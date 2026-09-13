@@ -197,6 +197,20 @@ function lookupMiss(lower: string): boolean {
 
 function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | undefined {
   const direct = LOOKUP_RECOVERY[toolName];
+  if (toolName === "read_source_annotation") {
+    const ref = /source annotation ref '([^']+)'/u.exec(lower)?.[1];
+    if (ref) return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
+      retryCondition: "Retry only after exact-ID discovery returns a ref in the same active source.",
+      steps: [
+        "Call find_source_annotations using the exact failed ID in suggestedCall, omitting status; do not substitute neighboring dialogue.",
+        "Copy results[].ref (including committed:/pending:) into read_source_annotation.ref; annotationId and proposalId are not read refs.",
+        "Retry read_source_annotation at most once with that returned ref. Never guess or retry unchanged.",
+        "If exact-ID discovery returns no match, stop for host review and preserve the failed ID and discovery result. Do not fabricate a replacement or widen source scope.",
+      ],
+      suggestedCall: { tool: "find_source_annotations", arguments: { query: ref.replace(/^(?:committed|pending):/u, ""), max_results: 20 } },
+    };
+  }
   if (direct) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -455,6 +469,18 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  if (COMPILER_PROPOSAL_TOOLS.has(toolName) && /(?:pending proposal .* already exists with different content|proposal .* already exists in (?:accepted|rejected) history)/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop this identity's retries; the host must review the persisted failed mutation before any replacement.",
+      steps: [
+        "The proposal ID belongs to an existing immutable draft or history entry. This is not a never-staged validation failure; the same-ID correction rule cannot overwrite or revive it.",
+        "Retain the failed obligation and every valid draft. Use find_compiler_artifacts in this source, copy the returned pending ref into read_compiler_artifact, and inspect the current active successor for the same logical artifact. Do not guess IDs or retry a retired ID.",
+        "After host adjudication, keep an unchanged valid active draft. Only a specifically diagnosed defective successful draft may be replaced through normal proposal validation and withdrawal, preserving its stable artifact ID. Never change IDs to clear this failed obligation.",
+      ],
+    };
+  }
+
   if (/already used|duplicate .*(?:id|proposal)|reuses proposal id|already has .*active proposals/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -693,7 +719,7 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
-  if (toolName === "finish_compiler_batch" && /(?:graph|trace) is incomplete/u.test(lower)) {
+  if (toolName === "finish_compiler_batch" && /(?:graph|trace) is incomplete|deterministic canonical commit preview(?: is incomplete)?:/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
@@ -702,6 +728,8 @@ export function buildNwhToolRecoveryAdvice(
       retryCondition: "Retry once only after correcting every reported graph/trace section through successful propose, withdraw, or replace calls.",
       steps: [
         "Treat the complete finish diagnostic as one validation report; preserve valid drafts and correct each listed logical dependency or trace.",
+        "These finish diagnostics refer to already-staged drafts. Discover their current pending refs with find_compiler_artifacts, copy the returned ref into read_compiler_artifact, and inspect the exact draft before editing. A successful draft is immutable: stage a specifically corrected replacement under a fresh envelope ID, preserve the stable artifact ID, then withdraw only its superseded successful predecessor. Never overwrite a successful ID or revive a withdrawn ID; use the latest active successor on subsequent repairs.",
+        "Repair only named defects. Restore SCENE_EVENT_BACKLINK_REQUIRED scene IDs without dropping any existing fields. For INACTIONABLE_CHARACTER_ENTRY, establish the named actor's source-backed pre-event location, plan or momentum; do not invent state or remove an entry just to pass. Leave unrelated active drafts unchanged.",
         "For entity identity, call find_entity_resolution_candidates and follow its resolutionMode: resolved reuses canonical/checkpointed identity, while new-entity requires a same-finish entity proposal.",
         "Use source-scoped finder results only when an exact existing ID is genuinely missing; do not re-propose a checkpointed pending identity or guess a replacement ID.",
         `Retry ${toolName} once after concrete proposal progress. If the same full diagnostic repeats, stop instead of looping.`,

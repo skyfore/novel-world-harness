@@ -1,0 +1,1044 @@
+{
+  "reviewedAt": "2026-09-12T19:15:57.593Z",
+  "sourceId": "a28585b1cf867f3e3a16",
+  "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-7",
+  "report": {
+    "target": "event:event-breakfast-meeting-00004",
+    "disposition": "unsupported",
+    "evidence_segment_ids": [
+      "a28585b1cf867f3e3a16-00004-f50b153c1580"
+    ],
+    "summary": "The breakfast meeting is explicit, but no registered state outcome is stated. Requested entry checkpoints for the professor, uncle, and aunt cannot be completed without inventing pre-event state/knowledge."
+  },
+  "originalFinishFingerprint": "d2565a080895705a36e8838c2aa1305f6f65f037c41914310c5bcc9b84178285",
+  "exact": "“明非，爸爸妈妈爱你。”",
+  "sourceLines": [
+    "\t“不需要！绝不需要！奖学金，就是奖励你的侄儿，因为他很优秀！”古德里安教授义正词严。\r",
+    "\t“这话听起来假。”叔叔摇头。\r",
+    "\t“当然，还有一些其他原因。路明非的父母呢，恰好是我们的名誉校友，对学院有过捐款。同等条件下，我们会优先录取校友的子女。”\r",
+    "\t路明非一下子抬起头来，心里像是有只小兔子一蹦一蹦，他已经忘了有多久没有收到父母的消息了，每次母亲写信来不过是叫他保重身体好好学习，千篇一律。路明非有时觉得那些信都是敷衍他的，其实父母根本不关心他了。\r",
+    "\t“他们很关心你啊。”古德里安教授说，“虽然我也没见过他们，但是听说一直在忙很重要的课题，这些年全世界跑。我这里有一张他们的照片，哦，对了，还有你妈妈为了你的事写给学院的信。”\r",
+    "\t他从口袋里摸出一张照片，放在路明非面前。照片上是夏天的花园，远处依稀是夕阳里的卡塞尔学院，近处则是无数的蔓墙，绿得沉郁而通透，一男一女携手在蔓墙里散步，男的穿了一件宽松的大白衬衣和一条洒腿裤，脚下一双木板拖鞋，女的一件纯白的居家棉裙。\r",
+    "\t路明非伸出手指，轻轻地触摸画面上两个人的脸。那漂亮的一男一女就是他的父母，可是离他真远啊，远在他永远都去不了的世界角落。他鼻子有点发酸，照片上一男一女互相看着彼此的脸，带着融融的笑意，显然是二人世界，大概把他们合伙生过一个孩子的事情抛在脑后了。\r",
+    "\t婶婶发表了精要的评论，“两个都上岁数的人了，还挺浪漫！”\r",
+    "\t古德里安教授又递过一封信，信很简短，是打印出来的，大概是电子邮件：\r",
+    "\t亲爱的昂热校长：\r",
+    "\t很久没有联系，希望你的身体和以前一样好。\r",
+    "\t我们应该还有很长时间不会见面，最近的研究有了新进展，我们没法离开。\r",
+    "\t有件事想拜托您，我的孩子路明非已经年满十八岁，他是个聪明的孩子，也许成绩不那么好，但是我们都相信他会在学术上有所作为，所以如果可能，请卡塞尔学院在接收他入学的事情上提供帮助。\r",
+    "\t不能亲口对他说，只好请您代我转达，说爸爸和妈妈爱他。\r",
+    "\t您诚挚的，\r",
+    "\t乔薇尼\r",
+    "\t路明非默默地读着那封信，久久没有说话。\r",
+    "\t古德里安教授清了清嗓子，忽然看着路明非的眼睛，用无比深情的语调和不太标准的发音说，“明非，爸爸妈妈爱你。”\r",
+    "\t路明非瞪大了眼睛，傻掉了。\r",
+    "\t“校长一定要我把你父母的问候带到，他也很关心你啊。”古德里安教授说。\r",
+    "\t如此生硬的转达让路鸣泽一时没忍住笑了起来，叔叔和婶婶脸上也绷不住，路明非的母亲乔薇尼那句话在信里说得那么柔情似水，简直催人泪下，可在须发花白满脸脱线表情的古德里安教授嘴里说出来，有种叫人忍俊不禁的错位感。叶胜和酒德亚纪也摇头苦笑，古德里安教授伸出手臂大力地拍了拍路明非的肩膀。\r",
+    "\t餐桌的气氛忽然融洽了许多。\r",
+    "\t“我去一下洗手间。”路明非站了起来。\r",
+    "\t路明非背靠在洗手间的门上，静了一会儿，眼泪无声地流了下来。\r",
+    "\t那些人都笑，可他觉得都没什么可笑的。\r",
+    "\t其实很感人的才对了，那么多年，他长到十八岁，没什么人在乎他想什么，也没什么人在乎他做什么，一次又一次走在放学回家的路上看着同学一个个被车接走。回头看着那些车卷起的尘土，也想过说这个世界上大概是没什么人爱自己的吧？\r",
+    "\t“明非，爸爸妈妈爱你。”\r"
+  ],
+  "mapping": [
+    {
+      "version": 1,
+      "id": "res-gude-00004",
+      "sourceId": "a28585b1cf867f3e3a16",
+      "mentionId": "mention-gude",
+      "status": "new-entity",
+      "entityId": "char-gudeli-an",
+      "candidates": [
+        {
+          "entityId": "char-gudeli-an",
+          "confidence": 0.99,
+          "basisMentionIds": [
+            "mention-gude"
+          ],
+          "evidenceAssertionIds": [],
+          "rationale": "明确的人物称谓，且当前无既有词汇候选。"
+        }
+      ],
+      "rationale": "来源在酒店会面中明确介绍古德里安教授这一人物。",
+      "derivation": {
+        "runId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1",
+        "worker": "propose_entity_resolution",
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1",
+        "ontologyVersion": "entity-resolution-v1"
+      }
+    },
+    {
+      "version": 1,
+      "id": "res-mention-lumingfei-00004",
+      "sourceId": "a28585b1cf867f3e3a16",
+      "mentionId": "mention-lumingfei",
+      "status": "resolved",
+      "entityId": "char-lumingfei",
+      "candidates": [
+        {
+          "entityId": "char-lumingfei",
+          "confidence": 0.99,
+          "basisMentionIds": [
+            "mention-lumingfei"
+          ],
+          "evidenceAssertionIds": [],
+          "rationale": "姓名与既有实体完全匹配。"
+        }
+      ],
+      "rationale": "解析酒店场景中的路明非为既有角色。",
+      "derivation": {
+        "runId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1",
+        "worker": "propose_entity_resolution",
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1",
+        "ontologyVersion": "entity-resolution-v1"
+      }
+    }
+  ],
+  "dependencies": {
+    "claims": [
+      {
+        "id": "claim-angier-norton-revenge-00023",
+        "subject": "char-norton-00010",
+        "predicate": "wants-revenge",
+        "object": true,
+        "epistemicType": "character-claim",
+        "speaker": "char-angier",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 756688,
+              "endByte": 798095,
+              "startLine": 4881,
+              "endLine": 5187,
+              "quoteHash": "109cf3454cd49be91da8cf074357a20a3eb4bf12883a66635664b59b8a14402f"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "claim-dragons-exist",
+        "subject": "faction-dragons",
+        "predicate": "exists",
+        "object": true,
+        "epistemicType": "narrator-claim",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "claim-eva-access-constraint-00015",
+        "subject": "char-eva-00008",
+        "predicate": "reports-access-control-constraint",
+        "object": "A pre-construction privilege card requires EVA to treat 13 as an ally and prevents her from reporting his unauthorized intrusion.",
+        "epistemicType": "character-claim",
+        "speaker": "char-eva-00008",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 440972,
+              "endByte": 482331,
+              "startLine": 2724,
+              "endLine": 3024,
+              "quoteHash": "c98e6792a5ae5c42d92dae969b8cfa4f7e54348aea5807e074a040adb3b7a580"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "claim-gude-dragontext-meaning-00007",
+        "subject": "char-gudeli-an",
+        "predicate": "explains-dragontext-as",
+        "object": "赞颂我王的苏醒，毁灭即是新生",
+        "epistemicType": "character-claim",
+        "speaker": "char-gudeli-an",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "claim-gude-frigga-effects-00007",
+        "subject": "char-gudeli-an",
+        "predicate": "reports-frigga-bullet-effects",
+        "object": "击中目标时会迅速粉碎汽化，不会伤到人，只会留下血一样的痕迹；混有微量麻醉剂，会让人立刻昏迷",
+        "epistemicType": "character-claim",
+        "speaker": "char-gudeli-an",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "claim-lumingfei-mission",
+        "subject": "char-lumingfei",
+        "predicate": "mission",
+        "object": "屠龙",
+        "epistemicType": "narrator-claim",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "claim-lumingfei-student",
+        "subject": "char-lumingfei",
+        "predicate": "described_as",
+        "object": "平凡普通的学生",
+        "epistemicType": "narrator-claim",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "claim-lzcheat-disclosure-001",
+        "subject": "char-lumingze-boy",
+        "predicate": "reports-black-sheep-wall-effect",
+        "object": "black sheep wall is unlocked; using it provides a detailed map of the surrounding environment, but overuse may be detected.",
+        "epistemicType": "character-claim",
+        "speaker": "char-lumingze-boy",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 305615,
+              "endByte": 330964,
+              "startLine": 1888,
+              "endLine": 2045,
+              "quoteHash": "80174f0bd7d324eece0959c9d16d8f372394444a6bf86c2cb4b04c02261e8921"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "claim-mans-guigu-00008",
+        "subject": "char-mans",
+        "predicate": "mission",
+        "object": "夔门计划",
+        "epistemicType": "character-claim",
+        "speaker": "char-eva-00008",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 197256,
+              "endByte": 246403,
+              "startLine": 1253,
+              "endLine": 1547,
+              "quoteHash": "1fb8ac99a307291dd1a38ea3cdb4ea460760682239e13e26f591fde5a3ae494f"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "claim-rescue-members-trapped-001",
+        "subject": "char-schneider",
+        "predicate": "reports-rescue-emergency",
+        "object": "两名执行部成员陷在龙族遗迹中，出入道路被堵死，氧气每秒减少",
+        "epistemicType": "character-claim",
+        "speaker": "char-schneider",
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 305615,
+              "endByte": 330964,
+              "startLine": 1888,
+              "endLine": 2045,
+              "quoteHash": "80174f0bd7d324eece0959c9d16d8f372394444a6bf86c2cb4b04c02261e8921"
+            },
+            "strength": "explicit"
+          }
+        ]
+      }
+    ],
+    "propositions": [
+      {
+        "id": "prop-angier-norton-revenge-00023",
+        "subjectEntityId": "char-norton-00010",
+        "relationId": "wants-revenge",
+        "object": {
+          "kind": "literal",
+          "value": true
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "ordinal",
+          "label": "诺顿死亡后的尾声、白色情人节前",
+          "orderHint": 233
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 756688,
+              "endByte": 798095,
+              "startLine": 4881,
+              "endLine": 5187,
+              "quoteHash": "109cf3454cd49be91da8cf074357a20a3eb4bf12883a66635664b59b8a14402f"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-dragons-exist",
+        "subjectEntityId": "faction-dragons",
+        "relationId": "exists-in-world",
+        "object": {
+          "kind": "literal",
+          "value": true
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "unknown"
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-eva-access-constraint-00015",
+        "subjectEntityId": "char-eva-00008",
+        "relationId": "reports-access-control-constraint",
+        "object": {
+          "kind": "literal",
+          "value": "A pre-construction privilege card requires EVA to treat 13 as an ally and prevents her from reporting his unauthorized intrusion."
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "ordinal",
+          "label": "入侵卡塞尔学院当晚",
+          "orderHint": 80
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 440972,
+              "endByte": 482331,
+              "startLine": 2724,
+              "endLine": 3024,
+              "quoteHash": "c98e6792a5ae5c42d92dae969b8cfa4f7e54348aea5807e074a040adb3b7a580"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-gude-dragontext-meaning-00007",
+        "subjectEntityId": "char-gudeli-an",
+        "relationId": "explains-dragontext-as",
+        "object": {
+          "kind": "literal",
+          "value": "赞颂我王的苏醒，毁灭即是新生"
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "ordinal",
+          "label": "自由一日当夜学生宿舍",
+          "orderHint": 75
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-gude-frigga-effects-00007",
+        "subjectEntityId": "char-gudeli-an",
+        "relationId": "reports-frigga-bullet-effects",
+        "object": {
+          "kind": "literal",
+          "value": "击中目标时会迅速粉碎汽化，不会伤到人，只会留下血一样的痕迹；混有微量麻醉剂，会让人立刻昏迷"
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "ordinal",
+          "label": "自由一日枪战结束后",
+          "orderHint": 73
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-lumingfei-mission",
+        "subjectEntityId": "char-lumingfei",
+        "relationId": "has-mission",
+        "object": {
+          "kind": "literal",
+          "value": "屠龙"
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "unknown"
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-lumingfei-student",
+        "subjectEntityId": "char-lumingfei",
+        "relationId": "is-described-as",
+        "object": {
+          "kind": "literal",
+          "value": "平凡普通的学生"
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "unknown"
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-lzcheat-disclosure-001",
+        "subjectEntityId": "char-lumingze-boy",
+        "relationId": "reports-black-sheep-wall-effect",
+        "object": {
+          "kind": "literal",
+          "value": "black sheep wall is unlocked; using it provides a detailed map of the surrounding environment, but overuse may be detected."
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "ordinal",
+          "label": "午睡后一点半，紧急警报前",
+          "orderHint": 30
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 305615,
+              "endByte": 330964,
+              "startLine": 1888,
+              "endLine": 2045,
+              "quoteHash": "80174f0bd7d324eece0959c9d16d8f372394444a6bf86c2cb4b04c02261e8921"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-mans-guigu-00008",
+        "subjectEntityId": "char-mans",
+        "relationId": "has-mission",
+        "object": {
+          "kind": "literal",
+          "value": "夔门计划"
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "ordinal",
+          "label": "EVA披露时"
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 197256,
+              "endByte": 246403,
+              "startLine": 1253,
+              "endLine": 1547,
+              "quoteHash": "1fb8ac99a307291dd1a38ea3cdb4ea460760682239e13e26f591fde5a3ae494f"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-parents-love-00004",
+        "subjectEntityId": "char-lumingfei",
+        "relationId": "is-loved-by-parents",
+        "object": {
+          "kind": "literal",
+          "value": true
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "ordinal",
+          "label": "酒店早餐会面"
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-rescue-members-trapped-001",
+        "subjectEntityId": "char-schneider",
+        "relationId": "reports-rescue-emergency",
+        "object": {
+          "kind": "literal",
+          "value": "两名执行部成员陷在龙族遗迹中，出入道路被堵死，氧气每秒减少"
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "ordinal",
+          "label": "紧急警报后，控制室人员到齐时",
+          "orderHint": 31
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 305615,
+              "endByte": 330964,
+              "startLine": 1888,
+              "endLine": 2045,
+              "quoteHash": "80174f0bd7d324eece0959c9d16d8f372394444a6bf86c2cb4b04c02261e8921"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "prop-scholarship-00004",
+        "subjectEntityId": "char-lumingfei",
+        "relationId": "offered-scholarship-amount-usd-per-year",
+        "object": {
+          "kind": "literal",
+          "value": 36000
+        },
+        "polarity": "positive",
+        "modality": "asserted",
+        "validStoryTime": {
+          "kind": "ordinal",
+          "label": "酒店早餐会面"
+        },
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      }
+    ],
+    "attributions": [
+      {
+        "id": "attr-angier-norton-revenge-00023",
+        "propositionId": "prop-angier-norton-revenge-00023",
+        "holderKind": "character",
+        "holderEntityId": "char-angier",
+        "attitude": "reports",
+        "certainty": 1,
+        "quotationIds": [
+          "q-angier-revenge-report-00023"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 756688,
+              "endByte": 798095,
+              "startLine": 4881,
+              "endLine": 5187,
+              "quoteHash": "109cf3454cd49be91da8cf074357a20a3eb4bf12883a66635664b59b8a14402f"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-dragons-exist",
+        "propositionId": "prop-dragons-exist",
+        "holderKind": "narrator",
+        "attitude": "asserts",
+        "certainty": 0.95,
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-eva-access-constraint-00015",
+        "propositionId": "prop-eva-access-constraint-00015",
+        "holderKind": "character",
+        "holderEntityId": "char-eva-00008",
+        "attitude": "reports",
+        "certainty": 1,
+        "quotationIds": [
+          "q-eva-access-disclosure-00015"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 440972,
+              "endByte": 482331,
+              "startLine": 2724,
+              "endLine": 3024,
+              "quoteHash": "c98e6792a5ae5c42d92dae969b8cfa4f7e54348aea5807e074a040adb3b7a580"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-eva-guigu-00008",
+        "propositionId": "prop-mans-guigu-00008",
+        "holderKind": "character",
+        "holderEntityId": "char-eva-00008",
+        "attitude": "reports",
+        "certainty": 0.98,
+        "quotationIds": [
+          "quote-eva-plan"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 197256,
+              "endByte": 246403,
+              "startLine": 1253,
+              "endLine": 1547,
+              "quoteHash": "1fb8ac99a307291dd1a38ea3cdb4ea460760682239e13e26f591fde5a3ae494f"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-gude-dragontext-meaning-00007",
+        "propositionId": "prop-gude-dragontext-meaning-00007",
+        "holderKind": "character",
+        "holderEntityId": "char-gudeli-an",
+        "attitude": "reports",
+        "certainty": 1,
+        "quotationIds": [
+          "q-gude-dragontext-translation-00007"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-gude-frigga-effects-00007",
+        "propositionId": "prop-gude-frigga-effects-00007",
+        "holderKind": "character",
+        "holderEntityId": "char-gudeli-an",
+        "attitude": "reports",
+        "certainty": 1,
+        "quotationIds": [
+          "q-gude-frigga-explanation-00007"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-lumingfei-mission",
+        "propositionId": "prop-lumingfei-mission",
+        "holderKind": "narrator",
+        "attitude": "reports",
+        "certainty": 0.9,
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-lumingfei-student",
+        "propositionId": "prop-lumingfei-student",
+        "holderKind": "narrator",
+        "attitude": "asserts",
+        "certainty": 0.95,
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-lzcheat-disclosure-001",
+        "propositionId": "prop-lzcheat-disclosure-001",
+        "holderKind": "character",
+        "holderEntityId": "char-lumingze-boy",
+        "attitude": "reports",
+        "certainty": 1,
+        "quotationIds": [
+          "q-lzcheat-001"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 305615,
+              "endByte": 330964,
+              "startLine": 1888,
+              "endLine": 2045,
+              "quoteHash": "80174f0bd7d324eece0959c9d16d8f372394444a6bf86c2cb4b04c02261e8921"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-parents-love-00004",
+        "propositionId": "prop-parents-love-00004",
+        "holderKind": "document",
+        "holderEntityId": "artifact-letter-parents",
+        "attitude": "asserts",
+        "certainty": 0.99,
+        "quotationIds": [
+          "quotation-letter-love"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      {
+        "id": "attr-schneider-rescue-members-trapped-001",
+        "propositionId": "prop-rescue-members-trapped-001",
+        "holderKind": "character",
+        "holderEntityId": "char-schneider",
+        "attitude": "reports",
+        "certainty": 1,
+        "quotationIds": [
+          "q-schneider-001"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 305615,
+              "endByte": 330964,
+              "startLine": 1888,
+              "endLine": 2045,
+              "quoteHash": "80174f0bd7d324eece0959c9d16d8f372394444a6bf86c2cb4b04c02261e8921"
+            },
+            "strength": "explicit"
+          }
+        ]
+      }
+    ]
+  },
+  "baseline": {
+    "id": "event-breakfast-meeting-00004",
+    "title": "古德里安教授在丽晶酒店早餐会见路明非一家",
+    "readerSummary": "次日上午，古德里安教授在丽晶酒店的VIP餐吧与路明非一家见面，并由叶胜和酒德亚纪陪同。会面使学院对路明非的招募从面试后的安排变成了面对面的接触。",
+    "participants": [
+      "char-gudeli-an",
+      "char-lumingfei",
+      "char-yesheng",
+      "char-jiudeyaji",
+      "char-shushu",
+      "char-shenshen",
+      "char-lumingze",
+      "loc-lijing-hotel"
+    ],
+    "participantPresence": [
+      {
+        "entityId": "char-gudeli-an",
+        "mode": "physical"
+      },
+      {
+        "entityId": "char-lumingfei",
+        "mode": "physical"
+      },
+      {
+        "entityId": "char-yesheng",
+        "mode": "physical"
+      },
+      {
+        "entityId": "char-jiudeyaji",
+        "mode": "physical"
+      },
+      {
+        "entityId": "char-shushu",
+        "mode": "physical"
+      },
+      {
+        "entityId": "char-shenshen",
+        "mode": "physical"
+      },
+      {
+        "entityId": "char-lumingze",
+        "mode": "physical"
+      }
+    ],
+    "storyTime": {
+      "kind": "ordinal",
+      "label": "面试次日上午",
+      "orderHint": 4
+    },
+    "narrativeContext": {
+      "layerId": "ds-hotel-breakfast",
+      "discourseOrder": 1,
+      "mode": "scene",
+      "viewpointActorId": "char-lumingfei"
+    },
+    "preconditions": [],
+    "observedOutcome": {
+      "version": 1,
+      "operations": []
+    },
+    "sceneOccurrenceIds": [
+      "scene-breakfast-00004"
+    ],
+    "evidence": [
+      {
+        "span": {
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 54279,
+          "endByte": 103369,
+          "startLine": 335,
+          "endLine": 692,
+          "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+        },
+        "strength": "explicit"
+      }
+    ],
+    "causalParents": [],
+    "confidence": 0.99
+  },
+  "finding": "Host reviewed the original unsupported report and original breakfast scene. There is no need to invent a numeric state effect: Gudelian directly relays the parents' greeting to Lumingfei, who hears it. Existing exact quotation and resolved speaker/listener support a bounded told/heard acquisition. The speaker is Gudelian relaying the parents, not either parent being physically present. Do not promote the reported affection to world truth or invent a relationship score. Preserve entry checkpoints and all other event fields; their missing seed remains an unresolved separate audit requirement. All original source-wide deferrals remain.",
+  "quotation": {
+    "version": 1,
+    "id": "quotation-gude-parents-v2",
+    "sourceId": "a28585b1cf867f3e3a16",
+    "derivation": {
+      "runId": "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+      "worker": "propose_quotation",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+      "ontologyVersion": "observation-v1"
+    },
+    "annotationType": "quotation",
+    "anchor": {
+      "version": 1,
+      "sourceId": "a28585b1cf867f3e3a16",
+      "startByte": 63275,
+      "endByte": 63311,
+      "startLine": 397,
+      "endLine": 397,
+      "exactHash": "7947fe142c827cbc86d2953c43957cda484a913eb8319067f132f0e9b8561f6f",
+      "prefixHash": "fceb1af9abb8d177a83c6998b7b98c284a41e39967aa71429ac5d90b5f097c0f",
+      "suffixHash": "7dbcdb881a5f73c2ee82617d5082394f2e0bc0b6377ebef1f60f742b2173acec",
+      "contextBytes": 64,
+      "normalization": "source-bytes-v1"
+    },
+    "mode": "direct",
+    "speakerMentionId": "mention-gude",
+    "addresseeMentionIds": [
+      "mention-lumingfei"
+    ],
+    "cueAnchor": {
+      "version": 1,
+      "sourceId": "a28585b1cf867f3e3a16",
+      "startByte": 63152,
+      "endByte": 63272,
+      "startLine": 397,
+      "endLine": 397,
+      "exactHash": "3ceb59a3f4412ea2a119b4b26e7c2d754cc85ed9528c34b45dfb0fa671ea8d2a",
+      "prefixHash": "ea430ef9dac5739ad9f5de7f61b4c7012d4bd04449271ee2030dc68a8a1166ca",
+      "suffixHash": "7ef4f7d58d35946ee191107666a6b4fadfbf6f187bfc11550e6b9981c624466f",
+      "contextBytes": 64,
+      "normalization": "source-bytes-v1"
+    },
+    "sceneId": "ds-hotel-breakfast",
+    "attributionConfidence": 0.99
+  },
+  "priorKnowledgeRepair": {
+    "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-6",
+    "pending": false,
+    "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+    "receiptFingerprint": "eca4e84675eeff514914668a764197742048ee6134b683d526f9ec822148c450",
+    "unresolvedTargets": []
+  },
+  "priorAppliedRepair": {
+    "repairId": "boy-listener-and-content-selectors-v1",
+    "failureFingerprint": "d98142ee01a99ba21ccc268302bf3a09ed3c843977a8839ba8b5aef4225a31da",
+    "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-selectors.json",
+    "appliedAt": "2026-09-12T19:12:49.583Z"
+  },
+  "namespaceUnchanged": "codex-opening-driver-v1-20260912",
+  "validation": "Knowledge scope, quotation trace, normal finish and obligation regression tests and type checks passed before application."
+}

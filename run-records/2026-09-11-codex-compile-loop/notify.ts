@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { queueCodexCompileCallback } from "../../src/runtime/codex-compile-loop.js";
+import { nextCompilerReset, queueCodexCompileCallback } from "../../src/runtime/codex-compile-loop.js";
 const directory = new URL("./", import.meta.url), file = new URL("state.json", directory);
 const state = JSON.parse(await fs.readFile(file, "utf8"));
+let reset: { anchor: string; timer?: { unit: string; scheduledAt: string; receipt: string } } | undefined;
+try { reset = JSON.parse(await fs.readFile(new URL("quota-reset.json", directory), "utf8")); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+if (reset) { if (reset.timer && Date.parse(reset.timer.scheduledAt) > Date.now()) state.timer = reset.timer; state.quotaResetAnchor = reset.anchor; if (state.status === "quota-wait") state.retryAt = nextCompilerReset(new Date(), new Date(reset.anchor)).toISOString(); }
 if (state.callback?.attempt === state.attempt && state.callback.delivered) process.exit(0);
 if (state.status === "running") {
   state.status = "needs-review"; state.error = `Compiler process exited ${process.argv[2] ?? "unknown"} before terminal hook settled.`;
@@ -18,8 +21,14 @@ if (state.status === "quota-wait") {
   const args = ["--unit", unit, "--on-calendar", when, "--timer-property=Persistent=true", "/root/.local/bin/codex", "queue", "--thread", state.threadId,
     "--message", `${continuePrompt} 这是到期唤醒；根据实际 provider 返回和新诊断检查限额是否恢复。`];
   try {
+    if (reset && reset.timer && reset.timer.scheduledAt === state.retryAt) {
+      const check = await promisify(execFile)("systemctl", ["is-active", reset.timer.unit], { timeout: 15_000 });
+      if (check.stdout.trim() !== "active") throw new Error("Corrected timer is not active");
+      state.timer = reset.timer;
+    } else {
     const result = await promisify(execFile)("systemd-run", args, { timeout: 15_000 });
     state.timer = { unit: `${unit}.timer`, scheduledAt: state.retryAt, receipt: result.stdout + result.stderr };
+    }
   } catch (error) { state.timer = { error: String(error) }; }
 }
 await fs.writeFile(file, JSON.stringify(state, null, 2));

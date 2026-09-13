@@ -48,3 +48,21 @@ Attempt 5 的 repeated-failure 是宿主根据局部汇总指标作出的过早�
 人物迁移和开局驱动要求独立明确，提供受控维度/上下文表及只读开局状态和知识。循环仅在 state.appliedRepair 记录的具体失败指纹经针对性修复后再次出现时自动 repeated-failure；不同提案不再归一成同一失败对象。回调禁止仅因汇总指标不变手动停止。
 
 用户明确授权本次修复后 rerun。旧 semanticRunId、计划和回执不改；通过 fresh audit、原完成回执及无未解决义务检查后，建立有前驱记录的新协议修复轮次。下一轮 namespace 固定为 codex-target-review-v1-20260912，后续恢复保持同一值。具体宿主复核与验证证据见 host-review-target-protocol.json。
+
+## 额度锚点更正
+
+用户更正下次额度刷新为北京时间 2026-09-13 01:23（UTC 2026-09-12 17:23），后续每5小时。state.quotaResetAnchor 保存该锚点，worker 由此计算未来窗口；替换旧05:08定时器，不立即启动编译。
+
+## Attempt 7：不可变草案生命周期恢复
+
+额度已恢复，accepted=499、pending=4。模型补回三个场景关联后撤回原草案，随后错误地再次使用被撤回的ID，并尝试在昂热邀请事件的成功ID上写不同内容。宿主发现 canonical commit preview 的报错误落通用字段纠正SOP，恢复时也缺少当前草案生命周期提示。
+
+修复错误分类：finish图问题针对已暂存草案，读取当前successor并在正常验证后替换；不可变ID冲突必须宿主复核，不能用更换ID清除已失败义务。新提示携带同批次草案状态，明确全量事件替换保留场景关联。review-proposal-lifecycle.ts 核查原失败hash、原草案与scene-backlink替换链，重放生产存储冲突，保留四个pending hash；独立preview仅余诺顿/参孙两个入场delta不可执行。失败写入按生命周期无效操作宿主复核保留，不认证其中新语义。worker先恢复原bounded第4片，针对实际active successor修复入场状态，保持namespace及其余三草案，完整finish及逐目标报告后再续编。逐目标unsupported报告仍需后续原文宿主复核，未在本次批量清除。
+
+## Attempt 8：开局驱动目标错配
+
+第4片恢复成功，accepted=503、pending=0、无未解决提案义务；完整语义审计仍不通过。逐目标报告指出开局实际角色为char-opening-man，旧计划却按全书参与次数给char-lumingfei分配开局驱动。宿主核对不可变序章醒来段及initial-world实体/物理在场数据，确认这是目标选择错误，不是可以把后期路明非提前激活的理由。
+
+修复audit与planner优先选择物理在场焦点角色，独立标明成长要求；驱动不再强制要求后期成长阶段。人物替换增加保留既有developmentPhases/developmentEpisodes的单调性检查，防止迁移一个指标时丢失另一项已建立语义。
+
+本次只建立有前驱审计的opening-driver补充计划，目标仅char-opening-man，禁止修改开局。旧计划/完成回执/全部source-wide deferral发布门槛保持。仅核实开局目标错配，不把其他模型unsupported/capability-gap批量确认为原文缺失。worker.reconciliationFocus约束本轮只做该项；后续不得通过去掉focus、换namespace或清除报告逃避宿主复核。详见host-review-opening-target.json。原文不支持具体驱动时必须如实报告，不发明状态或动作。

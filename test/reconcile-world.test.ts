@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { auditCompiler, type CompilerAuditReport } from "../src/compiler/audit.js";
 import {
   buildWorldReconciliationPrompt,
+  reconciliationProposalLifecycle,
   hasWorldReconciliationTargets,
   graphAdjudicationIterationFromBatchId,
   narrativeGraphNearNavigable,
@@ -578,4 +579,20 @@ describe("world semantic reconciliation", () => {
     expect(narrativeGraphNearNavigable(boundedGraphFallback)).toBe(false);
     expect(semanticRepairRequiresReparse(boundedGraphFallback)).toBe(true);
   });
+});
+
+it("supplies only same-batch proposal lifecycle with current successors and retired identities", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-lifecycle-")); roots.push(root);
+  const fixture = await createEvidenceFixture(root, "Hero waits.");
+  const service = new CompilerProposalService(root);
+  const payload = { id: "hero", kind: "character" as const, canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") };
+  await service.submit("entity", { proposalId: "old", payload, generatedBy: { worker: "test", compilerBatchId: "batch-a" } });
+  await service.submit("entity", { proposalId: "successor", payload, generatedBy: { worker: "test", compilerBatchId: "batch-a" } });
+  await service.withdraw("old", "Replaced by successor.");
+  await service.submit("entity", { proposalId: "unrelated", payload, generatedBy: { worker: "test", compilerBatchId: "batch-b" } });
+  const inventory = await reconciliationProposalLifecycle(root, fixture.source.id, "batch-a");
+  expect(inventory).toEqual([
+    { proposalId: "successor", status: "pending", kind: "entity", logicalId: "hero", ref: "pending:successor", immutable: true },
+    { proposalId: "old", status: "rejected", kind: "entity", logicalId: "hero", immutable: true },
+  ]);
 });

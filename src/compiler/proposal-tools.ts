@@ -1,5 +1,6 @@
-import { ProposalStore } from "../world/canonical-model.js";
+import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { reconciliationReviewIssues } from "./reconciliation-review.js";
+import { readKnowledgeRepairPlan, knowledgeRepairScopeIssues } from "./knowledge-repair.js";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { initialWorldInputIssues, INITIAL_WORLD_INPUT_GUIDANCE } from "./initial-world-preflight.js";
@@ -2874,6 +2875,13 @@ export function createCompilerProposalToolset(
           proposals.set(id, { kind: String(envelope.kind), payload: envelope.payload as Record<string, unknown> });
         }
         const issues = reconciliationReviewIssues(targetScope, input.target_reviews ?? [], proposals);
+        const knowledgePlan = await readKnowledgeRepairPlan(workspaceRoot, activeSourceId!, compilerBatchId!);
+        if (knowledgePlan) {
+          const canon = new CanonicalModelStore(workspaceRoot);
+          const [claims, propositions, attributions] = await Promise.all([canon.listClaims(), canon.listPropositions(), canon.listAttributions()]);
+          const existing = new Set([...claims.map(item => `claim:${item.id}`), ...propositions.map(item => `proposition:${item.id}`), ...attributions.map(item => `attribution:${item.id}`)]);
+          issues.push(...knowledgeRepairScopeIssues(knowledgePlan, proposals, existing, new Map(attributions.map(a => [a.id, a]))));
+        }
         for (const review of input.target_reviews ?? []) {
           try { resolveEvidenceSegmentIds(review.evidence_segment_ids); }
           catch (error) { issues.push(`${review.target}: ${error instanceof Error ? error.message : String(error)}`); }

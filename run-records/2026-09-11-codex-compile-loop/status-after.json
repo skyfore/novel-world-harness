@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "capturedAt": "2026-09-12T12:48:15.029Z",
+  "capturedAt": "2026-09-13T13:50:27.396Z",
   "workspace": "/root/workplace/novel-world-harness",
   "stateDirectory": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d",
   "compilerFingerprint": {
@@ -708,8 +708,86 @@
       "hasUnresolvedObligations": false,
       "supplementalBatches": [
         {
+          "id": "host-confession-quotation-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-dragontext-quotation-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-email-document-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-emergency-call-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-eva-disclosure-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-eva-interface-instruction-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-exploration-window-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-funding-answer-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-lumingze-identity-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-medical-quotation-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-office-quotation-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "host-quotation-content-a28585b1cf867f3e3a16-v1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
           "id": "opening-batch-a28585b1cf867f3e3a16-00002-executable-684389ad80a1",
           "phase": "opening",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-bounded-codex-opening-driver-v1-20260912-1",
+          "phase": "supplemental",
           "unresolvedObligations": 0,
           "requiresHostReview": false
         },
@@ -733,6 +811,24 @@
         },
         {
           "id": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-4",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-2",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-4",
           "phase": "supplemental",
           "unresolvedObligations": 0,
           "requiresHostReview": false
@@ -774,6 +870,18 @@
           "requiresHostReview": false
         },
         {
+          "id": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-target-review-v1-20260912-2",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-target-review-v1-20260912-3",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
           "id": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-v3-1",
           "phase": "supplemental",
           "unresolvedObligations": 0,
@@ -796,6 +904,102 @@
           "phase": "supplemental",
           "unresolvedObligations": 0,
           "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-10",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-11",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-12",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-13",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-14",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-15",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-16",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-2",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-3",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-4",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-5",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-6",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-7",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-8",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-9",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
         }
       ],
       "nextUncheckpointedBatch": null,
@@ -809,6 +1013,15 @@
             "preparedAt": "2026-09-11T17:05:32.553Z",
             "completedAt": "2026-09-11T17:05:32.559Z",
             "fingerprint": "9128634260084f9177b3382aabd9046c4d51c2f886ec8837624846f438aac59a",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-dragontext-quotation-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:30:48.455Z",
+            "completedAt": "2026-09-12T18:30:48.461Z",
+            "fingerprint": "369933fbbc7d5d3a93cf7e9b7c9e31b1e2cabe181ac504a45c4db6be0a1c9740",
             "checkpointed": false,
             "recoveryRequired": false
           },
@@ -831,6 +1044,15 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-8",
+            "state": "completed",
+            "preparedAt": "2026-09-12T19:26:53.660Z",
+            "completedAt": "2026-09-12T19:26:53.666Z",
+            "fingerprint": "4176e0f60f80d8da09f44af0cb4e7ab567c7464f80ded678469a00717d6a896d",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "batch-a28585b1cf867f3e3a16-00017-executable-b5864fa86dcb",
             "state": "completed",
             "preparedAt": "2026-09-10T08:12:26.053Z",
@@ -845,6 +1067,15 @@
             "preparedAt": "2026-09-11T16:37:36.489Z",
             "completedAt": "2026-09-11T16:37:36.497Z",
             "fingerprint": "c33f940b817aab120404db1a0c247936cfbc28711e7702d11c72734b97cc6056",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-9",
+            "state": "completed",
+            "preparedAt": "2026-09-12T19:33:22.802Z",
+            "completedAt": "2026-09-12T19:33:22.809Z",
+            "fingerprint": "bb667a3d751e646925b005f469396ae419c4ef89f624f12742915799bfafaacc",
             "checkpointed": false,
             "recoveryRequired": false
           },
@@ -864,6 +1095,15 @@
             "completedAt": "2026-09-10T14:15:27.493Z",
             "fingerprint": "67722d515c4bc0747443f8f9baf4eca37300ba4008f09c9017e79c5ac3fcf4c6",
             "checkpointed": true,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-opening-driver-v1-20260912-1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T17:58:24.888Z",
+            "completedAt": "2026-09-12T17:58:24.894Z",
+            "fingerprint": "7523aefe0e0a9a32410ec1e59708d557140c65a0a61b21c565100611270642f1",
+            "checkpointed": false,
             "recoveryRequired": false
           },
           {
@@ -894,6 +1134,33 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-11",
+            "state": "completed",
+            "preparedAt": "2026-09-13T12:51:10.087Z",
+            "completedAt": "2026-09-13T12:51:10.093Z",
+            "fingerprint": "b860218c84dc36767018908a51fdaaea20f3975e1c1cb48e2c64f993b7105974",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-5",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:58:52.112Z",
+            "completedAt": "2026-09-12T18:58:52.118Z",
+            "fingerprint": "9b47e05a8d83d08272bf58f01184723c23f0314d60a7e738479bbdcbae48ba4a",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-13",
+            "state": "completed",
+            "preparedAt": "2026-09-13T13:12:44.905Z",
+            "completedAt": "2026-09-13T13:12:44.911Z",
+            "fingerprint": "ebcc80887c90a45677644d3c7cd72fb4218e8feb3da34ecb2d5c722fd665759b",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "batch-a28585b1cf867f3e3a16-00019-executable-16c74a7cd7a6",
             "state": "completed",
             "preparedAt": "2026-09-10T08:39:19.523Z",
@@ -903,11 +1170,38 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-2",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:37:15.462Z",
+            "completedAt": "2026-09-12T18:37:15.470Z",
+            "fingerprint": "f9682e866aca66a22cf1a01b8dae5a32e523670103a62ea35e910c7c3fdb3436",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-eva-disclosure-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:56:16.960Z",
+            "completedAt": "2026-09-12T18:56:16.967Z",
+            "fingerprint": "132e90a5552a701890b57931954444340d81f31a5658ead0bd33916a11ce2997",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-v3-2",
             "state": "completed",
             "preparedAt": "2026-09-11T15:09:11.750Z",
             "completedAt": "2026-09-11T15:09:11.756Z",
             "fingerprint": "81292de9dbead8604beb5cf4f6fc800135cae76f91d96c946d65c48bfe2572b2",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-12",
+            "state": "completed",
+            "preparedAt": "2026-09-13T12:56:16.319Z",
+            "completedAt": "2026-09-13T12:56:16.325Z",
+            "fingerprint": "38b480456c192f1dd8cc493b53fc8087e72a7bc9a8c7f64028e25bd6e01d3c18",
             "checkpointed": false,
             "recoveryRequired": false
           },
@@ -930,6 +1224,24 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-4",
+            "state": "completed",
+            "preparedAt": "2026-09-12T17:48:32.024Z",
+            "completedAt": "2026-09-12T17:48:32.033Z",
+            "fingerprint": "e49da02afebdd899b197f684d05ca7832619f2dbd17b897a45dbef105bc1da44",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-quotation-content-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:25:10.093Z",
+            "completedAt": "2026-09-12T18:25:10.108Z",
+            "fingerprint": "903a92cb36ed290cba6433d312fef304024539521b12f0f87c6a771b0500d3ff",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-v3-10",
             "state": "completed",
             "preparedAt": "2026-09-11T16:59:12.819Z",
@@ -939,11 +1251,38 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-target-review-v1-20260912-1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T16:41:24.515Z",
+            "completedAt": "2026-09-12T16:41:24.520Z",
+            "fingerprint": "77d4269739572f6a9939f6414159ac69a1e1f575ed1ce0750ec6cfeafdd57cdc",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-17",
+            "state": "completed",
+            "preparedAt": "2026-09-13T13:50:21.715Z",
+            "completedAt": "2026-09-13T13:50:21.720Z",
+            "fingerprint": "23fec246048d47fd7916984f504b736186902a2627a5e271e24b525017a627bb",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-3",
             "state": "completed",
             "preparedAt": "2026-09-12T12:36:44.118Z",
             "completedAt": "2026-09-12T12:36:44.133Z",
             "fingerprint": "b0aab372dba90299bec5eea6482bd29efbd9f4ecb089e8ecd20e999985de1904",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-target-review-v1-20260912-3",
+            "state": "completed",
+            "preparedAt": "2026-09-12T16:47:31.442Z",
+            "completedAt": "2026-09-12T16:47:31.448Z",
+            "fingerprint": "af7ba095521cccc0b08d003b1d782478c26cd2e131f7181e54e677d08a632668",
             "checkpointed": false,
             "recoveryRequired": false
           },
@@ -975,6 +1314,15 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-target-review-v1-20260912-2",
+            "state": "completed",
+            "preparedAt": "2026-09-12T16:43:48.074Z",
+            "completedAt": "2026-09-12T16:43:48.079Z",
+            "fingerprint": "af5d0e58c81dcc14210271b21254dff0a92fd1b74e7880137a51080fb8d20936",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-4",
             "state": "completed",
             "preparedAt": "2026-09-12T12:47:16.888Z",
@@ -989,6 +1337,24 @@
             "preparedAt": "2026-09-11T15:53:23.082Z",
             "completedAt": "2026-09-11T15:53:23.088Z",
             "fingerprint": "98fc07224e3b459032907ad9cb63d7c9c822889fca63c467588ebad71b2cd0c1",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:17:34.376Z",
+            "completedAt": "2026-09-12T18:17:34.384Z",
+            "fingerprint": "a80578bca7684972296b14cdd8260d5f28fa0a1fdb8c9c47c9727c7a7e77a3c2",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-emergency-call-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-13T13:20:09.845Z",
+            "completedAt": "2026-09-13T13:20:09.852Z",
+            "fingerprint": "bfed9df6829ba1972010a54f81b93f6aaa439b320b8015e4657959f81b310773",
             "checkpointed": false,
             "recoveryRequired": false
           },
@@ -1020,11 +1386,47 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-6",
+            "state": "completed",
+            "preparedAt": "2026-09-12T19:12:49.572Z",
+            "completedAt": "2026-09-12T19:12:49.579Z",
+            "fingerprint": "eca4e84675eeff514914668a764197742048ee6134b683d526f9ec822148c450",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-office-quotation-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:47:01.549Z",
+            "completedAt": "2026-09-12T18:47:01.557Z",
+            "fingerprint": "4500c428d1abb6ce3dc3baa51d2f14f63bb8fb2c3f0db9e03b5e37ecb920f961",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-2",
             "state": "completed",
             "preparedAt": "2026-09-12T12:32:57.868Z",
             "completedAt": "2026-09-12T12:32:57.875Z",
             "fingerprint": "02cdb9966119316dec43488210db27ecd30dcf11d2107b063d648fbfeb9c36c3",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-4",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:49:37.005Z",
+            "completedAt": "2026-09-12T18:49:37.012Z",
+            "fingerprint": "10fe6b7ffcd87d66b60f006b04fa4bb8900efdca91e38a4a1d03b25d73db8fac",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-16",
+            "state": "completed",
+            "preparedAt": "2026-09-13T13:45:30.899Z",
+            "completedAt": "2026-09-13T13:45:30.906Z",
+            "fingerprint": "adb536f530a54f680b22acdfd55c27718bc788a2fa664b51f2c22f6728a0cecc",
             "checkpointed": false,
             "recoveryRequired": false
           },
@@ -1038,11 +1440,38 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-7",
+            "state": "completed",
+            "preparedAt": "2026-09-12T19:18:57.893Z",
+            "completedAt": "2026-09-12T19:18:57.899Z",
+            "fingerprint": "20bc8cd95777636285a45fa1612a0de9b588dac75feffd3e105c6b8c33ff8f07",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-exploration-window-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-13T13:30:17.824Z",
+            "completedAt": "2026-09-13T13:30:17.830Z",
+            "fingerprint": "48f3322829d309d2225e697f7bfb4303f99bf33431ebb4b934588cb85108ddd4",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-v3-1",
             "state": "completed",
             "preparedAt": "2026-09-11T16:00:40.378Z",
             "completedAt": "2026-09-11T16:00:40.387Z",
             "fingerprint": "0dcfc8a2ec1fe2dcba499630139d7ae23c27a8b30bfddb7b354523eb88624f9a",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-medical-quotation-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:40:08.958Z",
+            "completedAt": "2026-09-12T18:40:08.964Z",
+            "fingerprint": "c09c4bf7542b62867b1e78fdccfea4c6a336229c09a6777d3b1a3d8937418c9f",
             "checkpointed": false,
             "recoveryRequired": false
           },
@@ -1062,6 +1491,15 @@
             "completedAt": "2026-09-10T14:26:47.022Z",
             "fingerprint": "5a358835026f3a1ad97f8b078267eb1962954422d9677bab33b3ee35c7f8ee02",
             "checkpointed": true,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-3",
+            "state": "completed",
+            "preparedAt": "2026-09-12T17:30:08.977Z",
+            "completedAt": "2026-09-12T17:30:08.983Z",
+            "fingerprint": "7244c71c39204ed9a64b81f96be1353d07fe6d0a42eeb2e0de18aaf28f32b7c3",
+            "checkpointed": false,
             "recoveryRequired": false
           },
           {
@@ -1119,6 +1557,15 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T17:25:57.797Z",
+            "completedAt": "2026-09-12T17:25:57.802Z",
+            "fingerprint": "d2565a080895705a36e8838c2aa1305f6f65f037c41914310c5bcc9b84178285",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-v3-3",
             "state": "completed",
             "preparedAt": "2026-09-11T16:42:15.708Z",
@@ -1137,11 +1584,83 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "host-confession-quotation-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T19:21:48.483Z",
+            "completedAt": "2026-09-12T19:21:48.489Z",
+            "fingerprint": "a577e335a33fd24f74b5cd90697ff1d9849a6ef88317d417a26132a4c883d72d",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-14",
+            "state": "completed",
+            "preparedAt": "2026-09-13T13:26:20.456Z",
+            "completedAt": "2026-09-13T13:26:20.464Z",
+            "fingerprint": "099e053d905c7411e6c1424a3507084c7c4640c23983a03d2642edd887afe745",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-3",
+            "state": "completed",
+            "preparedAt": "2026-09-12T18:42:33.214Z",
+            "completedAt": "2026-09-12T18:42:33.221Z",
+            "fingerprint": "eee8c13e7ebba78cb1fb39a8d95f5a1743bd982ec3171298df37e25de903286e",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-2",
+            "state": "completed",
+            "preparedAt": "2026-09-12T17:28:13.690Z",
+            "completedAt": "2026-09-12T17:28:13.696Z",
+            "fingerprint": "bff0e12ff238f43175260240034775c5d32e8e548b44a91e61ed4dde1bcc4624",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-lumingze-identity-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T19:04:50.753Z",
+            "completedAt": "2026-09-12T19:04:50.762Z",
+            "fingerprint": "362a6228c63af64cda20a243cac91f29b4f933cbc399240190d4168794c8d3e3",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-10",
+            "state": "completed",
+            "preparedAt": "2026-09-13T12:43:04.846Z",
+            "completedAt": "2026-09-13T12:43:04.853Z",
+            "fingerprint": "14b4e7bbc2093be8d3d86f0356d2eb8c36a71459e1e7f0509e24eeaf71690964",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-15",
+            "state": "completed",
+            "preparedAt": "2026-09-13T13:38:07.636Z",
+            "completedAt": "2026-09-13T13:38:07.643Z",
+            "fingerprint": "e42c2b63609e824015b1d2fe60ae58f4cf80ea8d604cd9358998cc3d6a849e34",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-1",
             "state": "completed",
             "preparedAt": "2026-09-12T12:29:15.777Z",
             "completedAt": "2026-09-12T12:29:15.783Z",
             "fingerprint": "0959bf12cd234a6ea957a092d8de80a2cddc235b1814c6816e986b11193c6d75",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-email-document-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-13T13:12:43.783Z",
+            "completedAt": "2026-09-13T13:12:43.791Z",
+            "fingerprint": "d705ffb85ca5d7b9f9685d983567f4271628a8ae228e361490bb3e5101b5ae1d",
             "checkpointed": false,
             "recoveryRequired": false
           },
@@ -1189,34 +1708,52 @@
             "fingerprint": "73f646f78dc2d728e1a04d46490c91c99c8965e50761c8164cb0e8aba0d0978e",
             "checkpointed": true,
             "recoveryRequired": false
+          },
+          {
+            "batchId": "host-funding-answer-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-13T12:54:27.566Z",
+            "completedAt": "2026-09-13T12:54:27.573Z",
+            "fingerprint": "b026d4c4b508411fbbf0e1a266ac2a079d37d0d2fb83a8e2c8dc9a1914cd946b",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "host-eva-interface-instruction-a28585b1cf867f3e3a16-v1",
+            "state": "completed",
+            "preparedAt": "2026-09-13T13:48:58.215Z",
+            "completedAt": "2026-09-13T13:48:58.221Z",
+            "fingerprint": "6465a13d2e8e16c2cdfcf2598e7aac5d7c5cb8fbe0f0fd41e4aca5179274c6fa",
+            "checkpointed": false,
+            "recoveryRequired": false
           }
         ],
         "interpretation": "Receipt checksums only; host recovery revalidates dependencies and the original finish before checkpointing."
       },
       "worldProposalInventory": {
         "pending": 0,
-        "accepted": 491,
-        "rejected": 114
+        "accepted": 577,
+        "rejected": 145
       },
       "latestRun": {
-        "id": "run-mtydqzhu-b5e56a42-6305-40f4-9465-6532a641154d",
-        "operationId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-5",
-        "startedAt": "2026-09-12T12:47:21.906Z",
-        "endedAt": "2026-09-12T12:47:57.889Z",
+        "id": "run-mtzvef60-81a740c5-7e18-4204-96fd-a505d88fc68f",
+        "operationId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-17",
+        "startedAt": "2026-09-13T13:49:14.952Z",
+        "endedAt": "2026-09-13T13:50:21.738Z",
         "status": "succeeded",
         "counts": {
-          "llmRequests": 3,
-          "toolCalls": 4,
+          "llmRequests": 6,
+          "toolCalls": 11,
           "retries": 0
         },
         "usage": {
-          "input": 37003,
-          "output": 330,
-          "cacheRead": 483840,
+          "input": 135645,
+          "output": 979,
+          "cacheRead": 615936,
           "cacheWrite": 0,
-          "reasoning": 90,
-          "totalTokens": 521173,
-          "cost": 0.17473400000000003
+          "reasoning": 396,
+          "totalTokens": 752560,
+          "cost": 0.40622519999999995
         },
         "model": {
           "provider": "openai-codex",
@@ -1224,7 +1761,11 @@
           "thinking": "medium"
         },
         "error": null,
-        "lastToolFailure": null
+        "lastToolFailure": {
+          "tool": "read_source_annotation",
+          "observedAt": "2026-09-13T13:49:58.864Z",
+          "diagnostic": "Source annotation ref 'q-eva-interface-click-instruction-00011' was not found in active source 'a28585b1cf867f3e3a16'."
+        }
       },
       "candidates": {
         "inspection": "verified",

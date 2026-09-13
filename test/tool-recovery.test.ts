@@ -503,3 +503,29 @@ it("keeps a failed mention's original identity and stops preview scope or retry 
   const invalid = buildNwhToolRecoveryAdvice("preview_initial_world", "Initial-world preview validation failed: missing holderEntityId");
   expect(invalid.steps.join(" ")).toContain("every reported validation path");
 });
+
+it("routes deterministic commit preview to active-draft repair, including entry checkpoints", () => {
+  const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Deterministic canonical commit preview is incomplete:\n- p: INACTIONABLE_CHARACTER_ENTRY at characterEntryCheckpoints.0.delta.operations: missing location");
+  expect(advice.retryable).toBe(true);
+  expect(advice.steps.join(" ")).toContain("already-staged drafts");
+  expect(advice.steps.join(" ")).toContain("latest active successor");
+  expect(advice.steps.join(" ")).toContain("Leave unrelated active drafts unchanged");
+  expect(advice.steps.join(" ")).not.toContain("Retry finish_compiler_batch once with corrected arguments");
+});
+
+it.each([
+  "Pending proposal p already exists with different content; submit the correction under a new proposal id.",
+  "Proposal p already exists in rejected history; submit a new proposal id.",
+])("requires host adjudication for immutable proposal collision: %s", (message) => {
+  const advice = buildNwhToolRecoveryAdvice("propose_canonical_event", message);
+  expect(advice).toMatchObject({ category: "host-repair-required", retryable: false });
+  expect(advice.steps.join(" ")).toContain("Retain the failed obligation");
+  expect(advice.steps.join(" ")).toContain("find_compiler_artifacts");
+});
+
+it('directs a bare quotation-ID miss to exact-ID discovery rather than neighboring prose', () => {
+  const advice = buildNwhToolRecoveryAdvice('read_source_annotation', "Source annotation ref 'q-eva-interface-click-instruction-00011' was not found in active source 'source'.");
+  expect(advice.suggestedCall).toEqual({ tool: 'find_source_annotations', arguments: { query: 'q-eva-interface-click-instruction-00011', max_results: 20 } });
+  expect(advice.steps.join(' ')).toContain('results[].ref');
+  expect(advice.steps.join(' ')).toContain('at most once');
+});

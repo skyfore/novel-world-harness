@@ -1,5 +1,28 @@
 # Agent tool failure recovery
 
+Quotation-content trace validation compares exact proposition object assertions
+with the cited quotation anchors at finish and committed-artifact validation.
+Sharing a segment or speaker does not establish content support. If a source
+utterance was truncated by an observation, stop for host review of the full
+original utterance. Any justified revision retains the quotation's logical ID,
+speaker and addressees, stages a new correction envelope, and passes normal
+annotation/finish validation while preserving original revisions and receipts.
+Never remove content assertions or change acquisition mode to evade the check.
+Legacy artifacts without exact object assertions are not certified by this check.
+
+Host-reviewed knowledge supplements use an immutable `knowledge-repairs` plan
+linked to the original completed receipt and deferred target report. Their finish
+allows only the target event's knowledge acquisition and new claim/proposition/
+attribution dependencies reachable through typed references. Existing dependencies
+and all other event fields remain read-only. On a scope diagnostic, preserve all
+valid drafts, inspect the named pending artifact using `find_compiler_artifacts`
+and copy `readArguments.ref`; correct only the named defect once. If correction
+requires a new entity, annotation, changed baseline, or wider authority, stop for
+host review. Never rotate the batch/namespace, remove established knowledge, or
+reuse retired IDs. A short quotation anchor supports only its exact content, not
+adjacent dialogue. Original deferrals still require their source-wide host review
+before publication even after a supplement succeeds.
+
 Model-facing tool failures are part of the agent protocol, not terminal exception strings. A failure must remain a real error for audit, circuit-breaker, and checkpoint logic, while also telling the agent how to make bounded progress.
 
 Compiler recovery also consults the persisted proposal journal before session creation, after a batch report, and after a thrown timeout/network error. An interrupted mutation or two distinct failed inputs requires host review even when other proposals succeeded. `host-repair-required` metadata (including the tagged JSON on older Pi error paths) forbids fresh-session recovery. A single failed input remains eligible for one concrete correction under the same exact tool and `proposal_id`; a new ID or an unrelated successful draft never clears that obligation.
@@ -82,6 +105,18 @@ reference, preserves failed history, and does not certify executable coverage.
 For older runs predating the journal, the host must import the exact failed tool
 input and diagnosis from the audit using `record` before resuming that batch.
 These host operations require the workspace compiler lock.
+
+For a source-supported selector mistake after model retry exhaustion, the host
+may use `withHostSelectorCorrection` under that lock. Review every original
+failed input and bind its hashes, a reason, an audit reference, and one exact
+corrected input. Only exact/prefix/suffix/occurrence may change; tool, proposal
+ID, payload, segment scope, assertion targets and strengths stay fixed. The
+permit exists only within that host call, retains the unresolved obligation,
+and executes normal tool/schema/evidence validation. Only a successful tool
+result resolves the obligation. A failed host correction or interrupted result
+must stop for review; it grants no fresh-session or second host retry. Never
+classify a supported proposal as unsupported to reset the retry guard.
+
 
 Exact selector validation reports all missing/ambiguous quotes in one diagnostic.
 Copy verbatim punctuation and do not substitute quotes from another segment.
@@ -210,3 +245,23 @@ reason and audit reference. This does not certify world truth or bypass the full
 publication audit. Original plans and receipts remain immutable. A new reviewed
 repair round is allowed only after reviewing its predecessor's blockers; never
 rotate a namespace to escape proposal obligations or deferred reviews.
+
+Deterministic canonical commit-preview failures are finish-graph repair reports,
+not requests to change finish arguments. Inspect the exact current pending draft
+(using `find_compiler_artifacts` and its returned `ref`). Correct only the named
+successful draft via a validated new envelope and withdrawal of its superseded
+predecessor, preserving stable artifact identity and all unaffected fields.
+After withdrawal, subsequent repairs must follow the active successor, never the
+retired ID. A never-staged failed call still requires its original ID; these are
+different lifecycle states. An attempted overwrite/revival that has itself
+failed creates a durable obligation: stop for host review before any replacement.
+The storage error's old generic suggestion to use a new ID is not authorization
+to bypass that obligation. New reconciliation prompts include the exact-batch
+pending/accepted/rejected identity inventory. Existing source and publication
+validation remains unchanged.
+
+### Quotation retrieval and knowledge-repair deferrals
+
+`find_source_annotations` searches quotation content only after verifying its exact source anchor. Returned `readArguments.ref` is the read handle; `annotationId` remains the logical ID for attribution references. A failed annotation read must discover the exact failed ID in the same source, omitting status, copy the returned ref and retry once. Neighboring dialogue returning no matches is not proof that the designated quotation is missing. Invalid source anchors stop for host review; no unverified text fallback is allowed.
+
+Knowledge-repair prompts provide designated quotation read arguments and verified source text as untrusted evidence. After a no-progress finish, the compile-loop host independently checks those dependencies and preserves the original model report and finish receipt. Failure identity includes the target, deterministic failure category and dependency IDs; a target-only coverage gap is not a root-cause fingerprint. This does not authorize automatic reopening of completed receipts or a stopped loop.

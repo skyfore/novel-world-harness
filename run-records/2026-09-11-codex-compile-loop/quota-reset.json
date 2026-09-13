@@ -1,0 +1,11 @@
+{
+  "anchor": "2026-09-13T17:41:00.000Z",
+  "intervalHours": 5,
+  "updatedAt": "2026-09-13T12:43:21.794Z",
+  "reason": "User corrected next Beijing reset to 2026-09-14 01:41.",
+  "timer": {
+    "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+    "scheduledAt": "2026-09-13T17:41:00.000Z",
+    "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+  }
+}

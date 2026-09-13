@@ -84,3 +84,38 @@ it("reports every missing exact quote before submitting any proposal", async () 
     evidence_selectors: ["Hero", "Absent quotation", "Wrong slice"].map((exact) => ({ segment_id: f.batch.segmentIds[0], exact, target_path: "/canonicalName", relation: "supports", strength: "explicit" })),
   })).rejects.toThrow(/Evidence selector 2[\s\S]*Evidence selector 3/);
 });
+
+it("host selector correction preserves the failed identity and still uses exact-evidence validation", async () => {
+  const f = await setup(), batch = f.batch.id.replace("-observation-", "-semantic-");
+  const set = createCompilerProposalToolset(f.root); await set.beginBatch(f.batch.segmentIds, batch, f.fixture.source.id);
+  const input = (exact: string) => ({ proposal_id: "host-corrected-entity", payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [] }, evidence_segment_ids: f.batch.segmentIds,
+    evidence_selectors: [{ segment_id: f.batch.segmentIds[0], exact, target_path: "/canonicalName", relation: "supports", strength: "explicit" }] });
+  for (const exact of ["Missing one", "Missing two"]) await expect(call(set, "propose_entity", input(exact))).rejects.toThrow("Exact evidence quote");
+  const ledger = new CompilerProposalObligations(f.root, f.fixture.source.id, batch);
+  const hashes = ledger.history("propose_entity", "host-corrected-entity").filter(a => a.status === "failed").map(a => a.inputHash);
+  await expect(ledger.withHostSelectorCorrection("propose_entity", input("Hero"), [], "Reviewed source", "test:review", async () => {})).rejects.toThrow("every failed input");
+  await expect(ledger.withHostSelectorCorrection("propose_entity", { ...input("Hero"), payload: { ...input("Hero").payload, id: "other" } }, hashes, "Reviewed source", "test:review", async () => {})).rejects.toThrow("cannot change payload");
+  await ledger.withHostSelectorCorrection("propose_entity", input("Hero"), hashes, "Reviewed source", "test:review", async () => {
+    expect(() => ledger.assertFinishable()).toThrow();
+    expect(() => ledger.assertRetryAllowed("propose_entity", input("Not the reviewed quote"))).toThrow("requires host review");
+    expect(() => new CompilerProposalObligations(f.root, f.fixture.source.id, batch).assertModelRecoveryAllowed()).toThrow();
+    await call(set, "propose_entity", input("Hero"));
+  });
+  expect(ledger.unresolved()).toEqual([]);
+  expect(ledger.history("propose_entity", "host-corrected-entity").filter(a => a.status === "failed")).toHaveLength(2);
+  expect(ledger.history("propose_entity", "host-corrected-entity").at(-1)).toMatchObject({ status: "succeeded", hostReview: { auditRef: "test:review" } });
+});
+
+it("a failed host selector correction does not grant another retry or clear the obligation", async () => {
+  const f = await setup(), batch = f.batch.id.replace("-observation-", "-semantic-");
+  const set = createCompilerProposalToolset(f.root); await set.beginBatch(f.batch.segmentIds, batch, f.fixture.source.id);
+  const input = (exact: string) => ({ proposal_id: "bad-host-correction", payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [] }, evidence_segment_ids: f.batch.segmentIds,
+    evidence_selectors: [{ segment_id: f.batch.segmentIds[0], exact, target_path: "/canonicalName", relation: "supports", strength: "explicit" }] });
+  for (const exact of ["Missing one", "Missing two"]) await expect(call(set, "propose_entity", input(exact))).rejects.toThrow("Exact evidence quote");
+  const ledger = new CompilerProposalObligations(f.root, f.fixture.source.id, batch);
+  const hashes = () => ledger.history("propose_entity", "bad-host-correction").filter(a => a.status === "failed").map(a => a.inputHash);
+  await expect(ledger.withHostSelectorCorrection("propose_entity", input("Still missing"), hashes(), "Reviewed source", "test:review", () => call(set, "propose_entity", input("Still missing")))).rejects.toThrow("Exact evidence quote");
+  expect(() => ledger.assertFinishable()).toThrow();
+  await expect(call(set, "propose_entity", input("Hero"))).rejects.toThrow("requires host review");
+  await expect(ledger.withHostSelectorCorrection("propose_entity", input("Hero"), hashes(), "Again", "test:again", async () => {})).rejects.toThrow("reviewed failure must stop");
+});

@@ -1,3 +1,4 @@
+import { selectOpeningDriverActor } from "./opening-driver.js";
 import { ActorModelStore, characterGoalHasDevelopmentBoundary, characterModelSchema, evaluateCharacterGoal } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
@@ -1314,12 +1315,7 @@ export async function auditCompiler(
     }
     if (openingActiveWorldDrivers === 0) {
       semanticIssues.push("The compiled world has no executable autonomous driver active at the opening checkpoint, so divergence can only wait for canon or repeat local dialogue.");
-      const driverActorId = [...participationCounts]
-        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0]
-        ?? [...physicalOpeningActorIds].sort()[0]
-        ?? [...openingActiveEntityIds]
-          .filter((entityId) => entities.find((entity) => entity.id === entityId)?.kind === "character")
-          .sort()[0];
+      const driverActorId = selectOpeningDriverActor(physicalOpeningActorIds, initialWorld?.readerContext?.focalActorId, participationCounts);
       if (driverActorId) semanticRepairCharacterIds.push(driverActorId);
       else semanticRepairRequiresFullReparse = true;
     }

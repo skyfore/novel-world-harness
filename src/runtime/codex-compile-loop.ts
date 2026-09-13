@@ -35,3 +35,17 @@ export async function queueCodexCompileCallback(threadId: string, message: strin
   const result = await execute("/root/.local/bin/codex", ["queue", "--thread", threadId, "--message", message], { timeout: 20_000, maxBuffer: 128_000 });
   return result.stdout.trim();
 }
+
+export type CompilerFailureCause = {
+  category: string;
+  targetIds: string[];
+  dependencyIds: string[];
+};
+/** Never use a model's prose report or an aggregate coverage number as the root cause. */
+export function compilerFailureCauseFingerprint(cause: CompilerFailureCause): string {
+  return createHash("sha256").update(JSON.stringify({
+    category: cause.category,
+    targetIds: [...new Set(cause.targetIds)].sort(),
+    dependencyIds: [...new Set(cause.dependencyIds)].sort(),
+  })).digest("hex");
+}

@@ -24,3 +24,13 @@ it("stops only when the recorded repaired failure recurs", () => {
   expect(compilerFailureRepeatedAfterRepair(fingerprint, { failureFingerprint: fingerprint, repairId: "review-5" })).toBe(true);
   expect(compilerFailureRepeatedAfterRepair(compilerFailureFingerprint("failed proposal_id=bar: missing disposition"), { failureFingerprint: fingerprint, repairId: "review-5" })).toBe(false);
 });
+
+it('distinguishes a missing dependency from failed production on the same target, retaining same-cause stops', async () => {
+  const { compilerFailureCauseFingerprint } = await import('../src/runtime/codex-compile-loop.js');
+  const missing = { category: 'missing-designated-quotation', targetIds: ['eva-config'], dependencyIds: ['q-instruction'] };
+  const retrieval = { ...missing, category: 'knowledge-not-produced-with-verified-evidence' };
+  const repair = { repairId: 'quote-retrieval-fix', failureFingerprint: compilerFailureCauseFingerprint(retrieval) };
+  expect(compilerFailureRepeatedAfterRepair(compilerFailureCauseFingerprint(missing), repair)).toBe(false);
+  expect(compilerFailureRepeatedAfterRepair(compilerFailureCauseFingerprint(retrieval), repair)).toBe(true);
+  expect(compilerFailureRepeatedAfterRepair(compilerFailureCauseFingerprint({ ...retrieval, dependencyIds: ['other-quote'] }), repair)).toBe(false);
+});

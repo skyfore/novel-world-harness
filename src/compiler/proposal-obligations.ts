@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -26,6 +27,12 @@ export class CompilerHostReviewRequiredError extends Error {
     this.name = "CompilerHostReviewRequiredError";
   }
 }
+
+// Host-only, in-process authorization. Never persisted as a retry permit or exposed as a model tool.
+const hostSelectorCorrection = new AsyncLocalStorage<{
+  root: string; sourceId: string; batchId: string; tool: string; proposalId: string;
+  inputHash: string; priorHash: string; used: boolean; reason: string; auditRef: string;
+}>();
 
 /** Compiler-lock-owned journal. Synchronous writes also cover synchronous Pi argument preflight. */
 export class CompilerProposalObligations {
@@ -116,6 +123,24 @@ export class CompilerProposalObligations {
     if (blocked.length) throw new CompilerHostReviewRequiredError(blocked.map((item) =>
       `${item.tool} proposal_id=${item.proposalId}: ${item.status === "running" ? "interrupted tool result" : "the original and corrected inputs both failed"}: ${item.diagnostic}`).join("\n"));
   }
+  /** Under the compiler lock, run one exact source-reviewed selector correction through normal tools.
+   * Failures remain unresolved until the tool actually succeeds; no restart receives this authority.
+   */
+  async withHostSelectorCorrection<T>(tool: string, input: unknown, failedInputHashes: string[], reason: string, auditRef: string, action: () => Promise<T>): Promise<T> {
+    if (!reason.trim() || !auditRef.trim() || hostSelectorCorrection.getStore()) throw new Error("A separate host review and audit reference are required.");
+    const identity = CompilerProposalObligations.identity(tool, input);
+    const history = this.history(tool, identity.proposalId), last = history.at(-1);
+    if (last?.status !== "failed" || history.some(a => a.hostReview)) throw new Error("Host correction requires an unreviewed failed identity; a reviewed failure must stop.");
+    const hashes = [...new Set(history.filter(a => a.status === "failed").map(a => a.inputHash))].sort();
+    if (contentHash(hashes) !== contentHash([...new Set(failedInputHashes)].sort()) || hashes.includes(identity.inputHash)) throw new Error("Host review must bind every failed input and a changed correction.");
+    const previous = last.input as Record<string, unknown>, corrected = input as Record<string, unknown>;
+    const { evidence_selectors: oldSelectors, ...oldRest } = previous;
+    const { evidence_selectors: newSelectors, ...newRest } = corrected;
+    if (contentHash(oldRest) !== contentHash(newRest) || !Array.isArray(oldSelectors) || !Array.isArray(newSelectors) || oldSelectors.length !== newSelectors.length) throw new Error("Host selector correction cannot change payload, scope, proposal ID, or assertion count.");
+    const binding = (s: Record<string, unknown>) => { const { exact, prefix, suffix, occurrence, ...rest } = s; return rest; };
+    if (oldSelectors.some((s, i) => contentHash(binding(s)) !== contentHash(binding(newSelectors[i])))) throw new Error("Host selector correction must preserve assertion targets and strengths.");
+    return hostSelectorCorrection.run({ root: this.root, sourceId: this.sourceId, batchId: this.batchId, ...identity, priorHash: contentHash(last), used: false, reason, auditRef }, action);
+  }
   assertRetryAllowed(tool: string, input: unknown) {
     const identity = CompilerProposalObligations.identity(tool, input);
     const history = this.read(identity).attempts;
@@ -127,6 +152,10 @@ export class CompilerProposalObligations {
     }
     const lastResolution = history.findLastIndex((item) => item.status === "succeeded" || item.status === "unsupported");
     const failedInputs = new Set(history.slice(lastResolution + 1).filter((item) => item.status === "failed").map((item) => item.inputHash));
+    const host = hostSelectorCorrection.getStore();
+    if (host && !host.used && host.root === this.root && host.sourceId === this.sourceId && host.batchId === this.batchId
+      && host.tool === tool && host.proposalId === identity.proposalId && host.inputHash === identity.inputHash
+      && contentHash(history.at(-1)) === host.priorHash) return;
     if (failedInputs.size >= 2) {
       throw new CompilerHostReviewRequiredError("the original and corrected inputs both failed");
     }
@@ -140,7 +169,12 @@ export class CompilerProposalObligations {
     const started = ledger.attempts.at(-2);
     if (status === "running" && prior?.status === "succeeded" && started?.status === "running"
       && prior.inputHash === identity.inputHash && started.inputHash === identity.inputHash) ledger.attempts.splice(-2);
-    ledger.attempts.push({ ...identity, input, status, diagnostic, updatedAt: new Date().toISOString() });
+    const host = hostSelectorCorrection.getStore();
+    const reviewed = host && host.root === this.root && host.sourceId === this.sourceId && host.batchId === this.batchId
+      && host.tool === tool && host.proposalId === identity.proposalId && host.inputHash === identity.inputHash;
+    if (reviewed && status === "running") host.used = true;
+    ledger.attempts.push({ ...identity, input, status, diagnostic, updatedAt: new Date().toISOString(),
+      ...(reviewed ? { hostReview: { reason: host.reason, auditRef: host.auditRef } } : {}) });
     this.write(ledger);
   }
   assertFinishable() {

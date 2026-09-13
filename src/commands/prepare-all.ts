@@ -61,6 +61,7 @@ export type PrepareAllCommandOptions = {
   reparseBaselineBundleHash?: string;
   /** Stable identifier for resumable proposal namespaces inside an enclosing reparse. */
   reparseRunId?: string;
+  reconciliationFocus?: "opening-driver";
   /** Internal recovery mode: establish a validated opening world, then return before semantic repair or branch creation. */
   stopAfterInitialWorld?: boolean;
   signal?: AbortSignal;
@@ -396,6 +397,7 @@ export async function prepareAllCommand(
 
   if (
     inspection.audit
+    && !options.reconciliationFocus
     && narrativeGraphRepairIsTargetable(inspection.audit)
   ) {
     const plannedIterations = narrativeGraphRepairIterations(inspection.audit);
@@ -600,6 +602,7 @@ async function runWorldReconciliationPass(input: {
       input.iteration,
       {
         mode: input.mode,
+        ...(input.options.reconciliationFocus ? { focus: input.options.reconciliationFocus } : {}),
         ...(input.options.reparseRunId ? { proposalIdSuffixTail: input.options.reparseRunId } : {}),
       },
     );

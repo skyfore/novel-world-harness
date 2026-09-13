@@ -1,0 +1,896 @@
+{
+  "reviewedAt": "2026-09-12T18:25:09.342Z",
+  "sourceId": "a28585b1cf867f3e3a16",
+  "batchId": "host-quotation-content-a28585b1cf867f3e3a16-v1",
+  "reviews": [
+    {
+      "quotationId": "q-schneider-001",
+      "attributionId": "attr-schneider-rescue-members-trapped-001",
+      "line": 1999,
+      "prefix": "各位，我们需要你们的帮助，就是现在。",
+      "suffix": "我们必须为他们尽快找到出路。",
+      "proposalId": "q-schneider-full-utterance-host-v1",
+      "quotation": {
+        "version": 1,
+        "id": "q-schneider-001",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00011-observation-3b75ad587862",
+          "worker": "propose_quotation",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-observation-3b75ad587862",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "quotation",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 323379,
+          "endByte": 323433,
+          "startLine": 1999,
+          "endLine": 1999,
+          "exactHash": "7c03c6ac83c895a11544cd9e8482fdf9a19dfb3cf5ea2c3d838e4239b2127979",
+          "prefixHash": "faeec64d258f7eb2d2b701b3f757acfad3b9ca4b255188ad57c6f22e7635bd94",
+          "suffixHash": "9e9b917f8c6d89f930943d0cf281aebc0133a0fc83aa85ce2685ee7e33381df5",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "mode": "direct",
+        "speakerMentionId": "em-schneider-001",
+        "addresseeMentionIds": [
+          "em-lumingfei-003",
+          "em-kaisa-003",
+          "em-chuzihang-003"
+        ],
+        "sceneId": "ds-control-room-001",
+        "attributionConfidence": 1
+      },
+      "exact": "各位，我们需要你们的帮助，就是现在。就在此刻，两名执行部成员陷在一处龙族遗迹中，我们刚刚从那里获得了重要资料，但机关被触发了，出入的道路被堵死。他们的氧气每一秒钟都在减少，我们必须为他们尽快找到出路。",
+      "segmentId": "a28585b1cf867f3e3a16-00011-80174f0bd7d3",
+      "attribution": {
+        "id": "attr-schneider-rescue-members-trapped-001",
+        "propositionId": "prop-rescue-members-trapped-001",
+        "holderKind": "character",
+        "holderEntityId": "char-schneider",
+        "attitude": "reports",
+        "certainty": 1,
+        "quotationIds": [
+          "q-schneider-001"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 305615,
+              "endByte": 330964,
+              "startLine": 1888,
+              "endLine": 2045,
+              "quoteHash": "80174f0bd7d324eece0959c9d16d8f372394444a6bf86c2cb4b04c02261e8921"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "version": 1,
+          "id": "evidence-ddfe4ec71022bb9dfe3a552f2757e63b",
+          "target": {
+            "artifactKind": "proposition",
+            "artifactId": "prop-rescue-members-trapped-001",
+            "jsonPointer": "/object/value"
+          },
+          "anchors": [
+            {
+              "version": 1,
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 323433,
+              "endByte": 323679,
+              "startLine": 1999,
+              "endLine": 1999,
+              "exactHash": "ffe7826ce5fa6f2ce6f0b1a8599c6942894f84c0039460ef2783b3ff47df0de7",
+              "prefixHash": "c1e879aa33d66c4c5f3d99e45f094c128f66175ecadd949ddcf764092e3d36e9",
+              "suffixHash": "59240486755f99f73a158c8ac8f376bab3bf92df292d1af45b784f47d0ebfaf8",
+              "contextBytes": 64,
+              "normalization": "source-bytes-v1"
+            }
+          ],
+          "relation": "supports",
+          "strength": "explicit",
+          "derivation": {
+            "runId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+            "worker": "propose_proposition",
+            "compilerBatchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+            "model": "openai-codex/gpt-5.6-terra",
+            "ontologyVersion": "evidence-v1"
+          }
+        },
+        {
+          "version": 1,
+          "id": "evidence-c02ed81c8ae6df26be27afbc4d45acb5",
+          "target": {
+            "artifactKind": "proposition",
+            "artifactId": "prop-rescue-members-trapped-001",
+            "jsonPointer": "/subjectEntityId"
+          },
+          "anchors": [
+            {
+              "version": 1,
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 323226,
+              "endByte": 323295,
+              "startLine": 1998,
+              "endLine": 1998,
+              "exactHash": "0e16929b56569b7d40424245dcabaf68688e431a8d70293679f9c757a6af46ff",
+              "prefixHash": "eacab9f38f70859eb64f10a4bd7a5135892017684a2b13d7f97fcff18aa179a3",
+              "suffixHash": "b218567eea688c4a406cf65e7c69ea827d76ff354fb811fdfb51a2fe67a9808b",
+              "contextBytes": 64,
+              "normalization": "source-bytes-v1"
+            }
+          ],
+          "relation": "supports",
+          "strength": "explicit",
+          "derivation": {
+            "runId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+            "worker": "propose_proposition",
+            "compilerBatchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+            "model": "openai-codex/gpt-5.6-terra",
+            "ontologyVersion": "evidence-v1"
+          }
+        }
+      ],
+      "issues": [
+        "Attribution attr-schneider-rescue-members-trapped-001: proposition prop-rescue-members-trapped-001 object evidence is outside its cited quotation content. Read the exact quotation and proposition evidence with find_compiler_artifacts, copying readArguments.ref. A shared segment or speaker is insufficient. Correct the named trace once only when source supports it; if a quotation revision or wider authority is needed, preserve drafts and stop for host source review. Do not remove content assertions, change acquisition mode, or substitute IDs to bypass this check."
+      ],
+      "originalProposals": [
+        {
+          "version": 1,
+          "id": "q-schneider-001",
+          "annotationType": "quotation",
+          "payload": {
+            "version": 1,
+            "id": "q-schneider-001",
+            "sourceId": "a28585b1cf867f3e3a16",
+            "derivation": {
+              "runId": "batch-a28585b1cf867f3e3a16-00011-observation-3b75ad587862",
+              "worker": "propose_quotation",
+              "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-observation-3b75ad587862",
+              "ontologyVersion": "observation-v1"
+            },
+            "annotationType": "quotation",
+            "anchor": {
+              "version": 1,
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 323379,
+              "endByte": 323433,
+              "startLine": 1999,
+              "endLine": 1999,
+              "exactHash": "7c03c6ac83c895a11544cd9e8482fdf9a19dfb3cf5ea2c3d838e4239b2127979",
+              "prefixHash": "faeec64d258f7eb2d2b701b3f757acfad3b9ca4b255188ad57c6f22e7635bd94",
+              "suffixHash": "9e9b917f8c6d89f930943d0cf281aebc0133a0fc83aa85ce2685ee7e33381df5",
+              "contextBytes": 64,
+              "normalization": "source-bytes-v1"
+            },
+            "mode": "direct",
+            "speakerMentionId": "em-schneider-001",
+            "addresseeMentionIds": [
+              "em-lumingfei-003",
+              "em-kaisa-003",
+              "em-chuzihang-003"
+            ],
+            "sceneId": "ds-control-room-001",
+            "attributionConfidence": 1
+          },
+          "generatedBy": {
+            "worker": "propose_quotation",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-observation-3b75ad587862"
+          },
+          "createdAt": "2026-09-07T10:17:21.073Z"
+        }
+      ],
+      "reason": "Host read the original immutable source line and confirmed one continuous utterance by the same speaker. The original annotation retained only its prefix. Extend that same logical quotation to the complete utterance, retaining speaker/addressees/scene/confidence. This covers the existing exact proposition-content assertion without changing its content, removing evidence, inventing a speaker, or modifying world effects."
+    },
+    {
+      "quotationId": "quote-eva-plan",
+      "attributionId": "attr-eva-guigu-00008",
+      "line": 1530,
+      "prefix": "执行部增派了四个小组，分别向西藏、新疆、格陵兰和墨西哥",
+      "suffix": "校长亲自制定。",
+      "proposalId": "quote-eva-full-utterance-host-v1",
+      "quotation": {
+        "version": 1,
+        "id": "quote-eva-plan",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "worker": "propose_quotation",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "quotation",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 243533,
+          "endByte": 243614,
+          "startLine": 1530,
+          "endLine": 1530,
+          "exactHash": "9344a14ee95d3a7696db581f52855bcc5cb81246058278f704b9d9dc5fed51cc",
+          "prefixHash": "88dec725f1f428b94594897fe316473a03277069b8d86ca95099e92b581ffeea",
+          "suffixHash": "1347fce303ae85a067870cb4f60a8d6492c25e60b23bf35a43a1efdac303f0d8",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "mode": "direct",
+        "speakerMentionId": "m-evaname-current",
+        "addresseeMentionIds": [],
+        "sceneId": "ds-act3-underground-eva",
+        "attributionConfidence": 0.98
+      },
+      "exact": "执行部增派了四个小组，分别向西藏、新疆、格陵兰和墨西哥，全世界合计有大约一千三百人在探寻‘龙墓’的位置。目前最接近成功的是曼斯教授的小组，他的目标是青铜与火之王诺顿，高贵的初代种，四大君主之一。他们将在长江展开‘夔门计划’。这份计划的细节我不知道，校长亲自制定。",
+      "segmentId": "a28585b1cf867f3e3a16-00008-1fb8ac99a307",
+      "attribution": {
+        "id": "attr-eva-guigu-00008",
+        "propositionId": "prop-mans-guigu-00008",
+        "holderKind": "character",
+        "holderEntityId": "char-eva-00008",
+        "attitude": "reports",
+        "certainty": 0.98,
+        "quotationIds": [
+          "quote-eva-plan"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 197256,
+              "endByte": 246403,
+              "startLine": 1253,
+              "endLine": 1547,
+              "quoteHash": "1fb8ac99a307291dd1a38ea3cdb4ea460760682239e13e26f591fde5a3ae494f"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "version": 1,
+          "id": "evidence-1177094d5695918441ead2df08c427a9",
+          "target": {
+            "artifactKind": "proposition",
+            "artifactId": "prop-mans-guigu-00008",
+            "jsonPointer": "/object/value"
+          },
+          "anchors": [
+            {
+              "version": 1,
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 243824,
+              "endByte": 243866,
+              "startLine": 1530,
+              "endLine": 1530,
+              "exactHash": "b601c6a4dfcefbc5b7fd50aeef46c809c55770bc13c51d417e534dae65ffac4e",
+              "prefixHash": "cfffb05a5cb809887dccaef0bcdb172cf0af5ec3e43daa4ee4e5704030673d2a",
+              "suffixHash": "76c6b9c8cd26b3ed08ff8cecbeac7510c74944a4d9090c3b736f88e089919c39",
+              "contextBytes": 64,
+              "normalization": "source-bytes-v1"
+            }
+          ],
+          "relation": "supports",
+          "strength": "explicit",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b",
+            "worker": "propose_proposition",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b",
+            "ontologyVersion": "evidence-v1"
+          }
+        }
+      ],
+      "issues": [
+        "Attribution attr-eva-guigu-00008: proposition prop-mans-guigu-00008 object evidence is outside its cited quotation content. Read the exact quotation and proposition evidence with find_compiler_artifacts, copying readArguments.ref. A shared segment or speaker is insufficient. Correct the named trace once only when source supports it; if a quotation revision or wider authority is needed, preserve drafts and stop for host source review. Do not remove content assertions, change acquisition mode, or substitute IDs to bypass this check."
+      ],
+      "originalProposals": [
+        {
+          "version": 1,
+          "id": "q-eva-plan",
+          "annotationType": "quotation",
+          "payload": {
+            "version": 1,
+            "id": "quote-eva-plan",
+            "sourceId": "a28585b1cf867f3e3a16",
+            "derivation": {
+              "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+              "worker": "propose_quotation",
+              "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+              "ontologyVersion": "observation-v1"
+            },
+            "annotationType": "quotation",
+            "anchor": {
+              "version": 1,
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 243533,
+              "endByte": 243614,
+              "startLine": 1530,
+              "endLine": 1530,
+              "exactHash": "9344a14ee95d3a7696db581f52855bcc5cb81246058278f704b9d9dc5fed51cc",
+              "prefixHash": "88dec725f1f428b94594897fe316473a03277069b8d86ca95099e92b581ffeea",
+              "suffixHash": "1347fce303ae85a067870cb4f60a8d6492c25e60b23bf35a43a1efdac303f0d8",
+              "contextBytes": 64,
+              "normalization": "source-bytes-v1"
+            },
+            "mode": "direct",
+            "speakerMentionId": "m-evaname-current",
+            "addresseeMentionIds": [],
+            "sceneId": "ds-act3-underground-eva",
+            "attributionConfidence": 0.98
+          },
+          "generatedBy": {
+            "worker": "propose_quotation",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b"
+          },
+          "createdAt": "2026-09-07T10:02:52.747Z"
+        }
+      ],
+      "reason": "Host read the original immutable source line and confirmed one continuous utterance by the same speaker. The original annotation retained only its prefix. Extend that same logical quotation to the complete utterance, retaining speaker/addressees/scene/confidence. This covers the existing exact proposition-content assertion without changing its content, removing evidence, inventing a speaker, or modifying world effects."
+    }
+  ],
+  "originalReceipts": [
+    {
+      "batch": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+      "fingerprint": "a80578bca7684972296b14cdd8260d5f28fa0a1fdb8c9c47c9727c7a7e77a3c2",
+      "input": {
+        "target_reviews": [
+          {
+            "target": "event:event-rescue-briefing-001",
+            "disposition": "proposed",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ],
+            "summary": "施耐德向控制室内到场学生报告两名执行部成员被困、道路被堵、氧气递减并请求协助；已为路明非、恺撒和楚子航补入由施耐德告知而获得的“heard”知识。"
+          }
+        ],
+        "outcome": "complete",
+        "reviewed_segments": [],
+        "summary": "Repaired observedKnowledge for event-rescue-briefing-001 with source-grounded proposition, corrected compatible claim, attribution, and told knowledge acquisitions."
+      }
+    },
+    {
+      "batch": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-1",
+      "fingerprint": "d2565a080895705a36e8838c2aa1305f6f65f037c41914310c5bcc9b84178285",
+      "input": {
+        "target_reviews": [
+          {
+            "target": "event:event-sacrifice-vision-00002",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00002-16e2c6da87f3"
+            ],
+            "summary": "The text explicitly frames the sacrifice as a dream and says the waking world makes it false. No supported deterministic world-state or knowledge delta is available for this vision."
+          },
+          {
+            "target": "event:event-laotang-coaching-00003",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00003-5c70d7864d11"
+            ],
+            "summary": "The source supports remote pronunciation coaching and increased confidence, but supplies no registered state effect and no pre-event checkpoint payload with only already-true state/knowledge for both requested characters."
+          },
+          {
+            "target": "event:event-lumingfei-interview-00003",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00003-5c70d7864d11"
+            ],
+            "summary": "The interview and withdrawal are explicit, but no compatible numeric or entity state change is explicit; the requested embodied entry checkpoints would require unsupported pre-event state/knowledge construction."
+          },
+          {
+            "target": "event:event-nuonuo-game-00003",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00003-5c70d7864d11"
+            ],
+            "summary": "The online game ends in Lumingfei's loss, but game outcome is not a registered deterministic field and no compatible claim-backed knowledge delta is available."
+          },
+          {
+            "target": "event:event-breakfast-meeting-00004",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00004-f50b153c1580"
+            ],
+            "summary": "The breakfast meeting is explicit, but no registered state outcome is stated. Requested entry checkpoints for the professor, uncle, and aunt cannot be completed without inventing pre-event state/knowledge."
+          },
+          {
+            "target": "event:event-zhao-confession-00004",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00004-f50b153c1580"
+            ],
+            "summary": "The public confession is explicit, but the available state contract has no supported field for the social utterance; requested entry checkpoints would require unsupported prior state or knowledge."
+          },
+          {
+            "target": "event:event-chen-acceptance-00004",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00004-f50b153c1580"
+            ],
+            "summary": "Chen's acceptance is explicit, but no registered state field represents this relationship response, and no numerical relationship value may be invented."
+          },
+          {
+            "target": "event:event-accept-00005",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00005-12c9137e67cf"
+            ],
+            "summary": "The existing event already records Lumingfei's explicit acceptance as character.plan. Nono's requested entry checkpoint cannot be completed from the source without adding unsupported pre-event state/knowledge."
+          },
+          {
+            "target": "event:event-departure-00005",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00005-12c9137e67cf"
+            ],
+            "summary": "Departure is explicit, but no canonical destination location entity is available for a character.location effect; no other registered state change is explicit."
+          },
+          {
+            "target": "event:event-helicopter-00005",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00005-12c9137e67cf"
+            ],
+            "summary": "The helicopter's arrival and date are explicit, but its flight creates no supported registered state change for an existing entity."
+          },
+          {
+            "target": "event:event-makeover-00005",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00005-12c9137e67cf"
+            ],
+            "summary": "The existing event already records the explicit adopted title. The requested staff entry checkpoint cannot be completed without unsupported pre-event state/knowledge."
+          },
+          {
+            "target": "event:event-nono-entry-00005",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00005-12c9137e67cf"
+            ],
+            "summary": "Nono's entrance and invitation are explicit, but no compatible registered state effect is stated."
+          },
+          {
+            "target": "event:event-cc1000-arrival-00006",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00006-dfcdc0eeafc7"
+            ],
+            "summary": "The arrival at 2 a.m. is explicit, but Chicago station is not an existing canonical location entity for character.location. Required entry checkpoints would otherwise invent prior state or knowledge."
+          },
+          {
+            "target": "event:event-duel-00007",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ],
+            "summary": "The source explicitly places the duel after the prior battle and at the parking lot, but does not establish a safe global numeric orderHint; no registered deterministic effect is explicit, and requested entry checkpoints need unsupported pre-event state/knowledge."
+          },
+          {
+            "target": "event:event-nono-shot-00007",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ],
+            "summary": "The existing event already carries a health outcome. The source identifies the sniper's arrival during the exchange but does not support a complete pre-event checkpoint for that actor."
+          },
+          {
+            "target": "event:event-lu-shoot-caesar-00007",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ],
+            "summary": "The shot and Caesar's fall are explicit, but the catalog requires an invented numeric health value to encode injury; no such value is source-grounded."
+          },
+          {
+            "target": "character:char-lumingfei",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00003-5c70d7864d11",
+              "a28585b1cf867f3e3a16-00002-16e2c6da87f3"
+            ],
+            "summary": "The current model is already character-v1. The opening checkpoint's focal actor is char-opening-man, not Lumingfei; source support for Lumingfei begins later, so no executable autonomous opening driver for Lumingfei can be activated without leaking later canon backward."
+          },
+          {
+            "target": "character:char-caesar",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+            ],
+            "summary": "The current model is already character-v1. The cited text characterizes Caesar, but does not establish a bounded psychological-development transition requiring a new model or goal."
+          },
+          {
+            "target": "character:char-chuzi-hang",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+            ],
+            "summary": "The current model is already character-v1. The cited account describes prior motivation and recruitment, not a source-bounded development transition suitable for a new phase or goal."
+          },
+          {
+            "target": "character:char-jiudeyaji",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00003-5c70d7864d11"
+            ],
+            "summary": "The current model is already character-v1. The source establishes her interview role but no bounded psychological development or executable opening driver for this later character."
+          }
+        ],
+        "outcome": "no-artifacts",
+        "reviewed_segments": [],
+        "summary": "Reviewed all bounded targets and the opening dependency. No safe replacement was staged: remaining gaps require unsupported state encodings, unsupported complete entry checkpoints, or backward leakage into the distinct opening frame."
+      }
+    },
+    {
+      "batch": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-2",
+      "fingerprint": "bff0e12ff238f43175260240034775c5d32e8e548b44a91e61ed4dde1bcc4624",
+      "input": {
+        "target_reviews": [
+          {
+            "target": "event:event-lu-shoot-chu-00007",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ],
+            "summary": "Source explicitly says the bullet pierced Chu Zihang's chest, but character.health requires an unsupported numeric value; no typed outcome can be added without inventing a score."
+          },
+          {
+            "target": "event:event-medical-reveal-00007",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ],
+            "summary": "Source explicitly establishes that Frigga bullets do not injure and anesthetize targets, but the catalog has no nonnumeric injury/anesthesia field and no compatible pre-existing claim ID for a knowledge delta. The requested Manshtein entry checkpoint also requires an unavailable complete checkpoint projection seed."
+          },
+          {
+            "target": "event:event-angier-call-00007",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ],
+            "summary": "The call decides that the activity continues and discusses repairs, but no supported deterministic catalog field records that decision or an unquantified repair cost."
+          },
+          {
+            "target": "event:event-dragontext-00007",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ],
+            "summary": "The source says Lumingfei does not understand the dragon text and Gudelian infers a possibility; this is epistemic content, but no compatible claim/proposition is available for an event knowledge operation."
+          },
+          {
+            "target": "event:event-eva-activation-00008",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00008-1fb8ac99a307"
+            ],
+            "summary": "Source explicitly depicts activation and EVA's projected appearance, but no catalog field represents activation of a represented character; the source gives only '深夜', not a comparable global ordering anchor."
+          },
+          {
+            "target": "event:event-caesar-bets-00009",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00009-6677e8830ee3"
+            ],
+            "summary": "The source records Caesar's wager but gives no settled transfer, quantity, or deterministic state change. A wager belief is not a catalog state field."
+          },
+          {
+            "target": "event:event-man-asks-coins-00009",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00009-6677e8830ee3"
+            ],
+            "summary": "The request for two coins is explicit, but it changes no representable state. The excerpt provides no comparable time anchor and no complete entry checkpoint projection for the man."
+          },
+          {
+            "target": "event:event-eva-orders-coins-00009",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00009-6677e8830ee3"
+            ],
+            "summary": "EVA's order is explicit but is speech content rather than a catalog state effect; the excerpt provides no comparable time anchor or complete entry checkpoint projection for EVA."
+          },
+          {
+            "target": "event:event-adams-gives-coins-00009",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00009-6677e8830ee3"
+            ],
+            "summary": "Adams hands over two old coins, but no coin artifact/quantity field is modeled, so a quantity transfer cannot be encoded without inventing an artifact. No comparable time marker is stated."
+          },
+          {
+            "target": "event:event-exam-answer-00010",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00010-4539f49e0b67"
+            ],
+            "summary": "The source says Lumingfei answers the exam using copied drawings. It supplies no supported numeric experience change and the result remains unresolved within this event."
+          },
+          {
+            "target": "event:event-lumingfei-vision-fall-00010",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00010-4539f49e0b67"
+            ],
+            "summary": "The fall is an explicitly narrated vision during the examination, but it supplies no deterministic catalog state change. 'During the examination' lacks an independently comparable numeric ordering anchor."
+          },
+          {
+            "target": "event:event-underwater-earthquake-00010",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00010-4539f49e0b67"
+            ],
+            "summary": "The source explicitly describes collapse and the team being swept into a cavity, but location.condition requires an unsupported number. Mans's later physical involvement cannot be represented as a complete pre-event checkpoint without its required projection seed."
+          },
+          {
+            "target": "event:event-bronze-city-discovered-00010",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00010-4539f49e0b67"
+            ],
+            "summary": "Source confirms the city discovery and Mans's authorization, but establishes no representable deterministic state field. Its relative wording does not supply a numeric comparable ordering anchor."
+          },
+          {
+            "target": "event:event-bronze-city-gate-opened-00010",
+            "disposition": "unsupported",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00010-4539f49e0b67"
+            ],
+            "summary": "The existing event already has the explicit location.open=true outcome. The remaining requested baby entry checkpoint cannot be added without a complete checkpoint projection seed; its source wording does not yield a comparable numeric anchor."
+          },
+          {
+            "target": "event:event-academy-emergency-alarm-001",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ],
+            "summary": "The alarm summons high-ranked students, but summons are not a catalog state field. The source says the time is one-thirty after noon without a date or established global ordinal order."
+          },
+          {
+            "target": "event:event-eva-config-001",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ],
+            "summary": "EVA configures Lumingfei's interface as StarCraft. No catalog field represents user-interface configuration, and the rescue-briefing phrase gives no cross-world numeric ordering anchor."
+          },
+          {
+            "target": "character:char-norton-00010",
+            "disposition": "proposed",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00021-0343cf842992"
+            ],
+            "summary": "Proposed a character-v1 model using the registered dominance disposition after the explicitly narrated fusion; the model retains empty free-form traits and biases."
+          }
+        ],
+        "outcome": "complete",
+        "reviewed_segments": [],
+        "summary": "Reviewed every bounded target against exact source evidence. One character-v1 migration was proposed; remaining event gaps are reported as unsupported or field-model capability gaps rather than inventing outcomes, numeric condition values, knowledge claims, or checkpoint seeds."
+      }
+    },
+    {
+      "batch": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-3",
+      "fingerprint": "7244c71c39204ed9a64b81f96be1353d07fe6d0a42eeb2e0de18aaf28f32b7c3",
+      "input": {
+        "target_reviews": [
+          {
+            "target": "event:event-library-gathering-001",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ],
+            "summary": "The source says students enter the library control room, but no canonical library location entity exists and no representable state or knowledge field changes. A location-entity or attendance field is needed; no event replacement was staged."
+          },
+          {
+            "target": "event:event-lumingze-visit-001",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ],
+            "summary": "The visit and warning are explicit, including the newly available Black Sheep Wall phrase, but there is no claim/proposition record compatible with a KnowledgeDelta and no registered field represents the newly available capability. No supported typed effect can be added."
+          },
+          {
+            "target": "event:event-rescue-briefing-001",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ],
+            "summary": "Schneider explicitly reports that Ye Sheng and Yaji are trapped and oxygen is decreasing, but no compatible claim/proposition exists for a knowledge operation, and requesting help does not establish a represented state-field outcome."
+          },
+          {
+            "target": "event:event-cheatmap-001",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ],
+            "summary": "The source explicitly says the three-dimensional Bronze City map appears and is marked as Lumingfei's interpretation. No map artifact/entity or field exists to represent acquiring/displaying it, and no compatible claim exists for knowledge."
+          },
+          {
+            "target": "event:event-chu-invite-001",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+            ],
+            "summary": "The source explicitly recounts Chu Zihang inviting Lumingfei to join Lionheart and succeed him. An invitation is not a represented membership or state change, and the source does not say Lumingfei accepts it."
+          },
+          {
+            "target": "event:event-email-open-001",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+            ],
+            "summary": "The email explicitly invites Ricardo to Amber Hall the following evening. Reading an invitation has no compatible existing claim/proposition for KnowledgeDelta and no registered message/invitation field."
+          },
+          {
+            "target": "event:event-nono-appears-001",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+            ],
+            "summary": "The source explicitly states that Nono appears behind Lumingfei and Fingel at Amber Hall, but the existing catalog has no attendance/presence state field and no separate representable event outcome."
+          },
+          {
+            "target": "event:event-zero-dance-00014",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00014-4a34c47d2ef5"
+            ],
+            "summary": "Zero explicitly joins the dance and dances with Lumingfei; the applause and social effect are narrated, but no registered state field represents a dance, social standing change, or event-specific relationship change without inventing a value."
+          },
+          {
+            "target": "event:event-near-crash-00014",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00014-4a34c47d2ef5"
+            ],
+            "summary": "The source explicitly says Lumingfei turns the Bugatti in time and safely clears the bend. No represented vehicle-position, near-miss, or road-condition field exists; inventing health or another numeric state would be semantically incorrect."
+          },
+          {
+            "target": "event:event-eva-warns-thirteen-00015",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00015-c98e6792a5ae"
+            ],
+            "summary": "EVA explicitly identifies 13 as an intruder, cannot alarm because of the preconfigured card, and warns him to leave. The warning creates no compatible existing claim/proposition for a knowledge effect and no registered system-warning state."
+          },
+          {
+            "target": "event:event-thirteen-opens-control-door-00015",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00015-c98e6792a5ae"
+            ],
+            "summary": "The source explicitly says the black card retracts twelve locks and opens the twenty-centimeter metal door. The door is not a canonical location/entity, so location.open cannot be truthfully targeted."
+          },
+          {
+            "target": "event:event-caesar-mai-valhalla-battle-00016",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00016-a5fa7ec5e791"
+            ],
+            "summary": "The source explicitly narrates both sides firing Frigga anesthetic rounds and both groups falling unconscious. No named individual outcome is established for the two canonical participants, and no participant-specific health or other field can be assigned without fabrication."
+          },
+          {
+            "target": "event:event-thirteen-opens-aquatic-gate-00016",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00016-a5fa7ec5e791"
+            ],
+            "summary": "The source explicitly says the 1912 brass gate opens and 13 falls with seawater into the aquarium pool. Neither the gate nor aquarium pool is a canonical entity suitable for location.open or location state."
+          },
+          {
+            "target": "event:event-13-knockout-00017",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+            ],
+            "summary": "The source explicitly says 13 knocks out an unnamed showering man and wears a sterile suit. The victim and suit have no canonical entities, so no health, inventory, owner, or condition operation can be grounded."
+          },
+          {
+            "target": "event:event-church-sanwu-destruction-00017",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+            ],
+            "summary": "The source explicitly says the paired Junyan attacks leave only the church's columns and load-bearing walls. The church lacks a canonical location entity and location.condition is numeric, so the destruction cannot be represented without an unsupported numeric value. It also gives no pre-event direct observation for Sanwu beyond the encounter itself, so an entry checkpoint cannot be safely invented."
+          },
+          {
+            "target": "event:event-norton-capture-00017",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+            ],
+            "summary": "Angier explicitly announces Norton's capture after the brass urn is suspended in its isolation apparatus. No supported artifact owner/custodian/delivered value is specified, and artifact.condition cannot encode capture. The source does not provide a pre-event direct observation for Angier sufficient for an entry checkpoint."
+          }
+        ],
+        "outcome": "no-artifacts",
+        "reviewed_segments": [],
+        "summary": "Reviewed all 16 bounded targets against their exact source segments. No pending replacements were staged because each missing typed effect or checkpoint requires an unrepresented entity/field, an absent compatible semantic claim, or an invented value; all blockers are reported for host review."
+      }
+    },
+    {
+      "batch": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-4",
+      "fingerprint": "e49da02afebdd899b197f684d05ca7832619f2dbd17b897a45dbef105bc1da44",
+      "input": {
+        "target_reviews": [
+          {
+            "target": "event:event-norton-nmr-scan-00017",
+            "disposition": "proposed",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+            ],
+            "summary": "An active pending repair supplies a comparable ordinal scan time. The source explicitly reports an empty chamber and a dragon-egg crack; the remaining requested typed-effect gap has no current deterministic scan-finding field, and a knowledge delta would require a compatible source-grounded claim/proposition outside this bounded successor repair."
+          },
+          {
+            "target": "event:event-angier-invites-caesar-00019",
+            "disposition": "proposed",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00019-7707f11fa946"
+            ],
+            "summary": "An active pending repair supplies a comparable morning ordinal and the telephone invitation. The source says Angier invites Caesar to tea; the remaining typed-effect gap has no deterministic state field for an invitation or acceptance and no compatible claim-backed knowledge effect in this bounded repair."
+          },
+          {
+            "target": "event:event-lumingfei-emergency-signal-00021",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00021-0343cf842992"
+            ],
+            "summary": "The source explicitly shows Lumingfei invoking Black Sheep Wall, contacting Fingel, and asking for the map. The information outcome cannot be added as a knowledge delta without a compatible source-grounded claim/proposition, and no deterministic state-field effect is stated by the event."
+          },
+          {
+            "target": "event:event-norton-fuses-sampson-00021",
+            "disposition": "proposed",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00021-0343cf842992"
+            ],
+            "summary": "A replacement pending proposal preserves the event and scene backlink and supplies pre-event plan state for Norton and Sampson from the narrated approach and response. The remaining fusion-transformation gap has no representable deterministic state field and was not encoded as invented health, location, or lifecycle data."
+          },
+          {
+            "target": "event:event-zero-launches-torpedo-00022",
+            "disposition": "proposed",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00022-c0d6642068d7"
+            ],
+            "summary": "An active pending repair supplies an ordinal launch-time anchor. The source explicitly narrates Zero pulling the launch lever and the torpedo leaving the vessel; the remaining launch/transit gap is not representable by the available artifact fields, and artifact.delivered was not misused."
+          },
+          {
+            "target": "event:event-angier-tea-lumingfei-00023",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00023-109cf3454cd4"
+            ],
+            "summary": "The source establishes Angier and Lumingfei having afternoon tea in the president's office after the operation. It does not yield a supported deterministic state change under the listed catalog; grades and exposition are not substitutes for a state effect."
+          },
+          {
+            "target": "event:event-nono-gives-lumingfei-chocolate-00023",
+            "disposition": "capability-gap",
+            "evidence_segment_ids": [
+              "a28585b1cf867f3e3a16-00023-109cf3454cd4"
+            ],
+            "summary": "The source explicitly states that Nono gives Lumingfei chocolate on White Day. No chocolate artifact entity exists in the bounded catalog, so an inventory or ownership effect cannot be created without inventing an entity; no other deterministic state effect is stated."
+          }
+        ],
+        "outcome": "complete",
+        "reviewed_segments": [],
+        "summary": "Reconciled the sole host-blocked active successor by staging a preserved Norton–Sampson event replacement with source-supported pre-event plan state for both required embodied entry checkpoints, then withdrawing only its superseded pending predecessor. The three unrelated active pending event drafts remain preserved. All seven audit targets were reviewed against their cited source segments; remaining representation gaps are recorded in the target reviews."
+      }
+    }
+  ],
+  "previousAppliedRepair": {
+    "repairId": "scoped-knowledge-dependencies-v1",
+    "failureFingerprint": "5d2101b3ab80073631e75704de70596812824d97185c9107512ad0783ef63125",
+    "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-knowledge-dependencies.json",
+    "appliedAt": "2026-09-12T18:13:57.989Z",
+    "fingerprintBasis": "Exact source-reviewed event knowledge gap and original receipt; not aggregate coverage",
+    "previousFailureFingerprint": "8b3a73abbba6a26c310d579eae3f4c30f8be15613bbc687449e0e581c5bcc728"
+  },
+  "previousFailureFingerprint": "5648098dda73630861a87fce326c133da8232b8699f131c48a3a0d59b721842e",
+  "validation": "Quotation content regression and existing proposal/audit/finish recovery tests passed; repository and worker/review type checks passed before application.",
+  "status": "reviewed-before-proposals",
+  "semanticHashBefore": "9de56744b090e2922ee4119fadd836161d5d2cb8c5ecde4bd515f07631a2e615",
+  "namespace": "codex-opening-driver-v1-20260912"
+}

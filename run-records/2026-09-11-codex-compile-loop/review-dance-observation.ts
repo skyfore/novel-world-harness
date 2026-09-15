@@ -1,0 +1,48 @@
+import fs from "node:fs/promises";
+import { WorkspaceStore } from "../../src/storage/workspace-store.js";
+import { SourceMaterialStore } from "../../src/storage/source-material-store.js";
+import { CanonicalModelStore } from "../../src/world/canonical-model.js";
+import { inspectCompilerStatus } from "../../src/compiler/status.js";
+import { CompilerFinishReceipts } from "../../src/compiler/finish-receipts.js";
+import { writeKnowledgeRepairPlan, buildKnowledgeRepairPrompt } from "../../src/compiler/knowledge-repair.js";
+import { assertReconciliationDeferralsReviewed } from "../../src/compiler/reconciliation-review-ledger.js";
+import { validateCommittedAttributionTrace } from "../../src/compiler/attribution-trace.js";
+import { compilerFailureCauseFingerprint } from "../../src/runtime/codex-compile-loop.js";
+import { withWorkspaceOperationLock } from "../../src/util/workspace-lock.js";
+const root=process.cwd(),dir=new URL("./",import.meta.url);
+await withWorkspaceOperationLock(root,"compiler",async()=>{
+  const state=JSON.parse(await fs.readFile(new URL("state.json",dir),"utf8"));
+  if(state.attempt!==41||state.status!=="needs-review"||state.knowledgeRepair.pending)throw Error("Incident changed.");
+  const source=(await inspectCompilerStatus(root,state.sourceId)).sources.find(s=>s.sourceId===state.sourceId)!;
+  if(source.sourceIntegrity!=="verified"||source.hasUnresolvedObligations||source.worldProposalInventory.pending)throw Error("Unreviewed source or obligations.");
+  const canon=new CanonicalModelStore(root);
+  for(const a of await canon.listAttributions())if((await validateCommittedAttributionTrace(root,state.sourceId,a)).length)throw Error("Prior trace repair has not passed.");
+  const events=await canon.listEvents(),event=events.find(e=>e.id==="event-zero-dance-00014")!;
+  if(!event||event.observedKnowledge?.operations.length||event.observedOutcome.operations.length)throw Error("Target changed.");
+  const oldBatch=`reconcile-${state.sourceId}-bounded-codex-target-review-v1-20260912-3`;
+  const oldStore=new CompilerFinishReceipts(root,state.sourceId,oldBatch),old=await oldStore.read();
+  if(old?.state!=="completed")throw Error("Original batch unfinished.");await oldStore.verify(old);
+  const report=old.identity.input.target_reviews?.find(r=>r.target===`event:${event.id}`);
+  if(report?.disposition!=="capability-gap"||report.summary!=="Zero explicitly joins the dance and dances with Lumingfei; the applause and social effect are narrated, but no registered state field represents a dance, social standing change, or event-specific relationship change without inventing a value.")throw Error("Original report changed.");
+  const doc=await WorkspaceStore.openReadOnly(root).getSource(state.sourceId);if(!doc)throw Error("Missing source.");
+  const bytes=await new SourceMaterialStore().read(doc);if(!bytes)throw Error("Missing immutable bytes.");
+  const lines=bytes.toString("utf8").split("\n");
+  const exact=lines[2542]?.trim();
+  if(!exact?.startsWith("但是，随之而来的是自信")||!exact.includes("零完成了她3600度的旋转，面对路明非缓缓地蹲下行礼")||!lines[2544]?.includes("目光都集中在零的身上"))throw Error("Original dance observation changed");
+  if(!event.participants.includes("char-lumingfei")||event.participantPresence?.find(p=>p.entityId==="char-lumingfei")?.mode!=="physical")throw Error("Observer changed");
+  const dependencies={claims:await canon.listClaims(),propositions:await canon.listPropositions(),attributions:await canon.listAttributions()};
+  const batchId=`reconcile-${state.sourceId}-knowledge-effects-${state.semanticRunId}-26`,reviewPath="run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json";
+  const review={reviewedAt:new Date().toISOString(),sourceId:state.sourceId,batchId,report,originalFinishFingerprint:old.fingerprint,exact,sourceLines:lines.slice(2534,2546),dependencies,baseline:event,
+    finding:"Host compared the verbatim capability-gap report with the original dance finale. The source places Lumingfei holding Zero's hand, watching her finish the rotation and curtsy. This supports his directly observing her dance finale, not a numeric skill improvement, social rank or relationship mutation. Do not assign dance proficiency: the next lines explicitly say he never learned court dancing and does not know how to bow. Do not infer he counted ten revolutions merely because the narrator supplies 3600 degrees. Restrict any new knowledge to observable actions in this event, excluding Zero's internal motives and later speeches. Preserve the existing entry checkpoint, precondition, scene, event time, identity, all proposals and original report, and every publication gate. Previous helicopter acquisition for both present observers matches source, with no targeted failure recurrence.",
+    priorKnowledgeRepair:state.knowledgeRepair,priorAppliedRepair:state.appliedRepair,namespaceUnchanged:state.semanticRunId,validation:"Knowledge scope, quotation trace, normal finish and obligation regression tests and type checks passed before application."};
+  await fs.writeFile(new URL("host-review-dance-observation.json",dir),JSON.stringify(review,null,2),{flag:"wx"});
+  await writeKnowledgeRepairPlan(root,{version:1,sourceId:state.sourceId,batchId,predecessorBatchId:oldBatch,predecessorFingerprint:old.fingerprint,reviewRef:reviewPath,events:[event],requireDirectObservation:true});
+  const prompt=await buildKnowledgeRepairPrompt(root,state.sourceId,batchId);if(!prompt.includes(event.id))throw Error("Scoped quotation missing from prompt.");
+  let gateRetained=false;try{await assertReconciliationDeferralsReviewed(root,state.sourceId);}catch(e){if(String(e).includes("host source review"))gateRetained=true;else throw e;}if(!gateRetained)throw Error("Original deferral gate disappeared.");
+  state.knowledgeRepairHistory=[...(state.knowledgeRepairHistory??[]),state.knowledgeRepair];
+  state.knowledgeRepair={batchId,pending:true,reviewPath};
+  state.appliedRepairHistory=[...(state.appliedRepairHistory??[]),state.appliedRepair];
+  state.appliedRepair={repairId:"dance-finale-observation-source-review-v1",failureFingerprint:compilerFailureCauseFingerprint({category:"knowledge-not-produced-with-verified-evidence",targetIds:[event.id],dependencyIds:[]}),reviewPath,appliedAt:new Date().toISOString(),fingerprintBasis:"Original deferred event knowledge gap, not aggregate percentages"};
+  await fs.writeFile(new URL("state.tmp.json",dir),JSON.stringify(state,null,2));await fs.rename(new URL("state.tmp.json",dir),new URL("state.json",dir));
+  console.log(JSON.stringify({ready:true,target:event.id,gateRetained,namespaceUnchanged:true}));
+});

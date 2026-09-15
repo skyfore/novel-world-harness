@@ -1,0 +1,30 @@
+{
+  "at": "2026-09-13T17:58:47.585323+00:00",
+  "fromThreadId": "01a0912b-5872-75b0-a118-813e3e32d2be",
+  "toThreadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+  "reason": "User explicitly requested reading Add runtime execution hooks, checking timers and continuing the existing loop in this task. Original task ended with systemError after delivered callback. No compilation or provider guard was reset.",
+  "attempt": 45,
+  "status": "needs-review",
+  "timerCheck": {
+    "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+    "serviceActiveState": "failed",
+    "mainPID": 0,
+    "pendingQuotaTimers": [],
+    "anchor": "2026-09-13T17:41:00.000Z",
+    "nextWindow": "2026-09-13T22:41:00.000Z",
+    "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+  },
+  "priorCallback": {
+    "attempt": 45,
+    "delivered": true,
+    "receipt": "Queued message 01a09bdc-8e63-7823-8d50-a0cd436b02c7 for thread 01a0912b-5872-75b0-a118-813e3e32d2be.",
+    "at": "2026-09-13T17:41:57.992Z"
+  },
+  "priorTimer": {
+    "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+    "scheduledAt": "2026-09-13T17:41:00.000Z",
+    "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+  },
+  "review": "host-review-amber-arrival-time.json",
+  "validation": "42 relevant tests and strict reviewer type check passed; normal proposal and finish completed with all gates retained."
+}

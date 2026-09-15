@@ -1,0 +1,2334 @@
+{
+  "reviewedAt": "2026-09-13T19:55:04.468Z",
+  "priorState": {
+    "attempt": 80,
+    "status": "needs-review",
+    "sourceId": "a28585b1cf867f3e3a16",
+    "threadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+    "error": "Automatic preparation stopped at 'repair'. Novel-scale publication requires ready exact-evidence, source-accounting, and identity/event-resolution dimensions; exact evidence=unknown; source accounting=not-ready (0 unaccounted, 600 blocking unit(s)); identity/event resolution=not-ready (406 missing, 12 ambiguous/unresolved mention(s)). Entity mention em-angry-dragon-1 has no current identity-resolution record. Entity mention em-batch20-blood has no current identity-resolution record. Entity mention em-batch20-dragonsculpture has no current identity-resolution record. Entity mention em-batch20-dye has no current identity-resolution record. Entity mention em-batch20-egg has no current identity-resolution record. Entity mention em-blackcard has no current identity-resolution record. Entity mention em-blond-girl-1-v2 has no current identity-resolution record. Entity mention em-boy-b19 has no current identity-resolution record. Entity mention em-bronzeplan-b19 has no current identity-resolution record. Entity mention em-brother-03 has no current identity-resolution record. Entity mention em-burning-03 has no current identity-resolution record. Entity mention em-campus-b19 has no current identity-resolution record. Entity mention em-central has no current identity-resolution record. Entity mention em-chinese-child-1-v2 has no current identity-resolution record. Entity mention em-classmates-1-v2 has no current identity-resolution record. Entity mention em-dashu-00005 has no current identity-resolution record. Entity mention em-dorm303-b19 has no current identity-resolution record. Entity mention em-dragon-03 has no current identity-resolution record. Entity mention em-dragon-1-v2 has no current identity-resolution record. Entity mention em-dragon-clan-1-v2 has no current identity-resolution record. Next diagnostic step: nwh audit --source a28585b1cf867f3e3a16",
+    "reviewedBatchFinished": true,
+    "failureFingerprint": "44ef86c52d2aefae91e6173f9505789bc6e0ae0e450dcc676c0d5ece6e1f9782",
+    "startedAt": "2026-09-13T19:53:27.037Z",
+    "selectorBatchFinished": true,
+    "semanticRunId": "codex-opening-driver-v1-20260912",
+    "timer": {
+      "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+      "scheduledAt": "2026-09-13T17:41:00.000Z",
+      "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+    },
+    "hostReview": {
+      "path": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+      "reviewedAt": "2026-09-13T16:42:26.692Z",
+      "reason": "User-authorized continuation after verified retrieval fix; original stopped state preserved in review."
+    },
+    "appliedRepair": {
+      "repairId": "source-reviewed-guderian-identity-links-v1",
+      "failureFingerprint": "ec9cc15dde8450b91a7113b58a34064ef020838366a7fdef6f98dbc184bfcdb1",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-guderian-identity-links.json",
+      "appliedAt": "2026-09-13T19:53:12.302Z"
+    },
+    "timerHistory": [
+      {
+        "unit": "nwh-codex-reset-01a0912b-6.timer",
+        "scheduledAt": "2026-09-12T21:08:00.000Z",
+        "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-6.timer\nWill run service as unit: nwh-codex-reset-01a0912b-6.service\n"
+      }
+    ],
+    "quotaResetAnchor": "2026-09-13T17:41:00.000Z",
+    "lifecycleRecovery": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-4",
+      "pending": false,
+      "auditRef": "run-records/2026-09-11-codex-compile-loop/host-review-proposal-lifecycle.json"
+    },
+    "semanticRunHistory": [
+      {
+        "namespace": "codex-target-review-v1-20260912",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-opening-target.json"
+      }
+    ],
+    "reconciliationFocus": "opening-driver",
+    "knowledgeRepair": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-27",
+      "pending": false,
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+      "receiptFingerprint": "16abfa2b45fec0a37972fbd083ad28ca52fd9e70f8604205129a97c9a87bb040",
+      "unresolvedTargets": []
+    },
+    "traceRepair": {
+      "attributionIds": [
+        "attr-schneider-rescue-members-trapped-001",
+        "attr-eva-guigu-00008"
+      ],
+      "failureDiagnostic": "Reviewed quotation content trace failed again: attr-eva-guigu-00008,attr-schneider-rescue-members-trapped-001. Preserve originals and stop for host review.",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-quotation-content.json",
+      "batchId": "host-quotation-content-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "903a92cb36ed290cba6433d312fef304024539521b12f0f87c6a771b0500d3ff"
+    },
+    "knowledgeRepairHistory": [
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-knowledge-dependencies.json",
+        "receiptFingerprint": "a80578bca7684972296b14cdd8260d5f28fa0a1fdb8c9c47c9727c7a7e77a3c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-2",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "receiptFingerprint": "f9682e866aca66a22cf1a01b8dae5a32e523670103a62ea35e910c7c3fdb3436",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-3",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "receiptFingerprint": "eee8c13e7ebba78cb1fb39a8d95f5a1743bd982ec3171298df37e25de903286e",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-4",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "receiptFingerprint": "10fe6b7ffcd87d66b60f006b04fa4bb8900efdca91e38a4a1d03b25d73db8fac",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-5",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "receiptFingerprint": "9b47e05a8d83d08272bf58f01184723c23f0314d60a7e738479bbdcbae48ba4a",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-6",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "receiptFingerprint": "eca4e84675eeff514914668a764197742048ee6134b683d526f9ec822148c450",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-7",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "receiptFingerprint": "20bc8cd95777636285a45fa1612a0de9b588dac75feffd3e105c6b8c33ff8f07",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-8",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "receiptFingerprint": "4176e0f60f80d8da09f44af0cb4e7ab567c7464f80ded678469a00717d6a896d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-9",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "receiptFingerprint": "bb667a3d751e646925b005f469396ae419c4ef89f624f12742915799bfafaacc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-10",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "receiptFingerprint": "14b4e7bbc2093be8d3d86f0356d2eb8c36a71459e1e7f0509e24eeaf71690964",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-11",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "receiptFingerprint": "b860218c84dc36767018908a51fdaaea20f3975e1c1cb48e2c64f993b7105974",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-12",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "receiptFingerprint": "38b480456c192f1dd8cc493b53fc8087e72a7bc9a8c7f64028e25bd6e01d3c18",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-13",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "receiptFingerprint": "ebcc80887c90a45677644d3c7cd72fb4218e8feb3da34ecb2d5c722fd665759b",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-14",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "receiptFingerprint": "099e053d905c7411e6c1424a3507084c7c4640c23983a03d2642edd887afe745",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-15",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "receiptFingerprint": "e42c2b63609e824015b1d2fe60ae58f4cf80ea8d604cd9358998cc3d6a849e34",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-16",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "receiptFingerprint": "adb536f530a54f680b22acdfd55c27718bc788a2fa664b51f2c22f6728a0cecc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-17",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "receiptFingerprint": "23fec246048d47fd7916984f504b736186902a2627a5e271e24b525017a627bb",
+        "unresolvedTargets": [
+          "event-eva-config-001"
+        ]
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-18",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "receiptFingerprint": "e863047b25c119e6058eecaa1c01fea9b747e4e435927889937bd4067ff2b50d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-19",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "receiptFingerprint": "4e0c1388eca6e4942888f91782f8083ad560998996a4d58790111ec1070f784d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-20",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "receiptFingerprint": "fc96a11cf9e398b2aaf242858ce5f366d9f7ee53ad1b9179b761eca25f8c6a5c",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-21",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "receiptFingerprint": "1a66602c8e29aa70646e3ff8f476352b813fefee02e6528f495b22b162ebed32",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-22",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "receiptFingerprint": "66c5ad249e1b4413a6589600f1492b7d7041d659b8497254e7e529d7708a5169",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-23",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "receiptFingerprint": "5ca3cf4cdef33873685dcad3377007e791ba9f88604cf3bc4e0990dfeacdef5d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-24",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "receiptFingerprint": "1fe5dc9570548f6263c6b3014a6cf81c88db1264942385383f515faeda3430c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-25",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "receiptFingerprint": "57d5d7c48051196972e595c7f26b0f98ebbb0c721116e14f23bee07f677b01e9",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-26",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "receiptFingerprint": "d9a2961678b7acafabe33458e5f17b4b1d468370d6b69f3f74d6ed5b78432262",
+        "unresolvedTargets": []
+      }
+    ],
+    "appliedRepairHistory": [
+      {
+        "repairId": "dragontext-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "0be170fea49a866ea1c65fbe8fe8603cee179192f84fee568d777853abc44f63",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "appliedAt": "2026-09-12T18:30:48.769Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dragontext-proposition-object-selector-v1",
+        "failureFingerprint": "45af7b72057ca8627ca38f142736a1edc2484af30b0922c630fbf7a4e03523ed",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-anchor.json",
+        "appliedAt": "2026-09-12T18:37:15.473Z"
+      },
+      {
+        "repairId": "medical-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "d8d6e7cd654c89e070a14645d590c434ad1c952f01b27f5095e119ba6da97398",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "appliedAt": "2026-09-12T18:40:09.287Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "office-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "8ef8899d2276275463db5a56ae28051671b77ed93e721f72501fd01a65c1d2e0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "appliedAt": "2026-09-12T18:47:01.873Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-disclosure-source-grounded-dependencies-v1",
+        "failureFingerprint": "2c8fd49565f406cc3b9d3fabaf11460ff6d57ab72d0ca2fe8d8969a8dd25699f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "appliedAt": "2026-09-12T18:56:17.280Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-identity-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "b2e504d601decd98fcf28b2f03263a9f6837e3211d066def3c42bffc69b24aee",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "appliedAt": "2026-09-12T19:05:58.058Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-listener-and-content-selectors-v1",
+        "failureFingerprint": "d98142ee01a99ba21ccc268302bf3a09ed3c843977a8839ba8b5aef4225a31da",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-selectors.json",
+        "appliedAt": "2026-09-12T19:12:49.583Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "121356ed29262f4b483750da516cc9847495e8e970b9799b98a94a46c2606035",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "appliedAt": "2026-09-12T19:15:57.744Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "confession-quotation-and-knowledge-dependencies-v1",
+        "failureFingerprint": "06944c5fe2fe0476a51c4030301e37e89c1017926aa21fda094e70d29f2830a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "appliedAt": "2026-09-12T19:21:50.468Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "acceptance-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "801e624d68d6772a4af862184fac1ccaf9a7f0ea012ab4c3e1e1441931f35101",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "appliedAt": "2026-09-12T19:29:12.505Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "nono-entry-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "1dfc90a3e4174718919bedc66c7d47b966921b86a71c8390dedd7e3d10c0ec94",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "appliedAt": "2026-09-12T19:36:00.594Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "bend-warning-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "a6f5f754995fe21f6ba5134f90d1f3c666c9a1984ea4e8ad9851fa16cf085994",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "appliedAt": "2026-09-13T12:45:37.230Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "funding-answer-summary-and-knowledge-v1",
+        "failureFingerprint": "2f13c1affa661632fc1f1c0d3d028a919178af358162e575cf4e424e2f38cf67",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "appliedAt": "2026-09-13T12:54:28.250Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "6f5ddff7066f52187dc1d4090ae387d9a808375b020964d71c5beeb9b6c9232d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "appliedAt": "2026-09-13T12:59:21.471Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-document-holder-and-lifecycle-host-v1",
+        "failureFingerprint": "a7c7f0088d27ba49c117896fa5635360b3258cd945a6ca89ab75ccff6bcd708f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-document-correction.json",
+        "appliedAt": "2026-09-13T13:12:44.915Z"
+      },
+      {
+        "repairId": "emergency-call-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "24d033b42a3f33b73a24baabfb743cd5d8a4aab5dcfdb3a946ed376611dcbd7b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "appliedAt": "2026-09-13T13:20:10.161Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "emergency-request-quotation-anchors-v1",
+        "failureFingerprint": "626922bbf53ef32aef6f793771ac4a0340ff4144d094e0cd92718fc1dca9ff80",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-trace.json",
+        "appliedAt": "2026-09-13T13:26:20.468Z"
+      },
+      {
+        "repairId": "exploration-window-source-reviewed-knowledge-v1",
+        "failureFingerprint": "86278ddb0368746eecc0a772333379eed8ee879de047a72cbf557dd1e6affeab",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "appliedAt": "2026-09-13T13:30:18.146Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "exploration-full-projection-and-lifecycle-v1",
+        "failureFingerprint": "91387cb2707fac261925e5485d1f051fbbee51251a14ed7ce5d3b6d6174934f0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-projection.json",
+        "appliedAt": "2026-09-13T13:38:07.647Z"
+      },
+      {
+        "repairId": "nono-follow-source-reviewed-knowledge-v1",
+        "failureFingerprint": "9989a41693d7f8808acdb8f2eecaabbfea496591868b214529a100493a077503",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "appliedAt": "2026-09-13T13:41:24.132Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-interface-source-reviewed-knowledge-v1",
+        "failureFingerprint": "698fc2d0146b8703c3ae7c9b4d63acd82877b507158f9df2698757363af25032",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "appliedAt": "2026-09-13T13:48:58.522Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-quotation-retrieval-protocol-v1",
+        "failureFingerprint": "4b1a08018ec8ee43b8810abcb0286ab2643d17a06a2bbf07fe39ac35c010d508",
+        "failureCause": {
+          "category": "knowledge-not-produced-with-verified-evidence",
+          "targetIds": [
+            "event-eva-config-001"
+          ],
+          "dependencyIds": [
+            "q-eva-interface-click-instruction-00011"
+          ]
+        },
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "appliedAt": "2026-09-13T16:42:27.004Z"
+      },
+      {
+        "repairId": "map-display-source-reviewed-knowledge-v1",
+        "failureFingerprint": "11b736d5e84548b873606ab68338a15fc7717e89eab302fe811d537912347999",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "appliedAt": "2026-09-13T16:47:21.510Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-perception-source-reviewed-knowledge-v1",
+        "failureFingerprint": "c10c9346b27a3308d8f20d9f233edb9a83439a31057a8c6e554464311aadb61a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "appliedAt": "2026-09-13T16:54:36.423Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-direct-observation-scope-v1",
+        "failureFingerprint": "bfea6a8d889103ac8f5f70c43a26f5370f5e538e9e271edd0a287a45d692964c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "appliedAt": "2026-09-13T17:00:48.261Z",
+        "fingerprintBasis": "Verified attempt 36 temporal misattribution, not aggregate percentages"
+      },
+      {
+        "repairId": "duel-limited-observation-source-review-v1",
+        "failureFingerprint": "566b293740da10a7df74104a8ddf06078709571620449fece0312e7cf3a1b5eb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "appliedAt": "2026-09-13T17:06:26.315Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "earthquake-perception-source-review-v1",
+        "failureFingerprint": "2d4bcebfafff2412e9b9340fbad52822729157510e54f84eba2309d721df2b0d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "appliedAt": "2026-09-13T17:10:47.409Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "train-arrival-observation-source-review-v1",
+        "failureFingerprint": "c553169066754cdb8020da447d1ff3a30f30e8f0a3572c32986349e740d91219",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "appliedAt": "2026-09-13T17:15:51.299Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "helicopter-approach-observation-source-review-v1",
+        "failureFingerprint": "a1357fb5e1e649b1d317176279b1f17013fa7469bf64cbda434d4a68161fd4de",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "appliedAt": "2026-09-13T17:20:29.798Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dance-finale-observation-source-review-v1",
+        "failureFingerprint": "d7593d5f5485ea50d2d5cd1d9aaf09e9806758b323c516628c8f1bd3d459b6e2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "appliedAt": "2026-09-13T17:25:26.067Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "caesar-fall-observation-source-review-v1",
+        "failureFingerprint": "b2f54cf53c7298bda4359e70c2e6f8d06c39355bf69e840f373b99e8cf2c1ab7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+        "appliedAt": "2026-09-13T17:29:36.955Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "adams-fragment-required-before-reassembly-v1",
+        "failureFingerprint": "9d0ff292fa191d5375c8aa1d215484bf979385dfdd8597481b9d08796ef03a57",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-adams-causal.json",
+        "appliedAt": "2026-09-13T17:36:02.166Z"
+      },
+      {
+        "repairId": "alarm-gather-source-bounded-order-v1",
+        "failureFingerprint": "362c430bbb07c86c567325ab6be870f6795e2fc0b6f447d130865d7f645531cd",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-gather-time.json",
+        "appliedAt": "2026-09-13T17:40:28.712Z"
+      },
+      {
+        "repairId": "amber-arrival-source-bounded-order-v1",
+        "failureFingerprint": "e94692b391ee99323426bf5e5622d10f43cae30c1395866f13e4aad6ee446960",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-amber-arrival-time.json",
+        "appliedAt": "2026-09-13T17:58:02.856Z"
+      },
+      {
+        "repairId": "chu-source-reviewed-recruitment-goal-v1",
+        "failureFingerprint": "a79b1200e62046916fe8a6f8b85cfbbde81438477059fce7e4b2137e882d08b3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-chu-recruitment-goal.json",
+        "appliedAt": "2026-09-13T18:04:22.654Z"
+      },
+      {
+        "repairId": "roadside-setting-temporal-not-causal-v1",
+        "failureFingerprint": "8f98455210d2a817a03b8283bd4e3527da0482d8b26d4d9249f76937fcc050cb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-relation.json",
+        "appliedAt": "2026-09-13T18:08:49.574Z"
+      },
+      {
+        "repairId": "cinema-roadside-source-discourse-order-v1",
+        "failureFingerprint": "281da3693a1bdf2c5c0cad708495a15bae951cd8f2f6749086d4f3cc8649d1f7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-discourse.json",
+        "appliedAt": "2026-09-13T18:13:40.903Z"
+      },
+      {
+        "repairId": "nono-source-reviewed-pre-door-checkpoint-v1",
+        "failureFingerprint": "4a140bada4ca2aa6f97bcfeed747fff816996f471096c0562d5f7fd97e8e96a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:17:40.529Z"
+      },
+      {
+        "repairId": "duel-source-reviewed-pre-attack-checkpoints-v1",
+        "failureFingerprint": "405723fd4bda4e015571188be8a209d3b6f4adc660c42b7266cd00663479691c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:21:27.852Z"
+      },
+      {
+        "repairId": "interview-source-reviewed-examiner-checkpoints-v1",
+        "failureFingerprint": "d659905948263cfedf75bc190d07a77d367a47b4f8a65cb79c6dc748f2cf684b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-interview-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:24:35.323Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "144e3ad042532714d52a9ac8817643bc9a62a27329d3408a42e122ac849431a0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:29:48.199Z"
+      },
+      {
+        "repairId": "makeup-source-reviewed-pre-fitting-checkpoint-v1",
+        "failureFingerprint": "332e045d1ecf74f015abff501dd60261528a2dcbd342d9588c3dd151ef8a1902",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-makeup-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:35:13.298Z"
+      },
+      {
+        "repairId": "lumingfei-source-reviewed-pre-coaching-checkpoint-v1",
+        "failureFingerprint": "461f9395e4e429bdca57cce55672b8eabc86bec2405b0a2e54167c72722ed739",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingfei-coaching-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:38:13.852Z"
+      },
+      {
+        "repairId": "fingel-source-reviewed-pre-arrival-checkpoint-v1",
+        "failureFingerprint": "92f1d7c7f84411cb4261c0667e8d3c6706918ccd2b534d123c2253a6ac37d59d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-fingel-train-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:41:09.597Z"
+      },
+      {
+        "repairId": "black-sniper-source-reviewed-pre-shot-checkpoint-v1",
+        "failureFingerprint": "726e870c3d21679313187cc536e8b7d50428fb8954e1874fc3872bae2a3b2251",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-black-sniper-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:44:03.764Z"
+      },
+      {
+        "repairId": "man-coins-source-reviewed-pre-request-checkpoint-v1",
+        "failureFingerprint": "87b1cb60a82e2d0089f3b67e29a2e7903d17dffee47228764ec69ec599728e07",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-man-coins-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:47:30.839Z"
+      },
+      {
+        "repairId": "mans-source-reviewed-pre-earthquake-checkpoint-v1",
+        "failureFingerprint": "b7c61b852e8f97016ab2f593d2380a0701330c3ef8585517a4622226fdaca732",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-mans-earthquake-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:50:34.701Z"
+      },
+      {
+        "repairId": "zhao-source-reviewed-pre-confession-checkpoint-v1",
+        "failureFingerprint": "1653489dcdee02d9d4972c631ea64f60c7126f2aab30d78ef875e15a56c95b89",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-zhao-confession-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:53:30.319Z"
+      },
+      {
+        "repairId": "manshtein-source-reviewed-pre-dialogue-checkpoint-v1",
+        "failureFingerprint": "4779c49864b7a2b6bb7dde2f12bd8a4fd00026894be70f604da5e09232fa6196",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-manshtein-medical-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:56:26.947Z"
+      },
+      {
+        "repairId": "sanwu-source-reviewed-pre-invocation-checkpoint-v1",
+        "failureFingerprint": "d909f4ef203e62b052e0fae28fcab43832b7a6af4473b062b4a6d14e40cf3ba3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-sanwu-church-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:59:21.591Z"
+      },
+      {
+        "repairId": "angier-source-reviewed-pre-toast-checkpoint-v1",
+        "failureFingerprint": "6e80b15bf62ac687f9659caca02183f83b4d1b028b7dc65a859d405811ddb105",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-angier-toast-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:02:25.446Z"
+      },
+      {
+        "repairId": "caesar-source-reviewed-exchange-goal-v1",
+        "failureFingerprint": "7f9c344875e8102e6b8d94e64a430348b1c85cac3231be97ac6746d4a1fff752",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-exchange-goal.json",
+        "appliedAt": "2026-09-13T19:05:47.060Z"
+      },
+      {
+        "repairId": "yaji-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "a40e0d01989a02e780424be12d40ec51988b5c3fb93c8ab42986beb2e6e2c01d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yaji-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:09:14.053Z"
+      },
+      {
+        "repairId": "yesheng-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "6669d28ccb86bcc65f845b4da0aa6cf08f83afe9f9e91e8db23c12c7fa813728",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yesheng-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:12:07.578Z"
+      },
+      {
+        "repairId": "cousin-source-reviewed-bedroom-checkpoint-v1",
+        "failureFingerprint": "296e224f9723b4a93bad6e9a53bafe5edcd902158d12a9120a84c63a6dc6521d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-entry-checkpoint.json",
+        "correctionPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-trace-correction.json",
+        "appliedAt": "2026-09-13T19:17:13.858Z"
+      },
+      {
+        "repairId": "cinema-audience-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "bbf81a731f359f8e409a39d169a4d1f934d869d6f3e4c3760c9819577f869092",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cinema-audience-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T19:20:15.410Z"
+      },
+      {
+        "repairId": "baby-source-reviewed-citywall-checkpoint-v1",
+        "failureFingerprint": "31ea8b2b467f212220a54987686814fa226b17b96980f31dc130f47ba21bb531",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-baby-citywall-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:23:20.676Z"
+      },
+      {
+        "repairId": "conductor-source-reviewed-pre-boarding-checkpoint-v1",
+        "failureFingerprint": "fab1c99967c4541832b1bc87191dba25fea4e7d81b47810e7c733e44ae836b09",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-conductor-boarding-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:26:17.890Z"
+      },
+      {
+        "repairId": "eva-source-reviewed-projected-presence-v1",
+        "failureFingerprint": "e79dcae645ee1836dec3bc108435c1f8f58509a0717980e8f004768d6965a6f5",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-projected-presence.json",
+        "appliedAt": "2026-09-13T19:30:12.278Z"
+      },
+      {
+        "repairId": "boy-source-reviewed-pre-warning-checkpoint-v1",
+        "failureFingerprint": "19dab9bb94b5ac4b46cbf6b3162f3ed6656fcd9b13d5384ce7961ee668d65180",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-warning-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:33:06.641Z"
+      },
+      {
+        "repairId": "source-reviewed-explicit-identity-links-v1",
+        "failureFingerprint": "028cc7ff3f96455c5df92467d825aa63080ad02655a98463b847b2f1d1f8d63e",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-explicit-identity-links.json",
+        "appliedAt": "2026-09-13T19:37:01.203Z"
+      },
+      {
+        "repairId": "source-reviewed-briefing-identity-links-v1",
+        "failureFingerprint": "690b314981fc276223282e7f46f6d4d7f0dbbe8883f3a3308e1de6e13adbbdb2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-briefing-identity-links.json",
+        "appliedAt": "2026-09-13T19:38:50.717Z"
+      },
+      {
+        "repairId": "source-reviewed-named-student-identity-links-v1",
+        "failureFingerprint": "efbbedbbf6f4523071125f9aefd4cecd3030c0edee751b510bd0a5eee281d8db",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-named-student-identity-links.json",
+        "appliedAt": "2026-09-13T19:43:29.784Z"
+      },
+      {
+        "repairId": "source-reviewed-student-reference-identity-links-v1",
+        "failureFingerprint": "22686ec02d3c0230c3d8ef5c6897e3e52d29ce8a8f74c7c57fef396bfdae2019",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-student-reference-identity-links.json",
+        "appliedAt": "2026-09-13T19:45:24.872Z"
+      },
+      {
+        "repairId": "source-reviewed-recalled-name-identity-links-v1",
+        "failureFingerprint": "976d1e53cada7298d4632678d7b26a8237b1a97eda34a4f89e3191cea481b27a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-recalled-name-identity-links.json",
+        "appliedAt": "2026-09-13T19:47:13.331Z"
+      },
+      {
+        "repairId": "source-reviewed-car-council-identity-links-v1",
+        "failureFingerprint": "0b8644091a3568acbd28c7343d9c9ad92d8cdf82891729772d03f4c83eeedf8b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-car-council-identity-links.json",
+        "appliedAt": "2026-09-13T19:49:19.421Z"
+      },
+      {
+        "repairId": "source-reviewed-academy-identity-links-v1",
+        "failureFingerprint": "d7abef6eb71eb53ca10641dda0bc281491e990790e2e6712a4afddcca7e2d975",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-academy-identity-links.json",
+        "appliedAt": "2026-09-13T19:51:21.434Z"
+      }
+    ],
+    "identityRepair": {
+      "batchId": "host-lumingze-identity-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "362a6228c63af64cda20a243cac91f29b4f933cbc399240190d4168794c8d3e3",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingze-identity.json",
+      "verifiedAt": "2026-09-12T19:04:52.690Z",
+      "entityId": "char-lumingze-boy"
+    },
+    "threadHistory": [
+      {
+        "at": "2026-09-13T17:58:47.585323+00:00",
+        "fromThreadId": "01a0912b-5872-75b0-a118-813e3e32d2be",
+        "toThreadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+        "reason": "User explicitly requested reading Add runtime execution hooks, checking timers and continuing the existing loop in this task. Original task ended with systemError after delivered callback. No compilation or provider guard was reset.",
+        "attempt": 45,
+        "status": "needs-review",
+        "timerCheck": {
+          "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+          "serviceActiveState": "failed",
+          "mainPID": 0,
+          "pendingQuotaTimers": [],
+          "anchor": "2026-09-13T17:41:00.000Z",
+          "nextWindow": "2026-09-13T22:41:00.000Z",
+          "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+        },
+        "priorCallback": {
+          "attempt": 45,
+          "delivered": true,
+          "receipt": "Queued message 01a09bdc-8e63-7823-8d50-a0cd436b02c7 for thread 01a0912b-5872-75b0-a118-813e3e32d2be.",
+          "at": "2026-09-13T17:41:57.992Z"
+        },
+        "priorTimer": {
+          "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+          "scheduledAt": "2026-09-13T17:41:00.000Z",
+          "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+        },
+        "review": "host-review-amber-arrival-time.json",
+        "validation": "42 relevant tests and strict reviewer type check passed; normal proposal and finish completed with all gates retained."
+      }
+    ],
+    "timerCheck": {
+      "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+      "serviceActiveState": "failed",
+      "mainPID": 0,
+      "pendingQuotaTimers": [],
+      "anchor": "2026-09-13T17:41:00.000Z",
+      "nextWindow": "2026-09-13T22:41:00.000Z",
+      "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+    },
+    "endedAt": "2026-09-13T19:53:39.219Z",
+    "callback": {
+      "attempt": 80,
+      "delivered": true,
+      "receipt": "Queued message 01a09c55-201a-7ac1-905a-ac0990fb0cbc for thread 01a09be6-f704-72d0-aaf1-59b11709dd85.",
+      "at": "2026-09-13T19:53:39.616Z"
+    }
+  },
+  "targets": [
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-manshtein",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 152268,
+          "endByte": 152286,
+          "startLine": 990,
+          "endLine": 990,
+          "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+          "prefixHash": "c67cfde24f97e99f38a3ed905daaa98de7474007ec32d4197cb89d37dec07ce5",
+          "suffixHash": "b3f30ca944434999c6d71e7ba1d2995581c3dea1c0c10dd07565e30bc50e2876",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-arrival-proof",
+        "confidence": 0.95
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-manshtein",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 152268,
+            "endByte": 152286,
+            "startLine": 990,
+            "endLine": 990,
+            "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+            "prefixHash": "c67cfde24f97e99f38a3ed905daaa98de7474007ec32d4197cb89d37dec07ce5",
+            "suffixHash": "b3f30ca944434999c6d71e7ba1d2995581c3dea1c0c10dd07565e30bc50e2876",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-arrival-proof",
+          "confidence": 0.95
+        },
+        "candidates": [
+          {
+            "entityId": "char-manshtein",
+            "entityKind": "character",
+            "canonicalName": "曼施坦因教授",
+            "matchedText": "曼施坦因教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“好，那么第二件证明。”富山雅史开启了第二只手提箱。一只圆柱形的玻璃瓶被送到了路明非的面前，就像是生物课上老师用来装标本的那种瓶子。\r",
+        "\t路明非张大了嘴，仿佛被雷劈了，如果此刻富山雅史在他嘴里塞上一个橙子，他大概都不会察觉。泡在淡黄色福尔马林溶液里的是一个很像蜥蜴的动物，黄白色的，蜷缩着修长的尾巴，像是子宫中的胎儿，嘴边的长须在溶液里缓慢地飘拂，合着眼睛的样子看起来如婴儿般安详。如果不是那东西的背后展开了两面膜翼，路明非会认为它根本就是某种古代蜥蜴。\r",
+        "\t“这是一条红龙的幼崽，甚至还没死去，只是在沉睡状态。龙类很难杀死，尤其是高贵的初代种和次代种，即使你毁灭它们的身躯，都无法毁灭灵魂，它们会再度苏醒，”富山雅史说，“这是极难得的标本，通常人类无法捕获龙，因为龙类能够察觉人类大脑的活动，要么在人类靠近之前发动进攻，要么就会逃走。这个标本是1796年在印度发现的，很幸运，这条红龙幼崽大概是在刚刚孵化出来的时候被一条巨蟒吞下去了，当地的农民杀死了巨蟒，从它的肚子里得到了这个幼崽。”\r",
+        "\t“真的不是塑胶的么？”路明非捂脸，“完蛋了，我的世界观完蛋了。”\r",
+        "\t“凑近看看，看它的细节，鳞片的纹路，什么样的艺术家能做出这样完美的塑胶制品来？”富山雅史把玻璃瓶凑到路明非面前。\r",
+        "\t现在路明非隔着一层半厘米厚的玻璃和那只红龙幼崽面对面了，它的膜翼和长须都在溶液里拂动，就像是悬停在云中。富山雅史说得对，那细节，那纹路，太逼真了，只有自然或者神能够诞育这样的东西，它们存在于历史的阴影中，存在于不同民族的传说中，存在于人类想象的极限中，也存在于这个密封的玻璃瓶里。\r",
+        "\t“完美，是不是？”富山雅史带着赞叹的口气。\r",
+        "\t“完美。”路明非喃喃。\r",
+        "\t他盯着覆盖着龙眼的瞬膜，想到那对在黑暗里缓缓睁开的黄金瞳，仿佛世界之门在他的眼前开启。\r",
+        "\t泡在福尔马林溶液里的红龙幼崽忽然睁开了眼睛，金黄色的眼睛。它全身从头至尾，痉挛般地一颤，伸长脖子对路明非发出了吼叫，随之灼热的龙炎在它的喉咙深处被引燃，喷射而出！它奋力张开双翼，就要突破玻璃瓶的束缚，它苏醒了，不过猫一样大的身躯，却带着龙的威严。\r",
+        "\t路明非没有闪避，三个人全傻了，看着古老的标本在他们眼前复活。\r",
+        "\t细微的龙炎瞬息间就熄灭了，福尔马林溶液灌入了龙崽的喉咙，令它仿佛一个溺水的人那样痛苦不堪地咳嗽起来，同时它也未能突破玻璃瓶，它强有力地振动膜翼，但是撞在玻璃壁上甚至没有留下一点痕迹。这次积累了数百年的复苏结束得和开始一样迅速，很快，龙崽重新蜷缩起来，回复了安详，又一次进入了休眠。\r",
+        "\t“啊啊啊啊啊啊啊啊！”路明非终于能够尖叫出声了，颤抖着指着玻璃瓶。\r",
+        "\t“别喊。”古德里安教授喃喃地说。\r",
+        "\t“你没看见么？你没看见么？刚才它活过来了！它活过来了！活的龙！”路明非摇着那个完全傻掉了的老家伙大声说。\r",
+        "\t“看见了，”古德里安教授转向富山雅史教员，“你也看见了，对不对？”\r",
+        "\t富山雅史脸色惨白，只顾点头，“对啊……不过这个真的不是我的原意，我不知道它刚好会醒来……”他忽地提高了音量，几乎是嘶叫起来，“怎么回事？档案馆的那帮人搞错标签了么？它的苏醒日应该是2077年！他们这样乱贴标签会害死我们的！刚才它喷射了龙炎！龙炎！”\r",
+        "\t“还好从前年开始更换了纳米材料容器，否则刚才就撑不住了……”古德里安教授满头冷汗，“天呐，它的苏醒日是我和曼施坦因教授计算的，按说不会出错……除非……除非是血统召唤！”\r",
+        "\t“血统召唤么？”富山雅史转而看着路明非，那眼神压根就是在打量一个怪物。\r",
+        "\t“除了血统召唤，还能是什么能让龙类提前苏醒？”古德里安教授目光灼热，大力拍着路明非的肩膀，“是你强大的血统在召唤它啊！路明非，你现在知道自己是多么了不起的一个人物了吧？”\r",
+        "\t路明非的肩膀都要被他拍塌了，“什么跟什么？别把这种能够要人命的意外推在我身上！我可什么都没做！”\r",
+        "\t“龙皇可是只要凭借凝视就可以让人类臣服的，你不用做什么，因为你是具备次代种能力的龙族混血！”古德里安教授冲着路明非使劲点头。\r",
+        "\t“什么混血？我爸是个人类，我妈也是个人类，你《聊斋志异》看多了？以为我们中国都是人龙生子？”路明非争辩。\r",
+        "\t“不，他们确实都是人类，但是他们都是龙族混血种，所以你的血统里包含了很大比例的龙族血统。”古德里安教授和富山雅史对视一眼，“反正你早晚都会知道，这所学院里，绝大多数人都是龙族混血，你知道我们如何决定阶级么？所谓阶级，是指血统阶级！你之所以是‘S’级，是因为你有高纯度的龙族血统！”\r",
+        "\t路明非傻了。他眼里的古德里安教授忽然成了一头老龙，随时会把致命的火焰吐在他的脸上。\r"
+      ],
+      "rationale": "Guderian explicitly names Professor Manshtein as his colleague in a calculation; same professor, without endorsing the calculation or bloodline speculation."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-manstein-1",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 210028,
+          "endByte": 210040,
+          "startLine": 1328,
+          "endLine": 1328,
+          "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+          "prefixHash": "6c25264b4b3a2f52ee8f1f17c078602c972a5f8069fc4928ef78827c7cb0ce44",
+          "suffixHash": "2512f10d1b5677af979f7f93eff372bb3e1d49fb6d631d36ea36483f7856b494",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-act3-library-professors",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-manstein-1",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 210028,
+            "endByte": 210040,
+            "startLine": 1328,
+            "endLine": 1328,
+            "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+            "prefixHash": "6c25264b4b3a2f52ee8f1f17c078602c972a5f8069fc4928ef78827c7cb0ce44",
+            "suffixHash": "2512f10d1b5677af979f7f93eff372bb3e1d49fb6d631d36ea36483f7856b494",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-act3-library-professors",
+          "confidence": 0.99
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t路明非想了想，叹口气，双肘支在膝盖上，耷拉着脑袋，双手抓头。\r",
+        "\t“可我在家里，”他轻声说，“什么都没有啊，家里要是什么都没有，你会回去么？”他看着芬格尔。\r",
+        "\t芬格尔也看着路明非，银灰色的瞳子里有什么东西一闪而过，兔死狐悲的同情或者什么孤独分泌物？路明非说不清楚。\r",
+        "\t“野百合也有春天嘛，小野种也想发芽嘛，”路明非耸耸肩，“我虽然废柴，可我也想人家关注我啊，我也想有女孩喜欢我啊，我也想有什么东西可以吹牛啊……我不想当一辈子路人甲咯。”路明非说到这里，肚子“咕咕”叫了两声。\r",
+        "\t芬格尔一愣，“饿了？不如打电话订夜宵吧，把你学生证给我用一下。”\r",
+        "\t“还有夜宵服务呐？”路明非添了点精神，掏出学生证递给芬格尔，“不是指茶叶蛋外卖吧？”\r",
+        "\t“什么茶叶蛋？今天是我们同寝的第一天，当然要订大餐！”芬格尔念着路明非的学生证号码，“给1区303宿舍送两份松露面包，两份浇柠檬汁的煎鹅肝，一瓶香槟……对，要冰桶和柠檬皮，再来一只烤鹅吧，我们是有点饿了，两份配起司的鲱鱼卷。”\r",
+        "\t路明非抹了抹嘴角，肚子咕咕咕咕地欢腾起来。\r",
+        "\t二十分钟后，白衣侍者推着餐车进来，打开纯银盖碗，银盘中是芬格尔点的大餐。侍者们在宿舍里架起桌面，铺上雪白的桌布，摆设好银质刀叉，盛着香槟的冰桶放在中央，两只冻过带着冰凝露的玻璃杯放在两人面前，最后点燃一支蜡烛，退了出去。自始至终，侍者们只是微笑，没有发出任何声音。\r",
+        "\t“哇噻！果真是贵族学校！虽然我已经准备好明天退学，不过就冲着这桌吃的，我又有点动摇。”路明非一叉刺入烤鹅的胸膛，乐呵呵地看着油滴冒出来。\r",
+        "\t“吃！人是铁饭是钢，一顿不吃饿得慌，吃饱了再想3E考试的事。车到山前必有路，出门在外靠兄弟，还有我呢！”芬格尔抓起松露面包大嚼，“上手上手！”\r",
+        "\t“你这些套话真是相当流利啊！”路明非心情舒畅，撕下一条鹅腿大嚼，豪迈地把另外一只鹅腿递给芬格尔。\r",
+        "\t“练习中文最好就是在论坛看帖回帖啊！”芬格尔接过鹅腿，两人隔着烛光笑得灿烂。\r",
+        "\t此刻，两位饕餮之徒的老师，古德里安教授，正在图书馆中翻阅文档。古籍区的书架都顶着天花板，用缅甸硬木制成，在灯光下有铁一样的光辉和色泽，书架上陈列着一眼望不到头的精装大本，打开来里面都是抽干空气的透明密封夹，其中保存着古老的铜书卷，统称《冰海残卷》，这些铜书卷埋藏在冰海下数千年，还未能完全解读。\r",
+        "\t古德里安站在梯子顶上努力伸长手臂去够一个册子。\r",
+        "\t“深更半夜地查阅资料？”有人在梯子下说。\r",
+        "\t古德里安往下看去，看见一个和顶灯一样闪亮的球形物体。\r",
+        "\t“曼施坦因，深夜你怎么也会在这里？”古德里安很意外。\r",
+        "\t风纪委员会主席曼施坦因教授摸了摸自己光亮的脑袋，“我也是来查资料的，关于你新招的学生路明非。”\r",
+        "\t“哦？是么？他是很值得研究啊。”古德里安一愣，含含糊糊地应付着。\r",
+        "\t“作为一个新生，面对楚子航的黄金龙瞳，他居然毫无惧意地开枪了。楚子航是我们迄今找到的龙血纯度最高的人，已经表现出龙族的生理特征‘龙瞳’，在他的直视下，一般人都会敬畏，但是你的学生路明非毫无感觉。很有意思。”曼施坦因冷冷地说。\r",
+        "\t“他是个‘S’级学生啊，‘S’级身上发生什么事都是可能的。”古德里安急忙说。\r",
+        "\t“你对这个新学生很满意，准备把他培养成卡塞尔学院最优秀的年轻人，是么？”曼施坦因问。\r",
+        "\t“是啊是啊，”古德里安笑着抓头，“这样我的终生教授职位也到手了。”\r",
+        "\t“古德里安，从我们在哈佛同宿舍到如今，你说谎话的时候就会抓头，你就不能稍微克制一点么？”曼施坦因叹了口气。\r"
+      ],
+      "rationale": "Guderian addresses Manshtein and the next line explicitly identifies the disciplinary chairman as Professor Manshtein."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-manstein-current",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 210028,
+          "endByte": 210040,
+          "startLine": 1328,
+          "endLine": 1328,
+          "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+          "prefixHash": "6c25264b4b3a2f52ee8f1f17c078602c972a5f8069fc4928ef78827c7cb0ce44",
+          "suffixHash": "2512f10d1b5677af979f7f93eff372bb3e1d49fb6d631d36ea36483f7856b494",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-act3-library-professors",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-manstein-current",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 210028,
+            "endByte": 210040,
+            "startLine": 1328,
+            "endLine": 1328,
+            "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+            "prefixHash": "6c25264b4b3a2f52ee8f1f17c078602c972a5f8069fc4928ef78827c7cb0ce44",
+            "suffixHash": "2512f10d1b5677af979f7f93eff372bb3e1d49fb6d631d36ea36483f7856b494",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-act3-library-professors",
+          "confidence": 0.99
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t路明非想了想，叹口气，双肘支在膝盖上，耷拉着脑袋，双手抓头。\r",
+        "\t“可我在家里，”他轻声说，“什么都没有啊，家里要是什么都没有，你会回去么？”他看着芬格尔。\r",
+        "\t芬格尔也看着路明非，银灰色的瞳子里有什么东西一闪而过，兔死狐悲的同情或者什么孤独分泌物？路明非说不清楚。\r",
+        "\t“野百合也有春天嘛，小野种也想发芽嘛，”路明非耸耸肩，“我虽然废柴，可我也想人家关注我啊，我也想有女孩喜欢我啊，我也想有什么东西可以吹牛啊……我不想当一辈子路人甲咯。”路明非说到这里，肚子“咕咕”叫了两声。\r",
+        "\t芬格尔一愣，“饿了？不如打电话订夜宵吧，把你学生证给我用一下。”\r",
+        "\t“还有夜宵服务呐？”路明非添了点精神，掏出学生证递给芬格尔，“不是指茶叶蛋外卖吧？”\r",
+        "\t“什么茶叶蛋？今天是我们同寝的第一天，当然要订大餐！”芬格尔念着路明非的学生证号码，“给1区303宿舍送两份松露面包，两份浇柠檬汁的煎鹅肝，一瓶香槟……对，要冰桶和柠檬皮，再来一只烤鹅吧，我们是有点饿了，两份配起司的鲱鱼卷。”\r",
+        "\t路明非抹了抹嘴角，肚子咕咕咕咕地欢腾起来。\r",
+        "\t二十分钟后，白衣侍者推着餐车进来，打开纯银盖碗，银盘中是芬格尔点的大餐。侍者们在宿舍里架起桌面，铺上雪白的桌布，摆设好银质刀叉，盛着香槟的冰桶放在中央，两只冻过带着冰凝露的玻璃杯放在两人面前，最后点燃一支蜡烛，退了出去。自始至终，侍者们只是微笑，没有发出任何声音。\r",
+        "\t“哇噻！果真是贵族学校！虽然我已经准备好明天退学，不过就冲着这桌吃的，我又有点动摇。”路明非一叉刺入烤鹅的胸膛，乐呵呵地看着油滴冒出来。\r",
+        "\t“吃！人是铁饭是钢，一顿不吃饿得慌，吃饱了再想3E考试的事。车到山前必有路，出门在外靠兄弟，还有我呢！”芬格尔抓起松露面包大嚼，“上手上手！”\r",
+        "\t“你这些套话真是相当流利啊！”路明非心情舒畅，撕下一条鹅腿大嚼，豪迈地把另外一只鹅腿递给芬格尔。\r",
+        "\t“练习中文最好就是在论坛看帖回帖啊！”芬格尔接过鹅腿，两人隔着烛光笑得灿烂。\r",
+        "\t此刻，两位饕餮之徒的老师，古德里安教授，正在图书馆中翻阅文档。古籍区的书架都顶着天花板，用缅甸硬木制成，在灯光下有铁一样的光辉和色泽，书架上陈列着一眼望不到头的精装大本，打开来里面都是抽干空气的透明密封夹，其中保存着古老的铜书卷，统称《冰海残卷》，这些铜书卷埋藏在冰海下数千年，还未能完全解读。\r",
+        "\t古德里安站在梯子顶上努力伸长手臂去够一个册子。\r",
+        "\t“深更半夜地查阅资料？”有人在梯子下说。\r",
+        "\t古德里安往下看去，看见一个和顶灯一样闪亮的球形物体。\r",
+        "\t“曼施坦因，深夜你怎么也会在这里？”古德里安很意外。\r",
+        "\t风纪委员会主席曼施坦因教授摸了摸自己光亮的脑袋，“我也是来查资料的，关于你新招的学生路明非。”\r",
+        "\t“哦？是么？他是很值得研究啊。”古德里安一愣，含含糊糊地应付着。\r",
+        "\t“作为一个新生，面对楚子航的黄金龙瞳，他居然毫无惧意地开枪了。楚子航是我们迄今找到的龙血纯度最高的人，已经表现出龙族的生理特征‘龙瞳’，在他的直视下，一般人都会敬畏，但是你的学生路明非毫无感觉。很有意思。”曼施坦因冷冷地说。\r",
+        "\t“他是个‘S’级学生啊，‘S’级身上发生什么事都是可能的。”古德里安急忙说。\r",
+        "\t“你对这个新学生很满意，准备把他培养成卡塞尔学院最优秀的年轻人，是么？”曼施坦因问。\r",
+        "\t“是啊是啊，”古德里安笑着抓头，“这样我的终生教授职位也到手了。”\r",
+        "\t“古德里安，从我们在哈佛同宿舍到如今，你说谎话的时候就会抓头，你就不能稍微克制一点么？”曼施坦因叹了口气。\r"
+      ],
+      "rationale": "Separate existing observation of the same library greeting; preserve both annotation IDs and link independently."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-mannstein-01-v2",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 248404,
+          "endByte": 248422,
+          "startLine": 1562,
+          "endLine": 1562,
+          "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+          "prefixHash": "33f9280c13b00d0eb8e0690da1d44fbdf7d00b224e70019d44fe26535b908330",
+          "suffixHash": "70c274ce3246af354697f0e50563035f50e1fc5db45e22d47e2c23d46e005253",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-mannstein-01-v2",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 248404,
+            "endByte": 248422,
+            "startLine": 1562,
+            "endLine": 1562,
+            "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+            "prefixHash": "33f9280c13b00d0eb8e0690da1d44fbdf7d00b224e70019d44fe26535b908330",
+            "suffixHash": "70c274ce3246af354697f0e50563035f50e1fc5db45e22d47e2c23d46e005253",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "char-manshtein",
+            "entityKind": "character",
+            "canonicalName": "曼施坦因教授",
+            "matchedText": "曼施坦因教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t男人点了点头，从空虚中抽回了他的手，他原本就只握着空气而已。他仰头喝着啤酒往外走去，肉眼看不见，但是密集如蜘蛛网的红外扫描系统关闭，摄像系统自动关闭，跳闪的红色警戒灯切为绿色，走道地面的高压电被切断，安全系统再次进入短暂的休眠状态。\r",
+        "\t“哦对了，那路明非那件事，没有问题了对吧？”他想起了这件事，转身回头。\r",
+        "\t“没问题，只是包庇一个新生而已嘛，我帮你做过的坏事可不只这一件，”EVA笑笑，“不过我能问问你这么做的理由么？”\r",
+        "\t“看起来是个不错的孩子，”男人也笑笑，“我还有其他理由，等我证实了自己的想法再告诉你。”\r",
+        "\t他转身离去，走了两步又停下，走到角落里的Adams身边，蹲下身来，“嘿兄弟，能否还给我两个硬币让我去买罐可乐……我把所有钱都给你了……你看，钱对你只是个玩具，这里又没有超市和可乐机……”\r",
+        "\tAdams的表情变了，死死地攥着几枚硬币，露出一个典型的小气鬼表情。\r",
+        "\t“Adams，给你哥哥两枚硬币。”EVA说。\r",
+        "\tAdams的表情又变了，很委屈的样子，从硬币里小心地选了两枚旧的递给男人。\r",
+        "\t“真是个小气鬼！”男人在它脑袋上使劲拍了一巴掌，这个用炼金术构架的傀儡机器人受不了这样的大力，崩碎为一堆金属短棍和满地乱滚的小球。\r",
+        "\t男人一边抛着两枚硬币玩，一边喝着啤酒渐渐远去。EVA默默地看着他魁梧而寂寥的背影，和十年前相比，他的腰背没有那么挺拔了。\r",
+        "\t金属门开合，男人真的走了。光束中的女孩无声无息地落下泪来。\r",
+        "\t短棍和小球滚动着汇聚起来，Adams再次成形，发出“嘻哈嘻哈嘻哈”的声音跑到EVA面前，看到她虚幻的眼泪，呆住了。一会儿之后，它忽然高举双手过头挥舞，摇晃身体跳起一支难看的舞来，嚷嚷着，“EVA，开心！EVA，开心！EVA，开心！”\r",
+        "\t它手里的硬币叮叮当当散落一地，女孩的泪水也滴落在金属地板上，溅起莹蓝色的微光。\r",
+        "\t“一个新生，一天之内拿了当日十大头条的六条，以前真是想都不敢想。”\r",
+        "\t“他可击毙了恺撒和楚子航，假设那时候他的枪里填的不是弗里嘉子弹而是实弹的话……”\r",
+        "\t“惊爆新闻，‘S’级学生路明非对于龙皇秘仪咒文没有共鸣，校方正在寻找原因！”\r",
+        "\t“自由一日的王冠归属于谁？又是谁轰爆了恺撒之后又轰爆了楚子航？”\r",
+        "\t曼施坦因教授摇摇头，关闭了卡塞尔学院校网的讨论区页面，今夜大概是个不眠的夜晚，在线的人数冲到了新的高峰，整个学院的学生甚至化名的老师都在热议那个名叫路明非的新生。一名新的“S”级，会带来希望，还是带来危险，或者干脆就是个笑柄？\r",
+        "\t曼施坦因也有点迷茫，白王的猜测未必可靠，毕竟只是猜测，迄今还没有白王血裔被发现的记录。\r",
+        "\t他只能本能地对开枪射杀恺撒和楚子航的路明非感觉到戒惧。\r",
+        "\t他关闭了灯，独自在黑暗中坐了一会儿，打开手机接通了电话——“父亲。”\r",
+        "\t讨论区继续高速刷新，留言不停地上移。\r",
+        "\t“也许明天他会在3E吃亏，我觉得他不太行的样子，可能是校长误判了他的级别。”有人留言。\r",
+        "\t“可能他毫无龙族血统，所以不怕楚子航的黄金瞳。”\r",
+        "\t“最大特长是竞技类游戏诶！什么搞笑的特长？”\r"
+      ],
+      "rationale": "The narrator names Professor Manshtein reading the academy forum and subsequently uses the short name; identity only, no new mental-state or ancestry facts."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-mannstein-02",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 252504,
+          "endByte": 252522,
+          "startLine": 1585,
+          "endLine": 1585,
+          "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+          "prefixHash": "44f13f8e5336353e6c2ff356827e298493e05b6a1eeb2a8eed1864b59605d1a7",
+          "suffixHash": "e452926058049ef06f0f2eddc321c6492dfb57c9d4054e3dd5603b49b8330264",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-mannstein-office",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-mannstein-02",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 252504,
+            "endByte": 252522,
+            "startLine": 1585,
+            "endLine": 1585,
+            "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+            "prefixHash": "44f13f8e5336353e6c2ff356827e298493e05b6a1eeb2a8eed1864b59605d1a7",
+            "suffixHash": "e452926058049ef06f0f2eddc321c6492dfb57c9d4054e3dd5603b49b8330264",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-mannstein-office",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "char-manshtein",
+            "entityKind": "character",
+            "canonicalName": "曼施坦因教授",
+            "matchedText": "曼施坦因教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“可能他毫无龙族血统，所以不怕楚子航的黄金瞳。”\r",
+        "\t“最大特长是竞技类游戏诶！什么搞笑的特长？”\r",
+        "\t“嗨！不如开盘口好了，有谁赌路明非明天无法通过3E考试的？”带着管理员标志的芬格尔留言。他的出现带来了一股热潮，这个经年不能毕业的废物师兄是卡塞尔学院校网的热门人物，负责新闻频道，总能搞出一些热点新闻。\r",
+        "\t“我觉得下注他能过的少，我开一个好头。下100块，赌他能过！”芬格尔开通了投票区的主题。\r",
+        "\t“芬格尔你准备把还掉卡贷的机会都赌在你的室友身上么？”有人嘲笑。\r",
+        "\t“No”一侧的赌注迅速地飙升，很快突破了两万美金，而“Yes”一侧的仍旧只有芬格尔的100块，在短短的一晚上里，路明非的背景资料都被挖掘出来了，可笑的高中成绩，没谈过女朋友是因为没有任何人看中他，路痴，唯一的特长是打游戏，在海关被扣了几十张盗版盘，无论怎么分析都是个废物，绝不像传说里血统纯正潜力无穷的“S”级学生。\r",
+        "\t“难道没有人有点赌博精神么？”芬格尔留言抱怨，“你们这样没法玩，只能赢我的100块，现在赌路明非通过考试的盘口是1比130！”\r",
+        "\t“我赌500块，路明非能通过考试。”ID名为“村雨”的人留言。\r",
+        "\t一瞬间讨论区沉默了，那是楚子航的ID，很少出现在讨论区。沉默的狮心会会长，被称为“超A”级的男生并不喜欢絮絮叨叨的讨论。而他居然破例赌博，押了500块赌路明非能通过考试。\r",
+        "\t“我赌5000块。”ID名为“狄克推多”的人留言。\r",
+        "\t“恺撒！”有人留言惊叹。\r",
+        "\t“赌路明非不能通过考试。”恺撒说完之后断线了，留下一个暂时被冰封的讨论区。\r",
+        "\t隐隐约约又是一场竞争的开始，如果世界上真有天敌这种东西，那么恺撒和楚子航一定是，学生们的记忆里，他们两人从未在任何一件事上达成一致。不过今天终于有一件了，在“自由一日”神奇地被那个新生两枪结束后，学生会和“狮心会”的领袖都宣布了认可这个结果。\r",
+        "\t他们都会承认自己输给了一个废物？失去了诺顿馆的一年使用权和追求学院里任何一个女生不被拒绝的权力？学生们都觉得这两人未免太大度了一点。当然他们两个并不需要担心追求女生失败的问题，楚子航沉默内敛，光棍至今，看起来对女性非常冷感，而恺撒已经有了闻名学院的诺诺。\r",
+        "\t恺撒捧着无线键盘，半躺在安珀馆大厅的沙发上，看着巨大的投影屏幕上，赌注逐步上升。他退出了“狄克推多”的ID之后以“索尼克”的ID登陆，这个不起眼的ID始终缩在在线列表的角落里不说话。\r",
+        "\t诺诺捧着一杯冰咖啡，靠在他背后的墙上，“你很关注路明非啊。”\r",
+        "\t“是，他会不会通过明天的3E考试，我没把握。”恺撒坦然承认，“我赌他不能，只是我从来不和楚子航在同一边下注而已。”\r",
+        "\t“我知道，5000块对你算不了什么。”诺诺放下咖啡，拎起背包，“走了，这学期我选了曼施坦因教授的课，得啃啃书，有事给我电话。”\r",
+        "\t“要看书的话，跟苏茜住在那么小的宿舍里不会觉得很挤么？而且她白天才给了你一枪……她为了楚子航可是什么都能做。”恺撒伸手似乎想要阻拦诺诺，“在这里好了，安珀馆可比诺顿馆还要舒服很多。”\r",
+        "\t诺诺在门边转身，对恺撒翻了个白眼。\r",
+        "\t恺撒急忙举起双手，以示无辜，“我是说……客房！我有很多的客房！”\r",
+        "\t“其实我最不喜欢你的一点就是你租校内的别墅，你不觉得空么？”诺诺撇嘴，“我也不喜欢你的布加迪威龙。”\r",
+        "\t“好在今天我已经输掉了它。”恺撒耸耸肩。\r",
+        "\t“哦，乖。”诺诺带门离去。恺撒把手指伸进那头灿烂的金发里挠头，露出无可奈何的表情。\r",
+        "\t“再有三分钟封盘！还未下注的请即刻投下你们的赌注，所有赌注都要在明天3E考试前打入我的账户，由我代为管理，否则视为无效。”芬格尔蜷缩在1区宿舍的活动室里的沙发上，抱着笔记本，手指在键盘上弹跳如飞。十几个学生围绕着他站着，表情严肃，紧盯屏幕。\r"
+      ],
+      "rationale": "Nono explicitly names Professor Manshtein as her course instructor while talking to Caesar; a reference, not physical presence."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-mannstein-1",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 257860,
+          "endByte": 257878,
+          "startLine": 1623,
+          "endLine": 1623,
+          "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+          "prefixHash": "6ce6ed8b71e4174eb26ea4d66024bfe7ee1603d09631acb28e41fd780754b875",
+          "suffixHash": "3093c51114f8d9f1d273956d2031ffec0019e13021dfff51b5b23d026ffed112",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-exam-scene",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-mannstein-1",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 257860,
+            "endByte": 257878,
+            "startLine": 1623,
+            "endLine": 1623,
+            "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+            "prefixHash": "6ce6ed8b71e4174eb26ea4d66024bfe7ee1603d09631acb28e41fd780754b875",
+            "suffixHash": "3093c51114f8d9f1d273956d2031ffec0019e13021dfff51b5b23d026ffed112",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-exam-scene",
+          "confidence": 1
+        },
+        "candidates": [
+          {
+            "entityId": "char-manshtein",
+            "entityKind": "character",
+            "canonicalName": "曼施坦因教授",
+            "matchedText": "曼施坦因教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t此时此刻，路明非正在灯下临摹芬格尔留给他的答卷，一笔一画。芬格尔说不想打搅他努力，带着满脸诡异的笑容出去了，空荡荡的宿舍里只剩下他。距离天亮不到4个小时了，4小时里他必须把八张画都临摹一遍，记在脑海里。那些画上的线条仿佛枝蔓丛生的密林，根本就不是要让人记住的。\r",
+        "\t可还是得记，即使疲倦如涨潮般慢慢地上来了。\r",
+        "\t不会货不对板吧？也许这份价值2500美元的答卷根本就是扯淡？世界上哪有考语言要画画的？他凭什么相信那个有时脱线有时狡诈的芬格尔呢？从头到尾芬格尔都在占他的便宜。他脑子里乱糟糟的。其实过了3E又怎么样？在一个流行爬行类血统的天才学院里，他能活着爬出去么？爬出去又如何？满世界跑去屠龙？\r",
+        "\t此时此刻在遥远的中国该是早晨，白裙子的陈雯雯是否和她的新男友拉着手，走在去一所平民大学的路上？\r",
+        "\t诺诺开车带着他跑在高架路上的那个夜晚，他以为自己找到了出路，结果他还是一只小小的萤火虫，漫无目的地跟着大家一起飞。\r",
+        "\t他抱着膝盖坐在床上，想了很久，轻声对自己说，“诺诺，我很想见你。”\r",
+        "\t就是想见见她，不管发生了什么事。\r",
+        "\r",
+        "第四幕 青铜城\r",
+        "\tThe Bronze City\r",
+        "\t新的地图立刻显示在大屏幕上，短暂的沉默后，所有人都猛地扭头看着路明非，地图被解开之后，再理解就太简单了，每个人都意识到这是正确的结果。\r",
+        "\t控制室里一片死寂，平静中隐藏着巨大的惊叹和不安，像是颗深水炸弹正幽幽地下沉。\r",
+        "\t路明非第一次看见了那个娇小女孩的脸，透明得像是冰雪，冷得也像是冰雪。\r",
+        "\t“熊猫你好！”诺诺认真地说。\r",
+        "\t路明非脸上两大黑眼圈儿，一头撞进图书馆二楼的教室。撞进眼帘的是讲桌边晃悠的一双穿牛仔裤的长腿，穿了双似曾相识的、紫金色玛丽珍鞋。诺诺坐在讲桌上，手指路明非的鼻子。\r",
+        "\t路明非没有料到诺诺还会主动跟人说话，心里激动，“对不起对不起，昨天不知道怎么就爆掉了你男朋友。”\r",
+        "\t教室里立刻有人嘘了起来，路明非才想起这话说得真够欠的。\r",
+        "\t“你爆掉他跟我说对不起干什么？”诺诺耸耸肩，“到你座位上去，快开始了，监考老师是风纪委员会的曼施坦因教授，我负责收答卷。”\r",
+        "\t曼施坦因教授从旁边闪出，冷冷地扫了路明非一眼，看了一眼腕表，“全部人到齐，现在宣布考试纪律！”\r",
+        "\t“作弊是绝对禁止的，违反者会被取消一切资格！不要试图偷看别人的试卷，摄像头覆盖了整个教室，没有任何死角！也不要试图携带电子通讯设备，无线电波在教室里也是被监控的！我知道你们都是天才，但我可以告诉你们，比你们更加天才的人也曾在这个教室里考试，你们现在能想到的作弊手段，都有人尝试过……”曼施坦因教授抑扬顿挫，威风凛凛。\r",
+        "\t每个人的座位前都有名牌，路明非的名牌是“李嘉图·M·路”。\r",
+        "\t路明非愣了一下，意识到这就是他正式的英文名了。他抬头看见诺诺双手抱在怀里，侧过头，百无聊赖地眺望窗外。路明非想那些名牌是诺诺设的，这个世界上她是第一个叫他“李嘉图”的人，诺诺随口起的。这是个很任性的女孩，她叫他李嘉图，就一直叫。\r",
+        "\t他也侧头看向窗外，忽然发觉今天是个好天气，初升的太阳升到云层上方，阳光贴着云平铺而下，在胡桃木的课桌上投下窗户的影子，整个教室里染上一层淡淡的绯色。\r",
+        "\t路明非心里微微一动，可能是好天气驱散了他的坏心情，也可能是他第一次有了自己正式的英文名字。\r",
+        "\t“那就……李嘉图吧。”他在心里说。\r"
+      ],
+      "rationale": "Nono identifies the disciplinary-committee professor as invigilator, followed immediately by Professor Manshtein appearing."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-mansht-1",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00012-observation-f959f2526287",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00012-observation-f959f2526287",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 374827,
+          "endByte": 374845,
+          "startLine": 2305,
+          "endLine": 2305,
+          "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+          "prefixHash": "2175bcbbf37654f43380622f4a952ec73cec6b5795ebaea9022cb3ba8ff575fc",
+          "suffixHash": "e0544e9ba7e47ff08cc7e348ca69edb506c3bfc652bb11f98a59d91ae0a724df",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-campus-mourning",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-mansht-1",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00012-observation-f959f2526287",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00012-observation-f959f2526287",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 374827,
+            "endByte": 374845,
+            "startLine": 2305,
+            "endLine": 2305,
+            "exactHash": "c2db729453bd1d134ebf3f25ad1f13ea8cdab5fcf232a26dde4a8b6d6c1e2c5d",
+            "prefixHash": "2175bcbbf37654f43380622f4a952ec73cec6b5795ebaea9022cb3ba8ff575fc",
+            "suffixHash": "e0544e9ba7e47ff08cc7e348ca69edb506c3bfc652bb11f98a59d91ae0a724df",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-campus-mourning",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "char-manshtein",
+            "entityKind": "character",
+            "canonicalName": "曼施坦因教授",
+            "matchedText": "曼施坦因教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t昂热校长走到曼斯身边蹲下，摸出打火机为他点燃嘴里的雪茄，而后检查他腰间的伤口，一根枯黄色的牙齿刺穿了那里。剧烈的爆炸中，一截长牙崩断飞了出来，“无尘之地”未能挡住。\r",
+        "\t“要是往上面再偏一点，我就撑不到你来了。”曼斯深深吸着雪茄。\r",
+        "\t昂热校长按住曼斯的伤口，“不要说话，医生立刻就下来”。\r",
+        "\t校长已经很老了，但他的手依然温暖有力。曼斯觉得生命略微回流到自己的身体里，咧嘴笑笑：“医生没有用，让我做完最后的汇报，像电影里英雄人物那样。”\r",
+        "\t“是，医生没用了，龙牙里有剧毒，毒素正在侵蚀你的神经系统，你没救了。”校长点了点头，“那立刻开始吧。”\r",
+        "\t曼斯把婴儿递给校长。另一只手中，他始终死死攥住了一根索子，昏迷中也没有松开，他把索子也递给校长。校长拉着索子把沉水中的铜罐提了起来，抚摸着表面上那些细密的纹路，低声念诵。\r",
+        "\t“我想我杀死了龙王诺顿。这个铜罐是叶胜和酒德亚纪从青铜地宫里带出来的，不知道里面是什么，诺顿很想夺回它，它应该很有研究意义；应该在水库上游搜索那条龙的骨骸，也许还来得及提取DNA；其他的没有什么了，我知道我有一份可以把我遗体空运回德国的保险……”曼斯坚持着说到最后，体力已经跟不上了。\r",
+        "\t“不是龙王诺顿，只是一名龙侍，守护龙王灵魂的武士。”校长说，“这个铜罐是骨殖瓶，或者说‘卵’，上面的文字是：‘以我的骨血献予伟大的陛下尼德霍格，他是至尊、至力、至德的存在，以命运统治整个世界。’这里面的就是诺顿！”\r",
+        "\t“是他隐藏在公孙述背后？”曼斯问。\r",
+        "\t“我们研究过后会知道的，等我们得到答案，要不要刻在你的墓碑上？”校长问。\r",
+        "\t“不用了吧，刻我妻子的名字就可以了，”曼斯说，“不要把‘夔门行动组’全军覆没的消息告诉学生们，对于他们来说，这种事还很遥远。犯不着他们为我们悲伤，他们应该还觉得屠龙是个有趣而热血的事，值得他们奋斗一生。”\r",
+        "\t曼斯轻声说，“这样多好。”\r",
+        "\t“我没有说，他们只知道叶胜和亚纪离开了我们，我表现得很平静。”校长说，“只是不知道回到校园以后怎么圆这个谎，谁给你代课啊？你这学期还有课呢。”\r",
+        "\t“施耐德吧，他很想继续当教授。”曼斯从鼻孔里喷出一口烟，“就说我们去执行新的任务了吧，反正世界很大，龙族遗迹到处都有，永远都能说他们忙于新的探险。过些年，这件事公布不公布也就无所谓了。”\r",
+        "\t“好，就按照你说的。”\r",
+        "\t“再见，代我问诺诺好，她是该换个导师了。”雪茄落入水中，曼斯慢慢地闭上了眼睛。\r",
+        "\t校长抽出胸口那朵即将盛开的玫瑰，放在曼斯的胸口，抱着哇哇大哭的婴儿站了起来。四面八方涌来灯光，探照灯照在校长身上，军警的车包围了江堤两岸。这个老人默默地起身拍了拍婴儿的脸蛋，把他的小脑袋纳入自己怀里，将黑伞遮在自己头上。\r",
+        "\t“真大只啊！”曼施坦因教授轻声说。他在图书馆二楼，看着楼下的学生渐渐散去，只剩下围栏上扎满的白色饰巾。\r",
+        "\t“大只？”古德里安教授愣了一下。\r",
+        "\t“中文方言，是寂静的意思。”曼施坦因摘下眼镜，深有感触，“新学期，有人离开我们了，新生们还没有成长起来，我们又已经老了。让人不由地觉得很大只。”\r",
+        "\t“是啊，很大只。”古德里安也很感慨，“有件事我很好奇，在你知道路明非的3E考试成绩前你就对他不再怀疑了，我听说你还在网上下注他一定能通过。你有什么事瞒着我？”\r",
+        "\t“我不会瞒你的，我们不是同一个精神病院出来的好朋友么？”曼施坦因耸耸肩。\r",
+        "\t“这说法有点奇怪……”\r",
+        "\t“本来就是事实啊。我打消了对路明非的怀疑。”曼施坦因指了指远处的钟楼，“因为我给父亲打了个电话，他说路明非无需怀疑，是最优秀的龙血后裔。”\r",
+        "\t“守夜人会这么说？”古德里安惊叹。\r"
+      ],
+      "rationale": "The narrator explicitly names Professor Manshtein at the library with Guderian after the preceding scene about Mans. Preserve distinct Mans and Manshtein identities across the scene transition."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-mansht",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 425467,
+          "endByte": 425479,
+          "startLine": 2604,
+          "endLine": 2604,
+          "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+          "prefixHash": "1ab460e4ad62ea711b3d9f3bf37deb42aa30bf9dc738e42b712eabd811e90e74",
+          "suffixHash": "e18018cf6fde3c6ab56c5000af951fed23a1c7397550e933a2df9029ecbb0449",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-operations-intercut",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-mansht",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 425467,
+            "endByte": 425479,
+            "startLine": 2604,
+            "endLine": 2604,
+            "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+            "prefixHash": "1ab460e4ad62ea711b3d9f3bf37deb42aa30bf9dc738e42b712eabd811e90e74",
+            "suffixHash": "e18018cf6fde3c6ab56c5000af951fed23a1c7397550e933a2df9029ecbb0449",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-operations-intercut",
+          "confidence": 0.99
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t“……请走到窗边，看向校门的方向，屏住呼吸，客人到访的时候，主人应该做好准备。”电话里是个经过变声的低沉声音。\r",
+        "\t所有人的脸色也都变了，因为他们每个人的手机里，都是同一个声音。\r",
+        "\t客人们蜂拥着向窗边而去，从安珀馆的范围，隔着巨大的落地窗看出去，生铁雕花的校门封闭着，被一盏冷光灯照亮。\r",
+        "\t轰然巨响让人们一瞬间失去听觉，刺眼的火光中，铁门扭曲，被爆炸的冲击波抛向空中，一直升到二十米的高空才重新坠落，狠狠地砸在地上。警报声响彻校园，夜幕中，所有建筑忽然亮了，静谧的黑暗彻底被打破。\r",
+        "\t红色警戒状态瞬间启动。\r",
+        "\t明亮的光柱和摩托车的轰鸣声一起涌入校园，穿着黑色作战服，闯入者骑着暴躁的黑寡妇摩托，疾驰而来。他们的手中，枪支闪着狞厉的光。进入校园，他们立刻分散，同时精确地开枪，把经过的监视器都击碎。\r",
+        "\t“怎么？怎么？”路明非大惊，“踢馆的么？学院之间也踢馆么？”\r",
+        "\t那群闯入者的造型，实在太像暴走族了。\r",
+        "\t“这是我们……战争的开始！”电话里的人森冷地笑着挂断了。\r",
+        "\t“红色警戒状态！红色警戒状态！龙族入侵！龙族入侵！新生留在宿舍中，通过战场生存课的学生立刻领取武器，填装弗里嘉子弹，不得动用实弹。”诺玛的声音通过扩音器传遍校园的每个角落，“封锁所有入口，对身份不明者有权开枪。”\r",
+        "\t“龙族入侵？”路明非傻眼了，“龙……骑着摩托入侵？不会又是自由一日吧？一年不是只有一个么？”\r",
+        "\t其他人脸上凝重的表情都说明这不是一场演习。刚才还穿着礼服翩翩起舞的学生们立刻露出进过训练的军人仪态，有序地涌向外面，维修部的人把车停在每个建筑外面，打开车厢，里面的武器架上是整齐的自动枪支。安珀馆前，密集的上膛声。\r",
+        "\t没有星星的夜空下，黑影站在卡塞尔学院的角楼上，看着那些摩托车的灯光像是萤火虫那样分散到校园的各个角落之后熄灭了。人流涌出各个建筑，控制了所有通道和入口，这座安静的校园忽然变成了森严的军事堡垒。\r",
+        "\t他把手机扔下角楼，套上面罩，摸出了另外一台，“按照你的计划，一切顺利，行动开始。不过，这样的亮相是不是太像作秀了？”\r",
+        "\t“无论这一次的行动是否成功，我希望给他们留下深刻印象。”电话对面的人笑。\r",
+        "\t“那由我执行太合适了，我总是给人留下，”角楼上的人冷冷地说，“深刻印象！”\r",
+        "\t他忽然跃出了角楼的栏杆，双臂张开，飞身下坠。角楼有八米之高，对于普通人，脊椎都会承受不住冲击断裂，但他轻轻一滚落地，豹子一样猫着腰前奔，消失在黑暗中。\r",
+        "\t图书馆控制室，曼施坦因和古德里安匆匆推门而入。冯·施耐德教授站在大屏幕前，看着满屏幕的光点，每个光点代表一名加入警戒的学生。\r",
+        "\t“龙族入侵？怎么回事？谁判断是龙族入侵的？”曼施坦因神色紧张。\r",
+        "\t“龙族入侵”这种事他原以为只出现在理论中罢了。上百年来，每一个将要苏醒的龙族都被他们在未出龙墓的时候干掉了。什么时候轮到这些家伙来本部嚣张？而且成群的龙族？未免太挑战想象力了。\r",
+        "\t“是诺玛，我没有足够的权限了解为什么诺玛判断为龙族入侵，但是入侵者毫无疑问地出现了。”施耐德在大屏幕上调出摩托群进入校园瞬间的画面。\r",
+        "\t他转身，看见古德里安的时候愣了一下，愤怒了，“你这是什么衣着？”\r",
+        "\t古德里安看着自己的身上，说：“战斗服……虽然我也知道我参加战斗是没什么用。”\r",
+        "\t他睡得很早，从梦中惊醒，但没有忘记紧急状况下的应对办法，从衣柜里拿出多年不穿的战斗服套上，费了很大劲儿才把弗里嘉子弹填入了弹仓，他都快要忘记手枪是怎么上膛的了。\r",
+        "\t“可你戴着睡帽！”\r"
+      ],
+      "rationale": "Manshtein enters the library control room with Guderian and addresses the emergency; same named professor."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-manst",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 455463,
+          "endByte": 455475,
+          "startLine": 2821,
+          "endLine": 2821,
+          "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+          "prefixHash": "fe18f2fc7e0a0139a1805655b123dccaf62759e9f3ef01d4520e49e501a39765",
+          "suffixHash": "f561502450efc5fd56cc18637c17b6a6a81515560e9431194ddd0911d90be928",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-campus-command",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-manst",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 455463,
+            "endByte": 455475,
+            "startLine": 2821,
+            "endLine": 2821,
+            "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+            "prefixHash": "fe18f2fc7e0a0139a1805655b123dccaf62759e9f3ef01d4520e49e501a39765",
+            "suffixHash": "f561502450efc5fd56cc18637c17b6a6a81515560e9431194ddd0911d90be928",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-campus-command",
+          "confidence": 1
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t“不要把责任推给别人，负责的人得承担自己的失误。”排在最后的人冷冰冰地说。\r",
+        "\t“不用你提醒我，我是这次行动的队长，我自然有补救的办法。”\r",
+        "\t队长拿出了手机，在这种时候不得不使用手机通话让他觉得有点蠢，他摇了摇头：“喂，不要吃薯片了，想点办法，我们被困住了。这个地方的警戒不像你说得那么松懈。”\r",
+        "\t“嗯，那么现在不得不启动备份计划了。”电话那头的人说。\r",
+        "\t“备份计划是什么？”\r",
+        "\t“是在麻衣潜入受阻时的计划。”\r",
+        "\t“你早就预料到会受阻？”队长声音里透着显而易见的怒气。\r",
+        "\t“很容易理解嘛。我们至今都不知道昂热是个什么样的人，他已经在卡塞尔学院当了几十年校长，你觉得他会是个因为疏忽而犯错误、给你可乘之机的傻瓜？”电话对面的人轻松地说，“所以我们才安排了13号。”\r",
+        "\t“那个个人秀之王？拜托？我看他现在是迷路了！”队长晕了。\r",
+        "\t“故意的，我给他的装备中没有包括地图，根据我的了解，他是个从自己家开车到两个街区以外去买个汉堡都会迷路的路痴，所以他必然找不到英灵殿。”\r",
+        "\t“你这是什么备份计划？”队长大怒。\r",
+        "\t“不认路的小白鼠，会往最明显的目标去，那才是他的预设目标。至于你，你只需等待。”\r",
+        "\t“等什么？我现在像是夹缝里的蟑螂，外面有几百人，我只要一露面就会被发觉。我没有办法动用言灵，‘守夜人’控制了周围的领域，他的‘言灵·戒律’太强大了，我被压得死死的！”\r",
+        "\t电话那头的人轻轻笑了一声：“守夜人很快就会解除‘戒律’，因为他们找不到你们，危机感会让他们试图动用言灵，那就是你的机会。只要能动用言灵，谁能找得到你？”\r",
+        "\t施耐德教授看了一眼手表，时间已经过去整整一个小时，入侵者始终未被发现。\r",
+        "\t紧急状态被激发之后，所有摄像机都开始工作，每一个出入口都被严密地监控起来。他们也不可能逃离这个校园。\r",
+        "\t异乎寻常的平静让他觉得不安。本该发生的事情没有发生，这很危险。他揣摩不清对手的身份和意图，这种感觉阴魂般萦绕不散。\r",
+        "\t“除了叶胜，这里还有能动用‘言灵·蛇’的人么？”他转向曼施坦因。\r",
+        "\t“言灵能力的秘密档案我无权查看，但至少还有一个，我自己。”\r",
+        "\t“你的言灵是‘蛇’？”\r",
+        "\t“我的领域比叶胜还要大三倍，如果我能够言灵，也许能找出入侵者，但是在守夜人的‘戒律’下，”曼施坦因指了指自己的太阳穴，“我们的力量被强迫着沉睡。”\r",
+        "\t“能否请守夜人解除‘戒律’？”施耐德试探着问。\r",
+        "\t“我父亲？”曼施坦因一愣，“不可能的，只有校长能命令他解除‘戒律’。”\r",
+        "\t“情况很特殊，我们现在得不到校长授权。但只要解除了‘戒律’，我们有700个可以使用言灵的学生作为战斗力，力量会空前强大。只是这一晚，可以试试么？”施耐德盯着曼施坦因的眼睛。\r",
+        "\t曼施坦因沉默了很久，拿起了电话：“只能试试，这个老牛仔……是那种六亲不认的角色。”\r"
+      ],
+      "rationale": "Schneider turns to Manshtein in the continuing control-room exchange. Resolve the named respondent without validating the ability claim."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-mannstein",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 496177,
+          "endByte": 496189,
+          "startLine": 3129,
+          "endLine": 3129,
+          "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+          "prefixHash": "9c33e586e4de76ced9bf701b35885528d16e2f5a67d474ab74ee2246e66ee5f3",
+          "suffixHash": "c130cde53afb702fbc8bdb9efedd5cb85263b3ab70183dbf326919433cb64b8b",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-church-c",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-mannstein",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 496177,
+            "endByte": 496189,
+            "startLine": 3129,
+            "endLine": 3129,
+            "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+            "prefixHash": "9c33e586e4de76ced9bf701b35885528d16e2f5a67d474ab74ee2246e66ee5f3",
+            "suffixHash": "c130cde53afb702fbc8bdb9efedd5cb85263b3ab70183dbf326919433cb64b8b",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-church-c",
+          "confidence": 0.99
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t“子航！撤离。”苏茜又去敲忏悔室的门。\r",
+        "\t她对这条命令有点不解，教堂是通往三女神层和守夜人所在的钟楼的核心枢纽，本应集中人手警戒。\r",
+        "\t“不，不包括我。”楚子航低声说。\r",
+        "\t“不包括你？”苏茜愣住了，“是通过公共频道对所有人下达命令的。”\r",
+        "\t“C组收到请立即撤离教堂区域，不包括楚子航。”施耐德教授的声音再次响起，楚子航似乎对于这条命令早有预期。\r",
+        "\t“这条命令仅仅针对不需要参加教堂战斗的人。”楚子航说，“苏茜，撤离。”\r",
+        "\t楚子航从帘子后伸出手来，紧紧握了一把苏茜的手腕，他的手白皙、修长、温暖，而且有力。\r",
+        "\t“别担心，不出意外，过两个小时我们可以一起吃宵夜。”楚子航说。\r",
+        "\t“这是一个约定么。”苏茜把手覆在楚子航的手上。\r",
+        "\t“是。”\r",
+        "\t施耐德教授盯着大屏幕，代表C组的光点撤离了教堂，沉重地叹了口气。\r",
+        "\t“留楚子航一个人在那里？”古德里安教授对这个命令很吃惊，“对于一个二年级学生来说，责任太大了！”\r",
+        "\t“楚子航的导师是谁？”施耐德问。\r",
+        "\t“你啊。”\r",
+        "\t“对，我是楚子航的导师，”施耐德点了点头，“所以我知道自己学生的能力，‘戒律’已经被解除，学生们的言灵被解封了。他们是群草原上的野马了，有无限可能。”\r",
+        "\t“楚子航的言灵……是什么？”古德里安意识到了什么。\r",
+        "\t施耐德迟了一瞬，口气变得极其冷硬：“言灵档案只有学生的导师和校长有权查阅，你们没有资格问这件事！”\r",
+        "\t“楚子航的言灵……很危险？”曼施坦因站在施耐德背后，把手搭在他肩上，目光森严，“你让C组其他人撤离那里，是不希望别人知道楚子航的言灵。那些人都是狮心会的人，不会轻易泄露秘密，但是你仍旧不希望他们知道楚子航的言灵……因为它很危险，是么？”\r",
+        "\t“重复一次，你们无权过问！”施耐德面无表情。\r",
+        "\t“你从没有对风纪委员会汇报过这件事！别说蠢话，一般教授无权查看言灵档案，我却能以风纪委员会的名义申请特权！你忘记了校规了么？见鬼！”曼施坦因大声说，“施耐德！你是执行部的负责人，你该明白我们的学生都是些什么人！他们拥有人类和龙族的双重血统，在领域内下达命令，就会改变自然规则，这些能力有多危险，被许多案例证明过。你还记得那个被我们称为‘吞枪自杀’的学生到底是因为什么而死的么？”\r",
+        "\t“我对校长报告过这件事，校长默许我对此保密。”施耐德低声说，“曼施坦因，就算你帮我忙，忘记这件事，楚子航的言灵还在我的控制之中。”\r",
+        "\t“该死！不是你能否控制的问题！所有危险的言灵能力按照校规都要被立案存档，仅仅告诉校长是不够的，校长也无权默许你！这件事如果我保持沉默，校董会知道之后，违反校规的是你我校长和古德里安四个人！”曼施坦因愤怒了，“现在可以控制的，你怎么能保证它将来不会失控？不准备预案怎么可以？”\r",
+        "\t施耐德沉默了许久，深深地吸了口气：“楚子航……是个好学生。”\r",
+        "\t“这和他是否是好学生无关！”\r",
+        "\t“一旦被鉴定为言灵能力有风险，就会被从所有学生中隔离，是不是？”施耐德看着曼施坦因的眼睛。\r"
+      ],
+      "rationale": "Manshtein addresses Schneider about disciplinary-committee access during the same command-room scene. Identity only, not new permissions or character knowledge."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-manstein-1",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00020-observation-8727d8b4e3a3",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00020-observation-8727d8b4e3a3",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 637665,
+          "endByte": 637677,
+          "startLine": 4088,
+          "endLine": 4088,
+          "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+          "prefixHash": "5e51ed6badacdce0c6b616ff23524a784ec9b577df931850254eb92ce5edfa4f",
+          "suffixHash": "2109ec32bbcf60c59459b17609e042534dbbba907f9ce27d65f7d0deed80d454",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-operation-briefing",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-manstein-1",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00020-observation-8727d8b4e3a3",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00020-observation-8727d8b4e3a3",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 637665,
+            "endByte": 637677,
+            "startLine": 4088,
+            "endLine": 4088,
+            "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+            "prefixHash": "5e51ed6badacdce0c6b616ff23524a784ec9b577df931850254eb92ce5edfa4f",
+            "suffixHash": "2109ec32bbcf60c59459b17609e042534dbbba907f9ce27d65f7d0deed80d454",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-operation-briefing",
+          "confidence": 0.99
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t江水沸腾，炽热的白气冲天而起，发出雷鸣般的巨响。江面开裂，数百吨滚烫的海水向着天空激涌，而后化为水滴洒下。洒在漆黑的鳞片上，迅速地蒸发殆尽。\r",
+        "\t巨大的、无法用语言概括的生物。\r",
+        "\t他破水而出，仰天发出像是笑声又像是婴儿啼哭的声音，而后弯曲脖子，低下头，和水边的黑影对视。他露出水面的身躯就有近乎四层楼的高度，修长的脖子上遍布黑鳞，沿着脊椎，是锯齿般的黑色骨刺，刺破鳞片而出，古老的铁质面具覆盖了他的脸，只露出妖异的黄金瞳。\r",
+        "\t不是亲眼见到，没人会相信世界上真的存在这种生物，他的身影可以从各种神秘的、异端的书中找到，有人说他们隐藏在洞穴中，含着硫磺喷吐火焰；有人说他们是含有剧毒的大蛇，有不止一个头；也有人说他们是天命的象征，是半个神明。在古代欧洲的航海家中悄悄流传着这样的说法，东方的海洋不可航行，那里的水是红色的、沸腾的，因为水底流动着岩浆，成群的这种生物就游动于岩浆层的上方，他们发怒起来会断送任何大船，除非你投下米粒，因为米粒看起来像是蛆虫，这些生物唯一害怕的只是蛆虫钻进他们的鳞片里。\r",
+        "\t但是这一切的传说都不足以描述他们的真面目。\r",
+        "\t当他现身在人类面前时，远比任何传说都更加狰狞和威严。\r",
+        "\t只有一个字能描述它们：\r",
+        "\t“龙”！\r",
+        "\t长久的凝视。黑影向龙伸出了手，龙嘴里发出仿佛呜咽的低声，温顺地把头凑近黑影，让他抚摸自己的鼻子。\r",
+        "\t渺小的黑影和巨大的龙在这一刻异常和谐。\r",
+        "\t“参孙，经过了两千年，终于又见面了。”黑影轻声说，“让你看家也看得太久了……现在我们，回家吧！”\r",
+        "\t他伸手抓住巨龙面罩上的铁环，如同再次抓住力量和尊严！\r",
+        "\t黑影对着天空发出一声嘶吼，龙跟着他一同咆哮，两股声音交织共鸣，远播于江面上。龙的长尾猛地抽打江水，水面裂开了一道缝隙，龙首在夜空中划出一个完美的弧形，他带着黑影，钻入裂缝中。水面在片刻之后合拢，只余下一圈圈巨大的涟漪。\r",
+        "\t“什么声音？”距离小洲不远的游船上，在甲板上唱着露天卡拉OK的游客不约而同地哆嗦了一下，纷纷转头向某个方向。\r",
+        "\t他们只看见波光粼粼，星空下山形漆黑，但是那天晚上的卡拉OK很快就结束了，每个人都不想再唱下去。\r",
+        "\t整夜他们都不断地回想起那个声音，不知到底是什么声音，却让人觉出撕心裂肺的悲伤来。\r",
+        "\t如果那真的是人的声音，该是何等的痛苦，怎样的咬牙切齿，才能发出的声音啊！\r",
+        "\t“现在是公元2010年02月13日夜，中国农历春节，摩尼亚赫号在三峡水库下锚，江面安静，设备正常。今夜我们将执行‘青铜计划’，我是船长曼施坦因，这是我此次出航的第十三次船长日记。”曼施坦因教授看了一眼腕表，拨通越洋电话，打开免提，把手机放在桌上，“准备完毕，校董会请给我们最后的命令。”\r",
+        "\t“开始行动，并祝你们好运。”昂热校长挂断了电话。\r",
+        "\t曼施坦因环视所有人，“你们都已经听见了，校长确认了。”\r",
+        "\t所有人都点头。\r",
+        "\t“虽然已经预演了很多遍，但只有今夜，你们才会知道全部的细节。注意听，并且记住，各组配合才能确保成功。”曼施坦因环视舱里穿着黑色作战服的学生们，他们背着双手站立，神色肃穆，“恭喜大家，这是一场真正的屠龙行动，在这里，大家不被看作学生了。你们之所以被选拔到这艘船上来，只因为你们是最精英的。”\r",
+        "\t“喂，不要坦荡地说起什么‘最精英’而忘记我这种被拉来垫背的废柴好么？”路明非心里嘟哝，他站在人群后，只露出半张脸。\r",
+        "\t“和上次不同，这次摩尼亚赫号全副武装，装备部把最新的东西都塞进了底舱里。这条船已经集中了迄今人类最进步的技术，火力可以抗衡一艘巡洋舰，对付任何生物都不是问题。”曼施坦因说，“前提是操作不犯错误。”\r",
+        "\t“这次的目标，比你们在校园中遭遇的更加强大，金属和爆炸都不足以伤害他，所以一般武器对他无效。请允许我介绍，”曼施坦因打开大屏幕，屏幕上展开了一张电子图纸，“‘风暴’！世界上最快的鱼雷，俄罗斯生产，在水下的速度高达200节，近乎小型飞机的速度。据资料，龙类的潜泳速度可以达到50节，所以目标无法摆脱风暴鱼雷……路明非，你有问题？”\r"
+      ],
+      "rationale": "The ship captain explicitly self-names Manshtein and the narrator calls him Professor Manshtein in the same sentence. Not Mans or Angier."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m_mansht",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 690320,
+          "endByte": 690332,
+          "startLine": 4423,
+          "endLine": 4423,
+          "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+          "prefixHash": "577d796d2848b319e5e7c47814322b312ded7f2d87c7fe5da66c442d99566318",
+          "suffixHash": "eebf6694f53b53526066e651c42b8fbaebf0e4356d54dfe9c7ebb00f508a11e0",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds_ship_cabin",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m_mansht",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 690320,
+            "endByte": 690332,
+            "startLine": 4423,
+            "endLine": 4423,
+            "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+            "prefixHash": "577d796d2848b319e5e7c47814322b312ded7f2d87c7fe5da66c442d99566318",
+            "suffixHash": "eebf6694f53b53526066e651c42b8fbaebf0e4356d54dfe9c7ebb00f508a11e0",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds_ship_cabin",
+          "confidence": 1
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t“这是启动了自毁？”诺诺深呼吸，“诺顿曾经自毁过位于北欧的青铜宫殿，把它沉入冰海。”\r",
+        "\t“来不及研究这家伙拆迁史了！你看上面！”路明非大声说。\r",
+        "\t诺诺抬起头，看见了噩梦般的景象。在纷纷坠落的青铜碎片里，一张巨大的蛇脸凸显出来。龙王诺顿的雕像倾倒了，八层楼高的巨像，卷着激烈的暗流下沉，正砸向他们头顶。\r",
+        "\t“走下面！”诺诺不由分说地把路明非的手按在水底的活灵脸上。\r",
+        "\t顺着狂泻的水流，他们再次进入龙王寝宫，片刻之后，上面传来了地震般的裂响，想来是那具青铜雕塑沉底，整个屋子在摇晃，随时可能崩溃。\r",
+        "\t“正下方还有通道！”诺诺大喊，“那是上一次叶胜和亚纪走过的路！”\r",
+        "\t活灵扼守的门已经开裂，即使用再生金属那样柔韧的材料构建的墙壁也支撑不住那样剧烈的冲击，水流冲刷着青铜水车，带着他们向下。在那里他们直坠下去，又是一片不见底的水，路明非还没来得及观察周围，头顶的出口就泄出狂暴的水流，冲刷在他头顶。\r",
+        "\t“上一层已经注满水了！”诺诺大喊，“这里会一层一层地注水！和叶胜亚纪遭遇到的情况一模一样！你还记得上次你解开的青铜城地图的路么？”\r",
+        "\t“不记得！”急切间路明非不知怎么解释这件事，“就是往下，一直往下！”\r",
+        "\t“赌了！”诺诺抽出一根应急的止血绷带，紧紧地缠住他的手腕，打了一个死结，“把氧气阀门开到最大，加压！我们有足够的氧气，跟叶胜和亚纪那时候不一样。手暴露在外面没事，但是不要打开这个结子，一旦氧气泄露，你就没机会了！明白？”\r",
+        "\t“明白！”路明非用力点头，筛糠一样抖。\r",
+        "\t“现在下潜，我会罩你的。”诺诺盯着路明非的眼睛，那双眼睛里，一个没胆的怯懦灵魂在颤抖。\r",
+        "\t诺诺伸手在他的头上摸了摸，沉默了一会儿，“也许真的不该让你下来的，本来以为很好搞定……不过胆小没用的，记得不记得我走近放映厅的时候？你跟个灰孙子似的站在那里，耸着肩膀缩着头。我最讨厌看见别人那样了，因为以前我也耸着肩膀缩着头，站在别人都不看我的角落里……那样没用的，不会让你觉得更好。”\r",
+        "\t“就算在最难的时候，也要摆出一副我是开迈巴赫来的表情啊！”诺诺露出一个很淡的笑容来，射灯照着她的脸，她的脸是苍白的。\r",
+        "\t“能不能不要说得像永别？”路明非说。\r",
+        "\t“屁！就是为了不永别！下潜！”诺诺大声说。\r",
+        "\t摩尼亚赫号前舱，一片死寂。\r",
+        "\t监控屏幕上的连接状态仍旧是断开，摩尼亚赫号和下潜组的连接断开，原因不明。盯着监视屏幕的是曼施坦因和恺撒，从断开的瞬间开始，十五分钟，两个人的目光没有离开过那里。\r",
+        "\t恺撒的嘴角绷得很紧，曼施坦因的呼吸沉重。\r",
+        "\t“十五分钟过去了，生还机率已经很低。”曼施坦因低声说。\r",
+        "\t“现在应该派遣第二组下潜。”恺撒冷冷地说，“第二组可以是我一个人，也可以从其他人中抽调！他们的氧气至少还能坚持一个半小时，氧气还未耗尽，他们就还没死！我已经做好下潜的一切准备。”\r",
+        "\t“你知道我的言灵是什么么？”曼施坦因盯着恺撒的眼睛，“是‘蛇’，和叶胜一样，但我的领域比叶胜更大，直达水底。水底有剧烈的变动，你也感觉到了吧？水对于声音的传播是有利的，你的‘镰鼬’听到了什么？”\r",
+        "\t“噪音，可怕的噪音。”恺撒说。\r",
+        "\t“我无法判断下面的情况，但是龙王可能被惊醒了。现在不能下潜！我需要每个人在自己的位置上不动，我来这里的目的是杀死龙王。”曼施坦因说，“我就在这里等他。恺撒你应该清楚把一条龙放入人类世界的结果，龙族的一切都必须被封在黑匣子里，这是我们的使命！”\r",
+        "\t恺撒死死地盯着曼施坦因的眼睛，直到一名学生会的干部上来按住他的肩膀。\r"
+      ],
+      "rationale": "The same named expedition captain watches the connection monitor with Caesar in Monigar forecabin. Preserve the reported survival estimate without certifying it."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-manshtain-00022",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 715662,
+          "endByte": 715674,
+          "startLine": 4611,
+          "endLine": 4611,
+          "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+          "prefixHash": "1458a1380bc99345d0124257b13bc4a061ad0f6dc548a46c0d714322ee25ccc2",
+          "suffixHash": "a6e2f482dfd5cf6bd6a9d88c13a305f0a74da329e0ff053413b02e98a0968dd6",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "曼施坦因",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "confidence": 0.98
+      },
+      "entity": {
+        "id": "char-manshtein",
+        "kind": "character",
+        "canonicalName": "曼施坦因教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "endByte": 197256,
+              "startLine": 1066,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-manshtain-00022",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 715662,
+            "endByte": 715674,
+            "startLine": 4611,
+            "endLine": 4611,
+            "exactHash": "e3d5f72f28dd0742314fc35bfa839933f9134dab808ba2d262b48b5ec5ac55da",
+            "prefixHash": "1458a1380bc99345d0124257b13bc4a061ad0f6dc548a46c0d714322ee25ccc2",
+            "suffixHash": "a6e2f482dfd5cf6bd6a9d88c13a305f0a74da329e0ff053413b02e98a0968dd6",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "曼施坦因",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "confidence": 0.98
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t“别怕！”诺诺说。\r",
+        "\t“别怕别怕别怕……”路明非想要稍微换个姿势，可是刚刚直起腰，脑袋就撞在上方的青铜壁上。\r",
+        "\t只剩下不到一米的高度了，狭小的空间让人有种窒息的感觉，像是躺在棺材里看着上面的盖板。路明非打了一个寒噤，眼前发黑，潜水刀从手中滑落。\r",
+        "\t“快点！捡刀！”诺诺用脚踹他。\r",
+        "\t“这个时候还那么野蛮？还踹我？”路明非想，“都要死了。”\r",
+        "\t他扑过去捡刀，扭头看了诺诺一眼，呆住了。诺诺坐在地上，用头和双手呈三角形死死地撑住那面下沉的青铜壁。她只能踹他，因为手腾不开，手挪开也许脖子就会被压断。这个女孩真是发疯，这样子又能多撑几秒钟？在这种超级水压机下，人的骨骼又算得了什么，劈里啪啦就碎了。\r",
+        "\t“快，什么不要想，只是要你的一滴血。”诺诺的声音平静。\r",
+        "\t有必要这么感人么？一副大姐头的样子，好像你撑住我俩都不死了。路明非使劲地挤着自己的手指，脑子里高速转着念头，仿佛听见诺诺的骨骼正在发出咔咔的裂响。\r",
+        "\t他想起以前看过的老动画片《非凡的公主希瑞》，里面的女主角是个暴力女，只要拔出剑来高喊一声“赐予我力量吧”，就会立刻变身，穿着超短裙，骑着长翅膀的白马，看起来细弱的两臂浑有千钧之力，就算是座山压下来也能被她举起来。\r",
+        "\t可是诺诺不是希瑞，她甚至没有言灵能力，小巫女快要油尽灯枯。\r",
+        "\t“妈的拼了！”路明非心里忽然涌起一股“恶向胆边生”的感觉。\r",
+        "\t简单地说就是热血上脑，那股子狂暴，那股子不顾一切的尽头，又来了。\r",
+        "\t其实那些家伙都不知道吧？都没关心过他的想法吧？大家都觉得他很面是吧？其实他也是个事到临头会忽然发疯的主儿啊！\r",
+        "\t他猛地撕裂了手腕上的止血绷带，那根要命的绷带，就像是义务献血的时候医生扎在胳膊上的，锁住了血液，也死死地锁住了水中性命般珍贵的氧气。\r",
+        "\t鲜血顺着血管冲向指尖，无数的气泡冲出潜水服，冰冷的水流涌进路明非的嘴里。\r",
+        "\t路明非把手狠狠地拍在活灵的脸上，仿佛抽了他一个嘴巴。\r",
+        "\t氧气压力在迅速地下降，血液中溶解的高压气体开始溢出，他大脑充血，眼前漆黑，双手挥舞，试图要抓住什么能让他觉得安全的东西。在无数气泡中，有人紧紧地抱住了他。\r",
+        "\t摩尼亚赫号的前舱里回荡着路明非的惊叫，曼施坦因的身体一震，睁开了眼睛。\r",
+        "\t“救援……氧气泄漏……”最后传来的是诺诺的声音，从曼施坦因的嘴里。\r",
+        "\t他用尽了最后的精力，昏厥过去。\r",
+        "\t“氧气泄漏？”恺撒一怔，看向他们刚才泊船的江面，距离大约有两公里。\r",
+        "\t“准备潜水钟！”他回头大喊。\r",
+        "\t“路明非，你去订一下明天社团活动的场地吧。”\r",
+        "\t“路明非你这样子，全班的平均分都被你一个人拖下去了！你属秤砣的么？”\r",
+        "\t“兄弟没问题，泡妞这事儿大叔一定帮你搞定啊！”\r"
+      ],
+      "rationale": "The narrator explicitly locates Manshtein in Monigar forecabin in the continuing rescue scene. Resolve him without merging him with Nono whose voice is reported from his mouth or adding an ability."
+    }
+  ],
+  "identityIntroduction": {
+    "startLine": 1328,
+    "endLine": 1329,
+    "context": [
+      "\t“曼施坦因，深夜你怎么也会在这里？”古德里安很意外。\r",
+      "\t风纪委员会主席曼施坦因教授摸了摸自己光亮的脑袋，“我也是来查资料的，关于你新招的学生路明非。”\r"
+    ]
+  },
+  "ledgers": [],
+  "legacyOrigins": [
+    "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+    "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+    "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+    "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+    "batch-a28585b1cf867f3e3a16-00012-observation-f959f2526287",
+    "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+    "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+    "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+    "batch-a28585b1cf867f3e3a16-00020-observation-8727d8b4e3a3",
+    "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+    "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae"
+  ],
+  "legacyPolicy": "Existing completed observation checkpoints without modern receipts are readable under docs/agent-tool-recovery.md; do not synthesize, replace or certify their missing receipts. All new resolution proposals require a verified completed finish. Initial preflight stopped before any proposal mutation.",
+  "originalReceipts": [],
+  "reason": "Thirteen source-reviewed Manshtein references have explicit professor-name, disciplinary-chairman or continuous dialogue support. Preserve separate observations at line 1328. Scene changes do not merge Mans with Manshtein; the reported Nono voice does not merge the two characters either. No identity inference from opaque IDs alone. Add links only, preserving all goals, claims, abilities, physical participation, original observations, available receipts and legacy provenance. No relevant original target deferral was found; all unrelated deferrals, source-accounting obligations, canonical artifacts and checkpoints remain intact."
+}

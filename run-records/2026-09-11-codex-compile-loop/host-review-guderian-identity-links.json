@@ -1,0 +1,1628 @@
+{
+  "reviewedAt": "2026-09-13T19:53:11.355Z",
+  "priorState": {
+    "attempt": 79,
+    "status": "needs-review",
+    "sourceId": "a28585b1cf867f3e3a16",
+    "threadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+    "error": "Automatic preparation stopped at 'repair'. Novel-scale publication requires ready exact-evidence, source-accounting, and identity/event-resolution dimensions; exact evidence=unknown; source accounting=not-ready (0 unaccounted, 600 blocking unit(s)); identity/event resolution=not-ready (413 missing, 12 ambiguous/unresolved mention(s)). Entity mention em-angry-dragon-1 has no current identity-resolution record. Entity mention em-batch20-blood has no current identity-resolution record. Entity mention em-batch20-dragonsculpture has no current identity-resolution record. Entity mention em-batch20-dye has no current identity-resolution record. Entity mention em-batch20-egg has no current identity-resolution record. Entity mention em-blackcard has no current identity-resolution record. Entity mention em-blond-girl-1-v2 has no current identity-resolution record. Entity mention em-boy-b19 has no current identity-resolution record. Entity mention em-bronzeplan-b19 has no current identity-resolution record. Entity mention em-brother-03 has no current identity-resolution record. Entity mention em-burning-03 has no current identity-resolution record. Entity mention em-campus-b19 has no current identity-resolution record. Entity mention em-central has no current identity-resolution record. Entity mention em-chinese-child-1-v2 has no current identity-resolution record. Entity mention em-classmates-1-v2 has no current identity-resolution record. Entity mention em-dashu-00005 has no current identity-resolution record. Entity mention em-dorm303-b19 has no current identity-resolution record. Entity mention em-dragon-03 has no current identity-resolution record. Entity mention em-dragon-1-v2 has no current identity-resolution record. Entity mention em-dragon-clan-1-v2 has no current identity-resolution record. Next diagnostic step: nwh audit --source a28585b1cf867f3e3a16",
+    "reviewedBatchFinished": true,
+    "failureFingerprint": "b23cebf46f782533eacbc5ac4db8484ec7565d5c0e4a2a4de4b2f2c0d3ffb6a3",
+    "startedAt": "2026-09-13T19:51:34.130Z",
+    "selectorBatchFinished": true,
+    "semanticRunId": "codex-opening-driver-v1-20260912",
+    "timer": {
+      "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+      "scheduledAt": "2026-09-13T17:41:00.000Z",
+      "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+    },
+    "hostReview": {
+      "path": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+      "reviewedAt": "2026-09-13T16:42:26.692Z",
+      "reason": "User-authorized continuation after verified retrieval fix; original stopped state preserved in review."
+    },
+    "appliedRepair": {
+      "repairId": "source-reviewed-academy-identity-links-v1",
+      "failureFingerprint": "d7abef6eb71eb53ca10641dda0bc281491e990790e2e6712a4afddcca7e2d975",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-academy-identity-links.json",
+      "appliedAt": "2026-09-13T19:51:21.434Z"
+    },
+    "timerHistory": [
+      {
+        "unit": "nwh-codex-reset-01a0912b-6.timer",
+        "scheduledAt": "2026-09-12T21:08:00.000Z",
+        "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-6.timer\nWill run service as unit: nwh-codex-reset-01a0912b-6.service\n"
+      }
+    ],
+    "quotaResetAnchor": "2026-09-13T17:41:00.000Z",
+    "lifecycleRecovery": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-4",
+      "pending": false,
+      "auditRef": "run-records/2026-09-11-codex-compile-loop/host-review-proposal-lifecycle.json"
+    },
+    "semanticRunHistory": [
+      {
+        "namespace": "codex-target-review-v1-20260912",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-opening-target.json"
+      }
+    ],
+    "reconciliationFocus": "opening-driver",
+    "knowledgeRepair": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-27",
+      "pending": false,
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+      "receiptFingerprint": "16abfa2b45fec0a37972fbd083ad28ca52fd9e70f8604205129a97c9a87bb040",
+      "unresolvedTargets": []
+    },
+    "traceRepair": {
+      "attributionIds": [
+        "attr-schneider-rescue-members-trapped-001",
+        "attr-eva-guigu-00008"
+      ],
+      "failureDiagnostic": "Reviewed quotation content trace failed again: attr-eva-guigu-00008,attr-schneider-rescue-members-trapped-001. Preserve originals and stop for host review.",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-quotation-content.json",
+      "batchId": "host-quotation-content-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "903a92cb36ed290cba6433d312fef304024539521b12f0f87c6a771b0500d3ff"
+    },
+    "knowledgeRepairHistory": [
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-knowledge-dependencies.json",
+        "receiptFingerprint": "a80578bca7684972296b14cdd8260d5f28fa0a1fdb8c9c47c9727c7a7e77a3c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-2",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "receiptFingerprint": "f9682e866aca66a22cf1a01b8dae5a32e523670103a62ea35e910c7c3fdb3436",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-3",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "receiptFingerprint": "eee8c13e7ebba78cb1fb39a8d95f5a1743bd982ec3171298df37e25de903286e",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-4",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "receiptFingerprint": "10fe6b7ffcd87d66b60f006b04fa4bb8900efdca91e38a4a1d03b25d73db8fac",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-5",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "receiptFingerprint": "9b47e05a8d83d08272bf58f01184723c23f0314d60a7e738479bbdcbae48ba4a",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-6",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "receiptFingerprint": "eca4e84675eeff514914668a764197742048ee6134b683d526f9ec822148c450",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-7",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "receiptFingerprint": "20bc8cd95777636285a45fa1612a0de9b588dac75feffd3e105c6b8c33ff8f07",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-8",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "receiptFingerprint": "4176e0f60f80d8da09f44af0cb4e7ab567c7464f80ded678469a00717d6a896d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-9",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "receiptFingerprint": "bb667a3d751e646925b005f469396ae419c4ef89f624f12742915799bfafaacc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-10",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "receiptFingerprint": "14b4e7bbc2093be8d3d86f0356d2eb8c36a71459e1e7f0509e24eeaf71690964",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-11",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "receiptFingerprint": "b860218c84dc36767018908a51fdaaea20f3975e1c1cb48e2c64f993b7105974",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-12",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "receiptFingerprint": "38b480456c192f1dd8cc493b53fc8087e72a7bc9a8c7f64028e25bd6e01d3c18",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-13",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "receiptFingerprint": "ebcc80887c90a45677644d3c7cd72fb4218e8feb3da34ecb2d5c722fd665759b",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-14",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "receiptFingerprint": "099e053d905c7411e6c1424a3507084c7c4640c23983a03d2642edd887afe745",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-15",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "receiptFingerprint": "e42c2b63609e824015b1d2fe60ae58f4cf80ea8d604cd9358998cc3d6a849e34",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-16",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "receiptFingerprint": "adb536f530a54f680b22acdfd55c27718bc788a2fa664b51f2c22f6728a0cecc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-17",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "receiptFingerprint": "23fec246048d47fd7916984f504b736186902a2627a5e271e24b525017a627bb",
+        "unresolvedTargets": [
+          "event-eva-config-001"
+        ]
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-18",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "receiptFingerprint": "e863047b25c119e6058eecaa1c01fea9b747e4e435927889937bd4067ff2b50d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-19",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "receiptFingerprint": "4e0c1388eca6e4942888f91782f8083ad560998996a4d58790111ec1070f784d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-20",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "receiptFingerprint": "fc96a11cf9e398b2aaf242858ce5f366d9f7ee53ad1b9179b761eca25f8c6a5c",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-21",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "receiptFingerprint": "1a66602c8e29aa70646e3ff8f476352b813fefee02e6528f495b22b162ebed32",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-22",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "receiptFingerprint": "66c5ad249e1b4413a6589600f1492b7d7041d659b8497254e7e529d7708a5169",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-23",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "receiptFingerprint": "5ca3cf4cdef33873685dcad3377007e791ba9f88604cf3bc4e0990dfeacdef5d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-24",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "receiptFingerprint": "1fe5dc9570548f6263c6b3014a6cf81c88db1264942385383f515faeda3430c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-25",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "receiptFingerprint": "57d5d7c48051196972e595c7f26b0f98ebbb0c721116e14f23bee07f677b01e9",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-26",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "receiptFingerprint": "d9a2961678b7acafabe33458e5f17b4b1d468370d6b69f3f74d6ed5b78432262",
+        "unresolvedTargets": []
+      }
+    ],
+    "appliedRepairHistory": [
+      {
+        "repairId": "dragontext-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "0be170fea49a866ea1c65fbe8fe8603cee179192f84fee568d777853abc44f63",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "appliedAt": "2026-09-12T18:30:48.769Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dragontext-proposition-object-selector-v1",
+        "failureFingerprint": "45af7b72057ca8627ca38f142736a1edc2484af30b0922c630fbf7a4e03523ed",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-anchor.json",
+        "appliedAt": "2026-09-12T18:37:15.473Z"
+      },
+      {
+        "repairId": "medical-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "d8d6e7cd654c89e070a14645d590c434ad1c952f01b27f5095e119ba6da97398",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "appliedAt": "2026-09-12T18:40:09.287Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "office-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "8ef8899d2276275463db5a56ae28051671b77ed93e721f72501fd01a65c1d2e0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "appliedAt": "2026-09-12T18:47:01.873Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-disclosure-source-grounded-dependencies-v1",
+        "failureFingerprint": "2c8fd49565f406cc3b9d3fabaf11460ff6d57ab72d0ca2fe8d8969a8dd25699f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "appliedAt": "2026-09-12T18:56:17.280Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-identity-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "b2e504d601decd98fcf28b2f03263a9f6837e3211d066def3c42bffc69b24aee",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "appliedAt": "2026-09-12T19:05:58.058Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-listener-and-content-selectors-v1",
+        "failureFingerprint": "d98142ee01a99ba21ccc268302bf3a09ed3c843977a8839ba8b5aef4225a31da",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-selectors.json",
+        "appliedAt": "2026-09-12T19:12:49.583Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "121356ed29262f4b483750da516cc9847495e8e970b9799b98a94a46c2606035",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "appliedAt": "2026-09-12T19:15:57.744Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "confession-quotation-and-knowledge-dependencies-v1",
+        "failureFingerprint": "06944c5fe2fe0476a51c4030301e37e89c1017926aa21fda094e70d29f2830a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "appliedAt": "2026-09-12T19:21:50.468Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "acceptance-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "801e624d68d6772a4af862184fac1ccaf9a7f0ea012ab4c3e1e1441931f35101",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "appliedAt": "2026-09-12T19:29:12.505Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "nono-entry-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "1dfc90a3e4174718919bedc66c7d47b966921b86a71c8390dedd7e3d10c0ec94",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "appliedAt": "2026-09-12T19:36:00.594Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "bend-warning-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "a6f5f754995fe21f6ba5134f90d1f3c666c9a1984ea4e8ad9851fa16cf085994",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "appliedAt": "2026-09-13T12:45:37.230Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "funding-answer-summary-and-knowledge-v1",
+        "failureFingerprint": "2f13c1affa661632fc1f1c0d3d028a919178af358162e575cf4e424e2f38cf67",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "appliedAt": "2026-09-13T12:54:28.250Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "6f5ddff7066f52187dc1d4090ae387d9a808375b020964d71c5beeb9b6c9232d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "appliedAt": "2026-09-13T12:59:21.471Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-document-holder-and-lifecycle-host-v1",
+        "failureFingerprint": "a7c7f0088d27ba49c117896fa5635360b3258cd945a6ca89ab75ccff6bcd708f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-document-correction.json",
+        "appliedAt": "2026-09-13T13:12:44.915Z"
+      },
+      {
+        "repairId": "emergency-call-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "24d033b42a3f33b73a24baabfb743cd5d8a4aab5dcfdb3a946ed376611dcbd7b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "appliedAt": "2026-09-13T13:20:10.161Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "emergency-request-quotation-anchors-v1",
+        "failureFingerprint": "626922bbf53ef32aef6f793771ac4a0340ff4144d094e0cd92718fc1dca9ff80",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-trace.json",
+        "appliedAt": "2026-09-13T13:26:20.468Z"
+      },
+      {
+        "repairId": "exploration-window-source-reviewed-knowledge-v1",
+        "failureFingerprint": "86278ddb0368746eecc0a772333379eed8ee879de047a72cbf557dd1e6affeab",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "appliedAt": "2026-09-13T13:30:18.146Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "exploration-full-projection-and-lifecycle-v1",
+        "failureFingerprint": "91387cb2707fac261925e5485d1f051fbbee51251a14ed7ce5d3b6d6174934f0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-projection.json",
+        "appliedAt": "2026-09-13T13:38:07.647Z"
+      },
+      {
+        "repairId": "nono-follow-source-reviewed-knowledge-v1",
+        "failureFingerprint": "9989a41693d7f8808acdb8f2eecaabbfea496591868b214529a100493a077503",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "appliedAt": "2026-09-13T13:41:24.132Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-interface-source-reviewed-knowledge-v1",
+        "failureFingerprint": "698fc2d0146b8703c3ae7c9b4d63acd82877b507158f9df2698757363af25032",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "appliedAt": "2026-09-13T13:48:58.522Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-quotation-retrieval-protocol-v1",
+        "failureFingerprint": "4b1a08018ec8ee43b8810abcb0286ab2643d17a06a2bbf07fe39ac35c010d508",
+        "failureCause": {
+          "category": "knowledge-not-produced-with-verified-evidence",
+          "targetIds": [
+            "event-eva-config-001"
+          ],
+          "dependencyIds": [
+            "q-eva-interface-click-instruction-00011"
+          ]
+        },
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "appliedAt": "2026-09-13T16:42:27.004Z"
+      },
+      {
+        "repairId": "map-display-source-reviewed-knowledge-v1",
+        "failureFingerprint": "11b736d5e84548b873606ab68338a15fc7717e89eab302fe811d537912347999",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "appliedAt": "2026-09-13T16:47:21.510Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-perception-source-reviewed-knowledge-v1",
+        "failureFingerprint": "c10c9346b27a3308d8f20d9f233edb9a83439a31057a8c6e554464311aadb61a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "appliedAt": "2026-09-13T16:54:36.423Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-direct-observation-scope-v1",
+        "failureFingerprint": "bfea6a8d889103ac8f5f70c43a26f5370f5e538e9e271edd0a287a45d692964c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "appliedAt": "2026-09-13T17:00:48.261Z",
+        "fingerprintBasis": "Verified attempt 36 temporal misattribution, not aggregate percentages"
+      },
+      {
+        "repairId": "duel-limited-observation-source-review-v1",
+        "failureFingerprint": "566b293740da10a7df74104a8ddf06078709571620449fece0312e7cf3a1b5eb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "appliedAt": "2026-09-13T17:06:26.315Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "earthquake-perception-source-review-v1",
+        "failureFingerprint": "2d4bcebfafff2412e9b9340fbad52822729157510e54f84eba2309d721df2b0d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "appliedAt": "2026-09-13T17:10:47.409Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "train-arrival-observation-source-review-v1",
+        "failureFingerprint": "c553169066754cdb8020da447d1ff3a30f30e8f0a3572c32986349e740d91219",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "appliedAt": "2026-09-13T17:15:51.299Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "helicopter-approach-observation-source-review-v1",
+        "failureFingerprint": "a1357fb5e1e649b1d317176279b1f17013fa7469bf64cbda434d4a68161fd4de",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "appliedAt": "2026-09-13T17:20:29.798Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dance-finale-observation-source-review-v1",
+        "failureFingerprint": "d7593d5f5485ea50d2d5cd1d9aaf09e9806758b323c516628c8f1bd3d459b6e2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "appliedAt": "2026-09-13T17:25:26.067Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "caesar-fall-observation-source-review-v1",
+        "failureFingerprint": "b2f54cf53c7298bda4359e70c2e6f8d06c39355bf69e840f373b99e8cf2c1ab7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+        "appliedAt": "2026-09-13T17:29:36.955Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "adams-fragment-required-before-reassembly-v1",
+        "failureFingerprint": "9d0ff292fa191d5375c8aa1d215484bf979385dfdd8597481b9d08796ef03a57",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-adams-causal.json",
+        "appliedAt": "2026-09-13T17:36:02.166Z"
+      },
+      {
+        "repairId": "alarm-gather-source-bounded-order-v1",
+        "failureFingerprint": "362c430bbb07c86c567325ab6be870f6795e2fc0b6f447d130865d7f645531cd",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-gather-time.json",
+        "appliedAt": "2026-09-13T17:40:28.712Z"
+      },
+      {
+        "repairId": "amber-arrival-source-bounded-order-v1",
+        "failureFingerprint": "e94692b391ee99323426bf5e5622d10f43cae30c1395866f13e4aad6ee446960",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-amber-arrival-time.json",
+        "appliedAt": "2026-09-13T17:58:02.856Z"
+      },
+      {
+        "repairId": "chu-source-reviewed-recruitment-goal-v1",
+        "failureFingerprint": "a79b1200e62046916fe8a6f8b85cfbbde81438477059fce7e4b2137e882d08b3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-chu-recruitment-goal.json",
+        "appliedAt": "2026-09-13T18:04:22.654Z"
+      },
+      {
+        "repairId": "roadside-setting-temporal-not-causal-v1",
+        "failureFingerprint": "8f98455210d2a817a03b8283bd4e3527da0482d8b26d4d9249f76937fcc050cb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-relation.json",
+        "appliedAt": "2026-09-13T18:08:49.574Z"
+      },
+      {
+        "repairId": "cinema-roadside-source-discourse-order-v1",
+        "failureFingerprint": "281da3693a1bdf2c5c0cad708495a15bae951cd8f2f6749086d4f3cc8649d1f7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-discourse.json",
+        "appliedAt": "2026-09-13T18:13:40.903Z"
+      },
+      {
+        "repairId": "nono-source-reviewed-pre-door-checkpoint-v1",
+        "failureFingerprint": "4a140bada4ca2aa6f97bcfeed747fff816996f471096c0562d5f7fd97e8e96a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:17:40.529Z"
+      },
+      {
+        "repairId": "duel-source-reviewed-pre-attack-checkpoints-v1",
+        "failureFingerprint": "405723fd4bda4e015571188be8a209d3b6f4adc660c42b7266cd00663479691c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:21:27.852Z"
+      },
+      {
+        "repairId": "interview-source-reviewed-examiner-checkpoints-v1",
+        "failureFingerprint": "d659905948263cfedf75bc190d07a77d367a47b4f8a65cb79c6dc748f2cf684b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-interview-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:24:35.323Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "144e3ad042532714d52a9ac8817643bc9a62a27329d3408a42e122ac849431a0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:29:48.199Z"
+      },
+      {
+        "repairId": "makeup-source-reviewed-pre-fitting-checkpoint-v1",
+        "failureFingerprint": "332e045d1ecf74f015abff501dd60261528a2dcbd342d9588c3dd151ef8a1902",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-makeup-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:35:13.298Z"
+      },
+      {
+        "repairId": "lumingfei-source-reviewed-pre-coaching-checkpoint-v1",
+        "failureFingerprint": "461f9395e4e429bdca57cce55672b8eabc86bec2405b0a2e54167c72722ed739",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingfei-coaching-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:38:13.852Z"
+      },
+      {
+        "repairId": "fingel-source-reviewed-pre-arrival-checkpoint-v1",
+        "failureFingerprint": "92f1d7c7f84411cb4261c0667e8d3c6706918ccd2b534d123c2253a6ac37d59d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-fingel-train-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:41:09.597Z"
+      },
+      {
+        "repairId": "black-sniper-source-reviewed-pre-shot-checkpoint-v1",
+        "failureFingerprint": "726e870c3d21679313187cc536e8b7d50428fb8954e1874fc3872bae2a3b2251",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-black-sniper-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:44:03.764Z"
+      },
+      {
+        "repairId": "man-coins-source-reviewed-pre-request-checkpoint-v1",
+        "failureFingerprint": "87b1cb60a82e2d0089f3b67e29a2e7903d17dffee47228764ec69ec599728e07",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-man-coins-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:47:30.839Z"
+      },
+      {
+        "repairId": "mans-source-reviewed-pre-earthquake-checkpoint-v1",
+        "failureFingerprint": "b7c61b852e8f97016ab2f593d2380a0701330c3ef8585517a4622226fdaca732",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-mans-earthquake-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:50:34.701Z"
+      },
+      {
+        "repairId": "zhao-source-reviewed-pre-confession-checkpoint-v1",
+        "failureFingerprint": "1653489dcdee02d9d4972c631ea64f60c7126f2aab30d78ef875e15a56c95b89",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-zhao-confession-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:53:30.319Z"
+      },
+      {
+        "repairId": "manshtein-source-reviewed-pre-dialogue-checkpoint-v1",
+        "failureFingerprint": "4779c49864b7a2b6bb7dde2f12bd8a4fd00026894be70f604da5e09232fa6196",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-manshtein-medical-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:56:26.947Z"
+      },
+      {
+        "repairId": "sanwu-source-reviewed-pre-invocation-checkpoint-v1",
+        "failureFingerprint": "d909f4ef203e62b052e0fae28fcab43832b7a6af4473b062b4a6d14e40cf3ba3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-sanwu-church-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:59:21.591Z"
+      },
+      {
+        "repairId": "angier-source-reviewed-pre-toast-checkpoint-v1",
+        "failureFingerprint": "6e80b15bf62ac687f9659caca02183f83b4d1b028b7dc65a859d405811ddb105",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-angier-toast-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:02:25.446Z"
+      },
+      {
+        "repairId": "caesar-source-reviewed-exchange-goal-v1",
+        "failureFingerprint": "7f9c344875e8102e6b8d94e64a430348b1c85cac3231be97ac6746d4a1fff752",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-exchange-goal.json",
+        "appliedAt": "2026-09-13T19:05:47.060Z"
+      },
+      {
+        "repairId": "yaji-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "a40e0d01989a02e780424be12d40ec51988b5c3fb93c8ab42986beb2e6e2c01d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yaji-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:09:14.053Z"
+      },
+      {
+        "repairId": "yesheng-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "6669d28ccb86bcc65f845b4da0aa6cf08f83afe9f9e91e8db23c12c7fa813728",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yesheng-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:12:07.578Z"
+      },
+      {
+        "repairId": "cousin-source-reviewed-bedroom-checkpoint-v1",
+        "failureFingerprint": "296e224f9723b4a93bad6e9a53bafe5edcd902158d12a9120a84c63a6dc6521d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-entry-checkpoint.json",
+        "correctionPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-trace-correction.json",
+        "appliedAt": "2026-09-13T19:17:13.858Z"
+      },
+      {
+        "repairId": "cinema-audience-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "bbf81a731f359f8e409a39d169a4d1f934d869d6f3e4c3760c9819577f869092",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cinema-audience-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T19:20:15.410Z"
+      },
+      {
+        "repairId": "baby-source-reviewed-citywall-checkpoint-v1",
+        "failureFingerprint": "31ea8b2b467f212220a54987686814fa226b17b96980f31dc130f47ba21bb531",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-baby-citywall-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:23:20.676Z"
+      },
+      {
+        "repairId": "conductor-source-reviewed-pre-boarding-checkpoint-v1",
+        "failureFingerprint": "fab1c99967c4541832b1bc87191dba25fea4e7d81b47810e7c733e44ae836b09",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-conductor-boarding-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:26:17.890Z"
+      },
+      {
+        "repairId": "eva-source-reviewed-projected-presence-v1",
+        "failureFingerprint": "e79dcae645ee1836dec3bc108435c1f8f58509a0717980e8f004768d6965a6f5",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-projected-presence.json",
+        "appliedAt": "2026-09-13T19:30:12.278Z"
+      },
+      {
+        "repairId": "boy-source-reviewed-pre-warning-checkpoint-v1",
+        "failureFingerprint": "19dab9bb94b5ac4b46cbf6b3162f3ed6656fcd9b13d5384ce7961ee668d65180",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-warning-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:33:06.641Z"
+      },
+      {
+        "repairId": "source-reviewed-explicit-identity-links-v1",
+        "failureFingerprint": "028cc7ff3f96455c5df92467d825aa63080ad02655a98463b847b2f1d1f8d63e",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-explicit-identity-links.json",
+        "appliedAt": "2026-09-13T19:37:01.203Z"
+      },
+      {
+        "repairId": "source-reviewed-briefing-identity-links-v1",
+        "failureFingerprint": "690b314981fc276223282e7f46f6d4d7f0dbbe8883f3a3308e1de6e13adbbdb2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-briefing-identity-links.json",
+        "appliedAt": "2026-09-13T19:38:50.717Z"
+      },
+      {
+        "repairId": "source-reviewed-named-student-identity-links-v1",
+        "failureFingerprint": "efbbedbbf6f4523071125f9aefd4cecd3030c0edee751b510bd0a5eee281d8db",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-named-student-identity-links.json",
+        "appliedAt": "2026-09-13T19:43:29.784Z"
+      },
+      {
+        "repairId": "source-reviewed-student-reference-identity-links-v1",
+        "failureFingerprint": "22686ec02d3c0230c3d8ef5c6897e3e52d29ce8a8f74c7c57fef396bfdae2019",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-student-reference-identity-links.json",
+        "appliedAt": "2026-09-13T19:45:24.872Z"
+      },
+      {
+        "repairId": "source-reviewed-recalled-name-identity-links-v1",
+        "failureFingerprint": "976d1e53cada7298d4632678d7b26a8237b1a97eda34a4f89e3191cea481b27a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-recalled-name-identity-links.json",
+        "appliedAt": "2026-09-13T19:47:13.331Z"
+      },
+      {
+        "repairId": "source-reviewed-car-council-identity-links-v1",
+        "failureFingerprint": "0b8644091a3568acbd28c7343d9c9ad92d8cdf82891729772d03f4c83eeedf8b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-car-council-identity-links.json",
+        "appliedAt": "2026-09-13T19:49:19.421Z"
+      }
+    ],
+    "identityRepair": {
+      "batchId": "host-lumingze-identity-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "362a6228c63af64cda20a243cac91f29b4f933cbc399240190d4168794c8d3e3",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingze-identity.json",
+      "verifiedAt": "2026-09-12T19:04:52.690Z",
+      "entityId": "char-lumingze-boy"
+    },
+    "threadHistory": [
+      {
+        "at": "2026-09-13T17:58:47.585323+00:00",
+        "fromThreadId": "01a0912b-5872-75b0-a118-813e3e32d2be",
+        "toThreadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+        "reason": "User explicitly requested reading Add runtime execution hooks, checking timers and continuing the existing loop in this task. Original task ended with systemError after delivered callback. No compilation or provider guard was reset.",
+        "attempt": 45,
+        "status": "needs-review",
+        "timerCheck": {
+          "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+          "serviceActiveState": "failed",
+          "mainPID": 0,
+          "pendingQuotaTimers": [],
+          "anchor": "2026-09-13T17:41:00.000Z",
+          "nextWindow": "2026-09-13T22:41:00.000Z",
+          "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+        },
+        "priorCallback": {
+          "attempt": 45,
+          "delivered": true,
+          "receipt": "Queued message 01a09bdc-8e63-7823-8d50-a0cd436b02c7 for thread 01a0912b-5872-75b0-a118-813e3e32d2be.",
+          "at": "2026-09-13T17:41:57.992Z"
+        },
+        "priorTimer": {
+          "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+          "scheduledAt": "2026-09-13T17:41:00.000Z",
+          "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+        },
+        "review": "host-review-amber-arrival-time.json",
+        "validation": "42 relevant tests and strict reviewer type check passed; normal proposal and finish completed with all gates retained."
+      }
+    ],
+    "timerCheck": {
+      "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+      "serviceActiveState": "failed",
+      "mainPID": 0,
+      "pendingQuotaTimers": [],
+      "anchor": "2026-09-13T17:41:00.000Z",
+      "nextWindow": "2026-09-13T22:41:00.000Z",
+      "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+    },
+    "endedAt": "2026-09-13T19:51:46.129Z",
+    "callback": {
+      "attempt": 79,
+      "delivered": true,
+      "receipt": "Queued message 01a09c53-6654-7683-9a5a-860f0f99cf37 for thread 01a09be6-f704-72d0-aaf1-59b11709dd85.",
+      "at": "2026-09-13T19:51:46.523Z"
+    }
+  },
+  "targets": [
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-gudeli-01",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 18367,
+          "endByte": 18385,
+          "startLine": 111,
+          "endLine": 111,
+          "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+          "prefixHash": "3699bfe25f4f96412416a9e89dd67d9c0c48e8c5878ec3b06b3d4beab7f20a47",
+          "suffixHash": "917de895fdb97b4d780573097e236cc62824914b7df600b5e5784b516b70f1f9",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "古德里安教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-gudeli-an",
+        "kind": "character",
+        "canonicalName": "古德里安教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-gudeli-01",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 18367,
+            "endByte": 18385,
+            "startLine": 111,
+            "endLine": 111,
+            "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+            "prefixHash": "3699bfe25f4f96412416a9e89dd67d9c0c48e8c5878ec3b06b3d4beab7f20a47",
+            "suffixHash": "917de895fdb97b4d780573097e236cc62824914b7df600b5e5784b516b70f1f9",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "古德里安教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "confidence": 1
+        },
+        "candidates": [
+          {
+            "entityId": "char-gudeli-an",
+            "entityKind": "character",
+            "canonicalName": "古德里安教授",
+            "matchedText": "古德里安教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t这个话题让路明非比较沮丧。他确实申请了美国的大学，但这绝不是因为他的成绩太好大有希望。对于他的成绩，人人都有不同的评价方式。班主任说，路明非，你是属秤砣的么？你知不知道你一个人把我们班的平均分拉低了多少？婶婶是对叔叔说，鸣泽成绩好都是我们家的基因，看你家基因就是不行！只有路鸣泽对他很体贴，在QQ上鼓励他说，“夕阳！成绩不好怕什么？我行我路，这才是我们这种人该做的！反正你在我眼里是个好女孩！”\r",
+        "\t出国这件事，是婶婶灵机一动一力主张的，押着路明非把申请表给填了，还慷慨地付了每所学校几十美元的申请费。婶婶有自己的算盘，路明非的各科成绩中，唯有英语还不错，跟着同班的英语狂人考托福的时候又走了狗屎运，考分不错。以路明非的成绩，上一类本科很难，如今很流行弃考出国，申请一把，再走一次狗屎运拿到美国大学的录取通知，就算对路明非爸妈寄来的钱有交代了。\r",
+        "\t此外婶婶还有套“小”算盘。路鸣泽的成绩虽然比路明非好点，却也不是顶尖的，上不了清华北大那类婶婶挂在嘴边的名校，如果能弃考出国，也是很有面子的事。但是上大学是一辈子的事情，婶婶还不忍心看着路鸣泽去冒险。她思前想后，大概是想起了什么名人名言说“凡艰辛的路，当由勇敢者以坚硬的脚底踏开”，忽然觉得路明非很是勇敢，于是让他试试用坚硬的脚底给路鸣泽踩出一条路来。如果他失败了，也不要紧，说明此路不通，路明非可以迟一年和堂弟一起高考。\r",
+        "\t不过艰辛的路显然不是光靠勇气就能踏开的，路上满是崴脚的石头。路明非已经连着收到十几封复信了，开篇大同小异，都是：\r",
+        "\t“亲爱的申请者：\r",
+        "\t感谢你对本学院的兴趣，但是很遗憾的……”\r",
+        "\t婶婶花费了好几百美金的申请费，换来的只是美国人一而再再而三的感谢，善人当得很心痛。而路明非不焦不躁，心态如老僧入定，止水不波，只不过为了配合婶婶的沮丧，才在收到拒信时挤出点忧伤的表情来。\r",
+        "\t如今只剩一所大学没给他复信了，排名最靠前的名校，“芝加哥大学”。\r",
+        "\t“有我的信么？”路明非在传达室门口探头探脑，拽着英文发音，“Mingfei Lu。”\r",
+        "\t“有，美国寄来的。”门卫扔了一封信出来。\r",
+        "\t路明非一摸，信封里只有薄薄的一张纸，是拒信无疑。凡是录取信，会夹很多的表格和介绍材料，厚厚的一摞。而感谢你的申请并且遗憾你未被录取，只要一张打印纸就好了。\r",
+        "\t路明非撕开信封，来信居然是用中文写就的：\r",
+        "\t亲爱的路明非先生：\r",
+        "\t感谢你对芝加哥大学的兴趣，但是很遗憾的，你未被录取。\r",
+        "\t但是，我们常说，路不只一条，只看你愿不愿意选择。\r",
+        "\t首先自我介绍，卡塞尔学院是一所位于美国伊利诺伊州芝加哥远郊的私立大学，和芝加哥大学是联谊学校，有广泛的学术交流。\r",
+        "\t我们非常荣幸地从芝加哥大学那里得到了您的申请资料，经过细致评估，我们认为您达到了卡塞尔学院的入学标准，在此向你发出邀请。\r",
+        "\t请您在收到这封信的第一时间联系我校古德里安教授，他正在中国进行一次学术访问，将会安排对您的面试。\r",
+        "\t有如何疑问，也请联系古德里安教授。我会协助他为您提供服务，我是卡塞尔学院的学院秘书诺玛·劳恩斯，非常高兴认识您。\r",
+        "\t你诚挚的，\r",
+        "\t诺玛\r",
+        "\t路明非把信放下，摸了摸额头，有点发懵。\r",
+        "\t本来看开头很对的一封信，一封标准的拒信，怎么过了那句“但是，我们常说，路不只一条，只看你愿不愿意选择”之后，忽然变了呢？显然他已经被列在面试名单上了。路明非的高中同学也不是没有人申请成功过，但是有美国教授千里迢迢来面试的，这还是头一份儿。路明非不知道自己何德何能，他甚至没给这个卡塞尔学院贡献过申请费。\r",
+        "\t也许“夕阳的刻痕”的真实身份给路鸣泽发觉了？路鸣泽想办法报复他玩呢？\r",
+        "\t不过信封上确实是美国伊利诺伊州的邮戳。\r"
+      ],
+      "rationale": "The admission letter names Professor Guderian as the academy contact arranging the interview. Same named professor, preserving letter attribution without adding presence or commitments."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-gud",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 119021,
+          "endByte": 119039,
+          "startLine": 798,
+          "endLine": 798,
+          "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+          "prefixHash": "886f3a8584691c110b487fad29eb535cbf58c7d54095c6a67ce4cc428b091880",
+          "suffixHash": "145e700695a155058ea8293381ced67e2c9d30649cd96adcd2bdaf3e9ad01924",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "古德里安教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-train-journey",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-gudeli-an",
+        "kind": "character",
+        "canonicalName": "古德里安教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-gud",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 119021,
+            "endByte": 119039,
+            "startLine": 798,
+            "endLine": 798,
+            "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+            "prefixHash": "886f3a8584691c110b487fad29eb535cbf58c7d54095c6a67ce4cc428b091880",
+            "suffixHash": "145e700695a155058ea8293381ced67e2c9d30649cd96adcd2bdaf3e9ad01924",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "古德里安教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-train-journey",
+          "confidence": 1
+        },
+        "candidates": [
+          {
+            "entityId": "char-gudeli-an",
+            "entityKind": "character",
+            "canonicalName": "古德里安教授",
+            "matchedText": "古德里安教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t一二一二地跳着格子，路明非并不知道什么事情正在全世界范围内发生，刚才的一切只是开始，大量的数据包从那台名叫“诺玛”的超级计算机中涌出，正去向世界的不同角落，“路明非”这三个字出现在很多人的屏幕上，并被牢牢记住，数据锁解除，地球上数千个秘密网关对“路明非”开放。\r",
+        "\t卡塞尔学院对于新学生张开了怀抱。\r",
+        "\t巨大的声音在黑暗的夜空中穿行，路明非抬起头来，看见低空飞行着逼近的巨大黑影。\r",
+        "\t“不会吧？”他喃喃地说。\r",
+        "\t“老家伙那么着急来接你啊？”诺诺仰起头，“直升飞机都派过来。”\r",
+        "\t公元2009年5月15日，星期五，黑色的直升机如巨鸟那样掠过南方小城的天空，在少年路明非的头顶飞过。\r",
+        "\t隐藏在历史中的那场战争，就要重开大幕。\r",
+        "\r",
+        "第二幕 黄金瞳\r",
+        "\tGolden Eyes\r",
+        "\t那是那幅画的威压。\r",
+        "\t画面上，天空是铁青色混合着火焰的颜色，唯一的一株巨树矗立着，已经枯死的树枝向着四面八方延伸，织成一张密网，支撑住皲裂的天空。\r",
+        "\t荒原上枯骨满地，黑色的巨兽正从骨骸堆的深处腾起，双翼挂满骷髅，张开巨大的膜翼后，仰天吐出黑色的火焰。\r",
+        "\t路明非的脑袋里回荡着一个凄厉的吼叫声，他居然觉得自己能听见那巨兽的嘶吼。\r",
+        "\t路明非站在熙熙攘攘的人流中，看了一眼手里的火车票，抬头望着芝加哥火车站教堂般的穹顶。\r",
+        "\t他左右两只巨大的旅行箱，加起来和他自己的重量差不多，背后的背包鼓出一大块，因为里面婶婶塞进了一只压力锅，编织袋里塞着一床十二孔棉被，枕头和一只箱子捆在一起，护照叼在嘴里。\r",
+        "\t天之骄子、留学新人路明非携带全部出国装备，独自搭乘美联航班机，跨越大洋，降落在芝加哥国际机场，按照诺玛给的行程安排，他将在芝加哥火车站乘坐CC1000次快车前往卡塞尔学院。\r",
+        "\t“真想自己送你去啊，不过还得飞俄罗斯。”古德里安教授在电话里惋惜地说，“不过别担心，诺玛会把一切都安排好的。”\r",
+        "\t诺玛委实是个出色的秘书，三周之后一个极大的信封袋送到路明非手上，从护照到行程单，一应俱全，附送一份《卡塞尔学院入学傻瓜指南》，下面还标注了“路明非版”。\r",
+        "\t这份指南名字可笑却相当好用，是说在路明非到达芝加哥火车站之前。\r",
+        "\t“CC1000次快车？没有听说过……也许是什么支线列车？不过你说的编号不太对……新版的列车时刻表里包含车次的一切信息，再去查查吧……车票好像是真的，可是真的不知道有这班列车。”这是不同的值班人员给出的答复。\r",
+        "\t列车时刻表中，没有这趟快车。\r",
+        "\t“这下子乌龙大了！”路明非在人群中抓狂。\r",
+        "\t上帝应许摩西说，你去迦南，那里是留着蜜与奶的乐土，并给他一份地图。摩西以神力越过浩浩荡荡的红海，摆脱埃及人的追捕，九死换生，看见前面的路标上写着“去印度”、“去中国”、“去日本”，就是没有“去迦南”，路标下的警察叔叔说，“迦南？不晓得，没听过！”\r",
+        "\t大概这就是路明非此刻的感受。\r"
+      ],
+      "rationale": "The named Professor Guderian speaks to Lumingfei by phone about travel arrangements. Resolve the remote interlocutor without placing him at the airport or station."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-gud-title",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 132519,
+          "endByte": 132537,
+          "startLine": 884,
+          "endLine": 884,
+          "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+          "prefixHash": "c39b16bb838251ad551de0b5643b62143c50d84e640738efef6687c602a23a6a",
+          "suffixHash": "4f8d5a677f33176ae2d56546214bc7eafd332b74db6a3417ca88a76c2959ecb3",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "古德里安教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-arrival-proof",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-gudeli-an",
+        "kind": "character",
+        "canonicalName": "古德里安教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-gud-title",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 132519,
+            "endByte": 132537,
+            "startLine": 884,
+            "endLine": 884,
+            "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+            "prefixHash": "c39b16bb838251ad551de0b5643b62143c50d84e640738efef6687c602a23a6a",
+            "suffixHash": "4f8d5a677f33176ae2d56546214bc7eafd332b74db6a3417ca88a76c2959ecb3",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "古德里安教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-arrival-proof",
+          "confidence": 1
+        },
+        "candidates": [
+          {
+            "entityId": "char-gudeli-an",
+            "entityKind": "character",
+            "canonicalName": "古德里安教授",
+            "matchedText": "古德里安教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t路明非打了个寒噤，那列车员像是一个……鬼魂！\r",
+        "\t“怎么好像……地狱列车一样？”他抓住芬格尔的袖子。\r",
+        "\t“是他的言灵效果而已，那家伙是个正常不过的活人，还是后街男孩的粉哦。”芬格尔说。\r",
+        "\t“言灵？”路明非一愣。\r",
+        "\t“人在呐人在呐，芬格尔和路明非。”芬格尔挥手。\r",
+        "\t路明非小心翼翼地从口袋里摸出车票来，拖着大包小包，跟在芬格尔后面走向检票口。当他看清列车员的脸，才相信芬格尔说的，那家伙看起来确实不像个鬼魂，正嚼着口香糖吹泡泡。\r",
+        "\t列车员接过芬格尔的车票划过验票机，绿灯亮起，“嘟”的一声。\r",
+        "\t“芬格尔你还不退学呢？”列车员说，“我还以为今年见不到你了。”\r",
+        "\t“我可是有始有终的人，”芬格尔说，“车来得那么晚，我的阶级又降了么？”\r",
+        "\t“降到‘F’了，你可是从‘A’级降下来的，已经从天堂降到了地狱。”列车员说。\r",
+        "\t“真从农奴降成畜生了……”芬格尔嘟哝。\r",
+        "\t路明非的票划过验票机，绿灯亮起，声音却是欢快的音乐声。\r",
+        "\t“路明非？”列车员漂亮的绿眼睛亮了，“真抱歉，调度上出错了，你的阶级是‘S’，可是很少有那么高阶级的人，所以系统出错了吧，就跟千年虫一个道理。”\r",
+        "\t“‘S’？”芬格尔瞪大了眼睛，“不是只有校长是‘S’么？”\r",
+        "\t“不只，不过不超过十个人。”列车员说，“快上车吧，靠站时间不长。”\r",
+        "\t“我想问个问题……这真的是一趟正式列车么？为什么列车表上没有它？为什么不准时到站？”路明非实在忍不住，这趟车里里外外都透着诡异，要真是什么地狱特快，他踏上去前至少还能祷告一下什么的。\r",
+        "\t“是啊，芝加哥市政府特批的，直通卡塞尔学院。列车表上没有是因为它是支线车，不定期发车，你知道那种从公共铁路走但是通往一些矿山和工厂的特别列车么？我们跟那些是一样的。”列车员的回答非常坦然，一点不卖关子。\r",
+        "\t他们跟着列车员走上月台，高速列车停在铁轨上，亮着刺眼的头灯。车是黑色的，流线型的车身，耀眼的银白色藤蔓花纹在黑色的漆面上展开，华丽如一件艺术品。唯一一扇滑开的车门外，站着一个熟悉的身影——古德里安教授。\r",
+        "\t列车在漆黑的夜色里疾驰，隔着一张橡木条桌，路明非、芬格尔和古德里安教授对坐。车厢是典雅的欧式风格，四壁用维多利亚风格的花纹墙纸装饰，舷窗包裹着实木，墨绿色真皮沙发上刺绣金线，没有一处细节不精致。路明非和芬格尔都换上了卡塞尔学院的校服，白色的衬衣，墨绿色的西装滚着银色细边，深玫瑰红色的领巾，胸口的口袋上绣着卡塞尔学院的世界树校徽。学院的裁缝从没量过路明非的身材，却把衣服做得贴合无比，路明非翻开袖口，看见了里面用墨绿色线刺绣的名字，Ricardo M. Lu。\r",
+        "\t从踏上这列火车换上这身衣服，路明非忽然觉得自己上等了，非常上等的一个上等人。\r",
+        "\t可他不由自主地有些害怕，不知道为什么，好像什么糟糕的事情就要发生。\r",
+        "\t“咖啡还是热巧克力？”古德里安教授问。他背靠着墙，后面是一幅被帆布遮挡起来的巨画。\r",
+        "\t“热巧克力。”芬格尔举手。\r",
+        "\t“没问你，要严肃，我是你的临时导师，学校指派的，这是新生入学辅导时间，”古德里安教授看着路明非，“你也可以要一杯烈性酒什么的。”\r",
+        "\t“见导师……还能喝酒？”\r"
+      ],
+      "rationale": "The narrator explicitly identifies the familiar figure at the train door as Professor Guderian, followed by the same named professor sitting with Lumingfei and Fingel."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-gude-current",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 201722,
+          "endByte": 201734,
+          "startLine": 1278,
+          "endLine": 1278,
+          "exactHash": "322edd92346935ed25b194dc2f7382bb950dfa73bbeed37368d453d3ff2ff07e",
+          "prefixHash": "039db737c6f027e065c9d8927167d147cbaa1d30695e97934a0738ff6212c5a0",
+          "suffixHash": "0e9caa7dd4a61fd801dd87d1e131b8d60d3a731a01587aec5f8ac2eb552b8c15",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "古德里安",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-act3-library-professors",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-gudeli-an",
+        "kind": "character",
+        "canonicalName": "古德里安教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-gude-current",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 201722,
+            "endByte": 201734,
+            "startLine": 1278,
+            "endLine": 1278,
+            "exactHash": "322edd92346935ed25b194dc2f7382bb950dfa73bbeed37368d453d3ff2ff07e",
+            "prefixHash": "039db737c6f027e065c9d8927167d147cbaa1d30695e97934a0738ff6212c5a0",
+            "suffixHash": "0e9caa7dd4a61fd801dd87d1e131b8d60d3a731a01587aec5f8ac2eb552b8c15",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "古德里安",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-act3-library-professors",
+          "confidence": 0.99
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t沮丧如山般沉重，恺撒掌握学生会以来，他们一直是“自由一日”的赢家，在恺撒的领导下，学生会终于成为可以和卡塞尔学院最传统的兄弟会“狮心会”抗衡的社团，即使出现了被称作“超A”级的楚子航，也没能从他们手中夺走诺顿馆，而现在他们不可思议地输在一个新生手上。\r",
+        "\t“我们没输，这是一场可耻的黑枪战争！”一名资深委员说，“我们不该出让诺顿馆！”\r",
+        "\t群情激奋起来，委员们交头接耳，实在输得太冤枉了。\r",
+        "\t“停！”恺撒举手，他的声音威严，压下了会议厅里的喧嚣。\r",
+        "\t“我从来拒绝和懦夫说话，懦夫们才会拒绝承认自己的失败。”恺撒冰蓝色眼睛里全无表情，“今天我不想讨论失败的原因，路明非，‘S’级新生，来自中国，两枪击中了我和楚子航，作为第三方赢得了今年的‘自由一日’。要尊重游戏规则，按照游戏规则我们输了，狮心会保持了沉默，说明楚子航接受结果，你们不如楚子航么？”\r",
+        "\t“我已经租下了隔壁的‘安珀馆’，作为明年学生会的活动地，把我们的东西搬走，这里从午夜12点开始就属于路明非了。”恺撒起身为自己倒了一杯干邑，“路明非应该正为明天的3E考试准备吧？你们觉得他能通过么？”\r",
+        "\t“恺撒你是说？”\r",
+        "\t“刚才校园新闻网爆出一条新闻，‘S’级新生路明非对于‘言灵·皇帝’没有共鸣。”恺撒低声说。\r",
+        "\t静了一瞬以后，每个委员眼里都闪过惊喜的表情。\r",
+        "\t“3E考试的结果会告诉我们路明非的潜力有多大。如果他通不过，是会被降级的。对言灵没有共鸣，怎么通过3E考试？”恺撒环顾所有人，“我很期待，我想楚子航也一样期待。诺诺，你觉得路明非怎么样？”\r",
+        "\t“那个废柴的话？可能会直接降到‘Z’，如果有‘Z’这个级别的话。”诺诺靠在墙上，漫不经心地说。\r",
+        "\t所有委员都相视而笑，3E考试是第一道门槛，令所有新生惴惴不安。路明非要笑还不那么容易，通不过考试，他的阶级会直降，BCDEF，那时他会被整个学院看作笑话。一只羊如果披着狮子皮混进狮子群里，又被揭穿了身份，简直让人不忍想象他的下场。\r",
+        "\t恺撒却没有笑，而是低头抚摸着自己的心口，那是路明非一枪命中的地方。\r",
+        "\t“考试的缩写是EEE，拼写是Extraction Evaluation Exam，意思是血统评定考试。主要用于鉴定学生的龙族血统，龙族血裔对于‘龙文’会有共鸣，共鸣时会产生‘灵视’的效果，也就是自然而然会看见龙族文字浮现在脑海里。”芬格尔跟路明非解释，“这能力对龙族血裔非常重要。龙族血裔有被称作‘言灵’的超自然能力，在他的‘领域’内，他以龙文说出的话将成为一种规则。因此‘语言’是龙族发挥能力的工具，对龙文不敏感的学生通常能力不足，经过3E就要降级，太差的勒令退学。”\r",
+        "\t“我是被拐卖来的好不好？还勒令退学？”路明非说。\r",
+        "\t“那就洗个脑被扫地出门咯，你入学时签了保密协议的，而且你现在回家大概只有复读吧？”\r",
+        "\t“那是霸王条款啊！他用拉丁文写的，鬼才读得懂！”\r",
+        "\t这抱怨古德里安教授听不到了。老家伙对于路明非无法和龙文共鸣觉得一筹莫展，声称自己遇见了学术上的难题，往图书馆查资料去了。\r",
+        "\t宿舍里安静起来，窗户开着，路明非坐在铺上，看着窗外一轮漂亮的圆月，月光投射在教堂尖顶的红瓦上，舒爽的夜风幽幽地吹在他的身上。真是个漂亮的地方，不过明天就要被扫地出门了。\r",
+        "\t“洗脑其实蛮好玩的。”芬格尔吊死鬼似的从上铺垂下脑袋来。\r",
+        "\t“没洗过，很快就可以尝试了，好开心。”路明非超淡定。\r",
+        "\t他猜芬格尔想吓唬他，最好的反击就给他看一张扑克脸。好比晚饭时路鸣泽忽然眉飞色舞地跟路明非说，我今天看见陈雯雯和二班一个帅哥逛书店咯，陈雯雯笑得可开心了。路明非就会摆出一张木愣愣的脸说，what？兄台你在跟我说话么？路鸣泽攻不破他的厚脸皮，只能气馁地收拾碗筷退却。\r",
+        "\t“你们中国不是有个哲学家说过，人有痛苦，是因为记性太好。”\r",
+        "\t“不是什么哲学家，《东邪西毒》里欧阳锋说的……洗吧洗吧，我明天铁定挂，早点洗白白回家复读，考不上大学就待业……”路明非没来由地叹了口气。\r",
+        "\t“你刚才叹气嘞。”芬格尔说。\r"
+      ],
+      "rationale": "Exact short-name bytes Guderian occur inside Professor Guderian in the account of the professor researching Lumingfei and dragon text. Same professor; no new psychological or knowledge effects."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-gudelian-1",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 201722,
+          "endByte": 201734,
+          "startLine": 1278,
+          "endLine": 1278,
+          "exactHash": "322edd92346935ed25b194dc2f7382bb950dfa73bbeed37368d453d3ff2ff07e",
+          "prefixHash": "039db737c6f027e065c9d8927167d147cbaa1d30695e97934a0738ff6212c5a0",
+          "suffixHash": "0e9caa7dd4a61fd801dd87d1e131b8d60d3a731a01587aec5f8ac2eb552b8c15",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "古德里安",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-act3-library-professors",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-gudeli-an",
+        "kind": "character",
+        "canonicalName": "古德里安教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-gudelian-1",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 201722,
+            "endByte": 201734,
+            "startLine": 1278,
+            "endLine": 1278,
+            "exactHash": "322edd92346935ed25b194dc2f7382bb950dfa73bbeed37368d453d3ff2ff07e",
+            "prefixHash": "039db737c6f027e065c9d8927167d147cbaa1d30695e97934a0738ff6212c5a0",
+            "suffixHash": "0e9caa7dd4a61fd801dd87d1e131b8d60d3a731a01587aec5f8ac2eb552b8c15",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "古德里安",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-act3-library-professors",
+          "confidence": 0.99
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t沮丧如山般沉重，恺撒掌握学生会以来，他们一直是“自由一日”的赢家，在恺撒的领导下，学生会终于成为可以和卡塞尔学院最传统的兄弟会“狮心会”抗衡的社团，即使出现了被称作“超A”级的楚子航，也没能从他们手中夺走诺顿馆，而现在他们不可思议地输在一个新生手上。\r",
+        "\t“我们没输，这是一场可耻的黑枪战争！”一名资深委员说，“我们不该出让诺顿馆！”\r",
+        "\t群情激奋起来，委员们交头接耳，实在输得太冤枉了。\r",
+        "\t“停！”恺撒举手，他的声音威严，压下了会议厅里的喧嚣。\r",
+        "\t“我从来拒绝和懦夫说话，懦夫们才会拒绝承认自己的失败。”恺撒冰蓝色眼睛里全无表情，“今天我不想讨论失败的原因，路明非，‘S’级新生，来自中国，两枪击中了我和楚子航，作为第三方赢得了今年的‘自由一日’。要尊重游戏规则，按照游戏规则我们输了，狮心会保持了沉默，说明楚子航接受结果，你们不如楚子航么？”\r",
+        "\t“我已经租下了隔壁的‘安珀馆’，作为明年学生会的活动地，把我们的东西搬走，这里从午夜12点开始就属于路明非了。”恺撒起身为自己倒了一杯干邑，“路明非应该正为明天的3E考试准备吧？你们觉得他能通过么？”\r",
+        "\t“恺撒你是说？”\r",
+        "\t“刚才校园新闻网爆出一条新闻，‘S’级新生路明非对于‘言灵·皇帝’没有共鸣。”恺撒低声说。\r",
+        "\t静了一瞬以后，每个委员眼里都闪过惊喜的表情。\r",
+        "\t“3E考试的结果会告诉我们路明非的潜力有多大。如果他通不过，是会被降级的。对言灵没有共鸣，怎么通过3E考试？”恺撒环顾所有人，“我很期待，我想楚子航也一样期待。诺诺，你觉得路明非怎么样？”\r",
+        "\t“那个废柴的话？可能会直接降到‘Z’，如果有‘Z’这个级别的话。”诺诺靠在墙上，漫不经心地说。\r",
+        "\t所有委员都相视而笑，3E考试是第一道门槛，令所有新生惴惴不安。路明非要笑还不那么容易，通不过考试，他的阶级会直降，BCDEF，那时他会被整个学院看作笑话。一只羊如果披着狮子皮混进狮子群里，又被揭穿了身份，简直让人不忍想象他的下场。\r",
+        "\t恺撒却没有笑，而是低头抚摸着自己的心口，那是路明非一枪命中的地方。\r",
+        "\t“考试的缩写是EEE，拼写是Extraction Evaluation Exam，意思是血统评定考试。主要用于鉴定学生的龙族血统，龙族血裔对于‘龙文’会有共鸣，共鸣时会产生‘灵视’的效果，也就是自然而然会看见龙族文字浮现在脑海里。”芬格尔跟路明非解释，“这能力对龙族血裔非常重要。龙族血裔有被称作‘言灵’的超自然能力，在他的‘领域’内，他以龙文说出的话将成为一种规则。因此‘语言’是龙族发挥能力的工具，对龙文不敏感的学生通常能力不足，经过3E就要降级，太差的勒令退学。”\r",
+        "\t“我是被拐卖来的好不好？还勒令退学？”路明非说。\r",
+        "\t“那就洗个脑被扫地出门咯，你入学时签了保密协议的，而且你现在回家大概只有复读吧？”\r",
+        "\t“那是霸王条款啊！他用拉丁文写的，鬼才读得懂！”\r",
+        "\t这抱怨古德里安教授听不到了。老家伙对于路明非无法和龙文共鸣觉得一筹莫展，声称自己遇见了学术上的难题，往图书馆查资料去了。\r",
+        "\t宿舍里安静起来，窗户开着，路明非坐在铺上，看着窗外一轮漂亮的圆月，月光投射在教堂尖顶的红瓦上，舒爽的夜风幽幽地吹在他的身上。真是个漂亮的地方，不过明天就要被扫地出门了。\r",
+        "\t“洗脑其实蛮好玩的。”芬格尔吊死鬼似的从上铺垂下脑袋来。\r",
+        "\t“没洗过，很快就可以尝试了，好开心。”路明非超淡定。\r",
+        "\t他猜芬格尔想吓唬他，最好的反击就给他看一张扑克脸。好比晚饭时路鸣泽忽然眉飞色舞地跟路明非说，我今天看见陈雯雯和二班一个帅哥逛书店咯，陈雯雯笑得可开心了。路明非就会摆出一张木愣愣的脸说，what？兄台你在跟我说话么？路鸣泽攻不破他的厚脸皮，只能气馁地收拾碗筷退却。\r",
+        "\t“你们中国不是有个哲学家说过，人有痛苦，是因为记性太好。”\r",
+        "\t“不是什么哲学家，《东邪西毒》里欧阳锋说的……洗吧洗吧，我明天铁定挂，早点洗白白回家复读，考不上大学就待业……”路明非没来由地叹了口气。\r",
+        "\t“你刚才叹气嘞。”芬格尔说。\r"
+      ],
+      "rationale": "Independent existing observation of the same short-name occurrence inside Professor Guderian. Resolve separately while preserving both observation IDs and provenance."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-guderian",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 495502,
+          "endByte": 495520,
+          "startLine": 3123,
+          "endLine": 3123,
+          "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+          "prefixHash": "ec575b32e4f2e6f6d8fc0641d292388515a572d295e5f5cf60227d5bf0aa629c",
+          "suffixHash": "e0b0dba508c1204ee5181fefe1c7bef3017c012e6793e5a5d5ba18e28fc54a3d",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "古德里安教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-church-c",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-gudeli-an",
+        "kind": "character",
+        "canonicalName": "古德里安教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-guderian",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 495502,
+            "endByte": 495520,
+            "startLine": 3123,
+            "endLine": 3123,
+            "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+            "prefixHash": "ec575b32e4f2e6f6d8fc0641d292388515a572d295e5f5cf60227d5bf0aa629c",
+            "suffixHash": "e0b0dba508c1204ee5181fefe1c7bef3017c012e6793e5a5d5ba18e28fc54a3d",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "古德里安教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-church-c",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "char-gudeli-an",
+            "entityKind": "character",
+            "canonicalName": "古德里安教授",
+            "matchedText": "古德里安教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“没事。恺撒那边就要开始了，这里应该也快了。”楚子航在里面说。\r",
+        "\t“你的身体……”\r",
+        "\t“很好，没有任何问题。”楚子航打断了她。\r",
+        "\t“C组收到请撤离教堂区域，C组收到请撤离教堂区域。”C组公共频道中传来施耐德教授的声音。\r",
+        "\t“是！”所有人同声回答。\r",
+        "\t他们已经养成了服从的习惯。相比学生会，狮心会和执行部的关系更近，狮心会的成员可以说都是执行部的预备队。\r",
+        "\t“子航！撤离。”苏茜又去敲忏悔室的门。\r",
+        "\t她对这条命令有点不解，教堂是通往三女神层和守夜人所在的钟楼的核心枢纽，本应集中人手警戒。\r",
+        "\t“不，不包括我。”楚子航低声说。\r",
+        "\t“不包括你？”苏茜愣住了，“是通过公共频道对所有人下达命令的。”\r",
+        "\t“C组收到请立即撤离教堂区域，不包括楚子航。”施耐德教授的声音再次响起，楚子航似乎对于这条命令早有预期。\r",
+        "\t“这条命令仅仅针对不需要参加教堂战斗的人。”楚子航说，“苏茜，撤离。”\r",
+        "\t楚子航从帘子后伸出手来，紧紧握了一把苏茜的手腕，他的手白皙、修长、温暖，而且有力。\r",
+        "\t“别担心，不出意外，过两个小时我们可以一起吃宵夜。”楚子航说。\r",
+        "\t“这是一个约定么。”苏茜把手覆在楚子航的手上。\r",
+        "\t“是。”\r",
+        "\t施耐德教授盯着大屏幕，代表C组的光点撤离了教堂，沉重地叹了口气。\r",
+        "\t“留楚子航一个人在那里？”古德里安教授对这个命令很吃惊，“对于一个二年级学生来说，责任太大了！”\r",
+        "\t“楚子航的导师是谁？”施耐德问。\r",
+        "\t“你啊。”\r",
+        "\t“对，我是楚子航的导师，”施耐德点了点头，“所以我知道自己学生的能力，‘戒律’已经被解除，学生们的言灵被解封了。他们是群草原上的野马了，有无限可能。”\r",
+        "\t“楚子航的言灵……是什么？”古德里安意识到了什么。\r",
+        "\t施耐德迟了一瞬，口气变得极其冷硬：“言灵档案只有学生的导师和校长有权查阅，你们没有资格问这件事！”\r",
+        "\t“楚子航的言灵……很危险？”曼施坦因站在施耐德背后，把手搭在他肩上，目光森严，“你让C组其他人撤离那里，是不希望别人知道楚子航的言灵。那些人都是狮心会的人，不会轻易泄露秘密，但是你仍旧不希望他们知道楚子航的言灵……因为它很危险，是么？”\r",
+        "\t“重复一次，你们无权过问！”施耐德面无表情。\r"
+      ],
+      "rationale": "Professor Guderian addresses Schneider about leaving Chu at the church in the continuing command-room scene. Same named faculty member, distinct from Schneider and Manshtein."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m_guderian",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 696965,
+          "endByte": 696983,
+          "startLine": 4467,
+          "endLine": 4467,
+          "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+          "prefixHash": "250212e734c696a3ed7c987387efc53a41932eb3b8135f17194747ab23d85011",
+          "suffixHash": "f1e6b2c9e23d9617fc3b6559204a018df92363a7867701a69620bc7245c4626d",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "古德里安教授",
+        "form": "title",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds_remote_support",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-gudeli-an",
+        "kind": "character",
+        "canonicalName": "古德里安教授",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "endByte": 103369,
+              "startLine": 335,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m_guderian",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 696965,
+            "endByte": 696983,
+            "startLine": 4467,
+            "endLine": 4467,
+            "exactHash": "3f5f623dad6c607e3cf990b7fe8649d2c9a9e2f6e02fd48c44eeb27ae381096d",
+            "prefixHash": "250212e734c696a3ed7c987387efc53a41932eb3b8135f17194747ab23d85011",
+            "suffixHash": "f1e6b2c9e23d9617fc3b6559204a018df92363a7867701a69620bc7245c4626d",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "古德里安教授",
+          "form": "title",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds_remote_support",
+          "confidence": 1
+        },
+        "candidates": [
+          {
+            "entityId": "char-gudeli-an",
+            "entityKind": "character",
+            "canonicalName": "古德里安教授",
+            "matchedText": "古德里安教授",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t这个声音同时爆响在摩尼亚赫号的前舱，所有人都惊呆了。\r",
+        "\t“这……”恺撒从自己的位置冲到操作台前。\r",
+        "\t曼施坦因死死按着额头，他的脑海里，蛇群躁动。从科学的角度，“蛇”是一种生物电流，叶胜曾经用“蛇”直连摩尼亚赫号的无线电设备。而对于拥有“蛇”的曼施坦因而言，这群空虚之蛇是他忠诚的部属，只听从他的命令。\r",
+        "\t但是现在蛇群失控了！“蛇”高速地返回，瞬间进入他的意识里。路明非的声音则不仅仅在扩音器中，也在他的脑海中回荡。\r",
+        "\t他竭力对“蛇”下令，但是没有效果。\r",
+        "\t“蛇”在传递信号，而他，充当了路明非和摩尼亚赫号之间的中转站。某个不可思议的命令被下达，曼施坦因的言灵之力被强行征用！\r",
+        "\t“这是……作弊吧？”他想说。\r",
+        "\t这种能力超越了任何已知的规则。\r",
+        "\t屏幕上从路明非那里传回的信息完全显示出来，那是一张青铜城的地图！\r",
+        "\t“芬格尔！快把以前那份地图调出来！找出现在的位置！我们迷路了，在龙王家里迷路了！”路明非每一次喊叫对于曼施坦因而言都是脑海中的雷鸣，把他震得瘫软在椅子里。\r",
+        "\t“等等等等！我得……我得打印！”芬格尔在校园新闻网那间堆满计算机的办公室里暴走，对着麦克风咆哮。\r",
+        "\t他身边原本昏昏欲睡的狗仔们都惊醒了，狗仔们本来等待着把中国传回的新闻及时地放到网上去。\r",
+        "\t“打印！找幻灯片！给我打印！”芬格尔在计算机中间跳脚。\r",
+        "\t狗仔队发挥了新闻工作者的极限速度和敬业精神，两张打印出来的透明幻灯片迅速地递到芬格尔手上。芬格尔把两张片子叠合，举起来靠近灯光。\r",
+        "\t“芬格尔你怎么会在频道里？”恺撒大声质问，“你侵入了保密频道，这是违反校规的！”\r",
+        "\t“歇会儿三年级！我要是不侵入频道，你女朋友就得和我的废柴师弟一起死了！”芬格尔一反常态地强硬。\r",
+        "\t恺撒立刻闭嘴。\r",
+        "\t“别管校规了！找出位置！芬格尔你的魔动机械是满分，你没问题的！”古德里安教授的声音出现在频道里，这老家伙在图书馆的控制室里和芬格尔一样跳脚，好似脚上装了弹簧。\r",
+        "\t“闭嘴！我在看在看在看！”芬格尔满头冷汗。\r",
+        "\t“再加快！”恺撒再次接入，“曼施坦因教授快到极限了。”\r",
+        "\t“收到！”芬格尔咬着牙，脸色狰狞，“听着，废柴！你现在所在的位置，是直径大约2米的圆形通道，你刚经过了一处水闸，之前有很多转轮。对么？”\r",
+        "\t“对的！”\r",
+        "\t“我分析出来了，按照魔动机械学的原理，青铜城的运转和前一次没什么区别，只是运转的方向反了。你上过炼金化学课的导论，炼金术的标志是五芒星，在古代，巫师们举行‘火之召唤’的仪式，是从上方向右下开始画五芒星，而反过来从右下往上画五芒星，则是‘火之驱逐’。现在青铜城运转的模式应该是后一种，是自我毁灭的方式。”\r",
+        "\t“现在是上课的时候么？”路明非惨叫，“师兄你脑子要清醒一点啊！”\r",
+        "\t“我跟你说原理是让你相信我！这座城运转下去会彻底完蛋，要尽快脱出！前方向下，会有一眼方井，它在几分钟内会收缩消失，那是你的路！下一步我很快告诉你！”芬格尔坐在电脑前，按着键盘，“必须诺玛的支持……妈的我只有‘F’级权限！”\r"
+      ],
+      "rationale": "The narrator names Professor Guderian speaking on the channel from the library control room with Fingel. Link the same professor without placing him aboard Monigar or adding remote effects."
+    }
+  ],
+  "identityIntroduction": {
+    "startLine": 111,
+    "endLine": 112,
+    "context": [
+      "\t请您在收到这封信的第一时间联系我校古德里安教授，他正在中国进行一次学术访问，将会安排对您的面试。\r",
+      "\t有如何疑问，也请联系古德里安教授。我会协助他为您提供服务，我是卡塞尔学院的学院秘书诺玛·劳恩斯，非常高兴认识您。\r"
+    ]
+  },
+  "ledgers": [],
+  "legacyOrigins": [
+    "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+    "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+    "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+    "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+    "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae"
+  ],
+  "legacyPolicy": "Existing completed observation checkpoints without modern receipts are readable under docs/agent-tool-recovery.md; do not synthesize, replace or certify their missing receipts. All new resolution proposals require a verified completed finish. Initial preflight stopped before any proposal mutation.",
+  "originalReceipts": [],
+  "reason": "Seven individually reviewed references identify the same Professor Guderian through the admission contact, travel dialogue, explicit train recognition and faculty command-room contexts. The two observations at line 1278 are retained separately, not deduplicated. Preserve letter attribution and remote-versus-local participation; do not add locations, goals, knowledge, capabilities or event effects. No relevant original deferral was found, and all unrelated deferrals, observations, canonical artifacts, receipt histories, accounting and checkpoints remain intact."
+}

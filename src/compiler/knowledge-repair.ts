@@ -16,6 +16,7 @@ const planSchema = z.object({
   predecessorBatchId: idSchema, predecessorFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   reviewRef: z.string().min(1), events: z.array(canonicalEventSchema).min(1).max(4),
   quotationIds: z.array(idSchema).min(1).max(16).optional(),
+  requireDirectObservation: z.boolean().optional(),
 }).strict();
 export type KnowledgeRepairPlan = z.infer<typeof planSchema>;
 export const isKnowledgeRepairBatch = (source: string, batch: string) => batch.startsWith(`reconcile-${source}-knowledge-effects-`);
@@ -78,6 +79,7 @@ export function knowledgeRepairScopeIssues(plan: KnowledgeRepairPlan, proposals:
       }
       for (const op of after?.operations ?? []) {
         if (op.op === "learn") {
+          if (plan.requireDirectObservation && !(before?.operations ?? []).some(old => contentHash(old) === contentHash(op)) && (op.acquisitionMode !== "observed" || op.attributionId || op.sourceActorId)) issues.push(`${id}: host scope requires direct observation; do not substitute nearby dialogue or relabel attributed reports. Stop for host source review.`);
           if (!(before?.operations ?? []).some(old => contentHash(old) === contentHash(op)) && (!op.propositionId || !op.acquisitionMode)) issues.push(`${id}: knowledge repair requires propositionId and explicit acquisitionMode.`);
           reachable.add(`claim:${op.claimId}`);
           if (op.propositionId) reachable.add(`proposition:${op.propositionId}`);
@@ -140,6 +142,7 @@ Use the typed tool input schema: omit raw EvidenceRef fields and supply evidence
 Unlike the older bounded prompt, this scope explicitly permits NEW claim, proposition and attribution proposals required by the target's knowledge acquisition. Discover existing dependencies first and reuse exact IDs. Only dependencies transitively referenced by observedKnowledge are allowed; existing dependencies, entities, annotations, scenes and all other event fields are read-only. No new character, scene, rule, goal, state effect or checkpoint. Preserve every established event field and knowledge operation. A missing trace/entity requires a precise capability-gap report, never fabrication or widening authority.
 A claim describes base-world semantic content, never 'X knows Y'. A proposition is content, not world truth. Hearing a report does not prove its content. Each new learn operation requires claimId, propositionId and acquisitionMode. told additionally requires sourceActorId and attributionId; use source-grounded attribution quotationIds, actual speaker/addressee and the exact content covered by the quotation anchor. Do not extend a short quotation anchor to uncited neighboring statements. Choose knowledge status/confidence justified by the text, not the audit percentage. Do not propagate narrator knowledge or information to absent actors. All normal evidence, semantic, quotation trace and commit validation still apply.
 When plan.quotationIds is present, only those host-reviewed quotations belong to the target event's acquisition. Other quotations in the segment are read-only context; do not import earlier dialogue as a new outcome. Receiving a translation is not gaining fluency or an ability to understand the original language.
+When plan.requireDirectObservation is true, new acquisitions must use observed without attributionId or sourceActorId. Read the target event's own sensory evidence; neighboring dialogue and later reports are not that event's direct observation. If no supported observation exists, report the precise gap and stop for host source review.
 Every proposal_id must end with -${batch}. Keep the logical event ID. A never-staged failed call permits one concrete correction using the SAME proposal_id. Successful draft IDs are immutable; do not overwrite or revive them. For a defective successful draft, validate its justified successor and withdraw only the exact predecessor, preserving unrelated drafts. If host review is required or the corrected call fails again, stop without changing IDs, batch, plan or namespace.
 Finish through finish_compiler_batch with reviewed_segments=[], all active proposal IDs, and target_reviews exactly once for each event:<event-id>. Use disposition=proposed when the event has a proposal, otherwise unsupported or capability-gap with exact evidence_segment_ids and a source-grounded summary. Use outcome=complete only with proposals, otherwise no-artifacts. Dependencies do not require separate target reports. Deferrals remain awaiting host review; a finish receipt does not certify semantic readiness. Do not remove valid proposals or effects to make finish pass.
 <knowledge-repair-context>

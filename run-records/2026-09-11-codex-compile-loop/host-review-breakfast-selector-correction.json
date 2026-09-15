@@ -1,0 +1,1865 @@
+{
+  "reviewedAt": "2026-09-13T18:29:46.732Z",
+  "history": [
+    {
+      "tool": "propose_canonical_event",
+      "proposalId": "event-breakfast-host-checkpoints-v1",
+      "inputHash": "c0bf74da4d4b57c0e42c4f130315ce1d1c63ded024830f46b38793bfe1727817",
+      "input": {
+        "proposal_id": "event-breakfast-host-checkpoints-v1",
+        "payload": {
+          "id": "event-breakfast-meeting-00004",
+          "title": "古德里安教授在丽晶酒店早餐会见路明非一家",
+          "readerSummary": "次日上午，古德里安教授在丽晶酒店的VIP餐吧与路明非一家见面，并由叶胜和酒德亚纪陪同。会面使学院对路明非的招募从面试后的安排变成了面对面的接触。",
+          "participants": [
+            "char-gudeli-an",
+            "char-lumingfei",
+            "char-yesheng",
+            "char-jiudeyaji",
+            "char-shushu",
+            "char-shenshen",
+            "char-lumingze",
+            "loc-lijing-hotel"
+          ],
+          "participantPresence": [
+            {
+              "entityId": "char-gudeli-an",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-lumingfei",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-yesheng",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-jiudeyaji",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shushu",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shenshen",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-lumingze",
+              "mode": "physical"
+            }
+          ],
+          "storyTime": {
+            "kind": "ordinal",
+            "label": "面试次日上午",
+            "orderHint": 4
+          },
+          "narrativeContext": {
+            "layerId": "ds-hotel-breakfast",
+            "discourseOrder": 1,
+            "mode": "scene",
+            "viewpointActorId": "char-lumingfei"
+          },
+          "preconditions": [],
+          "observedOutcome": {
+            "version": 1,
+            "operations": []
+          },
+          "observedKnowledge": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "learn",
+                "actorId": "char-lumingfei",
+                "claimId": "claim-parents-love-00004",
+                "propositionId": "prop-parents-love-00004",
+                "attributionId": "attr-gude-parents-love-00004",
+                "acquisitionMode": "told",
+                "status": "believes",
+                "confidence": 1,
+                "sourceActorId": "char-gudeli-an"
+              }
+            ]
+          },
+          "sceneOccurrenceIds": [
+            "scene-breakfast-00004"
+          ],
+          "causalParents": [],
+          "confidence": 0.99,
+          "characterEntryCheckpoints": [
+            {
+              "actorId": "char-gudeli-an",
+              "readerSetup": "面试次日上午，路明非一家已在丽晶酒店九楼VIP餐吧等候，古德里安与叶胜、酒德亚纪刚到。这是教授走到桌边打招呼之前，尚未发生本次会面的介绍和说明。",
+              "actorObservation": "你与叶胜、酒德亚纪一起来到丽晶酒店九楼餐吧，准备走向路明非一家所在的桌边。",
+              "participantPresence": [
+                {
+                  "entityId": "char-gudeli-an",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shushu",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shenshen",
+                  "mode": "physical"
+                }
+              ],
+              "delta": {
+                "version": 1,
+                "operations": [
+                  {
+                    "op": "set",
+                    "entityId": "char-gudeli-an",
+                    "field": "character.location",
+                    "value": "loc-lijing-hotel"
+                  }
+                ]
+              }
+            },
+            {
+              "actorId": "char-shushu",
+              "readerSetup": "面试次日上午，路明非一家已在丽晶酒店九楼VIP餐吧等候，古德里安与叶胜、酒德亚纪刚到。这是教授走到桌边打招呼之前，尚未发生本次会面的介绍和说明。",
+              "actorObservation": "你已坐在丽晶酒店餐吧的桌边，路明非在你和婶婶之间。",
+              "participantPresence": [
+                {
+                  "entityId": "char-gudeli-an",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shushu",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shenshen",
+                  "mode": "physical"
+                }
+              ],
+              "delta": {
+                "version": 1,
+                "operations": [
+                  {
+                    "op": "set",
+                    "entityId": "char-shushu",
+                    "field": "character.location",
+                    "value": "loc-lijing-hotel"
+                  }
+                ]
+              }
+            },
+            {
+              "actorId": "char-shenshen",
+              "readerSetup": "面试次日上午，路明非一家已在丽晶酒店九楼VIP餐吧等候，古德里安与叶胜、酒德亚纪刚到。这是教授走到桌边打招呼之前，尚未发生本次会面的介绍和说明。",
+              "actorObservation": "你已在丽晶酒店餐吧的桌边，正在四下打量这个场所，路明非在你和叔叔之间。",
+              "participantPresence": [
+                {
+                  "entityId": "char-gudeli-an",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shushu",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shenshen",
+                  "mode": "physical"
+                }
+              ],
+              "delta": {
+                "version": 1,
+                "operations": [
+                  {
+                    "op": "set",
+                    "entityId": "char-shenshen",
+                    "field": "character.location",
+                    "value": "loc-lijing-hotel"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00004-f50b153c1580"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/storyTime",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。",
+            "target_path": "/participants",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "古德里安教授清了清嗓子，忽然看着路明非的眼睛，用无比深情的语调和不太标准的发音说，",
+            "target_path": "/observedKnowledge/operations/0/sourceActorId",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“明非，爸爸妈妈爱你。”",
+            "target_path": "/observedKnowledge/operations/0/attributionId",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "路明非相信的，在纸上看到的时候他其实没什么感觉，可是从古德里安教授嘴里说出来，他忽然就相信了。",
+            "target_path": "/observedKnowledge/operations/0/status",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "路明非相信的，在纸上看到的时候他其实没什么感觉，可是从古德里安教授嘴里说出来，他忽然就相信了。",
+            "target_path": "/observedKnowledge/operations/0/confidence",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/0/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/0/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/0/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/0/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/0/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/0/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/0/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/0/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/0/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/0/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/0/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/0/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/0/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/0/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/0/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/0/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/1/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/1/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/1/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/1/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/1/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/1/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/1/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/1/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/1/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/1/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/1/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/1/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/1/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/1/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/1/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/1/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/2/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/2/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/2/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/2/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/2/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/2/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/2/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/2/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/2/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/2/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/2/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/2/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/2/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/2/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/2/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/2/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          }
+        ]
+      },
+      "status": "running",
+      "diagnostic": "Tool result not yet verified; interrupted calls require host inspection before retry.",
+      "updatedAt": "2026-09-13T18:27:44.988Z"
+    },
+    {
+      "tool": "propose_canonical_event",
+      "proposalId": "event-breakfast-host-checkpoints-v1",
+      "inputHash": "c0bf74da4d4b57c0e42c4f130315ce1d1c63ded024830f46b38793bfe1727817",
+      "input": {
+        "proposal_id": "event-breakfast-host-checkpoints-v1",
+        "payload": {
+          "id": "event-breakfast-meeting-00004",
+          "title": "古德里安教授在丽晶酒店早餐会见路明非一家",
+          "readerSummary": "次日上午，古德里安教授在丽晶酒店的VIP餐吧与路明非一家见面，并由叶胜和酒德亚纪陪同。会面使学院对路明非的招募从面试后的安排变成了面对面的接触。",
+          "participants": [
+            "char-gudeli-an",
+            "char-lumingfei",
+            "char-yesheng",
+            "char-jiudeyaji",
+            "char-shushu",
+            "char-shenshen",
+            "char-lumingze",
+            "loc-lijing-hotel"
+          ],
+          "participantPresence": [
+            {
+              "entityId": "char-gudeli-an",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-lumingfei",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-yesheng",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-jiudeyaji",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shushu",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shenshen",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-lumingze",
+              "mode": "physical"
+            }
+          ],
+          "storyTime": {
+            "kind": "ordinal",
+            "label": "面试次日上午",
+            "orderHint": 4
+          },
+          "narrativeContext": {
+            "layerId": "ds-hotel-breakfast",
+            "discourseOrder": 1,
+            "mode": "scene",
+            "viewpointActorId": "char-lumingfei"
+          },
+          "preconditions": [],
+          "observedOutcome": {
+            "version": 1,
+            "operations": []
+          },
+          "observedKnowledge": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "learn",
+                "actorId": "char-lumingfei",
+                "claimId": "claim-parents-love-00004",
+                "propositionId": "prop-parents-love-00004",
+                "attributionId": "attr-gude-parents-love-00004",
+                "acquisitionMode": "told",
+                "status": "believes",
+                "confidence": 1,
+                "sourceActorId": "char-gudeli-an"
+              }
+            ]
+          },
+          "sceneOccurrenceIds": [
+            "scene-breakfast-00004"
+          ],
+          "causalParents": [],
+          "confidence": 0.99,
+          "characterEntryCheckpoints": [
+            {
+              "actorId": "char-gudeli-an",
+              "readerSetup": "面试次日上午，路明非一家已在丽晶酒店九楼VIP餐吧等候，古德里安与叶胜、酒德亚纪刚到。这是教授走到桌边打招呼之前，尚未发生本次会面的介绍和说明。",
+              "actorObservation": "你与叶胜、酒德亚纪一起来到丽晶酒店九楼餐吧，准备走向路明非一家所在的桌边。",
+              "participantPresence": [
+                {
+                  "entityId": "char-gudeli-an",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shushu",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shenshen",
+                  "mode": "physical"
+                }
+              ],
+              "delta": {
+                "version": 1,
+                "operations": [
+                  {
+                    "op": "set",
+                    "entityId": "char-gudeli-an",
+                    "field": "character.location",
+                    "value": "loc-lijing-hotel"
+                  }
+                ]
+              }
+            },
+            {
+              "actorId": "char-shushu",
+              "readerSetup": "面试次日上午，路明非一家已在丽晶酒店九楼VIP餐吧等候，古德里安与叶胜、酒德亚纪刚到。这是教授走到桌边打招呼之前，尚未发生本次会面的介绍和说明。",
+              "actorObservation": "你已坐在丽晶酒店餐吧的桌边，路明非在你和婶婶之间。",
+              "participantPresence": [
+                {
+                  "entityId": "char-gudeli-an",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shushu",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shenshen",
+                  "mode": "physical"
+                }
+              ],
+              "delta": {
+                "version": 1,
+                "operations": [
+                  {
+                    "op": "set",
+                    "entityId": "char-shushu",
+                    "field": "character.location",
+                    "value": "loc-lijing-hotel"
+                  }
+                ]
+              }
+            },
+            {
+              "actorId": "char-shenshen",
+              "readerSetup": "面试次日上午，路明非一家已在丽晶酒店九楼VIP餐吧等候，古德里安与叶胜、酒德亚纪刚到。这是教授走到桌边打招呼之前，尚未发生本次会面的介绍和说明。",
+              "actorObservation": "你已在丽晶酒店餐吧的桌边，正在四下打量这个场所，路明非在你和叔叔之间。",
+              "participantPresence": [
+                {
+                  "entityId": "char-gudeli-an",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shushu",
+                  "mode": "physical"
+                },
+                {
+                  "entityId": "char-shenshen",
+                  "mode": "physical"
+                }
+              ],
+              "delta": {
+                "version": 1,
+                "operations": [
+                  {
+                    "op": "set",
+                    "entityId": "char-shenshen",
+                    "field": "character.location",
+                    "value": "loc-lijing-hotel"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00004-f50b153c1580"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/storyTime",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。",
+            "target_path": "/participants",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "古德里安教授清了清嗓子，忽然看着路明非的眼睛，用无比深情的语调和不太标准的发音说，",
+            "target_path": "/observedKnowledge/operations/0/sourceActorId",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“明非，爸爸妈妈爱你。”",
+            "target_path": "/observedKnowledge/operations/0/attributionId",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "路明非相信的，在纸上看到的时候他其实没什么感觉，可是从古德里安教授嘴里说出来，他忽然就相信了。",
+            "target_path": "/observedKnowledge/operations/0/status",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "路明非相信的，在纸上看到的时候他其实没什么感觉，可是从古德里安教授嘴里说出来，他忽然就相信了。",
+            "target_path": "/observedKnowledge/operations/0/confidence",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/0/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/0/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/0/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/0/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/0/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/0/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/0/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/0/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/0/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/0/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/0/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/0/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/0/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/0/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/0/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/0/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/1/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/1/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/1/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/1/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/1/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/1/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/1/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/1/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/1/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/1/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/1/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/1/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/1/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/1/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/1/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/1/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/2/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/2/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/2/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/2/readerSetup",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/2/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/2/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/2/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/2/actorObservation",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/2/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/2/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/2/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/2/participantPresence",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "次日上午，丽晶酒店。",
+            "target_path": "/characterEntryCheckpoints/2/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+            "target_path": "/characterEntryCheckpoints/2/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+            "target_path": "/characterEntryCheckpoints/2/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+            "target_path": "/characterEntryCheckpoints/2/delta",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+          }
+        ]
+      },
+      "status": "failed",
+      "diagnostic": "Evidence selector 4 for target_path '/observedKnowledge/operations/0/attributionId' failed: Exact evidence quote is ambiguous in segment a28585b1cf867f3e3a16-00004-f50b153c1580: 2 occurrences match. Supply prefix/suffix or a one-based occurrence.",
+      "updatedAt": "2026-09-13T18:27:45.200Z"
+    }
+  ],
+  "anchor": {
+    "version": 1,
+    "sourceId": "a28585b1cf867f3e3a16",
+    "startByte": 63275,
+    "endByte": 63311,
+    "startLine": 397,
+    "endLine": 397,
+    "exactHash": "7947fe142c827cbc86d2953c43957cda484a913eb8319067f132f0e9b8561f6f",
+    "prefixHash": "fceb1af9abb8d177a83c6998b7b98c284a41e39967aa71429ac5d90b5f097c0f",
+    "suffixHash": "7dbcdb881a5f73c2ee82617d5082394f2e0bc0b6377ebef1f60f742b2173acec",
+    "contextBytes": 64,
+    "normalization": "source-bytes-v1"
+  },
+  "positions": [
+    63275,
+    64445
+  ],
+  "occurrence": 1,
+  "input": {
+    "proposal_id": "event-breakfast-host-checkpoints-v1",
+    "payload": {
+      "id": "event-breakfast-meeting-00004",
+      "title": "古德里安教授在丽晶酒店早餐会见路明非一家",
+      "readerSummary": "次日上午，古德里安教授在丽晶酒店的VIP餐吧与路明非一家见面，并由叶胜和酒德亚纪陪同。会面使学院对路明非的招募从面试后的安排变成了面对面的接触。",
+      "participants": [
+        "char-gudeli-an",
+        "char-lumingfei",
+        "char-yesheng",
+        "char-jiudeyaji",
+        "char-shushu",
+        "char-shenshen",
+        "char-lumingze",
+        "loc-lijing-hotel"
+      ],
+      "participantPresence": [
+        {
+          "entityId": "char-gudeli-an",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-lumingfei",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-yesheng",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-jiudeyaji",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-shushu",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-shenshen",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-lumingze",
+          "mode": "physical"
+        }
+      ],
+      "storyTime": {
+        "kind": "ordinal",
+        "label": "面试次日上午",
+        "orderHint": 4
+      },
+      "narrativeContext": {
+        "layerId": "ds-hotel-breakfast",
+        "discourseOrder": 1,
+        "mode": "scene",
+        "viewpointActorId": "char-lumingfei"
+      },
+      "preconditions": [],
+      "observedOutcome": {
+        "version": 1,
+        "operations": []
+      },
+      "observedKnowledge": {
+        "version": 1,
+        "operations": [
+          {
+            "op": "learn",
+            "actorId": "char-lumingfei",
+            "claimId": "claim-parents-love-00004",
+            "propositionId": "prop-parents-love-00004",
+            "attributionId": "attr-gude-parents-love-00004",
+            "acquisitionMode": "told",
+            "status": "believes",
+            "confidence": 1,
+            "sourceActorId": "char-gudeli-an"
+          }
+        ]
+      },
+      "sceneOccurrenceIds": [
+        "scene-breakfast-00004"
+      ],
+      "causalParents": [],
+      "confidence": 0.99,
+      "characterEntryCheckpoints": [
+        {
+          "actorId": "char-gudeli-an",
+          "readerSetup": "面试次日上午，路明非一家已在丽晶酒店九楼VIP餐吧等候，古德里安与叶胜、酒德亚纪刚到。这是教授走到桌边打招呼之前，尚未发生本次会面的介绍和说明。",
+          "actorObservation": "你与叶胜、酒德亚纪一起来到丽晶酒店九楼餐吧，准备走向路明非一家所在的桌边。",
+          "participantPresence": [
+            {
+              "entityId": "char-gudeli-an",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shushu",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shenshen",
+              "mode": "physical"
+            }
+          ],
+          "delta": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "char-gudeli-an",
+                "field": "character.location",
+                "value": "loc-lijing-hotel"
+              }
+            ]
+          }
+        },
+        {
+          "actorId": "char-shushu",
+          "readerSetup": "面试次日上午，路明非一家已在丽晶酒店九楼VIP餐吧等候，古德里安与叶胜、酒德亚纪刚到。这是教授走到桌边打招呼之前，尚未发生本次会面的介绍和说明。",
+          "actorObservation": "你已坐在丽晶酒店餐吧的桌边，路明非在你和婶婶之间。",
+          "participantPresence": [
+            {
+              "entityId": "char-gudeli-an",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shushu",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shenshen",
+              "mode": "physical"
+            }
+          ],
+          "delta": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "char-shushu",
+                "field": "character.location",
+                "value": "loc-lijing-hotel"
+              }
+            ]
+          }
+        },
+        {
+          "actorId": "char-shenshen",
+          "readerSetup": "面试次日上午，路明非一家已在丽晶酒店九楼VIP餐吧等候，古德里安与叶胜、酒德亚纪刚到。这是教授走到桌边打招呼之前，尚未发生本次会面的介绍和说明。",
+          "actorObservation": "你已在丽晶酒店餐吧的桌边，正在四下打量这个场所，路明非在你和叔叔之间。",
+          "participantPresence": [
+            {
+              "entityId": "char-gudeli-an",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shushu",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-shenshen",
+              "mode": "physical"
+            }
+          ],
+          "delta": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "char-shenshen",
+                "field": "character.location",
+                "value": "loc-lijing-hotel"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "evidence_segment_ids": [
+      "a28585b1cf867f3e3a16-00004-f50b153c1580"
+    ],
+    "evidence_selectors": [
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/storyTime",
+        "relation": "supports",
+        "strength": "explicit"
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。",
+        "target_path": "/participants",
+        "relation": "supports",
+        "strength": "explicit"
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "古德里安教授清了清嗓子，忽然看着路明非的眼睛，用无比深情的语调和不太标准的发音说，",
+        "target_path": "/observedKnowledge/operations/0/sourceActorId",
+        "relation": "supports",
+        "strength": "explicit"
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“明非，爸爸妈妈爱你。”",
+        "target_path": "/observedKnowledge/operations/0/attributionId",
+        "relation": "supports",
+        "strength": "explicit",
+        "occurrence": 1
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "路明非相信的，在纸上看到的时候他其实没什么感觉，可是从古德里安教授嘴里说出来，他忽然就相信了。",
+        "target_path": "/observedKnowledge/operations/0/status",
+        "relation": "supports",
+        "strength": "explicit"
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "路明非相信的，在纸上看到的时候他其实没什么感觉，可是从古德里安教授嘴里说出来，他忽然就相信了。",
+        "target_path": "/observedKnowledge/operations/0/confidence",
+        "relation": "supports",
+        "strength": "explicit"
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/0/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/0/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/0/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/0/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/0/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/0/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/0/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/0/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/0/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/0/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/0/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/0/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/0/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/0/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/0/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/0/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/1/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/1/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/1/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/1/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/1/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/1/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/1/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/1/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/1/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/1/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/1/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/1/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/1/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/1/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/1/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/1/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/2/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/2/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/2/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/2/readerSetup",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/2/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/2/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/2/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/2/actorObservation",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/2/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/2/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/2/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/2/participantPresence",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "次日上午，丽晶酒店。",
+        "target_path": "/characterEntryCheckpoints/2/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。",
+        "target_path": "/characterEntryCheckpoints/2/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。",
+        "target_path": "/characterEntryCheckpoints/2/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      },
+      {
+        "segment_id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+        "exact": "“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”",
+        "target_path": "/characterEntryCheckpoints/2/delta",
+        "relation": "supports",
+        "strength": "strong-inference",
+        "interpretation": "Immediate pre-greeting hotel checkpoint: family already seated, professor arriving. Location only; subsequent dialogue and its knowledge remain after the checkpoint."
+      }
+    ]
+  },
+  "reason": "Rebuilding the existing selector from exact text omitted its prior byte position. The quotation occurs twice. Bind the single corrected call to the occurrence at the existing verified anchor, keeping the same tool, proposal ID, payload, segment and every other selector. The original failed obligation remains until normal validation succeeds; a failed correction stops."
+}

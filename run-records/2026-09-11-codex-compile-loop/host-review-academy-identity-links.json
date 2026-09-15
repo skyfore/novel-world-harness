@@ -1,0 +1,1917 @@
+{
+  "reviewedAt": "2026-09-13T19:51:20.508Z",
+  "priorState": {
+    "attempt": 78,
+    "status": "needs-review",
+    "sourceId": "a28585b1cf867f3e3a16",
+    "threadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+    "error": "Automatic preparation stopped at 'repair'. Novel-scale publication requires ready exact-evidence, source-accounting, and identity/event-resolution dimensions; exact evidence=unknown; source accounting=not-ready (0 unaccounted, 600 blocking unit(s)); identity/event resolution=not-ready (422 missing, 12 ambiguous/unresolved mention(s)). Entity mention em-angry-dragon-1 has no current identity-resolution record. Entity mention em-batch20-blood has no current identity-resolution record. Entity mention em-batch20-dragonsculpture has no current identity-resolution record. Entity mention em-batch20-dye has no current identity-resolution record. Entity mention em-batch20-egg has no current identity-resolution record. Entity mention em-blackcard has no current identity-resolution record. Entity mention em-blond-girl-1-v2 has no current identity-resolution record. Entity mention em-boy-b19 has no current identity-resolution record. Entity mention em-bronzeplan-b19 has no current identity-resolution record. Entity mention em-brother-03 has no current identity-resolution record. Entity mention em-burning-03 has no current identity-resolution record. Entity mention em-campus-b19 has no current identity-resolution record. Entity mention em-cassell-03 has no current identity-resolution record. Entity mention em-central has no current identity-resolution record. Entity mention em-chinese-child-1-v2 has no current identity-resolution record. Entity mention em-classmates-1-v2 has no current identity-resolution record. Entity mention em-dashu-00005 has no current identity-resolution record. Entity mention em-dorm303-b19 has no current identity-resolution record. Entity mention em-dragon-03 has no current identity-resolution record. Entity mention em-dragon-1-v2 has no current identity-resolution record. Next diagnostic step: nwh audit --source a28585b1cf867f3e3a16",
+    "reviewedBatchFinished": true,
+    "failureFingerprint": "55e8dd694e8b245baf86998e832f1193ad55ec0a24ff8fab8e2d09fc1f18a5a5",
+    "startedAt": "2026-09-13T19:49:34.365Z",
+    "selectorBatchFinished": true,
+    "semanticRunId": "codex-opening-driver-v1-20260912",
+    "timer": {
+      "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+      "scheduledAt": "2026-09-13T17:41:00.000Z",
+      "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+    },
+    "hostReview": {
+      "path": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+      "reviewedAt": "2026-09-13T16:42:26.692Z",
+      "reason": "User-authorized continuation after verified retrieval fix; original stopped state preserved in review."
+    },
+    "appliedRepair": {
+      "repairId": "source-reviewed-car-council-identity-links-v1",
+      "failureFingerprint": "0b8644091a3568acbd28c7343d9c9ad92d8cdf82891729772d03f4c83eeedf8b",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-car-council-identity-links.json",
+      "appliedAt": "2026-09-13T19:49:19.421Z"
+    },
+    "timerHistory": [
+      {
+        "unit": "nwh-codex-reset-01a0912b-6.timer",
+        "scheduledAt": "2026-09-12T21:08:00.000Z",
+        "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-6.timer\nWill run service as unit: nwh-codex-reset-01a0912b-6.service\n"
+      }
+    ],
+    "quotaResetAnchor": "2026-09-13T17:41:00.000Z",
+    "lifecycleRecovery": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-4",
+      "pending": false,
+      "auditRef": "run-records/2026-09-11-codex-compile-loop/host-review-proposal-lifecycle.json"
+    },
+    "semanticRunHistory": [
+      {
+        "namespace": "codex-target-review-v1-20260912",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-opening-target.json"
+      }
+    ],
+    "reconciliationFocus": "opening-driver",
+    "knowledgeRepair": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-27",
+      "pending": false,
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+      "receiptFingerprint": "16abfa2b45fec0a37972fbd083ad28ca52fd9e70f8604205129a97c9a87bb040",
+      "unresolvedTargets": []
+    },
+    "traceRepair": {
+      "attributionIds": [
+        "attr-schneider-rescue-members-trapped-001",
+        "attr-eva-guigu-00008"
+      ],
+      "failureDiagnostic": "Reviewed quotation content trace failed again: attr-eva-guigu-00008,attr-schneider-rescue-members-trapped-001. Preserve originals and stop for host review.",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-quotation-content.json",
+      "batchId": "host-quotation-content-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "903a92cb36ed290cba6433d312fef304024539521b12f0f87c6a771b0500d3ff"
+    },
+    "knowledgeRepairHistory": [
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-knowledge-dependencies.json",
+        "receiptFingerprint": "a80578bca7684972296b14cdd8260d5f28fa0a1fdb8c9c47c9727c7a7e77a3c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-2",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "receiptFingerprint": "f9682e866aca66a22cf1a01b8dae5a32e523670103a62ea35e910c7c3fdb3436",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-3",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "receiptFingerprint": "eee8c13e7ebba78cb1fb39a8d95f5a1743bd982ec3171298df37e25de903286e",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-4",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "receiptFingerprint": "10fe6b7ffcd87d66b60f006b04fa4bb8900efdca91e38a4a1d03b25d73db8fac",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-5",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "receiptFingerprint": "9b47e05a8d83d08272bf58f01184723c23f0314d60a7e738479bbdcbae48ba4a",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-6",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "receiptFingerprint": "eca4e84675eeff514914668a764197742048ee6134b683d526f9ec822148c450",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-7",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "receiptFingerprint": "20bc8cd95777636285a45fa1612a0de9b588dac75feffd3e105c6b8c33ff8f07",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-8",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "receiptFingerprint": "4176e0f60f80d8da09f44af0cb4e7ab567c7464f80ded678469a00717d6a896d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-9",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "receiptFingerprint": "bb667a3d751e646925b005f469396ae419c4ef89f624f12742915799bfafaacc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-10",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "receiptFingerprint": "14b4e7bbc2093be8d3d86f0356d2eb8c36a71459e1e7f0509e24eeaf71690964",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-11",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "receiptFingerprint": "b860218c84dc36767018908a51fdaaea20f3975e1c1cb48e2c64f993b7105974",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-12",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "receiptFingerprint": "38b480456c192f1dd8cc493b53fc8087e72a7bc9a8c7f64028e25bd6e01d3c18",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-13",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "receiptFingerprint": "ebcc80887c90a45677644d3c7cd72fb4218e8feb3da34ecb2d5c722fd665759b",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-14",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "receiptFingerprint": "099e053d905c7411e6c1424a3507084c7c4640c23983a03d2642edd887afe745",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-15",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "receiptFingerprint": "e42c2b63609e824015b1d2fe60ae58f4cf80ea8d604cd9358998cc3d6a849e34",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-16",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "receiptFingerprint": "adb536f530a54f680b22acdfd55c27718bc788a2fa664b51f2c22f6728a0cecc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-17",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "receiptFingerprint": "23fec246048d47fd7916984f504b736186902a2627a5e271e24b525017a627bb",
+        "unresolvedTargets": [
+          "event-eva-config-001"
+        ]
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-18",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "receiptFingerprint": "e863047b25c119e6058eecaa1c01fea9b747e4e435927889937bd4067ff2b50d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-19",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "receiptFingerprint": "4e0c1388eca6e4942888f91782f8083ad560998996a4d58790111ec1070f784d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-20",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "receiptFingerprint": "fc96a11cf9e398b2aaf242858ce5f366d9f7ee53ad1b9179b761eca25f8c6a5c",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-21",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "receiptFingerprint": "1a66602c8e29aa70646e3ff8f476352b813fefee02e6528f495b22b162ebed32",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-22",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "receiptFingerprint": "66c5ad249e1b4413a6589600f1492b7d7041d659b8497254e7e529d7708a5169",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-23",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "receiptFingerprint": "5ca3cf4cdef33873685dcad3377007e791ba9f88604cf3bc4e0990dfeacdef5d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-24",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "receiptFingerprint": "1fe5dc9570548f6263c6b3014a6cf81c88db1264942385383f515faeda3430c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-25",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "receiptFingerprint": "57d5d7c48051196972e595c7f26b0f98ebbb0c721116e14f23bee07f677b01e9",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-26",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "receiptFingerprint": "d9a2961678b7acafabe33458e5f17b4b1d468370d6b69f3f74d6ed5b78432262",
+        "unresolvedTargets": []
+      }
+    ],
+    "appliedRepairHistory": [
+      {
+        "repairId": "dragontext-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "0be170fea49a866ea1c65fbe8fe8603cee179192f84fee568d777853abc44f63",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "appliedAt": "2026-09-12T18:30:48.769Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dragontext-proposition-object-selector-v1",
+        "failureFingerprint": "45af7b72057ca8627ca38f142736a1edc2484af30b0922c630fbf7a4e03523ed",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-anchor.json",
+        "appliedAt": "2026-09-12T18:37:15.473Z"
+      },
+      {
+        "repairId": "medical-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "d8d6e7cd654c89e070a14645d590c434ad1c952f01b27f5095e119ba6da97398",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "appliedAt": "2026-09-12T18:40:09.287Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "office-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "8ef8899d2276275463db5a56ae28051671b77ed93e721f72501fd01a65c1d2e0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "appliedAt": "2026-09-12T18:47:01.873Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-disclosure-source-grounded-dependencies-v1",
+        "failureFingerprint": "2c8fd49565f406cc3b9d3fabaf11460ff6d57ab72d0ca2fe8d8969a8dd25699f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "appliedAt": "2026-09-12T18:56:17.280Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-identity-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "b2e504d601decd98fcf28b2f03263a9f6837e3211d066def3c42bffc69b24aee",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "appliedAt": "2026-09-12T19:05:58.058Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-listener-and-content-selectors-v1",
+        "failureFingerprint": "d98142ee01a99ba21ccc268302bf3a09ed3c843977a8839ba8b5aef4225a31da",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-selectors.json",
+        "appliedAt": "2026-09-12T19:12:49.583Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "121356ed29262f4b483750da516cc9847495e8e970b9799b98a94a46c2606035",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "appliedAt": "2026-09-12T19:15:57.744Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "confession-quotation-and-knowledge-dependencies-v1",
+        "failureFingerprint": "06944c5fe2fe0476a51c4030301e37e89c1017926aa21fda094e70d29f2830a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "appliedAt": "2026-09-12T19:21:50.468Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "acceptance-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "801e624d68d6772a4af862184fac1ccaf9a7f0ea012ab4c3e1e1441931f35101",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "appliedAt": "2026-09-12T19:29:12.505Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "nono-entry-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "1dfc90a3e4174718919bedc66c7d47b966921b86a71c8390dedd7e3d10c0ec94",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "appliedAt": "2026-09-12T19:36:00.594Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "bend-warning-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "a6f5f754995fe21f6ba5134f90d1f3c666c9a1984ea4e8ad9851fa16cf085994",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "appliedAt": "2026-09-13T12:45:37.230Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "funding-answer-summary-and-knowledge-v1",
+        "failureFingerprint": "2f13c1affa661632fc1f1c0d3d028a919178af358162e575cf4e424e2f38cf67",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "appliedAt": "2026-09-13T12:54:28.250Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "6f5ddff7066f52187dc1d4090ae387d9a808375b020964d71c5beeb9b6c9232d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "appliedAt": "2026-09-13T12:59:21.471Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-document-holder-and-lifecycle-host-v1",
+        "failureFingerprint": "a7c7f0088d27ba49c117896fa5635360b3258cd945a6ca89ab75ccff6bcd708f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-document-correction.json",
+        "appliedAt": "2026-09-13T13:12:44.915Z"
+      },
+      {
+        "repairId": "emergency-call-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "24d033b42a3f33b73a24baabfb743cd5d8a4aab5dcfdb3a946ed376611dcbd7b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "appliedAt": "2026-09-13T13:20:10.161Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "emergency-request-quotation-anchors-v1",
+        "failureFingerprint": "626922bbf53ef32aef6f793771ac4a0340ff4144d094e0cd92718fc1dca9ff80",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-trace.json",
+        "appliedAt": "2026-09-13T13:26:20.468Z"
+      },
+      {
+        "repairId": "exploration-window-source-reviewed-knowledge-v1",
+        "failureFingerprint": "86278ddb0368746eecc0a772333379eed8ee879de047a72cbf557dd1e6affeab",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "appliedAt": "2026-09-13T13:30:18.146Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "exploration-full-projection-and-lifecycle-v1",
+        "failureFingerprint": "91387cb2707fac261925e5485d1f051fbbee51251a14ed7ce5d3b6d6174934f0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-projection.json",
+        "appliedAt": "2026-09-13T13:38:07.647Z"
+      },
+      {
+        "repairId": "nono-follow-source-reviewed-knowledge-v1",
+        "failureFingerprint": "9989a41693d7f8808acdb8f2eecaabbfea496591868b214529a100493a077503",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "appliedAt": "2026-09-13T13:41:24.132Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-interface-source-reviewed-knowledge-v1",
+        "failureFingerprint": "698fc2d0146b8703c3ae7c9b4d63acd82877b507158f9df2698757363af25032",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "appliedAt": "2026-09-13T13:48:58.522Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-quotation-retrieval-protocol-v1",
+        "failureFingerprint": "4b1a08018ec8ee43b8810abcb0286ab2643d17a06a2bbf07fe39ac35c010d508",
+        "failureCause": {
+          "category": "knowledge-not-produced-with-verified-evidence",
+          "targetIds": [
+            "event-eva-config-001"
+          ],
+          "dependencyIds": [
+            "q-eva-interface-click-instruction-00011"
+          ]
+        },
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "appliedAt": "2026-09-13T16:42:27.004Z"
+      },
+      {
+        "repairId": "map-display-source-reviewed-knowledge-v1",
+        "failureFingerprint": "11b736d5e84548b873606ab68338a15fc7717e89eab302fe811d537912347999",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "appliedAt": "2026-09-13T16:47:21.510Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-perception-source-reviewed-knowledge-v1",
+        "failureFingerprint": "c10c9346b27a3308d8f20d9f233edb9a83439a31057a8c6e554464311aadb61a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "appliedAt": "2026-09-13T16:54:36.423Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-direct-observation-scope-v1",
+        "failureFingerprint": "bfea6a8d889103ac8f5f70c43a26f5370f5e538e9e271edd0a287a45d692964c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "appliedAt": "2026-09-13T17:00:48.261Z",
+        "fingerprintBasis": "Verified attempt 36 temporal misattribution, not aggregate percentages"
+      },
+      {
+        "repairId": "duel-limited-observation-source-review-v1",
+        "failureFingerprint": "566b293740da10a7df74104a8ddf06078709571620449fece0312e7cf3a1b5eb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "appliedAt": "2026-09-13T17:06:26.315Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "earthquake-perception-source-review-v1",
+        "failureFingerprint": "2d4bcebfafff2412e9b9340fbad52822729157510e54f84eba2309d721df2b0d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "appliedAt": "2026-09-13T17:10:47.409Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "train-arrival-observation-source-review-v1",
+        "failureFingerprint": "c553169066754cdb8020da447d1ff3a30f30e8f0a3572c32986349e740d91219",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "appliedAt": "2026-09-13T17:15:51.299Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "helicopter-approach-observation-source-review-v1",
+        "failureFingerprint": "a1357fb5e1e649b1d317176279b1f17013fa7469bf64cbda434d4a68161fd4de",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "appliedAt": "2026-09-13T17:20:29.798Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dance-finale-observation-source-review-v1",
+        "failureFingerprint": "d7593d5f5485ea50d2d5cd1d9aaf09e9806758b323c516628c8f1bd3d459b6e2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "appliedAt": "2026-09-13T17:25:26.067Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "caesar-fall-observation-source-review-v1",
+        "failureFingerprint": "b2f54cf53c7298bda4359e70c2e6f8d06c39355bf69e840f373b99e8cf2c1ab7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+        "appliedAt": "2026-09-13T17:29:36.955Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "adams-fragment-required-before-reassembly-v1",
+        "failureFingerprint": "9d0ff292fa191d5375c8aa1d215484bf979385dfdd8597481b9d08796ef03a57",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-adams-causal.json",
+        "appliedAt": "2026-09-13T17:36:02.166Z"
+      },
+      {
+        "repairId": "alarm-gather-source-bounded-order-v1",
+        "failureFingerprint": "362c430bbb07c86c567325ab6be870f6795e2fc0b6f447d130865d7f645531cd",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-gather-time.json",
+        "appliedAt": "2026-09-13T17:40:28.712Z"
+      },
+      {
+        "repairId": "amber-arrival-source-bounded-order-v1",
+        "failureFingerprint": "e94692b391ee99323426bf5e5622d10f43cae30c1395866f13e4aad6ee446960",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-amber-arrival-time.json",
+        "appliedAt": "2026-09-13T17:58:02.856Z"
+      },
+      {
+        "repairId": "chu-source-reviewed-recruitment-goal-v1",
+        "failureFingerprint": "a79b1200e62046916fe8a6f8b85cfbbde81438477059fce7e4b2137e882d08b3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-chu-recruitment-goal.json",
+        "appliedAt": "2026-09-13T18:04:22.654Z"
+      },
+      {
+        "repairId": "roadside-setting-temporal-not-causal-v1",
+        "failureFingerprint": "8f98455210d2a817a03b8283bd4e3527da0482d8b26d4d9249f76937fcc050cb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-relation.json",
+        "appliedAt": "2026-09-13T18:08:49.574Z"
+      },
+      {
+        "repairId": "cinema-roadside-source-discourse-order-v1",
+        "failureFingerprint": "281da3693a1bdf2c5c0cad708495a15bae951cd8f2f6749086d4f3cc8649d1f7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-discourse.json",
+        "appliedAt": "2026-09-13T18:13:40.903Z"
+      },
+      {
+        "repairId": "nono-source-reviewed-pre-door-checkpoint-v1",
+        "failureFingerprint": "4a140bada4ca2aa6f97bcfeed747fff816996f471096c0562d5f7fd97e8e96a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:17:40.529Z"
+      },
+      {
+        "repairId": "duel-source-reviewed-pre-attack-checkpoints-v1",
+        "failureFingerprint": "405723fd4bda4e015571188be8a209d3b6f4adc660c42b7266cd00663479691c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:21:27.852Z"
+      },
+      {
+        "repairId": "interview-source-reviewed-examiner-checkpoints-v1",
+        "failureFingerprint": "d659905948263cfedf75bc190d07a77d367a47b4f8a65cb79c6dc748f2cf684b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-interview-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:24:35.323Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "144e3ad042532714d52a9ac8817643bc9a62a27329d3408a42e122ac849431a0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:29:48.199Z"
+      },
+      {
+        "repairId": "makeup-source-reviewed-pre-fitting-checkpoint-v1",
+        "failureFingerprint": "332e045d1ecf74f015abff501dd60261528a2dcbd342d9588c3dd151ef8a1902",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-makeup-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:35:13.298Z"
+      },
+      {
+        "repairId": "lumingfei-source-reviewed-pre-coaching-checkpoint-v1",
+        "failureFingerprint": "461f9395e4e429bdca57cce55672b8eabc86bec2405b0a2e54167c72722ed739",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingfei-coaching-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:38:13.852Z"
+      },
+      {
+        "repairId": "fingel-source-reviewed-pre-arrival-checkpoint-v1",
+        "failureFingerprint": "92f1d7c7f84411cb4261c0667e8d3c6706918ccd2b534d123c2253a6ac37d59d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-fingel-train-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:41:09.597Z"
+      },
+      {
+        "repairId": "black-sniper-source-reviewed-pre-shot-checkpoint-v1",
+        "failureFingerprint": "726e870c3d21679313187cc536e8b7d50428fb8954e1874fc3872bae2a3b2251",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-black-sniper-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:44:03.764Z"
+      },
+      {
+        "repairId": "man-coins-source-reviewed-pre-request-checkpoint-v1",
+        "failureFingerprint": "87b1cb60a82e2d0089f3b67e29a2e7903d17dffee47228764ec69ec599728e07",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-man-coins-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:47:30.839Z"
+      },
+      {
+        "repairId": "mans-source-reviewed-pre-earthquake-checkpoint-v1",
+        "failureFingerprint": "b7c61b852e8f97016ab2f593d2380a0701330c3ef8585517a4622226fdaca732",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-mans-earthquake-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:50:34.701Z"
+      },
+      {
+        "repairId": "zhao-source-reviewed-pre-confession-checkpoint-v1",
+        "failureFingerprint": "1653489dcdee02d9d4972c631ea64f60c7126f2aab30d78ef875e15a56c95b89",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-zhao-confession-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:53:30.319Z"
+      },
+      {
+        "repairId": "manshtein-source-reviewed-pre-dialogue-checkpoint-v1",
+        "failureFingerprint": "4779c49864b7a2b6bb7dde2f12bd8a4fd00026894be70f604da5e09232fa6196",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-manshtein-medical-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:56:26.947Z"
+      },
+      {
+        "repairId": "sanwu-source-reviewed-pre-invocation-checkpoint-v1",
+        "failureFingerprint": "d909f4ef203e62b052e0fae28fcab43832b7a6af4473b062b4a6d14e40cf3ba3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-sanwu-church-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:59:21.591Z"
+      },
+      {
+        "repairId": "angier-source-reviewed-pre-toast-checkpoint-v1",
+        "failureFingerprint": "6e80b15bf62ac687f9659caca02183f83b4d1b028b7dc65a859d405811ddb105",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-angier-toast-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:02:25.446Z"
+      },
+      {
+        "repairId": "caesar-source-reviewed-exchange-goal-v1",
+        "failureFingerprint": "7f9c344875e8102e6b8d94e64a430348b1c85cac3231be97ac6746d4a1fff752",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-exchange-goal.json",
+        "appliedAt": "2026-09-13T19:05:47.060Z"
+      },
+      {
+        "repairId": "yaji-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "a40e0d01989a02e780424be12d40ec51988b5c3fb93c8ab42986beb2e6e2c01d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yaji-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:09:14.053Z"
+      },
+      {
+        "repairId": "yesheng-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "6669d28ccb86bcc65f845b4da0aa6cf08f83afe9f9e91e8db23c12c7fa813728",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yesheng-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:12:07.578Z"
+      },
+      {
+        "repairId": "cousin-source-reviewed-bedroom-checkpoint-v1",
+        "failureFingerprint": "296e224f9723b4a93bad6e9a53bafe5edcd902158d12a9120a84c63a6dc6521d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-entry-checkpoint.json",
+        "correctionPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-trace-correction.json",
+        "appliedAt": "2026-09-13T19:17:13.858Z"
+      },
+      {
+        "repairId": "cinema-audience-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "bbf81a731f359f8e409a39d169a4d1f934d869d6f3e4c3760c9819577f869092",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cinema-audience-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T19:20:15.410Z"
+      },
+      {
+        "repairId": "baby-source-reviewed-citywall-checkpoint-v1",
+        "failureFingerprint": "31ea8b2b467f212220a54987686814fa226b17b96980f31dc130f47ba21bb531",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-baby-citywall-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:23:20.676Z"
+      },
+      {
+        "repairId": "conductor-source-reviewed-pre-boarding-checkpoint-v1",
+        "failureFingerprint": "fab1c99967c4541832b1bc87191dba25fea4e7d81b47810e7c733e44ae836b09",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-conductor-boarding-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:26:17.890Z"
+      },
+      {
+        "repairId": "eva-source-reviewed-projected-presence-v1",
+        "failureFingerprint": "e79dcae645ee1836dec3bc108435c1f8f58509a0717980e8f004768d6965a6f5",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-projected-presence.json",
+        "appliedAt": "2026-09-13T19:30:12.278Z"
+      },
+      {
+        "repairId": "boy-source-reviewed-pre-warning-checkpoint-v1",
+        "failureFingerprint": "19dab9bb94b5ac4b46cbf6b3162f3ed6656fcd9b13d5384ce7961ee668d65180",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-warning-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:33:06.641Z"
+      },
+      {
+        "repairId": "source-reviewed-explicit-identity-links-v1",
+        "failureFingerprint": "028cc7ff3f96455c5df92467d825aa63080ad02655a98463b847b2f1d1f8d63e",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-explicit-identity-links.json",
+        "appliedAt": "2026-09-13T19:37:01.203Z"
+      },
+      {
+        "repairId": "source-reviewed-briefing-identity-links-v1",
+        "failureFingerprint": "690b314981fc276223282e7f46f6d4d7f0dbbe8883f3a3308e1de6e13adbbdb2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-briefing-identity-links.json",
+        "appliedAt": "2026-09-13T19:38:50.717Z"
+      },
+      {
+        "repairId": "source-reviewed-named-student-identity-links-v1",
+        "failureFingerprint": "efbbedbbf6f4523071125f9aefd4cecd3030c0edee751b510bd0a5eee281d8db",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-named-student-identity-links.json",
+        "appliedAt": "2026-09-13T19:43:29.784Z"
+      },
+      {
+        "repairId": "source-reviewed-student-reference-identity-links-v1",
+        "failureFingerprint": "22686ec02d3c0230c3d8ef5c6897e3e52d29ce8a8f74c7c57fef396bfdae2019",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-student-reference-identity-links.json",
+        "appliedAt": "2026-09-13T19:45:24.872Z"
+      },
+      {
+        "repairId": "source-reviewed-recalled-name-identity-links-v1",
+        "failureFingerprint": "976d1e53cada7298d4632678d7b26a8237b1a97eda34a4f89e3191cea481b27a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-recalled-name-identity-links.json",
+        "appliedAt": "2026-09-13T19:47:13.331Z"
+      }
+    ],
+    "identityRepair": {
+      "batchId": "host-lumingze-identity-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "362a6228c63af64cda20a243cac91f29b4f933cbc399240190d4168794c8d3e3",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingze-identity.json",
+      "verifiedAt": "2026-09-12T19:04:52.690Z",
+      "entityId": "char-lumingze-boy"
+    },
+    "threadHistory": [
+      {
+        "at": "2026-09-13T17:58:47.585323+00:00",
+        "fromThreadId": "01a0912b-5872-75b0-a118-813e3e32d2be",
+        "toThreadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+        "reason": "User explicitly requested reading Add runtime execution hooks, checking timers and continuing the existing loop in this task. Original task ended with systemError after delivered callback. No compilation or provider guard was reset.",
+        "attempt": 45,
+        "status": "needs-review",
+        "timerCheck": {
+          "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+          "serviceActiveState": "failed",
+          "mainPID": 0,
+          "pendingQuotaTimers": [],
+          "anchor": "2026-09-13T17:41:00.000Z",
+          "nextWindow": "2026-09-13T22:41:00.000Z",
+          "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+        },
+        "priorCallback": {
+          "attempt": 45,
+          "delivered": true,
+          "receipt": "Queued message 01a09bdc-8e63-7823-8d50-a0cd436b02c7 for thread 01a0912b-5872-75b0-a118-813e3e32d2be.",
+          "at": "2026-09-13T17:41:57.992Z"
+        },
+        "priorTimer": {
+          "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+          "scheduledAt": "2026-09-13T17:41:00.000Z",
+          "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+        },
+        "review": "host-review-amber-arrival-time.json",
+        "validation": "42 relevant tests and strict reviewer type check passed; normal proposal and finish completed with all gates retained."
+      }
+    ],
+    "timerCheck": {
+      "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+      "serviceActiveState": "failed",
+      "mainPID": 0,
+      "pendingQuotaTimers": [],
+      "anchor": "2026-09-13T17:41:00.000Z",
+      "nextWindow": "2026-09-13T22:41:00.000Z",
+      "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+    },
+    "endedAt": "2026-09-13T19:49:46.502Z",
+    "callback": {
+      "attempt": 78,
+      "delivered": true,
+      "receipt": "Queued message 01a09c51-9327-7571-a85e-849818f74c58 for thread 01a09be6-f704-72d0-aaf1-59b11709dd85.",
+      "at": "2026-09-13T19:49:46.924Z"
+    }
+  },
+  "targets": [
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-kassel-1-v2",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00001-observation-23902a13002c",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-observation-23902a13002c",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 529,
+          "endByte": 544,
+          "startLine": 4,
+          "endLine": 4,
+          "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+          "prefixHash": "90ca2f431f8af99df66b27b2f4f62ce72a152493634a9dcd8a0b70f247d14251",
+          "suffixHash": "81d12c3d8b7f4fc625b8acba7adf93182fc0e0415d6b5d3d9ea29bd3b400dfca",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "卡塞尔学院",
+        "form": "proper",
+        "kindCandidates": [
+          "institution",
+          "location"
+        ],
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "inst-cassel-academy",
+        "kind": "institution",
+        "canonicalName": "卡塞尔学院",
+        "aliases": [
+          "美国神秘学院"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-kassel-1-v2",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00001-observation-23902a13002c",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-observation-23902a13002c",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 529,
+            "endByte": 544,
+            "startLine": 4,
+            "endLine": 4,
+            "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+            "prefixHash": "90ca2f431f8af99df66b27b2f4f62ce72a152493634a9dcd8a0b70f247d14251",
+            "suffixHash": "81d12c3d8b7f4fc625b8acba7adf93182fc0e0415d6b5d3d9ea29bd3b400dfca",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "卡塞尔学院",
+          "form": "proper",
+          "kindCandidates": [
+            "institution",
+            "location"
+          ],
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "inst-cassel-academy",
+            "entityKind": "institution",
+            "canonicalName": "卡塞尔学院",
+            "matchedText": "卡塞尔学院",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "龙族1·火之晨曦\r",
+        "作者：江南\r",
+        "内容简介\r",
+        " 他叫路明非，一个平凡普通的学生。他过着周而复始的生活，就在他以为他的一生就将如此度过的时候，一封来自美国神秘学院的来信改变了他平淡的人生世间有龙！你的使命是屠龙。在热血与神秘的呼唤下，在爱与梦想的抉择下，他毅然选择了未知。黑色的直升机划过天际，陌生国度的大门向他缓缓开启，平凡的中国小孩走上不平凡的屠龙之路。而遥远的卡塞尔学院却处处透着神秘奇怪的课程、搞笑的学长、疯狂的教师、骄傲的同学路明非刚刚进入学校就遭遇了无数的怪事。同时，随之而来的挑战也开始了，等级考试、言灵考验、三峡龙影、龙族入侵\r",
+        "\r",
+        "序幕 白帝城\r",
+        "\t所谓弃族的命运，就是要穿越荒原，再次竖起战旗，返回故乡。\r",
+        "\t死不可怕，只是一场长眠。\r",
+        "\t在我可以吞噬这个世界之前，与其孤独跋涉，不如安然沉睡。\r",
+        "\t我们仍会醒来。\r",
+        "\t“哥哥……”有人在黑暗里轻声地呼喊。\r"
+      ],
+      "rationale": "The synopsis names the same academy attended by Lumingfei. Resolve the institution while preserving the synopsis as paratext, not active world truth."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-kaisaier-01",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 17983,
+          "endByte": 17998,
+          "startLine": 109,
+          "endLine": 109,
+          "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+          "prefixHash": "384f56c8d517ebb86aab2a23938261e9c9842f6c64626d48484be8a79391700d",
+          "suffixHash": "491758fc8569ddafa8b44c6faf7757cd74b0d45ddf257b716b5b4dc1360a9d3e",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "卡塞尔学院",
+        "form": "proper",
+        "kindCandidates": [
+          "institution",
+          "location"
+        ],
+        "sceneId": "ds-opening",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "inst-cassel-academy",
+        "kind": "institution",
+        "canonicalName": "卡塞尔学院",
+        "aliases": [
+          "美国神秘学院"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-kaisaier-01",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 17983,
+            "endByte": 17998,
+            "startLine": 109,
+            "endLine": 109,
+            "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+            "prefixHash": "384f56c8d517ebb86aab2a23938261e9c9842f6c64626d48484be8a79391700d",
+            "suffixHash": "491758fc8569ddafa8b44c6faf7757cd74b0d45ddf257b716b5b4dc1360a9d3e",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "卡塞尔学院",
+          "form": "proper",
+          "kindCandidates": [
+            "institution",
+            "location"
+          ],
+          "sceneId": "ds-opening",
+          "confidence": 1
+        },
+        "candidates": [
+          {
+            "entityId": "inst-cassel-academy",
+            "entityKind": "institution",
+            "canonicalName": "卡塞尔学院",
+            "matchedText": "卡塞尔学院",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“没出息，看报摊赚不到钱，我是年纪大了。”\r",
+        "\t路明非翻着眼睛看看头顶绿荫里投下的阳光，“挺好的，可以晒太阳，没人来的时候就发呆，还有过路的美女看。”\r",
+        "\t这个话题让路明非比较沮丧。他确实申请了美国的大学，但这绝不是因为他的成绩太好大有希望。对于他的成绩，人人都有不同的评价方式。班主任说，路明非，你是属秤砣的么？你知不知道你一个人把我们班的平均分拉低了多少？婶婶是对叔叔说，鸣泽成绩好都是我们家的基因，看你家基因就是不行！只有路鸣泽对他很体贴，在QQ上鼓励他说，“夕阳！成绩不好怕什么？我行我路，这才是我们这种人该做的！反正你在我眼里是个好女孩！”\r",
+        "\t出国这件事，是婶婶灵机一动一力主张的，押着路明非把申请表给填了，还慷慨地付了每所学校几十美元的申请费。婶婶有自己的算盘，路明非的各科成绩中，唯有英语还不错，跟着同班的英语狂人考托福的时候又走了狗屎运，考分不错。以路明非的成绩，上一类本科很难，如今很流行弃考出国，申请一把，再走一次狗屎运拿到美国大学的录取通知，就算对路明非爸妈寄来的钱有交代了。\r",
+        "\t此外婶婶还有套“小”算盘。路鸣泽的成绩虽然比路明非好点，却也不是顶尖的，上不了清华北大那类婶婶挂在嘴边的名校，如果能弃考出国，也是很有面子的事。但是上大学是一辈子的事情，婶婶还不忍心看着路鸣泽去冒险。她思前想后，大概是想起了什么名人名言说“凡艰辛的路，当由勇敢者以坚硬的脚底踏开”，忽然觉得路明非很是勇敢，于是让他试试用坚硬的脚底给路鸣泽踩出一条路来。如果他失败了，也不要紧，说明此路不通，路明非可以迟一年和堂弟一起高考。\r",
+        "\t不过艰辛的路显然不是光靠勇气就能踏开的，路上满是崴脚的石头。路明非已经连着收到十几封复信了，开篇大同小异，都是：\r",
+        "\t“亲爱的申请者：\r",
+        "\t感谢你对本学院的兴趣，但是很遗憾的……”\r",
+        "\t婶婶花费了好几百美金的申请费，换来的只是美国人一而再再而三的感谢，善人当得很心痛。而路明非不焦不躁，心态如老僧入定，止水不波，只不过为了配合婶婶的沮丧，才在收到拒信时挤出点忧伤的表情来。\r",
+        "\t如今只剩一所大学没给他复信了，排名最靠前的名校，“芝加哥大学”。\r",
+        "\t“有我的信么？”路明非在传达室门口探头探脑，拽着英文发音，“Mingfei Lu。”\r",
+        "\t“有，美国寄来的。”门卫扔了一封信出来。\r",
+        "\t路明非一摸，信封里只有薄薄的一张纸，是拒信无疑。凡是录取信，会夹很多的表格和介绍材料，厚厚的一摞。而感谢你的申请并且遗憾你未被录取，只要一张打印纸就好了。\r",
+        "\t路明非撕开信封，来信居然是用中文写就的：\r",
+        "\t亲爱的路明非先生：\r",
+        "\t感谢你对芝加哥大学的兴趣，但是很遗憾的，你未被录取。\r",
+        "\t但是，我们常说，路不只一条，只看你愿不愿意选择。\r",
+        "\t首先自我介绍，卡塞尔学院是一所位于美国伊利诺伊州芝加哥远郊的私立大学，和芝加哥大学是联谊学校，有广泛的学术交流。\r",
+        "\t我们非常荣幸地从芝加哥大学那里得到了您的申请资料，经过细致评估，我们认为您达到了卡塞尔学院的入学标准，在此向你发出邀请。\r",
+        "\t请您在收到这封信的第一时间联系我校古德里安教授，他正在中国进行一次学术访问，将会安排对您的面试。\r",
+        "\t有如何疑问，也请联系古德里安教授。我会协助他为您提供服务，我是卡塞尔学院的学院秘书诺玛·劳恩斯，非常高兴认识您。\r",
+        "\t你诚挚的，\r",
+        "\t诺玛\r",
+        "\t路明非把信放下，摸了摸额头，有点发懵。\r",
+        "\t本来看开头很对的一封信，一封标准的拒信，怎么过了那句“但是，我们常说，路不只一条，只看你愿不愿意选择”之后，忽然变了呢？显然他已经被列在面试名单上了。路明非的高中同学也不是没有人申请成功过，但是有美国教授千里迢迢来面试的，这还是头一份儿。路明非不知道自己何德何能，他甚至没给这个卡塞尔学院贡献过申请费。\r"
+      ],
+      "rationale": "The admission letter explicitly introduces Cassell Academy and invites Lumingfei; same named institution, without certifying the letter claims."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "mention-kassel",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 57045,
+          "endByte": 57060,
+          "startLine": 357,
+          "endLine": 357,
+          "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+          "prefixHash": "1a61aa7c0a644bb4bff1be0953f7ba77c66b595c91b0220c63024bb0a4887f6f",
+          "suffixHash": "766401b555e041d62f7ea4efd39568f6bd1c4ae08241f69dcf44ac93a4ff55a0",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "卡塞尔学院",
+        "form": "proper",
+        "kindCandidates": [
+          "institution",
+          "location"
+        ],
+        "sceneId": "ds-hotel-breakfast",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "inst-cassel-academy",
+        "kind": "institution",
+        "canonicalName": "卡塞尔学院",
+        "aliases": [
+          "美国神秘学院"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "mention-kassel",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 57045,
+            "endByte": 57060,
+            "startLine": 357,
+            "endLine": 357,
+            "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+            "prefixHash": "1a61aa7c0a644bb4bff1be0953f7ba77c66b595c91b0220c63024bb0a4887f6f",
+            "suffixHash": "766401b555e041d62f7ea4efd39568f6bd1c4ae08241f69dcf44ac93a4ff55a0",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "卡塞尔学院",
+          "form": "proper",
+          "kindCandidates": [
+            "institution",
+            "location"
+          ],
+          "sceneId": "ds-hotel-breakfast",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "inst-cassel-academy",
+            "entityKind": "institution",
+            "canonicalName": "卡塞尔学院",
+            "matchedText": "卡塞尔学院",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“啊！”亚纪忽然出声。\r",
+        "\t古德里安教授一把捂着心口，“你忽然鬼叫什么？”\r",
+        "\t“我只是忽然想起一件糟糕的事，教授你心仪的‘S’级学生……他似乎对于自己的回答非常地失望，所以说完‘我不知道’后，他表示了弃权，然后直接退出了考场。”亚纪和叶胜面面相觑。\r",
+        "\t“答得那么好，为什么要弃权？”古德里安教授惊得像是要蹦起来。\r",
+        "\t“这种问题和配套答案……”叶胜耸肩苦笑，“只有你才会觉得答得好吧？”\r",
+        "\t“要挽回！必须挽回！我来给学生家长打电话！”古德里安教授摸索全身找手机。\r",
+        "\t叶胜挠了挠头，叹了口气，“还是我来打吧……您这样会吓到学生家长的，觉得您居心叵测。”\r",
+        "\t深夜三点，万籁俱寂，电话铃声横穿路明非家的走道。\r",
+        "\t婶婶从睡梦中惊得坐起，扭头看见床头柜上那部电话响得无比欢快，几乎是在蹦蹦跳跳。\r",
+        "\t“你家死人啦？半夜三更打电话！”婶婶抓起电话，怒气冲冲地喊。\r",
+        "\t很快，她的怒容消退了，一句话也说不出来，叔叔从被窝里坐起来，看见老婆头发散乱，目光呆滞，仿佛被雷劈了。\r",
+        "\t路鸣泽也被隔壁的电话铃声吵醒了，扭头看见隔壁床上，堂兄在梦里舔了舔嘴唇，发出猪一样快乐的哼哼。\r",
+        "\t次日上午，丽晶酒店。\r",
+        "\t九楼行政层VIP餐吧，路明非全家倾巢出动。叔叔西装笔挺，腆着肚子，教育路明非和路鸣泽来这种高级场所要懂规矩，不要总在餐具上摸来摸去。婶婶四下顾盼，啧啧赞叹高级酒店就是高级。\r",
+        "\t“路明非先生？绿茶还是黑茶？”衣冠楚楚的侍者走到桌边，对着被叔叔婶婶夹在中间的路明非发问。\r",
+        "\t“都什么价位啊？”叔叔显示出经常出入高级场所的气派。\r",
+        "\t“对于总统套房的客人全部免费，古德里安教授订的是总统套房。”\r",
+        "\t“美国学校真有钱！”婶婶瞬间对卡塞尔学院肃然起敬。\r",
+        "\t“叮”的一声，直达电梯打开了门，花白头发的魁梧老人向着靠窗的桌子大步走来，左边叶胜，右边酒德亚纪，左牵黄右擎苍，俊男美女，威风凛凛，上来二话不说一把握住路明非的手，“你好！路明非！”\r",
+        "\t“你好……古德里安……教授？”路明非在这份洋溢的热情前有些窘，“您中文说得真好。”\r",
+        "\t古德里安教授眼睛一亮，高兴地抓头，“有这么好？我跟着中央电视台新闻联播学的，我们学院全面普及中文，谁都知道中国将成为世界上最繁荣的地方嘛！”他看着路明非，目光闪闪，一脸拉拢的表情，“加入我们，不需要英语的，全校学生都说中文。”\r",
+        "\t路明非眨巴着眼睛。什么意思？说中文？不需要说英文？在他没什么亮点的人生里，也就那份托福成绩单还能凑合看看了，如果唯一的亮点都忽视了，卡塞尔学院看中他什么？这初次相逢的古德里安教授脸上，简直是“欢天喜地”的表情。\r",
+        "\t“你好，古教授，我是路明非的叔叔。”叔叔不甘寂寞地挤进古德里安教授和路明非之间。\r",
+        "\t因为记不住古德里安四个字，他非常巧妙的简化为“古教授”了。\r",
+        "\t“贤叔侄长得还真不像啊！”古德里安教授和叔叔握手。\r"
+      ],
+      "rationale": "At the hotel meeting with Guderian, the aunt reacts to the American school named Cassell Academy. Institutional reference, not the hotel location."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-kassel-1",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 198465,
+          "endByte": 198480,
+          "startLine": 1261,
+          "endLine": 1261,
+          "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+          "prefixHash": "f098a8c499f7a4d11c527327a7c5e8ca7c9ee59de244f2ac7dcfd1e9d86771d7",
+          "suffixHash": "f66d08daa282389bf7b5faa674e1a76fa5e2073233877bb00f75d9aa35f65d72",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "卡塞尔学院",
+        "form": "proper",
+        "kindCandidates": [
+          "institution"
+        ],
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "inst-cassel-academy",
+        "kind": "institution",
+        "canonicalName": "卡塞尔学院",
+        "aliases": [
+          "美国神秘学院"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-kassel-1",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 198465,
+            "endByte": 198480,
+            "startLine": 1261,
+            "endLine": 1261,
+            "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+            "prefixHash": "f098a8c499f7a4d11c527327a7c5e8ca7c9ee59de244f2ac7dcfd1e9d86771d7",
+            "suffixHash": "f66d08daa282389bf7b5faa674e1a76fa5e2073233877bb00f75d9aa35f65d72",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "卡塞尔学院",
+          "form": "proper",
+          "kindCandidates": [
+            "institution"
+          ],
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "inst-cassel-academy",
+            "entityKind": "institution",
+            "canonicalName": "卡塞尔学院",
+            "matchedText": "卡塞尔学院",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“是啊，可哈佛大学的终生教授要转卡塞尔学院的终生教授，就必须成功培养过一个学生。”\r",
+        "\t路明非眼前发黑，“就是说……我这样一个‘S’级学生，导师是一个没有任何教学经验的助理教授？”\r",
+        "\t“不能这么说，我转入卡塞尔学院后还是带过一个学生，他的名字叫做芬格尔……”老家伙拍了拍站在一旁满脸写着“不关我事”的人。\r",
+        "\t“哦……为这我才被分到和芬格尔这奇葩兄一个寝室的？”路明非恍然大悟。\r",
+        "\t“我很理解你，你感到绝望……但是正视现实吧，”芬格尔叹口气，“你确实是在一个废柴教授的组里，有一个八年没能毕业的废柴师兄，被全校男生追杀，而且我告诉你一个最悲哀不过的消息。”\r",
+        "\t“什么？”路明非挺胸，“来吧！还能更衰么？我不信了！”\r",
+        "\t“你一路上念叨的诺诺或者陈墨瞳，”芬格尔凑近路明非耳边，“她是恺撒的女朋友！”\r",
+        "\t“我现在信了……”路明非说。他感觉到自己心底深处微微抽动了一下，一下子空了。\r",
+        "\r",
+        "第三幕 恺撒\r",
+        "\tThe Dictator\r",
+        "\t金属门开合，男人真的走了。虚幻光束中的女孩无声无息地落下泪来。\r",
+        "\t短棍和小球滚动着汇聚起来，Adams再次成形，发出“嘻哈嘻哈嘻哈”的声音，用几枚金属球在地下滚动着跑到EVA面前，待了一会儿之后，忽然高举双手过头挥舞，摇晃身体跳起一支难看的舞来，嚷嚷着，“EVA，开心！EVA，开心！EVA，开心！”\r",
+        "\t它手里的硬币叮叮当当散落一地，女孩的泪水也滴落在金属地板上，溅起莹蓝色的、虚幻的微光。\r",
+        "\t深夜，诺顿馆，会议厅。\r",
+        "\t学生会全体委员出席会议，本届主席恺撒坐在壁炉前的沙发上，双手支着下巴，目视前方，头顶上方悬挂着加图索家族的凤凰家徽。沉默已经持续了很久，几乎每个人都低着头。\r",
+        "\t“三年来的第一次，我们将失去诺顿馆的使用权，所以这是我们在这里召开的最后一次会议。”恺撒淡淡地说，“对我而言这是前所未有的，惨败。”\r",
+        "\t沮丧如山般沉重，恺撒掌握学生会以来，他们一直是“自由一日”的赢家，在恺撒的领导下，学生会终于成为可以和卡塞尔学院最传统的兄弟会“狮心会”抗衡的社团，即使出现了被称作“超A”级的楚子航，也没能从他们手中夺走诺顿馆，而现在他们不可思议地输在一个新生手上。\r",
+        "\t“我们没输，这是一场可耻的黑枪战争！”一名资深委员说，“我们不该出让诺顿馆！”\r",
+        "\t群情激奋起来，委员们交头接耳，实在输得太冤枉了。\r",
+        "\t“停！”恺撒举手，他的声音威严，压下了会议厅里的喧嚣。\r",
+        "\t“我从来拒绝和懦夫说话，懦夫们才会拒绝承认自己的失败。”恺撒冰蓝色眼睛里全无表情，“今天我不想讨论失败的原因，路明非，‘S’级新生，来自中国，两枪击中了我和楚子航，作为第三方赢得了今年的‘自由一日’。要尊重游戏规则，按照游戏规则我们输了，狮心会保持了沉默，说明楚子航接受结果，你们不如楚子航么？”\r",
+        "\t“我已经租下了隔壁的‘安珀馆’，作为明年学生会的活动地，把我们的东西搬走，这里从午夜12点开始就属于路明非了。”恺撒起身为自己倒了一杯干邑，“路明非应该正为明天的3E考试准备吧？你们觉得他能通过么？”\r",
+        "\t“恺撒你是说？”\r",
+        "\t“刚才校园新闻网爆出一条新闻，‘S’级新生路明非对于‘言灵·皇帝’没有共鸣。”恺撒低声说。\r"
+      ],
+      "rationale": "The narrator describes Lionheart as the traditional fraternity of Cassell Academy in the student council meeting; same institution."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-kassel-current",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 198465,
+          "endByte": 198480,
+          "startLine": 1261,
+          "endLine": 1261,
+          "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+          "prefixHash": "f098a8c499f7a4d11c527327a7c5e8ca7c9ee59de244f2ac7dcfd1e9d86771d7",
+          "suffixHash": "f66d08daa282389bf7b5faa674e1a76fa5e2073233877bb00f75d9aa35f65d72",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "卡塞尔学院",
+        "form": "proper",
+        "kindCandidates": [
+          "institution"
+        ],
+        "sceneId": "ds-act3-student-council",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "inst-cassel-academy",
+        "kind": "institution",
+        "canonicalName": "卡塞尔学院",
+        "aliases": [
+          "美国神秘学院"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-kassel-current",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 198465,
+            "endByte": 198480,
+            "startLine": 1261,
+            "endLine": 1261,
+            "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+            "prefixHash": "f098a8c499f7a4d11c527327a7c5e8ca7c9ee59de244f2ac7dcfd1e9d86771d7",
+            "suffixHash": "f66d08daa282389bf7b5faa674e1a76fa5e2073233877bb00f75d9aa35f65d72",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "卡塞尔学院",
+          "form": "proper",
+          "kindCandidates": [
+            "institution"
+          ],
+          "sceneId": "ds-act3-student-council",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "inst-cassel-academy",
+            "entityKind": "institution",
+            "canonicalName": "卡塞尔学院",
+            "matchedText": "卡塞尔学院",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“是啊，可哈佛大学的终生教授要转卡塞尔学院的终生教授，就必须成功培养过一个学生。”\r",
+        "\t路明非眼前发黑，“就是说……我这样一个‘S’级学生，导师是一个没有任何教学经验的助理教授？”\r",
+        "\t“不能这么说，我转入卡塞尔学院后还是带过一个学生，他的名字叫做芬格尔……”老家伙拍了拍站在一旁满脸写着“不关我事”的人。\r",
+        "\t“哦……为这我才被分到和芬格尔这奇葩兄一个寝室的？”路明非恍然大悟。\r",
+        "\t“我很理解你，你感到绝望……但是正视现实吧，”芬格尔叹口气，“你确实是在一个废柴教授的组里，有一个八年没能毕业的废柴师兄，被全校男生追杀，而且我告诉你一个最悲哀不过的消息。”\r",
+        "\t“什么？”路明非挺胸，“来吧！还能更衰么？我不信了！”\r",
+        "\t“你一路上念叨的诺诺或者陈墨瞳，”芬格尔凑近路明非耳边，“她是恺撒的女朋友！”\r",
+        "\t“我现在信了……”路明非说。他感觉到自己心底深处微微抽动了一下，一下子空了。\r",
+        "\r",
+        "第三幕 恺撒\r",
+        "\tThe Dictator\r",
+        "\t金属门开合，男人真的走了。虚幻光束中的女孩无声无息地落下泪来。\r",
+        "\t短棍和小球滚动着汇聚起来，Adams再次成形，发出“嘻哈嘻哈嘻哈”的声音，用几枚金属球在地下滚动着跑到EVA面前，待了一会儿之后，忽然高举双手过头挥舞，摇晃身体跳起一支难看的舞来，嚷嚷着，“EVA，开心！EVA，开心！EVA，开心！”\r",
+        "\t它手里的硬币叮叮当当散落一地，女孩的泪水也滴落在金属地板上，溅起莹蓝色的、虚幻的微光。\r",
+        "\t深夜，诺顿馆，会议厅。\r",
+        "\t学生会全体委员出席会议，本届主席恺撒坐在壁炉前的沙发上，双手支着下巴，目视前方，头顶上方悬挂着加图索家族的凤凰家徽。沉默已经持续了很久，几乎每个人都低着头。\r",
+        "\t“三年来的第一次，我们将失去诺顿馆的使用权，所以这是我们在这里召开的最后一次会议。”恺撒淡淡地说，“对我而言这是前所未有的，惨败。”\r",
+        "\t沮丧如山般沉重，恺撒掌握学生会以来，他们一直是“自由一日”的赢家，在恺撒的领导下，学生会终于成为可以和卡塞尔学院最传统的兄弟会“狮心会”抗衡的社团，即使出现了被称作“超A”级的楚子航，也没能从他们手中夺走诺顿馆，而现在他们不可思议地输在一个新生手上。\r",
+        "\t“我们没输，这是一场可耻的黑枪战争！”一名资深委员说，“我们不该出让诺顿馆！”\r",
+        "\t群情激奋起来，委员们交头接耳，实在输得太冤枉了。\r",
+        "\t“停！”恺撒举手，他的声音威严，压下了会议厅里的喧嚣。\r",
+        "\t“我从来拒绝和懦夫说话，懦夫们才会拒绝承认自己的失败。”恺撒冰蓝色眼睛里全无表情，“今天我不想讨论失败的原因，路明非，‘S’级新生，来自中国，两枪击中了我和楚子航，作为第三方赢得了今年的‘自由一日’。要尊重游戏规则，按照游戏规则我们输了，狮心会保持了沉默，说明楚子航接受结果，你们不如楚子航么？”\r",
+        "\t“我已经租下了隔壁的‘安珀馆’，作为明年学生会的活动地，把我们的东西搬走，这里从午夜12点开始就属于路明非了。”恺撒起身为自己倒了一杯干邑，“路明非应该正为明天的3E考试准备吧？你们觉得他能通过么？”\r",
+        "\t“恺撒你是说？”\r",
+        "\t“刚才校园新闻网爆出一条新闻，‘S’级新生路明非对于‘言灵·皇帝’没有共鸣。”恺撒低声说。\r"
+      ],
+      "rationale": "Separate existing observation of the same named academy in the council discussion; preserve both observation IDs and separately link each, without deleting or merging observations."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-kassel-001",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00013-observation-d88837bd383a",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-observation-d88837bd383a",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 380301,
+          "endByte": 380316,
+          "startLine": 2343,
+          "endLine": 2343,
+          "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+          "prefixHash": "d1284cb259ee7d5fcc58c79456c40336c43da8c3729f3c3fc820710b584786b3",
+          "suffixHash": "bf498d9999cefb17c993c5dd32831ca478aa5ba94db39b5362dcfff10bf32efb",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "卡塞尔学院",
+        "form": "proper",
+        "kindCandidates": [
+          "institution",
+          "location"
+        ],
+        "sceneId": "ds-conversation-001",
+        "confidence": 1,
+        "interpretation": "Named academy/institution."
+      },
+      "entity": {
+        "id": "inst-cassel-academy",
+        "kind": "institution",
+        "canonicalName": "卡塞尔学院",
+        "aliases": [
+          "美国神秘学院"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-kassel-001",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00013-observation-d88837bd383a",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-observation-d88837bd383a",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 380301,
+            "endByte": 380316,
+            "startLine": 2343,
+            "endLine": 2343,
+            "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+            "prefixHash": "d1284cb259ee7d5fcc58c79456c40336c43da8c3729f3c3fc820710b584786b3",
+            "suffixHash": "bf498d9999cefb17c993c5dd32831ca478aa5ba94db39b5362dcfff10bf32efb",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "卡塞尔学院",
+          "form": "proper",
+          "kindCandidates": [
+            "institution",
+            "location"
+          ],
+          "sceneId": "ds-conversation-001",
+          "confidence": 1,
+          "interpretation": "Named academy/institution."
+        },
+        "candidates": [
+          {
+            "entityId": "inst-cassel-academy",
+            "entityKind": "institution",
+            "canonicalName": "卡塞尔学院",
+            "matchedText": "卡塞尔学院",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“强盗！”路明非抓起电话，“两份酥皮奶油浓汤！我还要大块儿的奶酪蛋糕！”\r",
+        "\t芬格尔拍拍巴掌。\r",
+        "\t“真的有人……死了？”路明非问。\r",
+        "\t“其实死亡名单已经公布了，执行部，叶胜，酒德亚纪。”芬格尔说，“你可以去看留言板。”\r",
+        "\t路明非沉默了，他还记得酒德亚纪微笑着纠正他的发音说，“おはよう”。人怎么忽然就死了？\r",
+        "\t“别太担心。执行部未必就那么危险，多数时候他们就像一群考古队员，满世界飞，探索龙族遗迹。过去十年里，好像只有几次盗墓的时候墓道塌方死了人。这一次是特殊情况。”芬格尔说，“青铜城的话，是龙王诺顿的墓地，龙墓确实是很危险的。有个传说，凡是进入龙墓的，一队人得牺牲至少一个，这是祭品。不过进入龙墓的任务都是保密的，没人知道全部，所以只是传说。”\r",
+        "\t“你担心过会死么？”路明非问。\r",
+        "\t芬格尔想了想，“你担心汉堡里吃出毛毛虫么？”\r",
+        "\t“废话！”\r",
+        "\t“那我当然也担心会死，这是每个人的正常反应好不好？”芬格尔耸耸肩，“其实每个人来卡塞尔学院都有自己的理由，各不相同，不过归根到底，在这个学院里的很多人都厌弃自己的龙族血统吧。”\r",
+        "\t“厌弃龙族血统？怎么会？你们看起来一个比一个拉风！”\r",
+        "\t“你知道曼施坦因和古德里安为什么是一对死党么？因为他们毕业自同一个精神病院。”芬格尔挑挑眉毛。\r",
+        "\t“慢！”路明非一愣，“什么……精神病院？”\r",
+        "\t“混血种的思维和普通人不一样，很难融入普通人群。古德里安和曼施坦因就是因为小时候就表现超常，所以被看作精神病，在医院里一直关到十五岁。所以卡塞尔学院才把自己称为另一种选择。选择了卡塞尔学院，你不得不和平常的生活说再见，在这里你能做的唯一的事情就是屠龙。因为龙族最痛恨的恰恰也是龙族混血种，我们具有龙族的能力，内心却是人类。我们是群生活在夹缝里的人，两边不讨好。”\r",
+        "\t“对！”路明非若有所思，“你们确实不是人。”\r",
+        "\t“你才不是人，你们全家都不是人……”\r",
+        "\t“说得有道理……如果我爹妈也是学院的人，他们也都该长着龙尾巴。”路明非倒也赞同。\r",
+        "\t芬格尔对于这个师弟的脸皮比城墙还厚已经习惯了，他自己的也不薄，“再比如楚子航，学院里的人都说他极度闷骚，他一直隐忍着不暴露自己和普通人的区别，从高中起就在整个网络搜索关于龙的信息，他是这些年来主动联系卡塞尔学院的几个人之一，开始他们都不相信会有龙血纯度那么高的混血种。所以想必这家伙小时候过得无比压抑，现在他找到了组织，当然要奋勇屠龙！”\r",
+        "\t“恺撒呢？他一点也不闷骚，是个明骚。”\r",
+        "\t“恺撒例外。他的全名是恺撒·加图索，加图索家族是意大利著名的贵族家族，出过七八个公爵，可惜没有一个人成功地登上意大利皇位。加图索家族一直觉得他们家应该出一个皇帝，后来他们发现幼年的恺撒就具备强大的领袖气质和数学、格斗的天分，他的思维逻辑和普通孩子的区别很大，加图索家族的长辈们无限欣慰。”芬格尔说，“恺撒那么明骚，是因为家族长辈太喜欢他了。”\r",
+        "\t“真狗屎运，就没人觉得他那么牛皮哄哄的也是种神经病？”路明非对恺撒没好感。\r",
+        "\t“皇帝啊，他是家族期待成为皇帝的人，皇帝这东西必然跟一般人不一样。一样才奇怪了。”\r",
+        "\t“还皇帝？什么时代了？”\r",
+        "\t“加图索家很遗憾啊！等了几百年出了一个能当意大利皇帝的主儿，结果好么，民主了，没皇帝了。只好把目标降低为意大利总理。恺撒从伊顿公学毕业，名校争着录取他，他在剑桥和卡塞尔学院里选择了卡塞尔学院。他不是来找安慰的，是他觉得这里更有挑战一些，适合他这种强到变态的人。他入学的第一句话是：‘你们可以挑战我，但我已经准备好了嘲笑你们！’”\r",
+        "\t路明非捂脸，“我入学的第一句话是什么？”\r"
+      ],
+      "rationale": "Fingel names Cassell Academy as the institution Chu contacted. Resolve the institution only, not his conjectures about motivation or ancestry."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-campus",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 401080,
+          "endByte": 401095,
+          "startLine": 2465,
+          "endLine": 2465,
+          "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+          "prefixHash": "33f783343f9536a41717112747261b490d8f216801bc273ce70b3d7ee90f8769",
+          "suffixHash": "bab8d9a3dafcaddd0503a5734682a0f4a73799c76140bff3730ddbb0fd7a1367",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "卡塞尔学院",
+        "form": "proper",
+        "kindCandidates": [
+          "institution",
+          "location"
+        ],
+        "sceneId": "ds-invasion",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "inst-cassel-academy",
+        "kind": "institution",
+        "canonicalName": "卡塞尔学院",
+        "aliases": [
+          "美国神秘学院"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-campus",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 401080,
+            "endByte": 401095,
+            "startLine": 2465,
+            "endLine": 2465,
+            "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+            "prefixHash": "33f783343f9536a41717112747261b490d8f216801bc273ce70b3d7ee90f8769",
+            "suffixHash": "bab8d9a3dafcaddd0503a5734682a0f4a73799c76140bff3730ddbb0fd7a1367",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "卡塞尔学院",
+          "form": "proper",
+          "kindCandidates": [
+            "institution",
+            "location"
+          ],
+          "sceneId": "ds-invasion",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "inst-cassel-academy",
+            "entityKind": "institution",
+            "canonicalName": "卡塞尔学院",
+            "matchedText": "卡塞尔学院",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t路明非被说得耷拉着脑袋，早已准备闪了，听了这句话如蒙大赦。可他没能跑掉，他被芬格尔拉住了！\r",
+        "\t“好久没有跳舞了啊！”芬格尔拍拍掌说出了这句让他自己将在几秒钟之后满世界寻找后悔药的话，“我入学的时候曾经是年级的猫王！”\r",
+        "\t侍者呆呆地看着这家伙。\r",
+        "\t“看我干什么？我是不懂社交规矩的人么？我等在这里是要跳舞的！”芬格尔一瞪眼，正了正领结，打了一个漂亮的响指。\r",
+        "\t芬格尔上上下下打量楼梯上的淑女们，路明非明白他这是走投无路不得不选择一个舞伴来化解此刻的尴尬了。\r",
+        "\t但是满场都是成对的男女，没有一个女孩是闲着的，而且每一个被芬格尔看到的女孩不约而同地发出“哦”的一声扭过头去，其感觉大概是看到了一坨牛粪后的自然反应。\r",
+        "\t满场只有他和路明非两个“多余的”男人。\r",
+        "\t二楼一侧的深红色幕布拉开，一支小型乐队正在试音，为首的指挥居然是上次深夜给路明非和芬格尔送餐的厨子，看来他果然是多才多艺。厨子兼职的指挥正准备挥舞手中的指挥棒，扭头看见了舞池中央众目焦点的两个男人，不禁有些踌躇，得不到命令的乐队成员们只能一再地重复那一小段序曲。\r",
+        "\t“是探戈！正是我的强项啊！”芬格尔眼中透出毅然决然的神情，“来，兄弟！别丢人，要挺住！我和你，漂亮地杀出一条路给恺撒看看！”\r",
+        "\t“太棒了，把你那条路指出来吧！”路明非呼应师兄的勇气。\r",
+        "\t“看见你的志气真让我高兴，那么亲爱的学弟，你跳女步……”芬格尔揽住路明非的腰，抓住路明非的手，对着二楼的乐队指挥潇洒地打了一个响指，“Let’s rock！”\r",
+        "\t这是路明非第一次看见芬格尔散发出如此强烈的气，带着一股跑江湖的大无畏精神，要是对古惑仔情有独钟的女生也许会忽然对这个邋遢男人产生一点点悸动。但是路明非不是个女人，而且事实证明了，今后每次芬格尔豪气干云，接下来他们就会陷入绝境……绝得不能再绝的……绝境。\r",
+        "\t音乐开始，舞裙旋转。两只黄鼠狼在巨大的外压之下，只能拥抱在一处。\r",
+        "\t空气里弥漫着缥缈的香水味道，客人们显然都上过同一门舞蹈课，舞姿出自同一个老师的授业，舞姿优雅，走位精准，一时摆出矩形阵列，一时散开为圆形，黑色的男生在外圈，里圈是白裙的女生们。\r",
+        "\t唯一的不协调是，路明非也在里圈……翩翩起舞。\r",
+        "\t“喂，这是选妃会吧？是奥匈帝国皇帝的选妃会吧？我看过《茜茜公主》，一模一样。”路明非后悔在被芬格尔抓住的瞬间没有飞起一脚踢在他脸上而后转身逃跑，等到他们被包围了，已经来不及了。\r",
+        "\t他的身边，蕾丝边的白色礼服裙随着女生们的旋转，如巨大的白花盛开。\r",
+        "\t“卡塞尔学院是个德系的学院，你说奥匈帝国也没错。我们有一流的宫廷舞老师。”芬格尔跳得很是投入。\r",
+        "\t“这就是你所说的杀出血路？拜托我们已经把能丢的人都丢完了！”\r",
+        "\t“动动脑子，这是欧洲古典式的社交舞会，他们会交换舞伴的！”芬格尔一边雄赳赳地大踏步而进，一边低声说，“他们一对对的就像XY染色体，而我们是两条YY染色体……从遗传学的角度来说我们是必胜的，你知道YY染色体么？想想你在高中生理课上学的知识，”芬格尔语气严肃，非常学术，“一个男人的染色体是XY，一个女人的是XX，只有所谓的‘超雄性’，才是无敌的‘YY’！这就意味着无论我们怎么交换舞伴，我们最多就还是YY，我们绝不吃亏！”\r",
+        "\t“我真无法想象你那颗脑袋里装着那么多生理课的讲义和乐观精神，事到如今你还能坚定地认为我们立于不败之地。”路明非揽着芬格尔熊虎一样的粗腰旋转，犹豫着是不是要和周围那些漂亮女生一样做那个华丽的高劈腿动作。别人的舞姿实在太默契了，大家都劈腿，他不劈他觉得有点影响和谐。\r",
+        "\t“不，”芬格尔悲怆地说，“我是说我们无可失败了，就像跌到谷底的股票，必然只有反弹。还有我觉得你可以放弃做出劈腿动作的想法，她们穿着长裙而你穿着裤子，你的裤裆缝线会裂开……”\r",
+        "\t路明非没有回答，他忽然觉得有小乌鸦在他头顶上飞过，呱呱呱地叫着。\r",
+        "\t“就是这一刻！目标是那个插蝴蝶发簪的女孩！”音乐声一变，芬格尔下达了作战的指令。\r",
+        "\t两个男人雄赳赳气昂昂，交握的手臂并在一处，仿佛一门等待发射的迫击炮，直奔距离他们大约十米的漂亮姑娘。那女生正在一个高挑瘦削的男生的怀抱里旋转，白裙盛开，裙下的小腿线条柔美。\r"
+      ],
+      "rationale": "Despite the opaque campus ID, Fingel explicitly characterizes Cassell Academy as a German-style academy with dance teachers. Institutional referent, not a new physical location."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-kas-academy",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00017-observation-b5864fa86dcb",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-observation-b5864fa86dcb",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 532356,
+          "endByte": 532371,
+          "startLine": 3348,
+          "endLine": 3348,
+          "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+          "prefixHash": "2f827c759045a86a8912f4689d41aed7a1c21dd2462e7f026693de318471761d",
+          "suffixHash": "d047a57131a3234ad7f72b3dd563e116100ad92c94bf1e6a363f738400465a6b",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "卡塞尔学院",
+        "form": "proper",
+        "kindCandidates": [
+          "institution"
+        ],
+        "sceneId": "ds-vahall",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "inst-cassel-academy",
+        "kind": "institution",
+        "canonicalName": "卡塞尔学院",
+        "aliases": [
+          "美国神秘学院"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-kas-academy",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00017-observation-b5864fa86dcb",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-observation-b5864fa86dcb",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 532356,
+            "endByte": 532371,
+            "startLine": 3348,
+            "endLine": 3348,
+            "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+            "prefixHash": "2f827c759045a86a8912f4689d41aed7a1c21dd2462e7f026693de318471761d",
+            "suffixHash": "d047a57131a3234ad7f72b3dd563e116100ad92c94bf1e6a363f738400465a6b",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "卡塞尔学院",
+          "form": "proper",
+          "kindCandidates": [
+            "institution"
+          ],
+          "sceneId": "ds-vahall",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "inst-cassel-academy",
+            "entityKind": "institution",
+            "canonicalName": "卡塞尔学院",
+            "matchedText": "卡塞尔学院",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“我明白了，”麻衣说，“你的言灵是‘镰鼬’，难怪你有信心。你早已明令系统熄灯，而在黑暗里‘镰鼬’几乎是无敌的。”\r",
+        "\t言灵·镰鼬，序列号59。\r",
+        "\t“镰鼬”是日本神话中风妖，它们是三兄弟，隐藏在风里，以高速的风形成的真空割伤路人。以它为名的言灵，释放者对着领域内的风下令，风如同被他奴役了那样，把一切声音捕捉来交给他。即便在没有一丝光的黑暗里，他以风为自己的眼睛，仍然掌握着整个战场。\r",
+        "\t“好说，看起来你并不急于侵入地下层。”恺撒说。\r",
+        "\t“你已经说了，我还有其他同伴。此时你们执行部的精英都在外面，学生里最具战斗力的是你和楚子航，你们的血统会对我们造成很大的困扰。我的任务就是拖延你的时间，别的事就交给那个从不空手而归的三无少女好了。”\r",
+        "\t“请教一下，什么叫‘三无少女’？”\r",
+        "\t“就是没身材、没脸蛋、也没热情那种，就是我的反面啦。”麻衣说。（作者注：“三无少女”指的其实是日漫中“无口无心无表情”的女性角色，例如绫波丽，这里麻衣是骗恺撒的。）\r",
+        "\t“那么和这样漂亮的对手对决，看来我比楚子航幸运。”恺撒淡淡地说。\r",
+        "\t“比谁出枪快吧？”\r",
+        "\t“好。”\r",
+        "\t“熄灯比？”麻衣冷笑，“让你一步，黑暗是你的主场，在你的主场比。”\r",
+        "\t“好。”恺撒说。\r",
+        "\t“稍等我一下。”麻衣把格洛克放在旁边的桌上，从贴身的衣袋里掏出两枚银色的发箍来。\r",
+        "\t她旁若无人地梳理着自己的长鬓。她的鬓发是特意蓄养的，两尺长，黑得如漆，像是浮世绘上的古代日本女人，这样两条长鬓和她高马尾辫的运动少女装束组合起来，很惹人注目。\r",
+        "\t“你真是个彬彬有礼的男人，杀了会很可惜。”酒德麻衣在梳理好的长鬓末端各扣上了一枚银色的发箍，发箍上雕刻着漂亮的蝴蝶花纹。\r",
+        "\t“我们家的家教永远让男人在等待女士梳妆时保持耐心。”恺撒说。\r",
+        "\t恺撒重新填充弹匣，麻衣抓起格洛克。两个人低头整理武器，同一声上膛，各自抬头。\r",
+        "\t恺撒双手如同鹰翼般展开：“卡塞尔学院，恺撒·加图索。按照你们日本的说法，参上。”\r",
+        "\t“你几年级？”麻衣忽然问。\r",
+        "\t恺撒一愣：“三年级。”\r",
+        "\t“哦，东京大学音乐系，酒德麻衣，获得市长奖学金，毕业已经两年整了，参上。”麻衣绯色的眉宇飞扬，“三年级，你脸上已经写着‘我觉得我很酷’的字样了。不过在我面前，你还是个师弟而已。如果现在认输，叫一声‘师姐’就当我放你一马。”\r",
+        "\t恺撒冷冷地不说话，冰蓝色的眼睛里闪过一丝慑人的怒气。\r",
+        "\t“看起来你不是那种很有幽默感的人啊。”麻衣耸耸肩，旋身，发梢追着银箍的长鬓飞荡起来。\r",
+        "\t“好！”麻衣下蹲到一个幅度，忽然完全静止。\r",
+        "\t“诺玛，熄灯。”恺撒打了个响指。\r"
+      ],
+      "rationale": "Caesar explicitly announces Cassell Academy as his affiliation before his own full name. Same institutional referent."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-cassell-03",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00018-observation-03bedebd6807",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00018-observation-03bedebd6807",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 565808,
+          "endByte": 565823,
+          "startLine": 3594,
+          "endLine": 3594,
+          "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+          "prefixHash": "957655016bb02348d1b0074229ff786f1e1471e564afedf43a4cdf55a27b1c8b",
+          "suffixHash": "6d20d2791024c7460859db29f5a861c7feadbf43cad64660e3dacd37576512d7",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "卡塞尔学院",
+        "form": "proper",
+        "kindCandidates": [
+          "institution",
+          "location"
+        ],
+        "sceneId": "ds-campus-03",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "inst-cassel-academy",
+        "kind": "institution",
+        "canonicalName": "卡塞尔学院",
+        "aliases": [
+          "美国神秘学院"
+        ],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 0,
+              "endByte": 797,
+              "startLine": 1,
+              "endLine": 5,
+              "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-cassell-03",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00018-observation-03bedebd6807",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00018-observation-03bedebd6807",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 565808,
+            "endByte": 565823,
+            "startLine": 3594,
+            "endLine": 3594,
+            "exactHash": "3c071aa0ee47c33c77ec58aea7a918fe358ea82525d9b04536ac4814a3135af7",
+            "prefixHash": "957655016bb02348d1b0074229ff786f1e1471e564afedf43a4cdf55a27b1c8b",
+            "suffixHash": "6d20d2791024c7460859db29f5a861c7feadbf43cad64660e3dacd37576512d7",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "卡塞尔学院",
+          "form": "proper",
+          "kindCandidates": [
+            "institution",
+            "location"
+          ],
+          "sceneId": "ds-campus-03",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "inst-cassel-academy",
+            "entityKind": "institution",
+            "canonicalName": "卡塞尔学院",
+            "matchedText": "卡塞尔学院",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“我以为日本人会奉行武士道。”恺撒说，“还有我有女朋友。”\r",
+        "\t恺撒的爷爷曾经跟他说起日本武士道的迂腐，说在中日战场上日本人和中国人拼刺刀，日本人总是按《步兵操典》卸下子弹，而中国人永远带弹拼刀，双方僵持的时候，中国人就一扣扳机……啪……哦呀，中国人转身和下一个日本兵拼刺刀。\r",
+        "\t“正是因为有这样的盟友，意大利才会在二战中失败的啊！”恺撒的爷爷总结。\r",
+        "\t“你了解的是公元1868年明治维新时的日本吧？”麻衣撇撇嘴。\r",
+        "\t“哥哥。”稚嫩的声音仿佛从幽深的井中升起。\r",
+        "\t炽热的风扑面而来，明亮的光隔着眼皮他们眼睛照得剧痛，鼻子里满是浓郁的灼烧味。\r",
+        "\t两个人不约而同地扑倒，因为那一瞬间有什么东西压得他们的心脏几乎停跳，比“刃旋岚”强出百倍的压迫感，让人惊悸得喘不过气来。\r",
+        "\t压迫感转瞬即逝，可刚才短短的瞬间，他们如同身处烧灼的地狱。\r",
+        "\t“什么……状况？”两人同时问。\r",
+        "\t“不知道。”两个人同时回答。\r",
+        "\t两个人都睁开了眼睛，大厅里本该一片漆黑，此刻却闪着微弱的光。这里仿佛被什么火风给洗掠了，周围都是浓重的烟雾，一排排的橡木长椅从中间断开为两截，断口参差不齐，闪着暗红色的光。坚硬的老橡木正在缓慢地燃烧，不知道是被什么点燃的，这些橡木经过太多年已经坚硬得和生铁差不多了。\r",
+        "\t“叫你们学院秘书开灯！”麻衣命令。\r",
+        "\t“中场休息对么？我们可没停战。”恺撒说。\r",
+        "\t“我占优势，让你一步，三年级。”麻衣收回了格洛克。\r",
+        "\t“诺玛，开灯！”恺撒缓缓收回狄克推多。\r",
+        "\t没有任何回应，大厅里仍旧是漆黑一片。\r",
+        "\t“诺玛没有响应，不知道为什么。”恺撒尽量保持平静，作为“A”级学生，他在诺玛那里拥有权限，从未有一次，诺玛不回应他。\r",
+        "\t“是跳闸？”麻衣有点烦躁，“你们卡塞尔学院的配电系统是什么三流公司做的？”\r",
+        "\t“没事，我有个抽雪茄用的喷气打火机……火头还不错。”恺撒说着，从口袋里摸出了一只纯银外壳的打火机。\r",
+        "\t“滚开！要你何用？”麻衣不耐烦了，从作战服后袋里摸出了燃烧棒。\r",
+        "\t燃烧棒照亮了周围一片，被弗里嘉子弹命中而昏迷的同伴们依然静静地躺着，除了橡木长椅偏离位置和起火燃烧之外，似乎没有其他异样。\r",
+        "\t“原来你有那么多‘蝴蝶’。”恺撒说。\r",
+        "\t环绕着他们，八枚银色的蝴蝶发卡被悬挂在蛛丝般的细线上，麻衣就是用这些发卡制造了四面八方都有分身的假象。麻衣把“蝴蝶”都摘下来收了起来。恺撒想要伸手拈取一枚看一看的时候，被她瞪了回去。\r",
+        "\t“没事不要收集女性用品！”\r",
+        "\t恺撒无奈地摇摇头。\r"
+      ],
+      "rationale": "Mai refers to your Cassell Academy and its power system while addressing Caesar. The named institution is the referent; no new power-system, location or failure fact."
+    }
+  ],
+  "identityIntroduction": {
+    "startLine": 109,
+    "endLine": 110,
+    "context": [
+      "\t首先自我介绍，卡塞尔学院是一所位于美国伊利诺伊州芝加哥远郊的私立大学，和芝加哥大学是联谊学校，有广泛的学术交流。\r",
+      "\t我们非常荣幸地从芝加哥大学那里得到了您的申请资料，经过细致评估，我们认为您达到了卡塞尔学院的入学标准，在此向你发出邀请。\r"
+    ]
+  },
+  "ledgers": [],
+  "legacyOrigins": [
+    "batch-a28585b1cf867f3e3a16-00001-observation-23902a13002c",
+    "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+    "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+    "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+    "batch-a28585b1cf867f3e3a16-00013-observation-d88837bd383a",
+    "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+    "batch-a28585b1cf867f3e3a16-00017-observation-b5864fa86dcb",
+    "batch-a28585b1cf867f3e3a16-00018-observation-03bedebd6807"
+  ],
+  "legacyPolicy": "Existing completed observation checkpoints without modern receipts are readable under docs/agent-tool-recovery.md; do not synthesize, replace or certify their missing receipts. All new resolution proposals require a verified completed finish. Initial preflight stopped before any proposal mutation.",
+  "originalReceipts": [],
+  "reason": "Nine individual academy mentions reviewed against immutable source bytes and local discourse. Each denotes the same named institution in synopsis, admission, recruitment, organization, affiliation or institutional-property context. Preserve the two distinct observations at line 1261; neither is deleted or merged. Do not turn paratext, reported claims, school evaluation or institutional reference into world truth or physical locations. No relevant original target deferral was found; all existing deferrals, artifacts, provenance, receipts, accounting and checkpoints remain unchanged."
+}

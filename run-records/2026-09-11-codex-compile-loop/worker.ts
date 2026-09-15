@@ -19,9 +19,11 @@ import { CompilerProposalObligations } from "../../src/compiler/proposal-obligat
 import { withWorkspaceOperationLock } from "../../src/util/workspace-lock.js";
 import { SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES, ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES, EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES, SOURCE_ACCOUNTING_TOOL_NAMES } from "../../src/compiler/proposal-tools.js";
 const directory = new URL("./", import.meta.url), stateFile = new URL("state.json", directory);
-const root = process.cwd(), sourceId = "a28585b1cf867f3e3a16", threadId = "01a0912b-5872-75b0-a118-813e3e32d2be";
+const root = process.cwd(), sourceId = "a28585b1cf867f3e3a16";
 let previous: Record<string, any> = {};
 try { previous = JSON.parse(await fs.readFile(stateFile, "utf8")); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+const threadId = previous.threadId ?? "01a0912b-5872-75b0-a118-813e3e32d2be";
+if (typeof threadId !== "string" || !/^[a-f0-9-]{36}$/i.test(threadId)) throw new Error("Invalid callback task UUID; stop for host configuration review.");
 try { const reset = JSON.parse(await fs.readFile(new URL("quota-reset.json", directory), "utf8")); if (previous.quotaResetAnchor !== reset.anchor && previous.status === "quota-wait") previous.retryAt = reset.anchor; previous.quotaResetAnchor = reset.anchor; } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
 if (["completed", "repeated-failure"].includes(previous.status)) throw new Error("Loop already stopped; do not restart automatically.");
 if (previous.status === "quota-wait" && Date.now() < Date.parse(previous.retryAt)) throw new Error("Quota reset has not arrived; do not retry.");

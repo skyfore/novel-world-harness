@@ -1,0 +1,1494 @@
+{
+  "reviewedAt": "2026-09-13T17:58:01.263Z",
+  "priorState": {
+    "attempt": 45,
+    "status": "needs-review",
+    "sourceId": "a28585b1cf867f3e3a16",
+    "threadId": "01a0912b-5872-75b0-a118-813e3e32d2be",
+    "error": "Automatic preparation stopped at 'repair'. The event graph has 44 unconditional roots across 45 causal components; reparse with phase gates and evidence-backed causal links so later canon cannot all activate at the opening. Only 75% of canonical events have a comparable story-time anchor (minimum 75%). Only 25% of recurring characters have phase-bounded goals or evidence-grounded development episodes (minimum 50%). Only 94% of legacy causal-parent edges have independently evidenced causes/enables relations (required 100%). Only 19% of later embodied characters have a complete pre-event entry checkpoint (required 100%). Next diagnostic step: nwh audit --source a28585b1cf867f3e3a16",
+    "reviewedBatchFinished": true,
+    "failureFingerprint": "7b09fbc72822b10277699837737069ad3bf087b4a80e84bcdfb49c7f71864d1c",
+    "startedAt": "2026-09-13T17:40:42.376Z",
+    "selectorBatchFinished": true,
+    "semanticRunId": "codex-opening-driver-v1-20260912",
+    "timer": {
+      "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+      "scheduledAt": "2026-09-13T17:41:00.000Z",
+      "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+    },
+    "hostReview": {
+      "path": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+      "reviewedAt": "2026-09-13T16:42:26.692Z",
+      "reason": "User-authorized continuation after verified retrieval fix; original stopped state preserved in review."
+    },
+    "appliedRepair": {
+      "repairId": "alarm-gather-source-bounded-order-v1",
+      "failureFingerprint": "362c430bbb07c86c567325ab6be870f6795e2fc0b6f447d130865d7f645531cd",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-gather-time.json",
+      "appliedAt": "2026-09-13T17:40:28.712Z"
+    },
+    "timerHistory": [
+      {
+        "unit": "nwh-codex-reset-01a0912b-6.timer",
+        "scheduledAt": "2026-09-12T21:08:00.000Z",
+        "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-6.timer\nWill run service as unit: nwh-codex-reset-01a0912b-6.service\n"
+      }
+    ],
+    "quotaResetAnchor": "2026-09-13T17:41:00.000Z",
+    "lifecycleRecovery": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-4",
+      "pending": false,
+      "auditRef": "run-records/2026-09-11-codex-compile-loop/host-review-proposal-lifecycle.json"
+    },
+    "semanticRunHistory": [
+      {
+        "namespace": "codex-target-review-v1-20260912",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-opening-target.json"
+      }
+    ],
+    "reconciliationFocus": "opening-driver",
+    "knowledgeRepair": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-27",
+      "pending": false,
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+      "receiptFingerprint": "16abfa2b45fec0a37972fbd083ad28ca52fd9e70f8604205129a97c9a87bb040",
+      "unresolvedTargets": []
+    },
+    "traceRepair": {
+      "attributionIds": [
+        "attr-schneider-rescue-members-trapped-001",
+        "attr-eva-guigu-00008"
+      ],
+      "failureDiagnostic": "Reviewed quotation content trace failed again: attr-eva-guigu-00008,attr-schneider-rescue-members-trapped-001. Preserve originals and stop for host review.",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-quotation-content.json",
+      "batchId": "host-quotation-content-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "903a92cb36ed290cba6433d312fef304024539521b12f0f87c6a771b0500d3ff"
+    },
+    "knowledgeRepairHistory": [
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-knowledge-dependencies.json",
+        "receiptFingerprint": "a80578bca7684972296b14cdd8260d5f28fa0a1fdb8c9c47c9727c7a7e77a3c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-2",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "receiptFingerprint": "f9682e866aca66a22cf1a01b8dae5a32e523670103a62ea35e910c7c3fdb3436",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-3",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "receiptFingerprint": "eee8c13e7ebba78cb1fb39a8d95f5a1743bd982ec3171298df37e25de903286e",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-4",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "receiptFingerprint": "10fe6b7ffcd87d66b60f006b04fa4bb8900efdca91e38a4a1d03b25d73db8fac",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-5",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "receiptFingerprint": "9b47e05a8d83d08272bf58f01184723c23f0314d60a7e738479bbdcbae48ba4a",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-6",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "receiptFingerprint": "eca4e84675eeff514914668a764197742048ee6134b683d526f9ec822148c450",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-7",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "receiptFingerprint": "20bc8cd95777636285a45fa1612a0de9b588dac75feffd3e105c6b8c33ff8f07",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-8",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "receiptFingerprint": "4176e0f60f80d8da09f44af0cb4e7ab567c7464f80ded678469a00717d6a896d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-9",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "receiptFingerprint": "bb667a3d751e646925b005f469396ae419c4ef89f624f12742915799bfafaacc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-10",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "receiptFingerprint": "14b4e7bbc2093be8d3d86f0356d2eb8c36a71459e1e7f0509e24eeaf71690964",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-11",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "receiptFingerprint": "b860218c84dc36767018908a51fdaaea20f3975e1c1cb48e2c64f993b7105974",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-12",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "receiptFingerprint": "38b480456c192f1dd8cc493b53fc8087e72a7bc9a8c7f64028e25bd6e01d3c18",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-13",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "receiptFingerprint": "ebcc80887c90a45677644d3c7cd72fb4218e8feb3da34ecb2d5c722fd665759b",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-14",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "receiptFingerprint": "099e053d905c7411e6c1424a3507084c7c4640c23983a03d2642edd887afe745",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-15",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "receiptFingerprint": "e42c2b63609e824015b1d2fe60ae58f4cf80ea8d604cd9358998cc3d6a849e34",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-16",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "receiptFingerprint": "adb536f530a54f680b22acdfd55c27718bc788a2fa664b51f2c22f6728a0cecc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-17",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "receiptFingerprint": "23fec246048d47fd7916984f504b736186902a2627a5e271e24b525017a627bb",
+        "unresolvedTargets": [
+          "event-eva-config-001"
+        ]
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-18",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "receiptFingerprint": "e863047b25c119e6058eecaa1c01fea9b747e4e435927889937bd4067ff2b50d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-19",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "receiptFingerprint": "4e0c1388eca6e4942888f91782f8083ad560998996a4d58790111ec1070f784d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-20",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "receiptFingerprint": "fc96a11cf9e398b2aaf242858ce5f366d9f7ee53ad1b9179b761eca25f8c6a5c",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-21",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "receiptFingerprint": "1a66602c8e29aa70646e3ff8f476352b813fefee02e6528f495b22b162ebed32",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-22",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "receiptFingerprint": "66c5ad249e1b4413a6589600f1492b7d7041d659b8497254e7e529d7708a5169",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-23",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "receiptFingerprint": "5ca3cf4cdef33873685dcad3377007e791ba9f88604cf3bc4e0990dfeacdef5d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-24",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "receiptFingerprint": "1fe5dc9570548f6263c6b3014a6cf81c88db1264942385383f515faeda3430c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-25",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "receiptFingerprint": "57d5d7c48051196972e595c7f26b0f98ebbb0c721116e14f23bee07f677b01e9",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-26",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "receiptFingerprint": "d9a2961678b7acafabe33458e5f17b4b1d468370d6b69f3f74d6ed5b78432262",
+        "unresolvedTargets": []
+      }
+    ],
+    "appliedRepairHistory": [
+      {
+        "repairId": "dragontext-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "0be170fea49a866ea1c65fbe8fe8603cee179192f84fee568d777853abc44f63",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "appliedAt": "2026-09-12T18:30:48.769Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dragontext-proposition-object-selector-v1",
+        "failureFingerprint": "45af7b72057ca8627ca38f142736a1edc2484af30b0922c630fbf7a4e03523ed",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-anchor.json",
+        "appliedAt": "2026-09-12T18:37:15.473Z"
+      },
+      {
+        "repairId": "medical-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "d8d6e7cd654c89e070a14645d590c434ad1c952f01b27f5095e119ba6da97398",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "appliedAt": "2026-09-12T18:40:09.287Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "office-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "8ef8899d2276275463db5a56ae28051671b77ed93e721f72501fd01a65c1d2e0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "appliedAt": "2026-09-12T18:47:01.873Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-disclosure-source-grounded-dependencies-v1",
+        "failureFingerprint": "2c8fd49565f406cc3b9d3fabaf11460ff6d57ab72d0ca2fe8d8969a8dd25699f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "appliedAt": "2026-09-12T18:56:17.280Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-identity-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "b2e504d601decd98fcf28b2f03263a9f6837e3211d066def3c42bffc69b24aee",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "appliedAt": "2026-09-12T19:05:58.058Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-listener-and-content-selectors-v1",
+        "failureFingerprint": "d98142ee01a99ba21ccc268302bf3a09ed3c843977a8839ba8b5aef4225a31da",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-selectors.json",
+        "appliedAt": "2026-09-12T19:12:49.583Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "121356ed29262f4b483750da516cc9847495e8e970b9799b98a94a46c2606035",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "appliedAt": "2026-09-12T19:15:57.744Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "confession-quotation-and-knowledge-dependencies-v1",
+        "failureFingerprint": "06944c5fe2fe0476a51c4030301e37e89c1017926aa21fda094e70d29f2830a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "appliedAt": "2026-09-12T19:21:50.468Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "acceptance-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "801e624d68d6772a4af862184fac1ccaf9a7f0ea012ab4c3e1e1441931f35101",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "appliedAt": "2026-09-12T19:29:12.505Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "nono-entry-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "1dfc90a3e4174718919bedc66c7d47b966921b86a71c8390dedd7e3d10c0ec94",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "appliedAt": "2026-09-12T19:36:00.594Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "bend-warning-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "a6f5f754995fe21f6ba5134f90d1f3c666c9a1984ea4e8ad9851fa16cf085994",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "appliedAt": "2026-09-13T12:45:37.230Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "funding-answer-summary-and-knowledge-v1",
+        "failureFingerprint": "2f13c1affa661632fc1f1c0d3d028a919178af358162e575cf4e424e2f38cf67",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "appliedAt": "2026-09-13T12:54:28.250Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "6f5ddff7066f52187dc1d4090ae387d9a808375b020964d71c5beeb9b6c9232d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "appliedAt": "2026-09-13T12:59:21.471Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-document-holder-and-lifecycle-host-v1",
+        "failureFingerprint": "a7c7f0088d27ba49c117896fa5635360b3258cd945a6ca89ab75ccff6bcd708f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-document-correction.json",
+        "appliedAt": "2026-09-13T13:12:44.915Z"
+      },
+      {
+        "repairId": "emergency-call-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "24d033b42a3f33b73a24baabfb743cd5d8a4aab5dcfdb3a946ed376611dcbd7b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "appliedAt": "2026-09-13T13:20:10.161Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "emergency-request-quotation-anchors-v1",
+        "failureFingerprint": "626922bbf53ef32aef6f793771ac4a0340ff4144d094e0cd92718fc1dca9ff80",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-trace.json",
+        "appliedAt": "2026-09-13T13:26:20.468Z"
+      },
+      {
+        "repairId": "exploration-window-source-reviewed-knowledge-v1",
+        "failureFingerprint": "86278ddb0368746eecc0a772333379eed8ee879de047a72cbf557dd1e6affeab",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "appliedAt": "2026-09-13T13:30:18.146Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "exploration-full-projection-and-lifecycle-v1",
+        "failureFingerprint": "91387cb2707fac261925e5485d1f051fbbee51251a14ed7ce5d3b6d6174934f0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-projection.json",
+        "appliedAt": "2026-09-13T13:38:07.647Z"
+      },
+      {
+        "repairId": "nono-follow-source-reviewed-knowledge-v1",
+        "failureFingerprint": "9989a41693d7f8808acdb8f2eecaabbfea496591868b214529a100493a077503",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "appliedAt": "2026-09-13T13:41:24.132Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-interface-source-reviewed-knowledge-v1",
+        "failureFingerprint": "698fc2d0146b8703c3ae7c9b4d63acd82877b507158f9df2698757363af25032",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "appliedAt": "2026-09-13T13:48:58.522Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-quotation-retrieval-protocol-v1",
+        "failureFingerprint": "4b1a08018ec8ee43b8810abcb0286ab2643d17a06a2bbf07fe39ac35c010d508",
+        "failureCause": {
+          "category": "knowledge-not-produced-with-verified-evidence",
+          "targetIds": [
+            "event-eva-config-001"
+          ],
+          "dependencyIds": [
+            "q-eva-interface-click-instruction-00011"
+          ]
+        },
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "appliedAt": "2026-09-13T16:42:27.004Z"
+      },
+      {
+        "repairId": "map-display-source-reviewed-knowledge-v1",
+        "failureFingerprint": "11b736d5e84548b873606ab68338a15fc7717e89eab302fe811d537912347999",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "appliedAt": "2026-09-13T16:47:21.510Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-perception-source-reviewed-knowledge-v1",
+        "failureFingerprint": "c10c9346b27a3308d8f20d9f233edb9a83439a31057a8c6e554464311aadb61a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "appliedAt": "2026-09-13T16:54:36.423Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-direct-observation-scope-v1",
+        "failureFingerprint": "bfea6a8d889103ac8f5f70c43a26f5370f5e538e9e271edd0a287a45d692964c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "appliedAt": "2026-09-13T17:00:48.261Z",
+        "fingerprintBasis": "Verified attempt 36 temporal misattribution, not aggregate percentages"
+      },
+      {
+        "repairId": "duel-limited-observation-source-review-v1",
+        "failureFingerprint": "566b293740da10a7df74104a8ddf06078709571620449fece0312e7cf3a1b5eb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "appliedAt": "2026-09-13T17:06:26.315Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "earthquake-perception-source-review-v1",
+        "failureFingerprint": "2d4bcebfafff2412e9b9340fbad52822729157510e54f84eba2309d721df2b0d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "appliedAt": "2026-09-13T17:10:47.409Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "train-arrival-observation-source-review-v1",
+        "failureFingerprint": "c553169066754cdb8020da447d1ff3a30f30e8f0a3572c32986349e740d91219",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "appliedAt": "2026-09-13T17:15:51.299Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "helicopter-approach-observation-source-review-v1",
+        "failureFingerprint": "a1357fb5e1e649b1d317176279b1f17013fa7469bf64cbda434d4a68161fd4de",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "appliedAt": "2026-09-13T17:20:29.798Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dance-finale-observation-source-review-v1",
+        "failureFingerprint": "d7593d5f5485ea50d2d5cd1d9aaf09e9806758b323c516628c8f1bd3d459b6e2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "appliedAt": "2026-09-13T17:25:26.067Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "caesar-fall-observation-source-review-v1",
+        "failureFingerprint": "b2f54cf53c7298bda4359e70c2e6f8d06c39355bf69e840f373b99e8cf2c1ab7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+        "appliedAt": "2026-09-13T17:29:36.955Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "adams-fragment-required-before-reassembly-v1",
+        "failureFingerprint": "9d0ff292fa191d5375c8aa1d215484bf979385dfdd8597481b9d08796ef03a57",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-adams-causal.json",
+        "appliedAt": "2026-09-13T17:36:02.166Z"
+      }
+    ],
+    "identityRepair": {
+      "batchId": "host-lumingze-identity-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "362a6228c63af64cda20a243cac91f29b4f933cbc399240190d4168794c8d3e3",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingze-identity.json",
+      "verifiedAt": "2026-09-12T19:04:52.690Z",
+      "entityId": "char-lumingze-boy"
+    },
+    "endedAt": "2026-09-13T17:41:57.612Z",
+    "callback": {
+      "attempt": 45,
+      "delivered": true,
+      "receipt": "Queued message 01a09bdc-8e63-7823-8d50-a0cd436b02c7 for thread 01a0912b-5872-75b0-a118-813e3e32d2be.",
+      "at": "2026-09-13T17:41:57.992Z"
+    }
+  },
+  "reports": [
+    {
+      "batch": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-3",
+      "receipt": {
+        "identity": {
+          "version": 1,
+          "pipelineVersion": 34,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "sourceSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+          "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-3",
+          "input": {
+            "target_reviews": [
+              {
+                "target": "event:event-library-gathering-001",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+                ],
+                "summary": "The source says students enter the library control room, but no canonical library location entity exists and no representable state or knowledge field changes. A location-entity or attendance field is needed; no event replacement was staged."
+              },
+              {
+                "target": "event:event-lumingze-visit-001",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+                ],
+                "summary": "The visit and warning are explicit, including the newly available Black Sheep Wall phrase, but there is no claim/proposition record compatible with a KnowledgeDelta and no registered field represents the newly available capability. No supported typed effect can be added."
+              },
+              {
+                "target": "event:event-rescue-briefing-001",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+                ],
+                "summary": "Schneider explicitly reports that Ye Sheng and Yaji are trapped and oxygen is decreasing, but no compatible claim/proposition exists for a knowledge operation, and requesting help does not establish a represented state-field outcome."
+              },
+              {
+                "target": "event:event-cheatmap-001",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+                ],
+                "summary": "The source explicitly says the three-dimensional Bronze City map appears and is marked as Lumingfei's interpretation. No map artifact/entity or field exists to represent acquiring/displaying it, and no compatible claim exists for knowledge."
+              },
+              {
+                "target": "event:event-chu-invite-001",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+                ],
+                "summary": "The source explicitly recounts Chu Zihang inviting Lumingfei to join Lionheart and succeed him. An invitation is not a represented membership or state change, and the source does not say Lumingfei accepts it."
+              },
+              {
+                "target": "event:event-email-open-001",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+                ],
+                "summary": "The email explicitly invites Ricardo to Amber Hall the following evening. Reading an invitation has no compatible existing claim/proposition for KnowledgeDelta and no registered message/invitation field."
+              },
+              {
+                "target": "event:event-nono-appears-001",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+                ],
+                "summary": "The source explicitly states that Nono appears behind Lumingfei and Fingel at Amber Hall, but the existing catalog has no attendance/presence state field and no separate representable event outcome."
+              },
+              {
+                "target": "event:event-zero-dance-00014",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00014-4a34c47d2ef5"
+                ],
+                "summary": "Zero explicitly joins the dance and dances with Lumingfei; the applause and social effect are narrated, but no registered state field represents a dance, social standing change, or event-specific relationship change without inventing a value."
+              },
+              {
+                "target": "event:event-near-crash-00014",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00014-4a34c47d2ef5"
+                ],
+                "summary": "The source explicitly says Lumingfei turns the Bugatti in time and safely clears the bend. No represented vehicle-position, near-miss, or road-condition field exists; inventing health or another numeric state would be semantically incorrect."
+              },
+              {
+                "target": "event:event-eva-warns-thirteen-00015",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00015-c98e6792a5ae"
+                ],
+                "summary": "EVA explicitly identifies 13 as an intruder, cannot alarm because of the preconfigured card, and warns him to leave. The warning creates no compatible existing claim/proposition for a knowledge effect and no registered system-warning state."
+              },
+              {
+                "target": "event:event-thirteen-opens-control-door-00015",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00015-c98e6792a5ae"
+                ],
+                "summary": "The source explicitly says the black card retracts twelve locks and opens the twenty-centimeter metal door. The door is not a canonical location/entity, so location.open cannot be truthfully targeted."
+              },
+              {
+                "target": "event:event-caesar-mai-valhalla-battle-00016",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00016-a5fa7ec5e791"
+                ],
+                "summary": "The source explicitly narrates both sides firing Frigga anesthetic rounds and both groups falling unconscious. No named individual outcome is established for the two canonical participants, and no participant-specific health or other field can be assigned without fabrication."
+              },
+              {
+                "target": "event:event-thirteen-opens-aquatic-gate-00016",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00016-a5fa7ec5e791"
+                ],
+                "summary": "The source explicitly says the 1912 brass gate opens and 13 falls with seawater into the aquarium pool. Neither the gate nor aquarium pool is a canonical entity suitable for location.open or location state."
+              },
+              {
+                "target": "event:event-13-knockout-00017",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+                ],
+                "summary": "The source explicitly says 13 knocks out an unnamed showering man and wears a sterile suit. The victim and suit have no canonical entities, so no health, inventory, owner, or condition operation can be grounded."
+              },
+              {
+                "target": "event:event-church-sanwu-destruction-00017",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+                ],
+                "summary": "The source explicitly says the paired Junyan attacks leave only the church's columns and load-bearing walls. The church lacks a canonical location entity and location.condition is numeric, so the destruction cannot be represented without an unsupported numeric value. It also gives no pre-event direct observation for Sanwu beyond the encounter itself, so an entry checkpoint cannot be safely invented."
+              },
+              {
+                "target": "event:event-norton-capture-00017",
+                "disposition": "capability-gap",
+                "evidence_segment_ids": [
+                  "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+                ],
+                "summary": "Angier explicitly announces Norton's capture after the brass urn is suspended in its isolation apparatus. No supported artifact owner/custodian/delivered value is specified, and artifact.condition cannot encode capture. The source does not provide a pre-event direct observation for Angier sufficient for an entry checkpoint."
+              }
+            ],
+            "outcome": "no-artifacts",
+            "reviewed_segments": [],
+            "summary": "Reviewed all 16 bounded targets against their exact source segments. No pending replacements were staged because each missing typed effect or checkpoint requires an unrepresented entity/field, an absent compatible semantic claim, or an invented value; all blockers are reported for host review."
+          },
+          "segments": [
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00001-ad1f59d1acf3",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 0,
+              "kind": "section",
+              "title": "龙族1·火之晨曦",
+              "startLine": 1,
+              "endLine": 5,
+              "startByte": 0,
+              "endByte": 797,
+              "textSha256": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521",
+              "bytes": 797,
+              "promptCharacters": 286
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 1,
+              "kind": "section",
+              "title": "序幕 白帝城",
+              "startLine": 6,
+              "endLine": 46,
+              "startByte": 797,
+              "endByte": 5290,
+              "textSha256": "16e2c6da87f3beec70e6abaa3cb349f62481de28484b50be6ad1613099ad67f3",
+              "bytes": 4493,
+              "promptCharacters": 1702
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00003-5c70d7864d11",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 2,
+              "kind": "section",
+              "title": "第一幕 卡塞尔之门",
+              "startLine": 47,
+              "endLine": 334,
+              "startByte": 5290,
+              "endByte": 54279,
+              "textSha256": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647",
+              "bytes": 48989,
+              "promptCharacters": 18161
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 3,
+              "kind": "section",
+              "title": "第一幕 卡塞尔之门 [2]",
+              "startLine": 335,
+              "endLine": 692,
+              "startByte": 54279,
+              "endByte": 103369,
+              "textSha256": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e",
+              "bytes": 49090,
+              "promptCharacters": 18263
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00005-12c9137e67cf",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 4,
+              "kind": "section",
+              "title": "第一幕 卡塞尔之门 [3]",
+              "startLine": 693,
+              "endLine": 788,
+              "startByte": 103369,
+              "endByte": 117806,
+              "textSha256": "12c9137e67cf1ac156f43d522649c25da31ed78a52bd87a9dd9036407ef8781a",
+              "bytes": 14437,
+              "promptCharacters": 5354
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00006-dfcdc0eeafc7",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 5,
+              "kind": "section",
+              "title": "第二幕 黄金瞳",
+              "startLine": 789,
+              "endLine": 1065,
+              "startByte": 117806,
+              "endByte": 166800,
+              "textSha256": "dfcdc0eeafc780261fb667b68bc0d7fe6380e77d04596acd8324271a50a5efd6",
+              "bytes": 48994,
+              "promptCharacters": 17873
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00007-26df32014434",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 6,
+              "kind": "section",
+              "title": "第二幕 黄金瞳 [2]",
+              "startLine": 1066,
+              "endLine": 1252,
+              "startByte": 166800,
+              "endByte": 197256,
+              "textSha256": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89",
+              "bytes": 30456,
+              "promptCharacters": 11135
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00008-1fb8ac99a307",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 7,
+              "kind": "section",
+              "title": "第三幕 恺撒",
+              "startLine": 1253,
+              "endLine": 1547,
+              "startByte": 197256,
+              "endByte": 246403,
+              "textSha256": "1fb8ac99a307291dd1a38ea3cdb4ea460760682239e13e26f591fde5a3ae494f",
+              "bytes": 49147,
+              "promptCharacters": 18043
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00009-6677e8830ee3",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 8,
+              "kind": "section",
+              "title": "第三幕 恺撒 [2]",
+              "startLine": 1548,
+              "endLine": 1613,
+              "startByte": 246403,
+              "endByte": 256734,
+              "textSha256": "6677e8830ee3eb02982b57e4636d6f0c4bc7a93fe3e6d7fd85e52950f0503200",
+              "bytes": 10331,
+              "promptCharacters": 3868
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00010-4539f49e0b67",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 9,
+              "kind": "section",
+              "title": "第四幕 青铜城",
+              "startLine": 1614,
+              "endLine": 1887,
+              "startByte": 256734,
+              "endByte": 305615,
+              "textSha256": "4539f49e0b673be585381c639f80fe5fe5cd254e181cacfd68176ab8e17443dd",
+              "bytes": 48881,
+              "promptCharacters": 17742
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00011-80174f0bd7d3",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 10,
+              "kind": "section",
+              "title": "第四幕 青铜城 [2]",
+              "startLine": 1888,
+              "endLine": 2045,
+              "startByte": 305615,
+              "endByte": 330964,
+              "textSha256": "80174f0bd7d324eece0959c9d16d8f372394444a6bf86c2cb4b04c02261e8921",
+              "bytes": 25349,
+              "promptCharacters": 9391
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00012-1f6706579fb4",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 11,
+              "kind": "section",
+              "title": "第五幕 龙影",
+              "startLine": 2046,
+              "endLine": 2342,
+              "startByte": 330964,
+              "endByte": 380000,
+              "textSha256": "1f6706579fb490d64a734edf09961b6257bad6bdeb5c41bce40c7ae07b74c9ce",
+              "bytes": 49036,
+              "promptCharacters": 17892
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00013-2df5b1eb46fa",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 12,
+              "kind": "section",
+              "title": "第五幕 龙影 [2]",
+              "startLine": 2343,
+              "endLine": 2410,
+              "startByte": 380000,
+              "endByte": 392127,
+              "textSha256": "2df5b1eb46fa149973d12c81ed6b5dfb9c7af67d201c82a9f8e7ab0bad932675",
+              "bytes": 12127,
+              "promptCharacters": 4422
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00014-4a34c47d2ef5",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 13,
+              "kind": "section",
+              "title": "第六幕 星与花",
+              "startLine": 2411,
+              "endLine": 2723,
+              "startByte": 392127,
+              "endByte": 440972,
+              "textSha256": "4a34c47d2ef5b1b80acf5e7dbc237fdcbaca06bd151d9f152910339711605ffb",
+              "bytes": 48845,
+              "promptCharacters": 17958
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00015-c98e6792a5ae",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 14,
+              "kind": "section",
+              "title": "第六幕 星与花 [2]",
+              "startLine": 2724,
+              "endLine": 3024,
+              "startByte": 440972,
+              "endByte": 482331,
+              "textSha256": "c98e6792a5ae5c42d92dae969b8cfa4f7e54348aea5807e074a040adb3b7a580",
+              "bytes": 41359,
+              "promptCharacters": 15505
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00016-a5fa7ec5e791",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 15,
+              "kind": "section",
+              "title": "第七幕 弟弟",
+              "startLine": 3025,
+              "endLine": 3340,
+              "startByte": 482331,
+              "endByte": 531431,
+              "textSha256": "a5fa7ec5e7913e92b1746e39d64e0488ea1cb1737fca48b0ee9d118e4c194f34",
+              "bytes": 49100,
+              "promptCharacters": 18229
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00017-3111c3cc2bb7",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 16,
+              "kind": "section",
+              "title": "第七幕 弟弟 [2]",
+              "startLine": 3341,
+              "endLine": 3444,
+              "startByte": 531431,
+              "endByte": 546558,
+              "textSha256": "3111c3cc2bb707d45859119543b103f52aba52c6b63eb69f32651352a1755b56",
+              "bytes": 15127,
+              "promptCharacters": 5587
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00018-5b35ba4d844e",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 17,
+              "kind": "section",
+              "title": "第八幕 哥哥",
+              "startLine": 3445,
+              "endLine": 3814,
+              "startByte": 546558,
+              "endByte": 595592,
+              "textSha256": "5b35ba4d844eea94d66681b9d71af0c52c18c12d4f6815ab871e4222b9f9b237",
+              "bytes": 49034,
+              "promptCharacters": 18319
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 18,
+              "kind": "section",
+              "title": "第八幕 哥哥 [2]",
+              "startLine": 3815,
+              "endLine": 4058,
+              "startByte": 595592,
+              "endByte": 633501,
+              "textSha256": "7707f11fa94612a078f57e3464d335d6bf1047233adc0554465b59805b6681e4",
+              "bytes": 37909,
+              "promptCharacters": 13927
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00020-710f6db124e7",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 19,
+              "kind": "section",
+              "title": "第九幕 龙墓",
+              "startLine": 4059,
+              "endLine": 4371,
+              "startByte": 633501,
+              "endByte": 682488,
+              "textSha256": "710f6db124e743cacc6aaae796a584fc40e02e8b6daa20e748089cabea7424b3",
+              "bytes": 48987,
+              "promptCharacters": 17955
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 20,
+              "kind": "section",
+              "title": "第九幕 龙墓 [2]",
+              "startLine": 4372,
+              "endLine": 4549,
+              "startByte": 682488,
+              "endByte": 707641,
+              "textSha256": "0343cf84299211b810c167ca129f490be32a08f5582709325fac2b264e374e0c",
+              "bytes": 25153,
+              "promptCharacters": 9307
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00022-c0d6642068d7",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 21,
+              "kind": "section",
+              "title": "第十幕 七宗罪",
+              "startLine": 4550,
+              "endLine": 4880,
+              "startByte": 707641,
+              "endByte": 756688,
+              "textSha256": "c0d6642068d743ac816a30df50ac5d51eb41fc39c1534a018c39543ed63601f8",
+              "bytes": 49047,
+              "promptCharacters": 18137
+            },
+            {
+              "version": 1,
+              "id": "a28585b1cf867f3e3a16-00023-109cf3454cd4",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "sourcePath": "fixtures/corpus/longzu_1.txt",
+              "ordinal": 22,
+              "kind": "section",
+              "title": "第十幕 七宗罪 [2]",
+              "startLine": 4881,
+              "endLine": 5187,
+              "startByte": 756688,
+              "endByte": 798095,
+              "textSha256": "109cf3454cd49be91da8cf074357a20a3eb4bf12883a66635664b59b8a14402f",
+              "bytes": 41407,
+              "promptCharacters": 15433
+            }
+          ],
+          "dependencies": [],
+          "metadata": {}
+        },
+        "fingerprint": "7244c71c39204ed9a64b81f96be1353d07fe6d0a42eeb2e0de18aaf28f32b7c3",
+        "state": "completed",
+        "preparedAt": "2026-09-12T17:30:08.977Z",
+        "completedAt": "2026-09-12T17:30:08.983Z"
+      },
+      "targets": [
+        {
+          "target": "event:event-email-open-001",
+          "disposition": "capability-gap",
+          "evidence_segment_ids": [
+            "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+          ],
+          "summary": "The email explicitly invites Ricardo to Amber Hall the following evening. Reading an invitation has no compatible existing claim/proposition for KnowledgeDelta and no registered message/invitation field."
+        },
+        {
+          "target": "event:event-nono-appears-001",
+          "disposition": "capability-gap",
+          "evidence_segment_ids": [
+            "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+          ],
+          "summary": "The source explicitly states that Nono appears behind Lumingfei and Fingel at Amber Hall, but the existing catalog has no attendance/presence state field and no separate representable event outcome."
+        }
+      ]
+    }
+  ],
+  "before": {
+    "id": "event-gear-jam-001",
+    "title": "叶胜卡住青铜齿轮",
+    "readerSummary": "叶胜把折刀刺入两枚齿轮之间，使齿轮暂时扣死并令巨钟摇晃放慢。",
+    "participants": [
+      "char-yesheng",
+      "char-jiudeyaji"
+    ],
+    "participantPresence": [
+      {
+        "entityId": "char-yesheng",
+        "mode": "physical"
+      },
+      {
+        "entityId": "char-jiudeyaji",
+        "mode": "physical"
+      }
+    ],
+    "storyTime": {
+      "kind": "ordinal",
+      "label": "青铜城探索期间，齿轮启动后",
+      "orderHint": 41
+    },
+    "preconditions": [],
+    "observedOutcome": {
+      "version": 1,
+      "operations": [
+        {
+          "op": "set",
+          "entityId": "loc-bronze-city-00010",
+          "field": "location.condition",
+          "value": 0
+        }
+      ]
+    },
+    "sceneOccurrenceIds": [
+      "scene-underwater-continuation-001"
+    ],
+    "evidence": [
+      {
+        "span": {
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 305615,
+          "endByte": 330964,
+          "startLine": 1888,
+          "endLine": 2045,
+          "quoteHash": "80174f0bd7d324eece0959c9d16d8f372394444a6bf86c2cb4b04c02261e8921"
+        },
+        "strength": "explicit"
+      }
+    ],
+    "causalParents": [
+      "event-gears-activate-001"
+    ],
+    "confidence": 0.99
+  },
+  "after": {
+    "id": "event-nono-pull-001",
+    "title": "诺诺拉着路明非和芬格尔奔向安珀馆门口",
+    "readerSummary": "诺诺抓住路明非和芬格尔，带着他们直奔安珀馆门口。",
+    "participants": [
+      "char-nuonuo",
+      "char-lumingfei",
+      "char-fingel",
+      "loc-amber-hall-00008"
+    ],
+    "participantPresence": [
+      {
+        "entityId": "char-nuonuo",
+        "mode": "physical"
+      },
+      {
+        "entityId": "char-lumingfei",
+        "mode": "physical"
+      },
+      {
+        "entityId": "char-fingel",
+        "mode": "physical"
+      }
+    ],
+    "storyTime": {
+      "kind": "ordinal",
+      "label": "安珀馆晚宴当晚",
+      "orderHint": 49
+    },
+    "preconditions": [],
+    "observedOutcome": {
+      "version": 1,
+      "operations": [
+        {
+          "op": "set",
+          "entityId": "char-lumingfei",
+          "field": "character.location",
+          "value": "loc-amber-hall-00008"
+        },
+        {
+          "op": "set",
+          "entityId": "char-fingel",
+          "field": "character.location",
+          "value": "loc-amber-hall-00008"
+        },
+        {
+          "op": "set",
+          "entityId": "char-nuonuo",
+          "field": "character.location",
+          "value": "loc-amber-hall-00008"
+        }
+      ]
+    },
+    "sceneOccurrenceIds": [
+      "scene-amber-evening-001"
+    ],
+    "evidence": [
+      {
+        "span": {
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 380000,
+          "endByte": 392127,
+          "startLine": 2343,
+          "endLine": 2410,
+          "quoteHash": "2df5b1eb46fa149973d12c81ed6b5dfb9c7af67d201c82a9f8e7ab0bad932675"
+        },
+        "strength": "explicit"
+      }
+    ],
+    "causalParents": [
+      "event-nono-appears-001"
+    ],
+    "confidence": 0.99
+  },
+  "originals": [
+    {
+      "id": "event-email-open-001",
+      "title": "路明非打开诺诺发来的晚宴邀请邮件",
+      "readerSummary": "路明非打开一封来自诺诺的新邮件，得知次日晚将在安珀馆举行晚宴和社交舞会，恺撒希望与他交流。这封邀请把他带入学生会的正式社交场合。",
+      "participants": [
+        "char-lumingfei",
+        "char-nuonuo"
+      ],
+      "participantPresence": [
+        {
+          "entityId": "char-lumingfei",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-nuonuo",
+          "mode": "represented"
+        }
+      ],
+      "storyTime": {
+        "kind": "ordinal",
+        "label": "安珀馆晚宴前一晚"
+      },
+      "preconditions": [],
+      "observedOutcome": {
+        "version": 1,
+        "operations": []
+      },
+      "observedKnowledge": {
+        "version": 1,
+        "operations": [
+          {
+            "op": "learn",
+            "actorId": "char-lumingfei",
+            "claimId": "claim-email-invitation-001",
+            "propositionId": "prop-email-invitation-001",
+            "attributionId": "attr-email-invitation-001",
+            "acquisitionMode": "read",
+            "status": "knows",
+            "confidence": 1
+          }
+        ]
+      },
+      "sceneOccurrenceIds": [
+        "scene-email-amber-001"
+      ],
+      "evidence": [
+        {
+          "span": {
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 380000,
+            "endByte": 392127,
+            "startLine": 2343,
+            "endLine": 2410,
+            "quoteHash": "2df5b1eb46fa149973d12c81ed6b5dfb9c7af67d201c82a9f8e7ab0bad932675"
+          },
+          "strength": "explicit"
+        }
+      ],
+      "causalParents": [],
+      "confidence": 0.98
+    },
+    {
+      "id": "event-nono-appears-001",
+      "title": "诺诺在安珀馆外现身",
+      "readerSummary": "路明非和芬格尔在安珀馆外观察迎宾场面时，诺诺悄然出现在他们身后。她的突然出现把两人的旁观转成了直接行动。",
+      "participants": [
+        "char-nuonuo",
+        "char-lumingfei",
+        "char-fingel"
+      ],
+      "participantPresence": [
+        {
+          "entityId": "char-nuonuo",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-lumingfei",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-fingel",
+          "mode": "physical"
+        }
+      ],
+      "storyTime": {
+        "kind": "ordinal",
+        "label": "安珀馆晚宴当晚"
+      },
+      "preconditions": [],
+      "observedOutcome": {
+        "version": 1,
+        "operations": []
+      },
+      "observedKnowledge": {
+        "version": 1,
+        "operations": [
+          {
+            "op": "learn",
+            "actorId": "char-lumingfei",
+            "claimId": "claim-nono-follow-command-001",
+            "propositionId": "prop-nono-follow-command-001",
+            "attributionId": "attr-nono-follow-command-001",
+            "acquisitionMode": "told",
+            "status": "knows",
+            "confidence": 1,
+            "sourceActorId": "char-nuonuo"
+          },
+          {
+            "op": "learn",
+            "actorId": "char-fingel",
+            "claimId": "claim-nono-follow-command-001",
+            "propositionId": "prop-nono-follow-command-001",
+            "attributionId": "attr-nono-follow-command-001",
+            "acquisitionMode": "told",
+            "status": "knows",
+            "confidence": 1,
+            "sourceActorId": "char-nuonuo"
+          }
+        ]
+      },
+      "sceneOccurrenceIds": [
+        "scene-amber-evening-001"
+      ],
+      "evidence": [
+        {
+          "span": {
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 380000,
+            "endByte": 392127,
+            "startLine": 2343,
+            "endLine": 2410,
+            "quoteHash": "2df5b1eb46fa149973d12c81ed6b5dfb9c7af67d201c82a9f8e7ab0bad932675"
+          },
+          "strength": "explicit"
+        }
+      ],
+      "causalParents": [],
+      "confidence": 0.97
+    }
+  ],
+  "next": [
+    {
+      "id": "event-email-open-001",
+      "title": "路明非打开诺诺发来的晚宴邀请邮件",
+      "readerSummary": "路明非打开一封来自诺诺的新邮件，得知次日晚将在安珀馆举行晚宴和社交舞会，恺撒希望与他交流。这封邀请把他带入学生会的正式社交场合。",
+      "participants": [
+        "char-lumingfei",
+        "char-nuonuo"
+      ],
+      "participantPresence": [
+        {
+          "entityId": "char-lumingfei",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-nuonuo",
+          "mode": "represented"
+        }
+      ],
+      "storyTime": {
+        "kind": "ordinal",
+        "label": "安珀馆晚宴前一晚",
+        "orderHint": 48
+      },
+      "preconditions": [],
+      "observedOutcome": {
+        "version": 1,
+        "operations": []
+      },
+      "observedKnowledge": {
+        "version": 1,
+        "operations": [
+          {
+            "op": "learn",
+            "actorId": "char-lumingfei",
+            "claimId": "claim-email-invitation-001",
+            "propositionId": "prop-email-invitation-001",
+            "attributionId": "attr-email-invitation-001",
+            "acquisitionMode": "read",
+            "status": "knows",
+            "confidence": 1
+          }
+        ]
+      },
+      "sceneOccurrenceIds": [
+        "scene-email-amber-001"
+      ],
+      "evidence": [
+        {
+          "span": {
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 380000,
+            "endByte": 392127,
+            "startLine": 2343,
+            "endLine": 2410,
+            "quoteHash": "2df5b1eb46fa149973d12c81ed6b5dfb9c7af67d201c82a9f8e7ab0bad932675"
+          },
+          "strength": "explicit"
+        }
+      ],
+      "causalParents": [],
+      "confidence": 0.98
+    },
+    {
+      "id": "event-nono-appears-001",
+      "title": "诺诺在安珀馆外现身",
+      "readerSummary": "路明非和芬格尔在安珀馆外观察迎宾场面时，诺诺悄然出现在他们身后。她的突然出现把两人的旁观转成了直接行动。",
+      "participants": [
+        "char-nuonuo",
+        "char-lumingfei",
+        "char-fingel"
+      ],
+      "participantPresence": [
+        {
+          "entityId": "char-nuonuo",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-lumingfei",
+          "mode": "physical"
+        },
+        {
+          "entityId": "char-fingel",
+          "mode": "physical"
+        }
+      ],
+      "storyTime": {
+        "kind": "ordinal",
+        "label": "安珀馆晚宴当晚",
+        "orderHint": 48.5
+      },
+      "preconditions": [],
+      "observedOutcome": {
+        "version": 1,
+        "operations": []
+      },
+      "observedKnowledge": {
+        "version": 1,
+        "operations": [
+          {
+            "op": "learn",
+            "actorId": "char-lumingfei",
+            "claimId": "claim-nono-follow-command-001",
+            "propositionId": "prop-nono-follow-command-001",
+            "attributionId": "attr-nono-follow-command-001",
+            "acquisitionMode": "told",
+            "status": "knows",
+            "confidence": 1,
+            "sourceActorId": "char-nuonuo"
+          },
+          {
+            "op": "learn",
+            "actorId": "char-fingel",
+            "claimId": "claim-nono-follow-command-001",
+            "propositionId": "prop-nono-follow-command-001",
+            "attributionId": "attr-nono-follow-command-001",
+            "acquisitionMode": "told",
+            "status": "knows",
+            "confidence": 1,
+            "sourceActorId": "char-nuonuo"
+          }
+        ]
+      },
+      "sceneOccurrenceIds": [
+        "scene-amber-evening-001"
+      ],
+      "evidence": [
+        {
+          "span": {
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 380000,
+            "endByte": 392127,
+            "startLine": 2343,
+            "endLine": 2410,
+            "quoteHash": "2df5b1eb46fa149973d12c81ed6b5dfb9c7af67d201c82a9f8e7ab0bad932675"
+          },
+          "strength": "explicit"
+        }
+      ],
+      "causalParents": [],
+      "confidence": 0.97
+    }
+  ],
+  "sourceLines": [
+    "\t他起身踱了几步，说：“从战略上分析，你在解密地图这件事上做得太出格，3E考试史上最高分，被授予校长奖学金，名出得太大了。如果是在中古时代，你这样年轻有为的屠龙勇士已经给授予骑士身份了，所以各个堂口都试图拉拢你。新生联谊会对你开出的条件是尊你为老大，这个很好理解，新生们总不想夹在狮心会和学生会之间左右为难，狮心会学生会都想拉新人，新生联谊会的人一旦被分开，就得当彼此的对手，奇兰很有点组织能力，不过没有你那么拉风，没有领袖魅力。”\r",
+    "\t“领袖魅力？我？”路明非耸拉着脑袋。\r",
+    "\t“相比起来楚子航的开价更加诱人一些，他是要培养你为他的继承人。狮心会在学院的地位原本还在学生会之上，狮心会的会长基本上总是最有天赋的年轻人，听说校长的大哥梅涅克就是狮心会的第一任会长。所以大家都觉得校长对于狮心会挺偏心的。成为狮心会会长会为你的英雄之路建立一个良好的开端！”\r",
+    "\t“呸！什么英雄之路？你脑子秀逗了吧？我现在是考虑我该怎么在这个学院里活命而已。”路明非翻了翻白眼儿，“别人不知道你也该知道啊，3E考试我怎么过的你不知道？地图那事儿……很难解释，反正不是我的本事。都是假的！你腰上别着两把木头盒子炮就想上山当大王？我现在只想知道我该抱谁的大腿。”\r",
+    "\t“你真是投降派嘴脸，拜托，你是刘禅么？你要扬名立万了，人家是邀请你去做老大，不是当小走狗。总之三大社团，只有恺撒主持的学生会没有邀请你，你暗地里还觊觎他女朋友……”\r",
+    "\t“喂！不是觊觎，是‘对英姿飒爽的师姐有好感’！”路明非赶快说。\r",
+    "\t“虽然恺撒是个豁得出去的校园政治家，按照中国话说，是条好汉。但好汉就那么一件好衣裳，恺撒总不乐意光屁股，更不愿和你一起穿。你要想好好混，除了抱楚子航的大粗腿是没什么办法了，毕竟你们也是校友。”芬格尔根本不理他。\r",
+    "\t路明非使劲抓头，这决定关乎他今后好混不好混，叫人为难得很。\r",
+    "\t笔记本“叮”的一声，提示有新的邮件进来。路明非打开那封新邮件，愣住了。\r",
+    "\tRicardo：\r",
+    "\t明晚在安珀馆举行晚宴和社交舞会，时间是18：00，如果你有时间就来吃东西，恺撒说他想和你交流。\r",
+    "\t记得穿着正装。温馨提示：校服不算正装，你可以去学院剧场租一套。\r",
+    "\t诺诺\r",
+    "\t芬格尔凑过来看了一眼，也傻了半天，“刘禅……司马昭来找你去跳舞了……如今三个社团都看中你这块肥肉了”。\r",
+    "\t路明非抬起头来，“师兄，如今……该降哪一国了？”\r",
+    "\t夜幕降临，安珀馆亮了起来，从那些巨型的落地玻璃窗看进去，灯光绚烂。这是一座有着哥特式尖顶的别墅建筑，屋顶铺着深红色的瓦片，墙壁贴着印度产的花岗岩。学生会干部们穿着黑色的礼服，上衣口袋里揣着白色的手帕或者深红色的玫瑰花，站在走廊下迎宾。\r",
+    "\t“我滴妈呀！恺撒一个人住的房子够我们一百个人住了吧？”路明非躲在远处的树丛里啧啧赞叹，“资本主义社会果然就是人吃人的。”\r",
+    "\t“恺撒也不是总住在这里，这是他租来作为学生会活动场所的，以前他不必支付租金，他每年都能赢得诺顿馆的使用权……现在诺顿馆归你了。”芬格尔一身黑色的正装。他其实是个高大的家伙，只是灵魂有点儿猥琐，这么穿起来肩宽臂长，加上德式的灰眉灰眼，再把乱蓬蓬的头发在脑袋后扎了一个小辫子，露出颇有几分帅气的额头来，站在路明非背后俨然一条保镖。\r",
+    "\t“那我们为什么不搬到诺顿馆去住？”路明非想起了这一茬。\r",
+    "\t“你得先花个上万美金把家具整修整修，还有高昂的取暖费和地税……你如果有意出这笔钱的话我是很乐意搬进去的，你叫我陪床我都乐意。”\r",
+    "\t“滚！”\r",
+    "\t“那我现在就滚了，你替我跟恺撒问好。”芬格尔掉头就走。\r",
+    "\t“师兄你义薄云天无论如何要陪我走这一遭。”路明非哭丧着脸一把拉住他。\r",
+    "\t“切！叫我滚？”芬格尔翻翻白眼儿，“看仔细了，这关不好过。人家花了很大的本钱！人家的兄弟都穿着Armani或者Zegna的西装，戴着Montblanc或者Constantine的表，门前停着的那一水儿要么阿斯顿·马丁要么捷豹……”芬格尔抖了抖自己身上那件显然小得有点裹不住的礼服，“对比我们这两身租来的正装……我觉得恺撒是准备以财富跟你炫耀一下，要么是准备把美钞拍在你脸上对你说要么跟老子闯荡江湖要么现在就给老子舔鞋！”\r",
+    "\t“希望他没有脚臭……”\r",
+    "\t“真没尊严！”芬格尔捂脸，“诶？有新情况！”\r",
+    "\t守在安珀馆门口的记者咔咔按动相机，镁光和目光的焦点是一辆正在倒车逼近安珀馆正门的皮卡，也不知载着什么，上面蒙了一层厚厚的雨布。雨布被学生会干部们猛地揭开，如瀑布一样的鲜红色从皮卡的货仓里流淌下来，在傍晚阴霾的天空下，一抹亮色看起来惊心动魄。\r",
+    "\t那是成千上万朵玫瑰花，刚刚采摘下来，带着新鲜的露水，江河入海似的洒在安珀馆的门前。\r",
+    "\t“恺撒还为你准备了玫瑰花，你看他有多么地爱你和看重你啊！”芬格尔感慨。\r",
+    "\t“看重你妹啊！”\r",
+    "\t“我没有妹妹！”芬格尔说。\r",
+    "\t“那是看重我妹妹咯？”有人在他们身后说。\r",
+    "\t路明非和芬格尔一起回头，女生站在他们的背后，深紫色的套裙，月白色丝绸的小衬衣，紫色的丝袜，全套黄金嵌紫晶的订制首饰，暗红色头发梳理得整整齐齐，蹬着十厘米高的玛丽珍高跟鞋，撑着一柄漆黑的伞，雨水沿着伞缘倾泻下来，让她像是笼在一个纱罩里。\r",
+    "\t诺诺不知什么时候站到了他们身后。\r",
+    "\t“诶？女主人亲自出来迎宾么？”芬格尔一愣。\r",
+    "\t“是来抓贼啦！你们鬼鬼祟祟的干什么？跟我来！”诺诺收起伞，一手抓住路明非，一手抓住芬格尔，扯着他们直奔安珀馆的门口而去。\r",
+    "\t路明非晕头转向中，听见了清寂有力的掌声。他一扭头，一身白色正装的恺撒正站在走廊尽头，头发金子般闪耀，领口里的蕾丝巾上镶嵌着水钻，嘴角带着一丝冷峻的笑意，说不清是欢迎还是嘲讽。\r"
+  ],
+  "reason": "Host independently reviewed immutable source: the dorm conversation explicitly discusses the already completed map decoding rescue, then a new email invites Lumingfei for tomorrow evening. The next scene is that Amber Hall evening: Nono appears behind the two students, then immediately takes them to the entrance (existing order 49). Positions 48 and 48.5 encode this source-supported relative order after the earlier rescue and before 49; they are neither dates nor durations. The earlier deferred reports concern missing knowledge/presence fields, not proof that relative chronology is absent. Preserve all existing labels, fields, source-wide deferred reports, plans, namespaces and publication gates. The alarm/gathering fix from attempt 44 is verified separately before application; attempt 45 is remaining audit work rather than that repair recurring.",
+  "validation": "Story-time, relation, compiler finish, obligation and loop regressions plus strict reviewer type check."
+}

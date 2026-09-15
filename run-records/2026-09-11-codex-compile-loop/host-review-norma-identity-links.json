@@ -1,0 +1,1212 @@
+{
+  "reviewedAt": "2026-09-13T20:20:08.391Z",
+  "priorState": {
+    "attempt": 92,
+    "status": "needs-review",
+    "sourceId": "a28585b1cf867f3e3a16",
+    "threadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+    "error": "Automatic preparation stopped at 'repair'. Novel-scale publication requires ready exact-evidence, source-accounting, and identity/event-resolution dimensions; exact evidence=unknown; source accounting=not-ready (0 unaccounted, 600 blocking unit(s)); identity/event resolution=not-ready (331 missing, 12 ambiguous/unresolved mention(s)). Entity mention em-angry-dragon-1 has no current identity-resolution record. Entity mention em-batch20-blood has no current identity-resolution record. Entity mention em-batch20-dragonsculpture has no current identity-resolution record. Entity mention em-batch20-dye has no current identity-resolution record. Entity mention em-batch20-egg has no current identity-resolution record. Entity mention em-blackcard has no current identity-resolution record. Entity mention em-blond-girl-1-v2 has no current identity-resolution record. Entity mention em-boy-b19 has no current identity-resolution record. Entity mention em-bronzeplan-b19 has no current identity-resolution record. Entity mention em-brother-03 has no current identity-resolution record. Entity mention em-burning-03 has no current identity-resolution record. Entity mention em-campus-b19 has no current identity-resolution record. Entity mention em-central has no current identity-resolution record. Entity mention em-chinese-child-1-v2 has no current identity-resolution record. Entity mention em-classmates-1-v2 has no current identity-resolution record. Entity mention em-dashu-00005 has no current identity-resolution record. Entity mention em-dorm303-b19 has no current identity-resolution record. Entity mention em-dragon-03 has no current identity-resolution record. Entity mention em-dragon-1-v2 has no current identity-resolution record. Entity mention em-dragon-clan-1-v2 has no current identity-resolution record. Next diagnostic step: nwh audit --source a28585b1cf867f3e3a16",
+    "reviewedBatchFinished": true,
+    "failureFingerprint": "a5442b767ceb22b9ce06eb5b3c24a6ac49e91a79811150194da7c43d5b2595a8",
+    "startedAt": "2026-09-13T20:17:45.831Z",
+    "selectorBatchFinished": true,
+    "semanticRunId": "codex-opening-driver-v1-20260912",
+    "timer": {
+      "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+      "scheduledAt": "2026-09-13T17:41:00.000Z",
+      "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+    },
+    "hostReview": {
+      "path": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+      "reviewedAt": "2026-09-13T16:42:26.692Z",
+      "reason": "User-authorized continuation after verified retrieval fix; original stopped state preserved in review."
+    },
+    "appliedRepair": {
+      "repairId": "source-reviewed-eva-mans-identity-links-v1",
+      "failureFingerprint": "cc1af69420da2ad0685d4b6fb27db4fded57ba3f1f38e85702656cf81b69397e",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-mans-identity-links.json",
+      "appliedAt": "2026-09-13T20:17:27.481Z"
+    },
+    "timerHistory": [
+      {
+        "unit": "nwh-codex-reset-01a0912b-6.timer",
+        "scheduledAt": "2026-09-12T21:08:00.000Z",
+        "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-6.timer\nWill run service as unit: nwh-codex-reset-01a0912b-6.service\n"
+      }
+    ],
+    "quotaResetAnchor": "2026-09-13T17:41:00.000Z",
+    "lifecycleRecovery": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-4",
+      "pending": false,
+      "auditRef": "run-records/2026-09-11-codex-compile-loop/host-review-proposal-lifecycle.json"
+    },
+    "semanticRunHistory": [
+      {
+        "namespace": "codex-target-review-v1-20260912",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-opening-target.json"
+      }
+    ],
+    "reconciliationFocus": "opening-driver",
+    "knowledgeRepair": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-27",
+      "pending": false,
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+      "receiptFingerprint": "16abfa2b45fec0a37972fbd083ad28ca52fd9e70f8604205129a97c9a87bb040",
+      "unresolvedTargets": []
+    },
+    "traceRepair": {
+      "attributionIds": [
+        "attr-schneider-rescue-members-trapped-001",
+        "attr-eva-guigu-00008"
+      ],
+      "failureDiagnostic": "Reviewed quotation content trace failed again: attr-eva-guigu-00008,attr-schneider-rescue-members-trapped-001. Preserve originals and stop for host review.",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-quotation-content.json",
+      "batchId": "host-quotation-content-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "903a92cb36ed290cba6433d312fef304024539521b12f0f87c6a771b0500d3ff"
+    },
+    "knowledgeRepairHistory": [
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-knowledge-dependencies.json",
+        "receiptFingerprint": "a80578bca7684972296b14cdd8260d5f28fa0a1fdb8c9c47c9727c7a7e77a3c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-2",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "receiptFingerprint": "f9682e866aca66a22cf1a01b8dae5a32e523670103a62ea35e910c7c3fdb3436",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-3",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "receiptFingerprint": "eee8c13e7ebba78cb1fb39a8d95f5a1743bd982ec3171298df37e25de903286e",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-4",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "receiptFingerprint": "10fe6b7ffcd87d66b60f006b04fa4bb8900efdca91e38a4a1d03b25d73db8fac",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-5",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "receiptFingerprint": "9b47e05a8d83d08272bf58f01184723c23f0314d60a7e738479bbdcbae48ba4a",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-6",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "receiptFingerprint": "eca4e84675eeff514914668a764197742048ee6134b683d526f9ec822148c450",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-7",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "receiptFingerprint": "20bc8cd95777636285a45fa1612a0de9b588dac75feffd3e105c6b8c33ff8f07",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-8",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "receiptFingerprint": "4176e0f60f80d8da09f44af0cb4e7ab567c7464f80ded678469a00717d6a896d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-9",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "receiptFingerprint": "bb667a3d751e646925b005f469396ae419c4ef89f624f12742915799bfafaacc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-10",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "receiptFingerprint": "14b4e7bbc2093be8d3d86f0356d2eb8c36a71459e1e7f0509e24eeaf71690964",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-11",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "receiptFingerprint": "b860218c84dc36767018908a51fdaaea20f3975e1c1cb48e2c64f993b7105974",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-12",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "receiptFingerprint": "38b480456c192f1dd8cc493b53fc8087e72a7bc9a8c7f64028e25bd6e01d3c18",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-13",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "receiptFingerprint": "ebcc80887c90a45677644d3c7cd72fb4218e8feb3da34ecb2d5c722fd665759b",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-14",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "receiptFingerprint": "099e053d905c7411e6c1424a3507084c7c4640c23983a03d2642edd887afe745",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-15",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "receiptFingerprint": "e42c2b63609e824015b1d2fe60ae58f4cf80ea8d604cd9358998cc3d6a849e34",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-16",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "receiptFingerprint": "adb536f530a54f680b22acdfd55c27718bc788a2fa664b51f2c22f6728a0cecc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-17",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "receiptFingerprint": "23fec246048d47fd7916984f504b736186902a2627a5e271e24b525017a627bb",
+        "unresolvedTargets": [
+          "event-eva-config-001"
+        ]
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-18",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "receiptFingerprint": "e863047b25c119e6058eecaa1c01fea9b747e4e435927889937bd4067ff2b50d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-19",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "receiptFingerprint": "4e0c1388eca6e4942888f91782f8083ad560998996a4d58790111ec1070f784d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-20",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "receiptFingerprint": "fc96a11cf9e398b2aaf242858ce5f366d9f7ee53ad1b9179b761eca25f8c6a5c",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-21",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "receiptFingerprint": "1a66602c8e29aa70646e3ff8f476352b813fefee02e6528f495b22b162ebed32",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-22",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "receiptFingerprint": "66c5ad249e1b4413a6589600f1492b7d7041d659b8497254e7e529d7708a5169",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-23",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "receiptFingerprint": "5ca3cf4cdef33873685dcad3377007e791ba9f88604cf3bc4e0990dfeacdef5d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-24",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "receiptFingerprint": "1fe5dc9570548f6263c6b3014a6cf81c88db1264942385383f515faeda3430c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-25",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "receiptFingerprint": "57d5d7c48051196972e595c7f26b0f98ebbb0c721116e14f23bee07f677b01e9",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-26",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "receiptFingerprint": "d9a2961678b7acafabe33458e5f17b4b1d468370d6b69f3f74d6ed5b78432262",
+        "unresolvedTargets": []
+      }
+    ],
+    "appliedRepairHistory": [
+      {
+        "repairId": "dragontext-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "0be170fea49a866ea1c65fbe8fe8603cee179192f84fee568d777853abc44f63",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "appliedAt": "2026-09-12T18:30:48.769Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dragontext-proposition-object-selector-v1",
+        "failureFingerprint": "45af7b72057ca8627ca38f142736a1edc2484af30b0922c630fbf7a4e03523ed",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-anchor.json",
+        "appliedAt": "2026-09-12T18:37:15.473Z"
+      },
+      {
+        "repairId": "medical-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "d8d6e7cd654c89e070a14645d590c434ad1c952f01b27f5095e119ba6da97398",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "appliedAt": "2026-09-12T18:40:09.287Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "office-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "8ef8899d2276275463db5a56ae28051671b77ed93e721f72501fd01a65c1d2e0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "appliedAt": "2026-09-12T18:47:01.873Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-disclosure-source-grounded-dependencies-v1",
+        "failureFingerprint": "2c8fd49565f406cc3b9d3fabaf11460ff6d57ab72d0ca2fe8d8969a8dd25699f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "appliedAt": "2026-09-12T18:56:17.280Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-identity-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "b2e504d601decd98fcf28b2f03263a9f6837e3211d066def3c42bffc69b24aee",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "appliedAt": "2026-09-12T19:05:58.058Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-listener-and-content-selectors-v1",
+        "failureFingerprint": "d98142ee01a99ba21ccc268302bf3a09ed3c843977a8839ba8b5aef4225a31da",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-selectors.json",
+        "appliedAt": "2026-09-12T19:12:49.583Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "121356ed29262f4b483750da516cc9847495e8e970b9799b98a94a46c2606035",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "appliedAt": "2026-09-12T19:15:57.744Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "confession-quotation-and-knowledge-dependencies-v1",
+        "failureFingerprint": "06944c5fe2fe0476a51c4030301e37e89c1017926aa21fda094e70d29f2830a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "appliedAt": "2026-09-12T19:21:50.468Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "acceptance-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "801e624d68d6772a4af862184fac1ccaf9a7f0ea012ab4c3e1e1441931f35101",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "appliedAt": "2026-09-12T19:29:12.505Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "nono-entry-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "1dfc90a3e4174718919bedc66c7d47b966921b86a71c8390dedd7e3d10c0ec94",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "appliedAt": "2026-09-12T19:36:00.594Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "bend-warning-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "a6f5f754995fe21f6ba5134f90d1f3c666c9a1984ea4e8ad9851fa16cf085994",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "appliedAt": "2026-09-13T12:45:37.230Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "funding-answer-summary-and-knowledge-v1",
+        "failureFingerprint": "2f13c1affa661632fc1f1c0d3d028a919178af358162e575cf4e424e2f38cf67",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "appliedAt": "2026-09-13T12:54:28.250Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "6f5ddff7066f52187dc1d4090ae387d9a808375b020964d71c5beeb9b6c9232d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "appliedAt": "2026-09-13T12:59:21.471Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-document-holder-and-lifecycle-host-v1",
+        "failureFingerprint": "a7c7f0088d27ba49c117896fa5635360b3258cd945a6ca89ab75ccff6bcd708f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-document-correction.json",
+        "appliedAt": "2026-09-13T13:12:44.915Z"
+      },
+      {
+        "repairId": "emergency-call-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "24d033b42a3f33b73a24baabfb743cd5d8a4aab5dcfdb3a946ed376611dcbd7b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "appliedAt": "2026-09-13T13:20:10.161Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "emergency-request-quotation-anchors-v1",
+        "failureFingerprint": "626922bbf53ef32aef6f793771ac4a0340ff4144d094e0cd92718fc1dca9ff80",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-trace.json",
+        "appliedAt": "2026-09-13T13:26:20.468Z"
+      },
+      {
+        "repairId": "exploration-window-source-reviewed-knowledge-v1",
+        "failureFingerprint": "86278ddb0368746eecc0a772333379eed8ee879de047a72cbf557dd1e6affeab",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "appliedAt": "2026-09-13T13:30:18.146Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "exploration-full-projection-and-lifecycle-v1",
+        "failureFingerprint": "91387cb2707fac261925e5485d1f051fbbee51251a14ed7ce5d3b6d6174934f0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-projection.json",
+        "appliedAt": "2026-09-13T13:38:07.647Z"
+      },
+      {
+        "repairId": "nono-follow-source-reviewed-knowledge-v1",
+        "failureFingerprint": "9989a41693d7f8808acdb8f2eecaabbfea496591868b214529a100493a077503",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "appliedAt": "2026-09-13T13:41:24.132Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-interface-source-reviewed-knowledge-v1",
+        "failureFingerprint": "698fc2d0146b8703c3ae7c9b4d63acd82877b507158f9df2698757363af25032",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "appliedAt": "2026-09-13T13:48:58.522Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-quotation-retrieval-protocol-v1",
+        "failureFingerprint": "4b1a08018ec8ee43b8810abcb0286ab2643d17a06a2bbf07fe39ac35c010d508",
+        "failureCause": {
+          "category": "knowledge-not-produced-with-verified-evidence",
+          "targetIds": [
+            "event-eva-config-001"
+          ],
+          "dependencyIds": [
+            "q-eva-interface-click-instruction-00011"
+          ]
+        },
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "appliedAt": "2026-09-13T16:42:27.004Z"
+      },
+      {
+        "repairId": "map-display-source-reviewed-knowledge-v1",
+        "failureFingerprint": "11b736d5e84548b873606ab68338a15fc7717e89eab302fe811d537912347999",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "appliedAt": "2026-09-13T16:47:21.510Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-perception-source-reviewed-knowledge-v1",
+        "failureFingerprint": "c10c9346b27a3308d8f20d9f233edb9a83439a31057a8c6e554464311aadb61a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "appliedAt": "2026-09-13T16:54:36.423Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-direct-observation-scope-v1",
+        "failureFingerprint": "bfea6a8d889103ac8f5f70c43a26f5370f5e538e9e271edd0a287a45d692964c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "appliedAt": "2026-09-13T17:00:48.261Z",
+        "fingerprintBasis": "Verified attempt 36 temporal misattribution, not aggregate percentages"
+      },
+      {
+        "repairId": "duel-limited-observation-source-review-v1",
+        "failureFingerprint": "566b293740da10a7df74104a8ddf06078709571620449fece0312e7cf3a1b5eb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "appliedAt": "2026-09-13T17:06:26.315Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "earthquake-perception-source-review-v1",
+        "failureFingerprint": "2d4bcebfafff2412e9b9340fbad52822729157510e54f84eba2309d721df2b0d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "appliedAt": "2026-09-13T17:10:47.409Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "train-arrival-observation-source-review-v1",
+        "failureFingerprint": "c553169066754cdb8020da447d1ff3a30f30e8f0a3572c32986349e740d91219",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "appliedAt": "2026-09-13T17:15:51.299Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "helicopter-approach-observation-source-review-v1",
+        "failureFingerprint": "a1357fb5e1e649b1d317176279b1f17013fa7469bf64cbda434d4a68161fd4de",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "appliedAt": "2026-09-13T17:20:29.798Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dance-finale-observation-source-review-v1",
+        "failureFingerprint": "d7593d5f5485ea50d2d5cd1d9aaf09e9806758b323c516628c8f1bd3d459b6e2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "appliedAt": "2026-09-13T17:25:26.067Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "caesar-fall-observation-source-review-v1",
+        "failureFingerprint": "b2f54cf53c7298bda4359e70c2e6f8d06c39355bf69e840f373b99e8cf2c1ab7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+        "appliedAt": "2026-09-13T17:29:36.955Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "adams-fragment-required-before-reassembly-v1",
+        "failureFingerprint": "9d0ff292fa191d5375c8aa1d215484bf979385dfdd8597481b9d08796ef03a57",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-adams-causal.json",
+        "appliedAt": "2026-09-13T17:36:02.166Z"
+      },
+      {
+        "repairId": "alarm-gather-source-bounded-order-v1",
+        "failureFingerprint": "362c430bbb07c86c567325ab6be870f6795e2fc0b6f447d130865d7f645531cd",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-gather-time.json",
+        "appliedAt": "2026-09-13T17:40:28.712Z"
+      },
+      {
+        "repairId": "amber-arrival-source-bounded-order-v1",
+        "failureFingerprint": "e94692b391ee99323426bf5e5622d10f43cae30c1395866f13e4aad6ee446960",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-amber-arrival-time.json",
+        "appliedAt": "2026-09-13T17:58:02.856Z"
+      },
+      {
+        "repairId": "chu-source-reviewed-recruitment-goal-v1",
+        "failureFingerprint": "a79b1200e62046916fe8a6f8b85cfbbde81438477059fce7e4b2137e882d08b3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-chu-recruitment-goal.json",
+        "appliedAt": "2026-09-13T18:04:22.654Z"
+      },
+      {
+        "repairId": "roadside-setting-temporal-not-causal-v1",
+        "failureFingerprint": "8f98455210d2a817a03b8283bd4e3527da0482d8b26d4d9249f76937fcc050cb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-relation.json",
+        "appliedAt": "2026-09-13T18:08:49.574Z"
+      },
+      {
+        "repairId": "cinema-roadside-source-discourse-order-v1",
+        "failureFingerprint": "281da3693a1bdf2c5c0cad708495a15bae951cd8f2f6749086d4f3cc8649d1f7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-discourse.json",
+        "appliedAt": "2026-09-13T18:13:40.903Z"
+      },
+      {
+        "repairId": "nono-source-reviewed-pre-door-checkpoint-v1",
+        "failureFingerprint": "4a140bada4ca2aa6f97bcfeed747fff816996f471096c0562d5f7fd97e8e96a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:17:40.529Z"
+      },
+      {
+        "repairId": "duel-source-reviewed-pre-attack-checkpoints-v1",
+        "failureFingerprint": "405723fd4bda4e015571188be8a209d3b6f4adc660c42b7266cd00663479691c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:21:27.852Z"
+      },
+      {
+        "repairId": "interview-source-reviewed-examiner-checkpoints-v1",
+        "failureFingerprint": "d659905948263cfedf75bc190d07a77d367a47b4f8a65cb79c6dc748f2cf684b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-interview-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:24:35.323Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "144e3ad042532714d52a9ac8817643bc9a62a27329d3408a42e122ac849431a0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:29:48.199Z"
+      },
+      {
+        "repairId": "makeup-source-reviewed-pre-fitting-checkpoint-v1",
+        "failureFingerprint": "332e045d1ecf74f015abff501dd60261528a2dcbd342d9588c3dd151ef8a1902",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-makeup-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:35:13.298Z"
+      },
+      {
+        "repairId": "lumingfei-source-reviewed-pre-coaching-checkpoint-v1",
+        "failureFingerprint": "461f9395e4e429bdca57cce55672b8eabc86bec2405b0a2e54167c72722ed739",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingfei-coaching-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:38:13.852Z"
+      },
+      {
+        "repairId": "fingel-source-reviewed-pre-arrival-checkpoint-v1",
+        "failureFingerprint": "92f1d7c7f84411cb4261c0667e8d3c6706918ccd2b534d123c2253a6ac37d59d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-fingel-train-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:41:09.597Z"
+      },
+      {
+        "repairId": "black-sniper-source-reviewed-pre-shot-checkpoint-v1",
+        "failureFingerprint": "726e870c3d21679313187cc536e8b7d50428fb8954e1874fc3872bae2a3b2251",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-black-sniper-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:44:03.764Z"
+      },
+      {
+        "repairId": "man-coins-source-reviewed-pre-request-checkpoint-v1",
+        "failureFingerprint": "87b1cb60a82e2d0089f3b67e29a2e7903d17dffee47228764ec69ec599728e07",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-man-coins-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:47:30.839Z"
+      },
+      {
+        "repairId": "mans-source-reviewed-pre-earthquake-checkpoint-v1",
+        "failureFingerprint": "b7c61b852e8f97016ab2f593d2380a0701330c3ef8585517a4622226fdaca732",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-mans-earthquake-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:50:34.701Z"
+      },
+      {
+        "repairId": "zhao-source-reviewed-pre-confession-checkpoint-v1",
+        "failureFingerprint": "1653489dcdee02d9d4972c631ea64f60c7126f2aab30d78ef875e15a56c95b89",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-zhao-confession-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:53:30.319Z"
+      },
+      {
+        "repairId": "manshtein-source-reviewed-pre-dialogue-checkpoint-v1",
+        "failureFingerprint": "4779c49864b7a2b6bb7dde2f12bd8a4fd00026894be70f604da5e09232fa6196",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-manshtein-medical-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:56:26.947Z"
+      },
+      {
+        "repairId": "sanwu-source-reviewed-pre-invocation-checkpoint-v1",
+        "failureFingerprint": "d909f4ef203e62b052e0fae28fcab43832b7a6af4473b062b4a6d14e40cf3ba3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-sanwu-church-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:59:21.591Z"
+      },
+      {
+        "repairId": "angier-source-reviewed-pre-toast-checkpoint-v1",
+        "failureFingerprint": "6e80b15bf62ac687f9659caca02183f83b4d1b028b7dc65a859d405811ddb105",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-angier-toast-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:02:25.446Z"
+      },
+      {
+        "repairId": "caesar-source-reviewed-exchange-goal-v1",
+        "failureFingerprint": "7f9c344875e8102e6b8d94e64a430348b1c85cac3231be97ac6746d4a1fff752",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-exchange-goal.json",
+        "appliedAt": "2026-09-13T19:05:47.060Z"
+      },
+      {
+        "repairId": "yaji-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "a40e0d01989a02e780424be12d40ec51988b5c3fb93c8ab42986beb2e6e2c01d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yaji-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:09:14.053Z"
+      },
+      {
+        "repairId": "yesheng-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "6669d28ccb86bcc65f845b4da0aa6cf08f83afe9f9e91e8db23c12c7fa813728",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yesheng-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:12:07.578Z"
+      },
+      {
+        "repairId": "cousin-source-reviewed-bedroom-checkpoint-v1",
+        "failureFingerprint": "296e224f9723b4a93bad6e9a53bafe5edcd902158d12a9120a84c63a6dc6521d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-entry-checkpoint.json",
+        "correctionPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-trace-correction.json",
+        "appliedAt": "2026-09-13T19:17:13.858Z"
+      },
+      {
+        "repairId": "cinema-audience-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "bbf81a731f359f8e409a39d169a4d1f934d869d6f3e4c3760c9819577f869092",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cinema-audience-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T19:20:15.410Z"
+      },
+      {
+        "repairId": "baby-source-reviewed-citywall-checkpoint-v1",
+        "failureFingerprint": "31ea8b2b467f212220a54987686814fa226b17b96980f31dc130f47ba21bb531",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-baby-citywall-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:23:20.676Z"
+      },
+      {
+        "repairId": "conductor-source-reviewed-pre-boarding-checkpoint-v1",
+        "failureFingerprint": "fab1c99967c4541832b1bc87191dba25fea4e7d81b47810e7c733e44ae836b09",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-conductor-boarding-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:26:17.890Z"
+      },
+      {
+        "repairId": "eva-source-reviewed-projected-presence-v1",
+        "failureFingerprint": "e79dcae645ee1836dec3bc108435c1f8f58509a0717980e8f004768d6965a6f5",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-projected-presence.json",
+        "appliedAt": "2026-09-13T19:30:12.278Z"
+      },
+      {
+        "repairId": "boy-source-reviewed-pre-warning-checkpoint-v1",
+        "failureFingerprint": "19dab9bb94b5ac4b46cbf6b3162f3ed6656fcd9b13d5384ce7961ee668d65180",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-warning-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:33:06.641Z"
+      },
+      {
+        "repairId": "source-reviewed-explicit-identity-links-v1",
+        "failureFingerprint": "028cc7ff3f96455c5df92467d825aa63080ad02655a98463b847b2f1d1f8d63e",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-explicit-identity-links.json",
+        "appliedAt": "2026-09-13T19:37:01.203Z"
+      },
+      {
+        "repairId": "source-reviewed-briefing-identity-links-v1",
+        "failureFingerprint": "690b314981fc276223282e7f46f6d4d7f0dbbe8883f3a3308e1de6e13adbbdb2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-briefing-identity-links.json",
+        "appliedAt": "2026-09-13T19:38:50.717Z"
+      },
+      {
+        "repairId": "source-reviewed-named-student-identity-links-v1",
+        "failureFingerprint": "efbbedbbf6f4523071125f9aefd4cecd3030c0edee751b510bd0a5eee281d8db",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-named-student-identity-links.json",
+        "appliedAt": "2026-09-13T19:43:29.784Z"
+      },
+      {
+        "repairId": "source-reviewed-student-reference-identity-links-v1",
+        "failureFingerprint": "22686ec02d3c0230c3d8ef5c6897e3e52d29ce8a8f74c7c57fef396bfdae2019",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-student-reference-identity-links.json",
+        "appliedAt": "2026-09-13T19:45:24.872Z"
+      },
+      {
+        "repairId": "source-reviewed-recalled-name-identity-links-v1",
+        "failureFingerprint": "976d1e53cada7298d4632678d7b26a8237b1a97eda34a4f89e3191cea481b27a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-recalled-name-identity-links.json",
+        "appliedAt": "2026-09-13T19:47:13.331Z"
+      },
+      {
+        "repairId": "source-reviewed-car-council-identity-links-v1",
+        "failureFingerprint": "0b8644091a3568acbd28c7343d9c9ad92d8cdf82891729772d03f4c83eeedf8b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-car-council-identity-links.json",
+        "appliedAt": "2026-09-13T19:49:19.421Z"
+      },
+      {
+        "repairId": "source-reviewed-academy-identity-links-v1",
+        "failureFingerprint": "d7abef6eb71eb53ca10641dda0bc281491e990790e2e6712a4afddcca7e2d975",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-academy-identity-links.json",
+        "appliedAt": "2026-09-13T19:51:21.434Z"
+      },
+      {
+        "repairId": "source-reviewed-guderian-identity-links-v1",
+        "failureFingerprint": "ec9cc15dde8450b91a7113b58a34064ef020838366a7fdef6f98dbc184bfcdb1",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-guderian-identity-links.json",
+        "appliedAt": "2026-09-13T19:53:12.302Z"
+      },
+      {
+        "repairId": "source-reviewed-manshtein-identity-links-v1",
+        "failureFingerprint": "9470632e5feded3505f105bd678d2f6403dcee6593de4e74129339ec2afd0a99",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-manshtein-identity-links.json",
+        "appliedAt": "2026-09-13T19:55:05.416Z"
+      },
+      {
+        "repairId": "source-reviewed-schneider-identity-links-v1",
+        "failureFingerprint": "41778356dd1b292a300e1d6ef5b9abca4ff103a9a536c1c0c958eb71c43283ad",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-schneider-identity-links.json",
+        "appliedAt": "2026-09-13T19:57:01.802Z"
+      },
+      {
+        "repairId": "source-reviewed-fingel-identity-links-v1",
+        "failureFingerprint": "c3f127f60a53c95e492585a97e07182f7458e58732f17f91809f642b5ee5f6fc",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-fingel-identity-links.json",
+        "appliedAt": "2026-09-13T19:59:09.288Z"
+      },
+      {
+        "repairId": "source-reviewed-named-diver-identity-links-v1",
+        "failureFingerprint": "3813cf573c0e326d2a5130853c75f67f0e3606ac6c0d7b5b5d316f92e771f753",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-named-diver-identity-links.json",
+        "appliedAt": "2026-09-13T20:01:35.181Z"
+      },
+      {
+        "repairId": "source-reviewed-nono-identity-links-v1",
+        "failureFingerprint": "992052042761f1fe4525e5c7b9e0fb49c4f66ce2bf47a8278670041d8037c668",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-identity-links.json",
+        "appliedAt": "2026-09-13T20:03:45.350Z"
+      },
+      {
+        "repairId": "source-reviewed-caesar-identity-links-v1",
+        "failureFingerprint": "1cb452ade384e2e96596ed99409a1165cca80c7def12f28475b72d5447dbbd8d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-identity-links.json",
+        "appliedAt": "2026-09-13T20:05:35.527Z"
+      },
+      {
+        "repairId": "source-reviewed-chu-identity-links-v1",
+        "failureFingerprint": "3160d5ade4e3ed16b4d4425407a13f640dfbdb2c86ef432f2d6b4d54010ca419",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-chu-identity-links.json",
+        "appliedAt": "2026-09-13T20:07:22.860Z"
+      },
+      {
+        "repairId": "source-reviewed-qilan-zero-identity-links-v1",
+        "failureFingerprint": "0d7b496589b153ee69b885d082a9b5271fdc1e4541f3bf46e5c72dd4efb8c57f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-qilan-zero-identity-links.json",
+        "appliedAt": "2026-09-13T20:09:30.529Z"
+      },
+      {
+        "repairId": "source-reviewed-schoolmate-identity-links-v1",
+        "failureFingerprint": "c017c71c928505e63b42ca7fb2f80568fc9405fed5919e450bf053fe6c46646a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-schoolmate-identity-links.json",
+        "appliedAt": "2026-09-13T20:11:17.515Z"
+      },
+      {
+        "repairId": "source-reviewed-lumingfei-identity-links-v1",
+        "failureFingerprint": "0528f700c57a7fb6dce63afc1f965923e95ac7be0991e620637c6f1728718a1e",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingfei-identity-links.json",
+        "appliedAt": "2026-09-13T20:13:07.295Z"
+      },
+      {
+        "repairId": "source-reviewed-vessel-hall-identity-links-v1",
+        "failureFingerprint": "8f558d3f0dc96eec0297ad4c0e6dc2d4966b15ddb3a581ad61509ba87718622b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-vessel-hall-identity-links.json",
+        "appliedAt": "2026-09-13T20:15:17.264Z"
+      }
+    ],
+    "identityRepair": {
+      "batchId": "host-lumingze-identity-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "362a6228c63af64cda20a243cac91f29b4f933cbc399240190d4168794c8d3e3",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingze-identity.json",
+      "verifiedAt": "2026-09-12T19:04:52.690Z",
+      "entityId": "char-lumingze-boy"
+    },
+    "threadHistory": [
+      {
+        "at": "2026-09-13T17:58:47.585323+00:00",
+        "fromThreadId": "01a0912b-5872-75b0-a118-813e3e32d2be",
+        "toThreadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+        "reason": "User explicitly requested reading Add runtime execution hooks, checking timers and continuing the existing loop in this task. Original task ended with systemError after delivered callback. No compilation or provider guard was reset.",
+        "attempt": 45,
+        "status": "needs-review",
+        "timerCheck": {
+          "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+          "serviceActiveState": "failed",
+          "mainPID": 0,
+          "pendingQuotaTimers": [],
+          "anchor": "2026-09-13T17:41:00.000Z",
+          "nextWindow": "2026-09-13T22:41:00.000Z",
+          "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+        },
+        "priorCallback": {
+          "attempt": 45,
+          "delivered": true,
+          "receipt": "Queued message 01a09bdc-8e63-7823-8d50-a0cd436b02c7 for thread 01a0912b-5872-75b0-a118-813e3e32d2be.",
+          "at": "2026-09-13T17:41:57.992Z"
+        },
+        "priorTimer": {
+          "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+          "scheduledAt": "2026-09-13T17:41:00.000Z",
+          "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+        },
+        "review": "host-review-amber-arrival-time.json",
+        "validation": "42 relevant tests and strict reviewer type check passed; normal proposal and finish completed with all gates retained."
+      }
+    ],
+    "timerCheck": {
+      "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+      "serviceActiveState": "failed",
+      "mainPID": 0,
+      "pendingQuotaTimers": [],
+      "anchor": "2026-09-13T17:41:00.000Z",
+      "nextWindow": "2026-09-13T22:41:00.000Z",
+      "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+    },
+    "endedAt": "2026-09-13T20:17:58.287Z",
+    "callback": {
+      "attempt": 92,
+      "delivered": true,
+      "receipt": "Queued message 01a09c6b-639b-7391-9c4e-34db6dddea83 for thread 01a09be6-f704-72d0-aaf1-59b11709dd85.",
+      "at": "2026-09-13T20:17:58.688Z"
+    }
+  },
+  "targets": [
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-norma-current",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 222715,
+          "endByte": 222721,
+          "startLine": 1399,
+          "endLine": 1399,
+          "exactHash": "5ea66a6496692f1f3a8119e606a6152852c2781566e51b3554c7888222586b4b",
+          "prefixHash": "5c394854fb0228d35e5c230ffc016c4cd6db0527b502612362e89d4b83f6e944",
+          "suffixHash": "afd4aa550bf79edc32d8cbe98ab56eccf09f0cee4ccb94583fa3ef80e6ecfa8d",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺玛",
+        "form": "proper",
+        "kindCandidates": [
+          "character",
+          "institution"
+        ],
+        "sceneId": "ds-act3-underground-eva",
+        "confidence": 0.98
+      },
+      "entity": {
+        "id": "char-norma-lawrence",
+        "kind": "character",
+        "canonicalName": "诺玛·劳恩斯",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-norma-current",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 222715,
+            "endByte": 222721,
+            "startLine": 1399,
+            "endLine": 1399,
+            "exactHash": "5ea66a6496692f1f3a8119e606a6152852c2781566e51b3554c7888222586b4b",
+            "prefixHash": "5c394854fb0228d35e5c230ffc016c4cd6db0527b502612362e89d4b83f6e944",
+            "suffixHash": "afd4aa550bf79edc32d8cbe98ab56eccf09f0cee4ccb94583fa3ef80e6ecfa8d",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺玛",
+          "form": "proper",
+          "kindCandidates": [
+            "character",
+            "institution"
+          ],
+          "sceneId": "ds-act3-underground-eva",
+          "confidence": 0.98
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t“可造之材！”芬格尔对路明非的坚决很赞赏，“记住，要在这个学院混下去，我们一定要有底线！”\r",
+        "\t“底线？”路明非不敢相信这样有品德的词会从芬格尔嘴里说出来。\r",
+        "\t“底线一定要有负三米这样的高度！”芬格尔把手贴在地面上，“就是这样，再往下挖三米，就是我们的底线！”\r",
+        "\t“太有道理了！”路明非被师兄感动了。\r",
+        "\t“在这个天才和疯子都多如牛毛的地方，底线要有，但是不能高于负三米，否则一定完蛋。”芬格尔一脸隐秘的神色，“工欲善其事必先利其器，我们要作弊，一定要对作弊对象有深刻的理解！师弟，你知道迄今被破译的龙文有多少句么？”\r",
+        "\t“难道不是论单词来的？”\r",
+        "\t“错！是论句！一共只有七十六句！”芬格尔有种授课的气派，“语言分为字和语法两块，这两块组合起来，就是无穷多的句子。但是龙文是一种死文字，迄今只剩下字，而没有语法了。历史上最后一个懂龙文语法的人是尼古拉斯·弗拉梅尔……”\r",
+        "\t“尼……尼……尼什么？”路明非没记住。\r",
+        "\t“你这个猪脑子，算了，别记了，就叫……老尼吧！我们称他为老尼！”芬格尔大手一挥，“老尼生活在巴黎，职业是个抄写员，同时也是个炼金术师。他是有历史记载的、唯一一个把‘贤者之石’炼成的人！”\r",
+        "\t“贤者之石？听起来很拽。”路明非说。\r",
+        "\t“超拽！解释起来稍微复杂了点，简单地说，‘贤者之石’是地水风火以外的第五种元素，纯净的精神元素，这些你在‘炼金原理入门’那门课里会学到。炼金术和言灵，是龙族科技的两大支柱，在还没有科学的时代，龙类就靠炼金术和言灵搞出很多的奇迹来。老尼很有意思，他是个抄写员，却忽然学会了炼金术这种龙族技术，原因是在抄写孤本时发现了一本炼金术手抄本，其中记录的，就是龙文语法。老尼学会了这套语法，没有把它传给别人，而是总结了76句晦涩的龙文，只把这些龙文传了下来，这些就是我们目前能破译的全部龙文。所以你明白了？考题，最多只有76道。”\r",
+        "\t“师兄你是说有题库？”路明非恍然大悟。\r",
+        "\t“被你说中了！我先告诉你出题的方式。当你进入考场的时候，他们只会给你一张白纸和一支铅笔，没有任何提示。他们会播放吟诵龙文的录音，对于龙族血裔来说，龙文会和精神共鸣，从而产生‘灵视’效果，龙文是一种象形文字，你会‘看见’不可思议的景象。”\r",
+        "\t“看见什么？”\r",
+        "\t“不同的人不一样，往往是杂乱的线条、纠缠的蛇群、疯长的植物之类的，你只要按照你所见的记录下来，就可以了。”\r",
+        "\t“这是考美术吧？”路明非有点傻眼，“我画画可不太行。”\r",
+        "\t“有画乌龟的本事就行，不看画得好不好，看你的‘灵视’效果，血统越纯正的学生，看到的越多，也越逼真。”芬格尔拿出一张白纸，以铅笔在纸上快速地勾勒。看不出芬格尔居然是个素描的好手，路明非看着铅笔线条渐渐构成了一幅画，那幅画极其抽象，无数波形重叠在一起，远看像是一片海洋。\r",
+        "\t“这幅画里包含了大量的曲线，你如果从曲线中提取它的某些部分，”芬格尔把一些线条勾得重了，“就是龙文的‘字’，判卷人是诺玛，她会详细分析你绘制的东西，寻找其中的龙文，非常精确，所以鬼画符是没用的。这张画就是我当年绘制过的，考题之一。”\r",
+        "\t“那岂不是说……有七十六幅画？七十六幅画还有各种变体？这题库，可背不下来！”路明非刚刚燃起的希望眼看又要熄灭。\r",
+        "\t“别担心，现在，让我为你揭示终极奥义！”芬格尔龇牙一笑，“卡塞尔学院3E考试制度最大的缺陷就是，他们循环使用旧试卷！”\r",
+        "\t“循环？”路明非不解。\r",
+        "\t“一共就八套试卷，八年一轮，循环使用，从不换的！”\r",
+        "\t“教授们脑子秀逗了吧？”路明非不敢相信。\r",
+        "\t在国内上学，老师斗学生，学生斗老师，皆有无数斗争经验。中国高考也就那么几本书，可哪个高中的老师不能整出百来套模考题？中国老师所练好比黄药师的什么玉箫剑法，变化复变化，总有百来招，这卡塞尔学院的教授们看来练的是降龙十八掌一类，力大招猛，但是打完一套就没了，还得从头打起。\r",
+        "\t芬格尔耸耸肩，“参加3E考试的每年就几十、一百个人，都是天才，四年毕业，毕业必然加入执行部，满世界探寻龙族遗迹，他们怎么可能把考题记下来泄密给新生？所以八年一轮其实是安全的，可凡事总有例外，”他挑了挑眉毛，满脸淫贱，“记得么？我已经上了八年学了！”\r"
+      ],
+      "rationale": "Fingel identifies Norma as the exam marker. The academy secretary introduction and later explicit central-computer explanation establish the same referent; no new grading capability."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-norma",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 457382,
+          "endByte": 457388,
+          "startLine": 2837,
+          "endLine": 2837,
+          "exactHash": "5ea66a6496692f1f3a8119e606a6152852c2781566e51b3554c7888222586b4b",
+          "prefixHash": "87fa308a5a9d2fe7ac05dd68a51be61958fe46d3540d3a69b8a6fbe2551fe4c8",
+          "suffixHash": "286c020b317d4495afef903f255d1f4232c7dbea533b55e692d08d13f6afde27",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺玛",
+        "form": "proper",
+        "kindCandidates": [
+          "character",
+          "institution"
+        ],
+        "sceneId": "ds-library-entry",
+        "confidence": 0.95
+      },
+      "entity": {
+        "id": "char-norma-lawrence",
+        "kind": "character",
+        "canonicalName": "诺玛·劳恩斯",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-norma",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 457382,
+            "endByte": 457388,
+            "startLine": 2837,
+            "endLine": 2837,
+            "exactHash": "5ea66a6496692f1f3a8119e606a6152852c2781566e51b3554c7888222586b4b",
+            "prefixHash": "87fa308a5a9d2fe7ac05dd68a51be61958fe46d3540d3a69b8a6fbe2551fe4c8",
+            "suffixHash": "286c020b317d4495afef903f255d1f4232c7dbea533b55e692d08d13f6afde27",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺玛",
+          "form": "proper",
+          "kindCandidates": [
+            "character",
+            "institution"
+          ],
+          "sceneId": "ds-library-entry",
+          "confidence": 0.95
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t异乎寻常的平静让他觉得不安。本该发生的事情没有发生，这很危险。他揣摩不清对手的身份和意图，这种感觉阴魂般萦绕不散。\r",
+        "\t“除了叶胜，这里还有能动用‘言灵·蛇’的人么？”他转向曼施坦因。\r",
+        "\t“言灵能力的秘密档案我无权查看，但至少还有一个，我自己。”\r",
+        "\t“你的言灵是‘蛇’？”\r",
+        "\t“我的领域比叶胜还要大三倍，如果我能够言灵，也许能找出入侵者，但是在守夜人的‘戒律’下，”曼施坦因指了指自己的太阳穴，“我们的力量被强迫着沉睡。”\r",
+        "\t“能否请守夜人解除‘戒律’？”施耐德试探着问。\r",
+        "\t“我父亲？”曼施坦因一愣，“不可能的，只有校长能命令他解除‘戒律’。”\r",
+        "\t“情况很特殊，我们现在得不到校长授权。但只要解除了‘戒律’，我们有700个可以使用言灵的学生作为战斗力，力量会空前强大。只是这一晚，可以试试么？”施耐德盯着曼施坦因的眼睛。\r",
+        "\t曼施坦因沉默了很久，拿起了电话：“只能试试，这个老牛仔……是那种六亲不认的角色。”\r",
+        "\t教堂钟楼的阁楼里，正放着1952年的经典西部片《正午》，执法官贾利·古伯挎着枪走在尘沙飞扬的西部小镇街头。\r",
+        "\t看电影的人装束跟贾利·古伯差不多，一身花格子衬衫，一顶卷沿的帽子，一双牛仔靴，靴子上的马刺亮晃晃的。老家伙像个硕大的土豆般躺在沙发里，把脚翘得老高，手里拎着一瓶啤酒。电话铃响了，他抓起话筒。\r",
+        "\t“你还在看《正午》？看了那么多遍，不烦么？”\r",
+        "\t“嗨！昂热！你回到学院了么？”老牛仔眼睛亮了。\r",
+        "\t“是啊，还找到了龙王诺顿的骨骸，我正准备给它做核磁重现。”校长说，“我建议你改看《闻香识女人》。”\r",
+        "\t“我知道你不喜欢热血电影，”老牛仔说，“你是个风骚的老家伙。”\r",
+        "\t“嗯，我说，解除‘戒律’吧。”\r",
+        "\t老牛仔忽然坐直了，放下酒瓶，脸色渐渐变得严肃：“你是认真的么？”\r",
+        "\t“有入侵者，诺玛的判断是龙族入侵，让年轻人们锻炼一下不好么？”校长淡淡地说，“龙族亲王们就苏醒了，他们该历练一下了。”\r",
+        "\t“言灵可是瓶子里的魔鬼，轻易放出来，虽然能够获得力量，但未必是好事。年轻人们做好准备了么？”\r",
+        "\t“拥有龙血的人，本来就是在用魔鬼的力量对抗魔鬼吧？这个世界将是我们两个都守不住的了，我们需要年轻人。”\r",
+        "\t老牛仔沉默了很久：“暂时同意你吧，管好你的学生们。”\r",
+        "\t他关闭了电视，静静地坐在沙发上，只有桌上的一盏烛光照亮他苍老的脸。这盏烛已经点燃了多少年？十二年或者十五年？他都记不清了。\r",
+        "\t电话铃又一次响了。\r",
+        "\t“哪位？”老牛仔拎起话筒。\r",
+        "\t“爸爸。”电话对面的人有点战战兢兢的。\r"
+      ],
+      "rationale": "The principal attributes the intrusion judgment to Norma in conversation. Resolve the named system without adopting its judgment as world truth."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-norma-00022",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 708907,
+          "endByte": 708913,
+          "startLine": 4561,
+          "endLine": 4561,
+          "exactHash": "5ea66a6496692f1f3a8119e606a6152852c2781566e51b3554c7888222586b4b",
+          "prefixHash": "4c849dd3c0e45dd36230954c3fdf1359b4628bb6cf84b4ae14ae54d72e08eb92",
+          "suffixHash": "2eb082769df7223252442ca81dbb74e7c1d26f744afba0a3efcfb5d0f148a6ef",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺玛",
+        "form": "proper",
+        "kindCandidates": [
+          "character",
+          "institution"
+        ],
+        "confidence": 0.98
+      },
+      "entity": {
+        "id": "char-norma-lawrence",
+        "kind": "character",
+        "canonicalName": "诺玛·劳恩斯",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-norma-00022",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 708907,
+            "endByte": 708913,
+            "startLine": 4561,
+            "endLine": 4561,
+            "exactHash": "5ea66a6496692f1f3a8119e606a6152852c2781566e51b3554c7888222586b4b",
+            "prefixHash": "4c849dd3c0e45dd36230954c3fdf1359b4628bb6cf84b4ae14ae54d72e08eb92",
+            "suffixHash": "2eb082769df7223252442ca81dbb74e7c1d26f744afba0a3efcfb5d0f148a6ef",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺玛",
+          "form": "proper",
+          "kindCandidates": [
+            "character",
+            "institution"
+          ],
+          "confidence": 0.98
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t“出现了，但他没有孵化，而是占领了龙侍参孙的身体。”\r",
+        "\t“直接融合很省时间，只是要牺牲一个强大的族裔。卡塞尔学院那帮家伙对龙族的理解还真是有限，看起来像完全不知道融合这种事啊。”\r",
+        "\t“让我觉得恶心，像是寄生虫一样。”\r",
+        "\t“参孙会愿意的，龙侍为了君主可以做任何事，而复仇是他们最乐意做的事之一。”女人说，“重复一遍命令，路明非必须幸存，青铜与火之王诺顿死不死无所谓。”\r",
+        "\t“明白。”麻衣挂断电话，举着望远镜看向浓雾中的摩尼亚赫号，微笑，“三年级，你要多坚持一阵子啊，我对你很期待的！”\r",
+        "\r",
+        "第十幕 七宗罪\r",
+        "\tSeven Deadly Sins\r",
+        "\t我已经承认自己是废柴了，那就让我过得轻松点吧。这种英雄戏跟我没关系才对，明知道我根本什么都做不了，还让我看这种悲伤的场面，看一个我喜欢的女孩慢慢地死掉。好吧好吧，其实我也不是真的那么喜欢她，可是她死了我真是很害怕。路明非想。\r",
+        "\t可还是什么都做不了……废柴就是什么都做不了！\r",
+        "\t“不要死！”他用尽全身力气大喊，不知不觉地，眼泪滑过面颊。\r",
+        "\t这个世界真孤独，在水下八十米，你孤独得像独自站在一个星球上，没人听得见你说话，你可以放声大喊，然而无人在意。\r",
+        "\t路明非和诺诺正在激流中挣扎着，全速向前。\r",
+        "\t他们经过的每条通道每个空间都在变化中，巨大的青铜机件互相摩擦，发出“咔咔”的声音，厚重的闸门、高耸的青铜壁、巨大的齿轮、粗大的转轴在他们身边运转，他们就像是被投入一台巨大机械的两尾小鱼苗。\r",
+        "\t“在前面等待一分钟，等待一分钟，一分钟后你们右方将有通道打开。”\r",
+        "\t“加速前进，前面的出口将在二十秒内消失。”\r",
+        "\t“左侧转向，避开前面的闸门！”\r",
+        "\t诺玛的命令从远隔半个地球的学院本部传来。获得了地图之后，这台超级计算机的效率惊人，每一条命令都清晰准确。如果她出一点儿错误，路明非和诺诺可能就被压扁。\r",
+        "\t“你们即将到达青铜城的底部，在那里你们会找到出口，但是三十秒钟后，青铜城将彻底锁死！”诺玛说。\r",
+        "\t“出口在哪里？”路明非四顾。\r",
+        "\t四面都是青铜墙壁，这是一个四方形的空间，注满了水，他们进入这里的通道已经被封闭，墙壁轰隆隆地震动着。\r",
+        "\t“那里。”诺诺指着不远处，声音有些异样。\r",
+        "\t路明非顺着射灯的光束看去，狠狠地打了个哆嗦，和诺诺交握的手不禁收紧了。\r",
+        "\t“是他么？”路明非低声问。\r",
+        "\t“是他，虽然变成了这副模样。”\r"
+      ],
+      "rationale": "The narrator explicitly identifies Norma commands as coming from the remote academy supercomputer. Same system, with no physical presence in the underwater city."
+    }
+  ],
+  "preflightFailure": {
+    "error": "Source/identity mismatch",
+    "mutationStarted": false,
+    "deferredMentions": [
+      "em-noma-1",
+      "m-norma",
+      "em-noma-03",
+      "m_norma"
+    ],
+    "reason": "These four observations allow institution/other, incompatible with existing character entity. Preserve kinds and defer separate host review; no validation weakening."
+  },
+  "identityIntroduction": {
+    "letter": {
+      "line": 112,
+      "text": "\t有如何疑问，也请联系古德里安教授。我会协助他为您提供服务，我是卡塞尔学院的学院秘书诺玛·劳恩斯，非常高兴认识您。\r"
+    },
+    "computer": {
+      "startLine": 776,
+      "endLine": 781,
+      "context": [
+        "\t“验证通过，选项开启。路明非，出生日期1992年02月14日，性别男，编号A.D.0013，阶级‘S’，列入卡塞尔学院名单。数据库访问权限开启，账户开启，选课表生成。我是诺玛，卡塞尔学院秘书，很高兴为您服务，您的机票、护照和签证将在三周之内送达。欢迎，路明非。”一个沉稳的女音响起在电话中。\r",
+        "\t古德里安教授的声音再次传来，“明非，声纹签字完成，剩下的事诺玛都会解决好，你等着邮件就行。你和诺诺在一起么？呆在那里不要动，我立刻就派交通工具去接你们，还有几个纸面的签字需要你落笔。”\r",
+        "\t电话挂断了，路明非对刚才发生的一切还有点懵。\r",
+        "\t“诺玛是学院的中央电脑，是个拟人电脑，什么事情交给她就好了，她绝对一流！”诺诺说，“一起来玩跳格子！”\r",
+        "\t“哦，好啊。”路明非说。\r",
+        "\t一二一二地跳着格子，路明非并不知道什么事情正在全世界范围内发生，刚才的一切只是开始，大量的数据包从那台名叫“诺玛”的超级计算机中涌出，正去向世界的不同角落，“路明非”这三个字出现在很多人的屏幕上，并被牢牢记住，数据锁解除，地球上数千个秘密网关对“路明非”开放。\r"
+      ]
+    }
+  },
+  "ledgers": [],
+  "legacyOrigins": [
+    "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+    "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+    "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae"
+  ],
+  "legacyPolicy": "Existing completed observation checkpoints without modern receipts are readable under docs/agent-tool-recovery.md; do not synthesize, replace or certify their missing receipts. All new resolution proposals require a verified completed finish. Initial preflight stopped before any proposal mutation.",
+  "originalReceipts": [],
+  "reason": "Three type-compatible source-reviewed Norma references. Initial seven-target preflight stopped before any proposal because four observation kinds conflict with the existing character entity; those four remain untouched for separate host review. The letter names academy secretary Norma Lawrence; the telephone self-introduction names Norma as academy secretary, followed by explicit central-computer explanation and narrator confirmation. Those original anchors support continuity rather than lexical similarity alone. Preserve distinct EVA identity, nonphysical system status, speech attribution, conjectures and permissions. No new aliases, capabilities, access grants, knowledge or event effects. No relevant original deferral was found; preserve all unrelated reports, observations, canonical artifacts, receipts, accounting and checkpoints."
+}

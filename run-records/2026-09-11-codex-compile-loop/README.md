@@ -66,3 +66,11 @@ Attempt 5 的 repeated-failure 是宿主根据局部汇总指标作出的过早�
 修复audit与planner优先选择物理在场焦点角色，独立标明成长要求；驱动不再强制要求后期成长阶段。人物替换增加保留既有developmentPhases/developmentEpisodes的单调性检查，防止迁移一个指标时丢失另一项已建立语义。
 
 本次只建立有前驱审计的opening-driver补充计划，目标仅char-opening-man，禁止修改开局。旧计划/完成回执/全部source-wide deferral发布门槛保持。仅核实开局目标错配，不把其他模型unsupported/capability-gap批量确认为原文缺失。worker.reconciliationFocus约束本轮只做该项；后续不得通过去掉focus、换namespace或清除报告逃避宿主复核。详见host-review-opening-target.json。原文不支持具体驱动时必须如实报告，不发明状态或动作。
+
+## 2026-09-13：当前任务接续
+
+用户要求读完原任务并复查定时器后继续 loop。新回调目标为 `01a09be6-f704-72d0-aaf1-59b11709dd85`，原任务及其回调记录保存在 `handoff-2026-09-13.json` 和 state.threadHistory。worker 从 state.threadId 读取目标，避免每轮覆盖回旧任务。
+
+第45轮停止于全书审计，非额度或同根因复发。宿主通过正常提案/finish补齐邀请邮件与安珀馆现身的相对顺序；原文、原批次、已提交字段及所有发布门槛保留。后续重点仍是因果可导航性、角色阶段目标、入场检查点和逐目标原文复核。不得把时间覆盖率或71/71当作全书完成。
+
+实查服务无进程，额度计时器已到期，无待执行额度timer。当前有效额度锚点为北京时间2026年9月14日01:41，之后每5小时；下一窗口06:41。非quota-wait不额外安排重复唤醒，真实硬限额由notify.ts按此锚点安排下一次。启动后台服务后结束回复，后续由hook唤醒当前任务。

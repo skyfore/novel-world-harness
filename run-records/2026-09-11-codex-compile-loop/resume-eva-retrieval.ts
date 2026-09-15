@@ -1,0 +1,43 @@
+import fs from 'node:fs/promises';
+import { withWorkspaceOperationLock } from '../../src/util/workspace-lock.js';
+import { CompilerFinishReceipts } from '../../src/compiler/finish-receipts.js';
+import { readKnowledgeRepairPlan, writeKnowledgeRepairPlan, buildKnowledgeRepairPrompt, readKnowledgeRepairQuotations } from '../../src/compiler/knowledge-repair.js';
+import { createSourceAnnotationRetrievalTools } from '../../src/compiler/annotation-retrieval.js';
+import { inspectCompilerStatus } from '../../src/compiler/status.js';
+import { contentHash } from '../../src/world/canonical.js';
+import { compilerFailureCauseFingerprint } from '../../src/runtime/codex-compile-loop.js';
+const root=process.cwd(),dir=new URL('./',import.meta.url);
+await withWorkspaceOperationLock(root,'compiler',async()=>{
+ const state=JSON.parse(await fs.readFile(new URL('state.json',dir),'utf8'));
+ if(state.attempt!==33||state.status!=='repeated-failure'||state.knowledgeRepair.pending)throw Error('Incident changed');
+ const sid=state.sourceId,oldBatch=state.knowledgeRepair.batchId;
+ const oldPlan=await readKnowledgeRepairPlan(root,sid,oldBatch);if(!oldPlan||oldPlan.events.length!==1||oldPlan.events[0]?.id!=='event-eva-config-001')throw Error('Scope changed');
+ const oldStore=new CompilerFinishReceipts(root,sid,oldBatch),receipt=await oldStore.read();if(receipt?.state!=='completed'||receipt.fingerprint!==state.knowledgeRepair.receiptFingerprint)throw Error('Receipt changed');await oldStore.verify(receipt);
+ const report=receipt.identity.input.target_reviews?.find(r=>r.target==='event:event-eva-config-001');
+ if(report?.disposition!=='capability-gap'||receipt.identity.input.outcome!=='no-artifacts'||!report.summary.includes('could not be retrieved'))throw Error('Original model report changed');
+ const source=(await inspectCompilerStatus(root,sid)).sources.find(s=>s.sourceId===sid)!;
+ if(source.sourceIntegrity!=='verified'||source.hasUnresolvedObligations||source.worldProposalInventory.pending)throw Error('Unreviewed source or drafts');
+ const quotations=await readKnowledgeRepairQuotations(root,sid,oldPlan.quotationIds??[]);
+ if(quotations.length!==1||!quotations[0]?.available||!quotations[0].exactText?.includes('所有的读取、移动和存储'))throw Error('Host quote verification failed');
+ const tools=createSourceAnnotationRetrievalTools(root,()=>sid);
+ const result=await tools[0]!.execute('host-review',{query:'所有的读取、移动和存储',annotation_type:'quotation',status:'committed'} as never,undefined,undefined,{} as never);
+ const found=JSON.parse((result.content[0] as {text:string}).text);
+ if(!found.results.some((r:{ref:string})=>r.ref===quotations[0]!.readArguments?.ref))throw Error('Actual model retrieval still fails');
+ await tools[1]!.execute('host-review',quotations[0].readArguments as never,undefined,undefined,{} as never);
+ const reviewPath='run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json';
+ const batchId=`reconcile-${sid}-knowledge-effects-${state.semanticRunId}-18`;
+ const cause={category:'knowledge-not-produced-with-verified-evidence',targetIds:['event-eva-config-001'],dependencyIds:oldPlan.quotationIds!};
+ const review={reviewedAt:new Date().toISOString(),authorization:'User explicitly requested fixes and continuation of the same loop after root-cause analysis.',priorState:state,originalPlan:oldPlan,originalReceipt:receipt,originalReport:report,quotations,retrievalResult:found,
+ reason:'The prior no-artifacts finish is immutable and remains intact. Host independently disproves the model missing-quotation report using verified source text and the actual discovery/read tools. Production fixes add quotation-text search, exact-ID recovery and explicit read refs, and distinguish dependency failures from target-only gaps. Create a bounded successor linked to this exact deferred receipt, with identical target baseline and quotation whitelist in the same namespace. This is continuation after a verified retrieval fix, not deletion of a failed proposal, obligation, checkpoint or original receipt.',
+ tests:'55 regression tests passed; full project and worker type checks passed. Live source search and exact-ref read pass before resuming.',failureCause:cause};
+ await fs.writeFile(new URL('host-review-eva-retrieval-resume.json',dir),JSON.stringify(review,null,2),{flag:'wx'});
+ await writeKnowledgeRepairPlan(root,{...oldPlan,batchId,predecessorBatchId:oldBatch,predecessorFingerprint:receipt.fingerprint,reviewRef:reviewPath});
+ const prompt=await buildKnowledgeRepairPrompt(root,sid,batchId);
+ if(!prompt.includes(quotations[0].readArguments!.ref)||!prompt.includes(quotations[0].exactText!))throw Error('Fixed prompt missing retrieval evidence');
+ if(contentHash(await oldStore.read())!==contentHash(receipt)||contentHash(await readKnowledgeRepairPlan(root,sid,oldBatch))!==contentHash(oldPlan))throw Error('Original history changed');
+ state.knowledgeRepairHistory.push(state.knowledgeRepair);state.knowledgeRepair={batchId,pending:true,reviewPath};
+ state.appliedRepairHistory.push(state.appliedRepair);state.appliedRepair={repairId:'eva-quotation-retrieval-protocol-v1',failureFingerprint:compilerFailureCauseFingerprint(cause),failureCause:cause,reviewPath,appliedAt:new Date().toISOString()};
+ state.status='needs-review';state.hostReview={path:reviewPath,reviewedAt:review.reviewedAt,reason:'User-authorized continuation after verified retrieval fix; original stopped state preserved in review.'};
+ await fs.writeFile(new URL('state.tmp.json',dir),JSON.stringify(state,null,2));await fs.rename(new URL('state.tmp.json',dir),new URL('state.json',dir));
+ console.log(JSON.stringify({ready:true,batchId,originalReceiptPreserved:receipt.fingerprint,namespace:state.semanticRunId}));
+});

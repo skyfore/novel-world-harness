@@ -1,0 +1,1925 @@
+{
+  "reviewedAt": "2026-09-13T20:03:44.409Z",
+  "priorState": {
+    "attempt": 84,
+    "status": "needs-review",
+    "sourceId": "a28585b1cf867f3e3a16",
+    "threadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+    "error": "Automatic preparation stopped at 'repair'. Novel-scale publication requires ready exact-evidence, source-accounting, and identity/event-resolution dimensions; exact evidence=unknown; source accounting=not-ready (0 unaccounted, 600 blocking unit(s)); identity/event resolution=not-ready (373 missing, 12 ambiguous/unresolved mention(s)). Entity mention em-angry-dragon-1 has no current identity-resolution record. Entity mention em-batch20-blood has no current identity-resolution record. Entity mention em-batch20-dragonsculpture has no current identity-resolution record. Entity mention em-batch20-dye has no current identity-resolution record. Entity mention em-batch20-egg has no current identity-resolution record. Entity mention em-blackcard has no current identity-resolution record. Entity mention em-blond-girl-1-v2 has no current identity-resolution record. Entity mention em-boy-b19 has no current identity-resolution record. Entity mention em-bronzeplan-b19 has no current identity-resolution record. Entity mention em-brother-03 has no current identity-resolution record. Entity mention em-burning-03 has no current identity-resolution record. Entity mention em-campus-b19 has no current identity-resolution record. Entity mention em-central has no current identity-resolution record. Entity mention em-chinese-child-1-v2 has no current identity-resolution record. Entity mention em-classmates-1-v2 has no current identity-resolution record. Entity mention em-dashu-00005 has no current identity-resolution record. Entity mention em-dorm303-b19 has no current identity-resolution record. Entity mention em-dragon-03 has no current identity-resolution record. Entity mention em-dragon-1-v2 has no current identity-resolution record. Entity mention em-dragon-clan-1-v2 has no current identity-resolution record. Next diagnostic step: nwh audit --source a28585b1cf867f3e3a16",
+    "reviewedBatchFinished": true,
+    "failureFingerprint": "edb39bb060b13e189e1fe12cda2d1d9a07ec2708e8068b631bb1186bfbf080ea",
+    "startedAt": "2026-09-13T20:01:49.929Z",
+    "selectorBatchFinished": true,
+    "semanticRunId": "codex-opening-driver-v1-20260912",
+    "timer": {
+      "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+      "scheduledAt": "2026-09-13T17:41:00.000Z",
+      "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+    },
+    "hostReview": {
+      "path": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+      "reviewedAt": "2026-09-13T16:42:26.692Z",
+      "reason": "User-authorized continuation after verified retrieval fix; original stopped state preserved in review."
+    },
+    "appliedRepair": {
+      "repairId": "source-reviewed-named-diver-identity-links-v1",
+      "failureFingerprint": "3813cf573c0e326d2a5130853c75f67f0e3606ac6c0d7b5b5d316f92e771f753",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-named-diver-identity-links.json",
+      "appliedAt": "2026-09-13T20:01:35.181Z"
+    },
+    "timerHistory": [
+      {
+        "unit": "nwh-codex-reset-01a0912b-6.timer",
+        "scheduledAt": "2026-09-12T21:08:00.000Z",
+        "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-6.timer\nWill run service as unit: nwh-codex-reset-01a0912b-6.service\n"
+      }
+    ],
+    "quotaResetAnchor": "2026-09-13T17:41:00.000Z",
+    "lifecycleRecovery": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-target-review-v1-20260912-4",
+      "pending": false,
+      "auditRef": "run-records/2026-09-11-codex-compile-loop/host-review-proposal-lifecycle.json"
+    },
+    "semanticRunHistory": [
+      {
+        "namespace": "codex-target-review-v1-20260912",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-opening-target.json"
+      }
+    ],
+    "reconciliationFocus": "opening-driver",
+    "knowledgeRepair": {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-27",
+      "pending": false,
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+      "receiptFingerprint": "16abfa2b45fec0a37972fbd083ad28ca52fd9e70f8604205129a97c9a87bb040",
+      "unresolvedTargets": []
+    },
+    "traceRepair": {
+      "attributionIds": [
+        "attr-schneider-rescue-members-trapped-001",
+        "attr-eva-guigu-00008"
+      ],
+      "failureDiagnostic": "Reviewed quotation content trace failed again: attr-eva-guigu-00008,attr-schneider-rescue-members-trapped-001. Preserve originals and stop for host review.",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-quotation-content.json",
+      "batchId": "host-quotation-content-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "903a92cb36ed290cba6433d312fef304024539521b12f0f87c6a771b0500d3ff"
+    },
+    "knowledgeRepairHistory": [
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-1",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-knowledge-dependencies.json",
+        "receiptFingerprint": "a80578bca7684972296b14cdd8260d5f28fa0a1fdb8c9c47c9727c7a7e77a3c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-2",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "receiptFingerprint": "f9682e866aca66a22cf1a01b8dae5a32e523670103a62ea35e910c7c3fdb3436",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-3",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "receiptFingerprint": "eee8c13e7ebba78cb1fb39a8d95f5a1743bd982ec3171298df37e25de903286e",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-4",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "receiptFingerprint": "10fe6b7ffcd87d66b60f006b04fa4bb8900efdca91e38a4a1d03b25d73db8fac",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-5",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "receiptFingerprint": "9b47e05a8d83d08272bf58f01184723c23f0314d60a7e738479bbdcbae48ba4a",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-6",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "receiptFingerprint": "eca4e84675eeff514914668a764197742048ee6134b683d526f9ec822148c450",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-7",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "receiptFingerprint": "20bc8cd95777636285a45fa1612a0de9b588dac75feffd3e105c6b8c33ff8f07",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-8",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "receiptFingerprint": "4176e0f60f80d8da09f44af0cb4e7ab567c7464f80ded678469a00717d6a896d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-9",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "receiptFingerprint": "bb667a3d751e646925b005f469396ae419c4ef89f624f12742915799bfafaacc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-10",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "receiptFingerprint": "14b4e7bbc2093be8d3d86f0356d2eb8c36a71459e1e7f0509e24eeaf71690964",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-11",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "receiptFingerprint": "b860218c84dc36767018908a51fdaaea20f3975e1c1cb48e2c64f993b7105974",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-12",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "receiptFingerprint": "38b480456c192f1dd8cc493b53fc8087e72a7bc9a8c7f64028e25bd6e01d3c18",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-13",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "receiptFingerprint": "ebcc80887c90a45677644d3c7cd72fb4218e8feb3da34ecb2d5c722fd665759b",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-14",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "receiptFingerprint": "099e053d905c7411e6c1424a3507084c7c4640c23983a03d2642edd887afe745",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-15",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "receiptFingerprint": "e42c2b63609e824015b1d2fe60ae58f4cf80ea8d604cd9358998cc3d6a849e34",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-16",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "receiptFingerprint": "adb536f530a54f680b22acdfd55c27718bc788a2fa664b51f2c22f6728a0cecc",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-17",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "receiptFingerprint": "23fec246048d47fd7916984f504b736186902a2627a5e271e24b525017a627bb",
+        "unresolvedTargets": [
+          "event-eva-config-001"
+        ]
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-18",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "receiptFingerprint": "e863047b25c119e6058eecaa1c01fea9b747e4e435927889937bd4067ff2b50d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-19",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "receiptFingerprint": "4e0c1388eca6e4942888f91782f8083ad560998996a4d58790111ec1070f784d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-20",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "receiptFingerprint": "fc96a11cf9e398b2aaf242858ce5f366d9f7ee53ad1b9179b761eca25f8c6a5c",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-21",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "receiptFingerprint": "1a66602c8e29aa70646e3ff8f476352b813fefee02e6528f495b22b162ebed32",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-22",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "receiptFingerprint": "66c5ad249e1b4413a6589600f1492b7d7041d659b8497254e7e529d7708a5169",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-23",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "receiptFingerprint": "5ca3cf4cdef33873685dcad3377007e791ba9f88604cf3bc4e0990dfeacdef5d",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-24",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "receiptFingerprint": "1fe5dc9570548f6263c6b3014a6cf81c88db1264942385383f515faeda3430c2",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-25",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "receiptFingerprint": "57d5d7c48051196972e595c7f26b0f98ebbb0c721116e14f23bee07f677b01e9",
+        "unresolvedTargets": []
+      },
+      {
+        "batchId": "reconcile-a28585b1cf867f3e3a16-knowledge-effects-codex-opening-driver-v1-20260912-26",
+        "pending": false,
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "receiptFingerprint": "d9a2961678b7acafabe33458e5f17b4b1d468370d6b69f3f74d6ed5b78432262",
+        "unresolvedTargets": []
+      }
+    ],
+    "appliedRepairHistory": [
+      {
+        "repairId": "dragontext-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "0be170fea49a866ea1c65fbe8fe8603cee179192f84fee568d777853abc44f63",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-knowledge.json",
+        "appliedAt": "2026-09-12T18:30:48.769Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dragontext-proposition-object-selector-v1",
+        "failureFingerprint": "45af7b72057ca8627ca38f142736a1edc2484af30b0922c630fbf7a4e03523ed",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dragontext-anchor.json",
+        "appliedAt": "2026-09-12T18:37:15.473Z"
+      },
+      {
+        "repairId": "medical-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "d8d6e7cd654c89e070a14645d590c434ad1c952f01b27f5095e119ba6da97398",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-medical-knowledge.json",
+        "appliedAt": "2026-09-12T18:40:09.287Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "office-source-grounded-knowledge-dependencies-v1",
+        "failureFingerprint": "8ef8899d2276275463db5a56ae28051671b77ed93e721f72501fd01a65c1d2e0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-office-knowledge.json",
+        "appliedAt": "2026-09-12T18:47:01.873Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-disclosure-source-grounded-dependencies-v1",
+        "failureFingerprint": "2c8fd49565f406cc3b9d3fabaf11460ff6d57ab72d0ca2fe8d8969a8dd25699f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-disclosure.json",
+        "appliedAt": "2026-09-12T18:56:17.280Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-identity-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "b2e504d601decd98fcf28b2f03263a9f6837e3211d066def3c42bffc69b24aee",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-knowledge.json",
+        "appliedAt": "2026-09-12T19:05:58.058Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "boy-listener-and-content-selectors-v1",
+        "failureFingerprint": "d98142ee01a99ba21ccc268302bf3a09ed3c843977a8839ba8b5aef4225a31da",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-selectors.json",
+        "appliedAt": "2026-09-12T19:12:49.583Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "121356ed29262f4b483750da516cc9847495e8e970b9799b98a94a46c2606035",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-knowledge.json",
+        "appliedAt": "2026-09-12T19:15:57.744Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "confession-quotation-and-knowledge-dependencies-v1",
+        "failureFingerprint": "06944c5fe2fe0476a51c4030301e37e89c1017926aa21fda094e70d29f2830a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-confession-knowledge.json",
+        "appliedAt": "2026-09-12T19:21:50.468Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "acceptance-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "801e624d68d6772a4af862184fac1ccaf9a7f0ea012ab4c3e1e1441931f35101",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-acceptance-knowledge.json",
+        "appliedAt": "2026-09-12T19:29:12.505Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "nono-entry-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "1dfc90a3e4174718919bedc66c7d47b966921b86a71c8390dedd7e3d10c0ec94",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-knowledge.json",
+        "appliedAt": "2026-09-12T19:36:00.594Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "bend-warning-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "a6f5f754995fe21f6ba5134f90d1f3c666c9a1984ea4e8ad9851fa16cf085994",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-bend-warning-knowledge.json",
+        "appliedAt": "2026-09-13T12:45:37.230Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "funding-answer-summary-and-knowledge-v1",
+        "failureFingerprint": "2f13c1affa661632fc1f1c0d3d028a919178af358162e575cf4e424e2f38cf67",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-funding-knowledge.json",
+        "appliedAt": "2026-09-13T12:54:28.250Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "6f5ddff7066f52187dc1d4090ae387d9a808375b020964d71c5beeb9b6c9232d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-knowledge.json",
+        "appliedAt": "2026-09-13T12:59:21.471Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "email-document-holder-and-lifecycle-host-v1",
+        "failureFingerprint": "a7c7f0088d27ba49c117896fa5635360b3258cd945a6ca89ab75ccff6bcd708f",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-email-document-correction.json",
+        "appliedAt": "2026-09-13T13:12:44.915Z"
+      },
+      {
+        "repairId": "emergency-call-source-reviewed-knowledge-dependencies-v1",
+        "failureFingerprint": "24d033b42a3f33b73a24baabfb743cd5d8a4aab5dcfdb3a946ed376611dcbd7b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-knowledge.json",
+        "appliedAt": "2026-09-13T13:20:10.161Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "emergency-request-quotation-anchors-v1",
+        "failureFingerprint": "626922bbf53ef32aef6f793771ac4a0340ff4144d094e0cd92718fc1dca9ff80",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-emergency-trace.json",
+        "appliedAt": "2026-09-13T13:26:20.468Z"
+      },
+      {
+        "repairId": "exploration-window-source-reviewed-knowledge-v1",
+        "failureFingerprint": "86278ddb0368746eecc0a772333379eed8ee879de047a72cbf557dd1e6affeab",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-window.json",
+        "appliedAt": "2026-09-13T13:30:18.146Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "exploration-full-projection-and-lifecycle-v1",
+        "failureFingerprint": "91387cb2707fac261925e5485d1f051fbbee51251a14ed7ce5d3b6d6174934f0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-exploration-projection.json",
+        "appliedAt": "2026-09-13T13:38:07.647Z"
+      },
+      {
+        "repairId": "nono-follow-source-reviewed-knowledge-v1",
+        "failureFingerprint": "9989a41693d7f8808acdb8f2eecaabbfea496591868b214529a100493a077503",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-follow-instruction.json",
+        "appliedAt": "2026-09-13T13:41:24.132Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-interface-source-reviewed-knowledge-v1",
+        "failureFingerprint": "698fc2d0146b8703c3ae7c9b4d63acd82877b507158f9df2698757363af25032",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-interface-instruction.json",
+        "appliedAt": "2026-09-13T13:48:58.522Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "eva-quotation-retrieval-protocol-v1",
+        "failureFingerprint": "4b1a08018ec8ee43b8810abcb0286ab2643d17a06a2bbf07fe39ac35c010d508",
+        "failureCause": {
+          "category": "knowledge-not-produced-with-verified-evidence",
+          "targetIds": [
+            "event-eva-config-001"
+          ],
+          "dependencyIds": [
+            "q-eva-interface-click-instruction-00011"
+          ]
+        },
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-retrieval-resume.json",
+        "appliedAt": "2026-09-13T16:42:27.004Z"
+      },
+      {
+        "repairId": "map-display-source-reviewed-knowledge-v1",
+        "failureFingerprint": "11b736d5e84548b873606ab68338a15fc7717e89eab302fe811d537912347999",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-map-observation.json",
+        "appliedAt": "2026-09-13T16:47:21.510Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-perception-source-reviewed-knowledge-v1",
+        "failureFingerprint": "c10c9346b27a3308d8f20d9f233edb9a83439a31057a8c6e554464311aadb61a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-observation.json",
+        "appliedAt": "2026-09-13T16:54:36.423Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "alarm-direct-observation-scope-v1",
+        "failureFingerprint": "bfea6a8d889103ac8f5f70c43a26f5370f5e538e9e271edd0a287a45d692964c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-scope-correction.json",
+        "appliedAt": "2026-09-13T17:00:48.261Z",
+        "fingerprintBasis": "Verified attempt 36 temporal misattribution, not aggregate percentages"
+      },
+      {
+        "repairId": "duel-limited-observation-source-review-v1",
+        "failureFingerprint": "566b293740da10a7df74104a8ddf06078709571620449fece0312e7cf3a1b5eb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-observation.json",
+        "appliedAt": "2026-09-13T17:06:26.315Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "earthquake-perception-source-review-v1",
+        "failureFingerprint": "2d4bcebfafff2412e9b9340fbad52822729157510e54f84eba2309d721df2b0d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-earthquake-observation.json",
+        "appliedAt": "2026-09-13T17:10:47.409Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "train-arrival-observation-source-review-v1",
+        "failureFingerprint": "c553169066754cdb8020da447d1ff3a30f30e8f0a3572c32986349e740d91219",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-train-observation.json",
+        "appliedAt": "2026-09-13T17:15:51.299Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "helicopter-approach-observation-source-review-v1",
+        "failureFingerprint": "a1357fb5e1e649b1d317176279b1f17013fa7469bf64cbda434d4a68161fd4de",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-helicopter-observation.json",
+        "appliedAt": "2026-09-13T17:20:29.798Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "dance-finale-observation-source-review-v1",
+        "failureFingerprint": "d7593d5f5485ea50d2d5cd1d9aaf09e9806758b323c516628c8f1bd3d459b6e2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-dance-observation.json",
+        "appliedAt": "2026-09-13T17:25:26.067Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "caesar-fall-observation-source-review-v1",
+        "failureFingerprint": "b2f54cf53c7298bda4359e70c2e6f8d06c39355bf69e840f373b99e8cf2c1ab7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-fall-observation.json",
+        "appliedAt": "2026-09-13T17:29:36.955Z",
+        "fingerprintBasis": "Original deferred event knowledge gap, not aggregate percentages"
+      },
+      {
+        "repairId": "adams-fragment-required-before-reassembly-v1",
+        "failureFingerprint": "9d0ff292fa191d5375c8aa1d215484bf979385dfdd8597481b9d08796ef03a57",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-adams-causal.json",
+        "appliedAt": "2026-09-13T17:36:02.166Z"
+      },
+      {
+        "repairId": "alarm-gather-source-bounded-order-v1",
+        "failureFingerprint": "362c430bbb07c86c567325ab6be870f6795e2fc0b6f447d130865d7f645531cd",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-alarm-gather-time.json",
+        "appliedAt": "2026-09-13T17:40:28.712Z"
+      },
+      {
+        "repairId": "amber-arrival-source-bounded-order-v1",
+        "failureFingerprint": "e94692b391ee99323426bf5e5622d10f43cae30c1395866f13e4aad6ee446960",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-amber-arrival-time.json",
+        "appliedAt": "2026-09-13T17:58:02.856Z"
+      },
+      {
+        "repairId": "chu-source-reviewed-recruitment-goal-v1",
+        "failureFingerprint": "a79b1200e62046916fe8a6f8b85cfbbde81438477059fce7e4b2137e882d08b3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-chu-recruitment-goal.json",
+        "appliedAt": "2026-09-13T18:04:22.654Z"
+      },
+      {
+        "repairId": "roadside-setting-temporal-not-causal-v1",
+        "failureFingerprint": "8f98455210d2a817a03b8283bd4e3527da0482d8b26d4d9249f76937fcc050cb",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-relation.json",
+        "appliedAt": "2026-09-13T18:08:49.574Z"
+      },
+      {
+        "repairId": "cinema-roadside-source-discourse-order-v1",
+        "failureFingerprint": "281da3693a1bdf2c5c0cad708495a15bae951cd8f2f6749086d4f3cc8649d1f7",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-roadside-discourse.json",
+        "appliedAt": "2026-09-13T18:13:40.903Z"
+      },
+      {
+        "repairId": "nono-source-reviewed-pre-door-checkpoint-v1",
+        "failureFingerprint": "4a140bada4ca2aa6f97bcfeed747fff816996f471096c0562d5f7fd97e8e96a8",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-nono-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:17:40.529Z"
+      },
+      {
+        "repairId": "duel-source-reviewed-pre-attack-checkpoints-v1",
+        "failureFingerprint": "405723fd4bda4e015571188be8a209d3b6f4adc660c42b7266cd00663479691c",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-duel-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:21:27.852Z"
+      },
+      {
+        "repairId": "interview-source-reviewed-examiner-checkpoints-v1",
+        "failureFingerprint": "d659905948263cfedf75bc190d07a77d367a47b4f8a65cb79c6dc748f2cf684b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-interview-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:24:35.323Z"
+      },
+      {
+        "repairId": "breakfast-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "144e3ad042532714d52a9ac8817643bc9a62a27329d3408a42e122ac849431a0",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-breakfast-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T18:29:48.199Z"
+      },
+      {
+        "repairId": "makeup-source-reviewed-pre-fitting-checkpoint-v1",
+        "failureFingerprint": "332e045d1ecf74f015abff501dd60261528a2dcbd342d9588c3dd151ef8a1902",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-makeup-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:35:13.298Z"
+      },
+      {
+        "repairId": "lumingfei-source-reviewed-pre-coaching-checkpoint-v1",
+        "failureFingerprint": "461f9395e4e429bdca57cce55672b8eabc86bec2405b0a2e54167c72722ed739",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingfei-coaching-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:38:13.852Z"
+      },
+      {
+        "repairId": "fingel-source-reviewed-pre-arrival-checkpoint-v1",
+        "failureFingerprint": "92f1d7c7f84411cb4261c0667e8d3c6706918ccd2b534d123c2253a6ac37d59d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-fingel-train-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:41:09.597Z"
+      },
+      {
+        "repairId": "black-sniper-source-reviewed-pre-shot-checkpoint-v1",
+        "failureFingerprint": "726e870c3d21679313187cc536e8b7d50428fb8954e1874fc3872bae2a3b2251",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-black-sniper-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:44:03.764Z"
+      },
+      {
+        "repairId": "man-coins-source-reviewed-pre-request-checkpoint-v1",
+        "failureFingerprint": "87b1cb60a82e2d0089f3b67e29a2e7903d17dffee47228764ec69ec599728e07",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-man-coins-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:47:30.839Z"
+      },
+      {
+        "repairId": "mans-source-reviewed-pre-earthquake-checkpoint-v1",
+        "failureFingerprint": "b7c61b852e8f97016ab2f593d2380a0701330c3ef8585517a4622226fdaca732",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-mans-earthquake-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:50:34.701Z"
+      },
+      {
+        "repairId": "zhao-source-reviewed-pre-confession-checkpoint-v1",
+        "failureFingerprint": "1653489dcdee02d9d4972c631ea64f60c7126f2aab30d78ef875e15a56c95b89",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-zhao-confession-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:53:30.319Z"
+      },
+      {
+        "repairId": "manshtein-source-reviewed-pre-dialogue-checkpoint-v1",
+        "failureFingerprint": "4779c49864b7a2b6bb7dde2f12bd8a4fd00026894be70f604da5e09232fa6196",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-manshtein-medical-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:56:26.947Z"
+      },
+      {
+        "repairId": "sanwu-source-reviewed-pre-invocation-checkpoint-v1",
+        "failureFingerprint": "d909f4ef203e62b052e0fae28fcab43832b7a6af4473b062b4a6d14e40cf3ba3",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-sanwu-church-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T18:59:21.591Z"
+      },
+      {
+        "repairId": "angier-source-reviewed-pre-toast-checkpoint-v1",
+        "failureFingerprint": "6e80b15bf62ac687f9659caca02183f83b4d1b028b7dc65a859d405811ddb105",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-angier-toast-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:02:25.446Z"
+      },
+      {
+        "repairId": "caesar-source-reviewed-exchange-goal-v1",
+        "failureFingerprint": "7f9c344875e8102e6b8d94e64a430348b1c85cac3231be97ac6746d4a1fff752",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-caesar-exchange-goal.json",
+        "appliedAt": "2026-09-13T19:05:47.060Z"
+      },
+      {
+        "repairId": "yaji-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "a40e0d01989a02e780424be12d40ec51988b5c3fb93c8ab42986beb2e6e2c01d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yaji-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:09:14.053Z"
+      },
+      {
+        "repairId": "yesheng-source-reviewed-retreat-goal-v1",
+        "failureFingerprint": "6669d28ccb86bcc65f845b4da0aa6cf08f83afe9f9e91e8db23c12c7fa813728",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-yesheng-retreat-goal.json",
+        "appliedAt": "2026-09-13T19:12:07.578Z"
+      },
+      {
+        "repairId": "cousin-source-reviewed-bedroom-checkpoint-v1",
+        "failureFingerprint": "296e224f9723b4a93bad6e9a53bafe5edcd902158d12a9120a84c63a6dc6521d",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-entry-checkpoint.json",
+        "correctionPath": "run-records/2026-09-11-codex-compile-loop/host-review-cousin-bedroom-trace-correction.json",
+        "appliedAt": "2026-09-13T19:17:13.858Z"
+      },
+      {
+        "repairId": "cinema-audience-source-reviewed-location-checkpoints-v1",
+        "failureFingerprint": "bbf81a731f359f8e409a39d169a4d1f934d869d6f3e4c3760c9819577f869092",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-cinema-audience-entry-checkpoints.json",
+        "appliedAt": "2026-09-13T19:20:15.410Z"
+      },
+      {
+        "repairId": "baby-source-reviewed-citywall-checkpoint-v1",
+        "failureFingerprint": "31ea8b2b467f212220a54987686814fa226b17b96980f31dc130f47ba21bb531",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-baby-citywall-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:23:20.676Z"
+      },
+      {
+        "repairId": "conductor-source-reviewed-pre-boarding-checkpoint-v1",
+        "failureFingerprint": "fab1c99967c4541832b1bc87191dba25fea4e7d81b47810e7c733e44ae836b09",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-conductor-boarding-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:26:17.890Z"
+      },
+      {
+        "repairId": "eva-source-reviewed-projected-presence-v1",
+        "failureFingerprint": "e79dcae645ee1836dec3bc108435c1f8f58509a0717980e8f004768d6965a6f5",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-eva-projected-presence.json",
+        "appliedAt": "2026-09-13T19:30:12.278Z"
+      },
+      {
+        "repairId": "boy-source-reviewed-pre-warning-checkpoint-v1",
+        "failureFingerprint": "19dab9bb94b5ac4b46cbf6b3162f3ed6656fcd9b13d5384ce7961ee668d65180",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-boy-warning-entry-checkpoint.json",
+        "appliedAt": "2026-09-13T19:33:06.641Z"
+      },
+      {
+        "repairId": "source-reviewed-explicit-identity-links-v1",
+        "failureFingerprint": "028cc7ff3f96455c5df92467d825aa63080ad02655a98463b847b2f1d1f8d63e",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-explicit-identity-links.json",
+        "appliedAt": "2026-09-13T19:37:01.203Z"
+      },
+      {
+        "repairId": "source-reviewed-briefing-identity-links-v1",
+        "failureFingerprint": "690b314981fc276223282e7f46f6d4d7f0dbbe8883f3a3308e1de6e13adbbdb2",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-briefing-identity-links.json",
+        "appliedAt": "2026-09-13T19:38:50.717Z"
+      },
+      {
+        "repairId": "source-reviewed-named-student-identity-links-v1",
+        "failureFingerprint": "efbbedbbf6f4523071125f9aefd4cecd3030c0edee751b510bd0a5eee281d8db",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-named-student-identity-links.json",
+        "appliedAt": "2026-09-13T19:43:29.784Z"
+      },
+      {
+        "repairId": "source-reviewed-student-reference-identity-links-v1",
+        "failureFingerprint": "22686ec02d3c0230c3d8ef5c6897e3e52d29ce8a8f74c7c57fef396bfdae2019",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-student-reference-identity-links.json",
+        "appliedAt": "2026-09-13T19:45:24.872Z"
+      },
+      {
+        "repairId": "source-reviewed-recalled-name-identity-links-v1",
+        "failureFingerprint": "976d1e53cada7298d4632678d7b26a8237b1a97eda34a4f89e3191cea481b27a",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-recalled-name-identity-links.json",
+        "appliedAt": "2026-09-13T19:47:13.331Z"
+      },
+      {
+        "repairId": "source-reviewed-car-council-identity-links-v1",
+        "failureFingerprint": "0b8644091a3568acbd28c7343d9c9ad92d8cdf82891729772d03f4c83eeedf8b",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-car-council-identity-links.json",
+        "appliedAt": "2026-09-13T19:49:19.421Z"
+      },
+      {
+        "repairId": "source-reviewed-academy-identity-links-v1",
+        "failureFingerprint": "d7abef6eb71eb53ca10641dda0bc281491e990790e2e6712a4afddcca7e2d975",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-academy-identity-links.json",
+        "appliedAt": "2026-09-13T19:51:21.434Z"
+      },
+      {
+        "repairId": "source-reviewed-guderian-identity-links-v1",
+        "failureFingerprint": "ec9cc15dde8450b91a7113b58a34064ef020838366a7fdef6f98dbc184bfcdb1",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-guderian-identity-links.json",
+        "appliedAt": "2026-09-13T19:53:12.302Z"
+      },
+      {
+        "repairId": "source-reviewed-manshtein-identity-links-v1",
+        "failureFingerprint": "9470632e5feded3505f105bd678d2f6403dcee6593de4e74129339ec2afd0a99",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-manshtein-identity-links.json",
+        "appliedAt": "2026-09-13T19:55:05.416Z"
+      },
+      {
+        "repairId": "source-reviewed-schneider-identity-links-v1",
+        "failureFingerprint": "41778356dd1b292a300e1d6ef5b9abca4ff103a9a536c1c0c958eb71c43283ad",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-schneider-identity-links.json",
+        "appliedAt": "2026-09-13T19:57:01.802Z"
+      },
+      {
+        "repairId": "source-reviewed-fingel-identity-links-v1",
+        "failureFingerprint": "c3f127f60a53c95e492585a97e07182f7458e58732f17f91809f642b5ee5f6fc",
+        "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-fingel-identity-links.json",
+        "appliedAt": "2026-09-13T19:59:09.288Z"
+      }
+    ],
+    "identityRepair": {
+      "batchId": "host-lumingze-identity-a28585b1cf867f3e3a16-v1",
+      "receiptFingerprint": "362a6228c63af64cda20a243cac91f29b4f933cbc399240190d4168794c8d3e3",
+      "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-lumingze-identity.json",
+      "verifiedAt": "2026-09-12T19:04:52.690Z",
+      "entityId": "char-lumingze-boy"
+    },
+    "threadHistory": [
+      {
+        "at": "2026-09-13T17:58:47.585323+00:00",
+        "fromThreadId": "01a0912b-5872-75b0-a118-813e3e32d2be",
+        "toThreadId": "01a09be6-f704-72d0-aaf1-59b11709dd85",
+        "reason": "User explicitly requested reading Add runtime execution hooks, checking timers and continuing the existing loop in this task. Original task ended with systemError after delivered callback. No compilation or provider guard was reset.",
+        "attempt": 45,
+        "status": "needs-review",
+        "timerCheck": {
+          "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+          "serviceActiveState": "failed",
+          "mainPID": 0,
+          "pendingQuotaTimers": [],
+          "anchor": "2026-09-13T17:41:00.000Z",
+          "nextWindow": "2026-09-13T22:41:00.000Z",
+          "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+        },
+        "priorCallback": {
+          "attempt": 45,
+          "delivered": true,
+          "receipt": "Queued message 01a09bdc-8e63-7823-8d50-a0cd436b02c7 for thread 01a0912b-5872-75b0-a118-813e3e32d2be.",
+          "at": "2026-09-13T17:41:57.992Z"
+        },
+        "priorTimer": {
+          "unit": "nwh-codex-reset-01a0912b-20260914-0141.timer",
+          "scheduledAt": "2026-09-13T17:41:00.000Z",
+          "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-20260914-0141.timer\nWill run service as unit: nwh-codex-reset-01a0912b-20260914-0141.service\n"
+        },
+        "review": "host-review-amber-arrival-time.json",
+        "validation": "42 relevant tests and strict reviewer type check passed; normal proposal and finish completed with all gates retained."
+      }
+    ],
+    "timerCheck": {
+      "checkedAt": "2026-09-13T17:58:47.585323+00:00",
+      "serviceActiveState": "failed",
+      "mainPID": 0,
+      "pendingQuotaTimers": [],
+      "anchor": "2026-09-13T17:41:00.000Z",
+      "nextWindow": "2026-09-13T22:41:00.000Z",
+      "policy": "Schedule only upon a real provider hard-quota response; existing 01:41 Beijing timer already fired."
+    },
+    "endedAt": "2026-09-13T20:02:02.191Z",
+    "callback": {
+      "attempt": 84,
+      "delivered": true,
+      "receipt": "Queued message 01a09c5c-ccdb-7b81-ad0a-a9baa8875a64 for thread 01a09be6-f704-72d0-aaf1-59b11709dd85.",
+      "at": "2026-09-13T20:02:02.603Z"
+    }
+  },
+  "targets": [
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-nono-01-v2",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 251850,
+          "endByte": 251856,
+          "startLine": 1581,
+          "endLine": 1581,
+          "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+          "prefixHash": "e0db19bb44f124b32ba90776886807e4fc1b9c9ab7ec2f2ec33a810d7e45b33b",
+          "suffixHash": "a40a53a0ea05713bdd4a0ea7fe4810a4e3640dacf672800d8ed4cea9ca4742b3",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺诺",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-nuonuo",
+        "kind": "character",
+        "canonicalName": "诺诺",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-nono-01-v2",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 251850,
+            "endByte": 251856,
+            "startLine": 1581,
+            "endLine": 1581,
+            "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+            "prefixHash": "e0db19bb44f124b32ba90776886807e4fc1b9c9ab7ec2f2ec33a810d7e45b33b",
+            "suffixHash": "a40a53a0ea05713bdd4a0ea7fe4810a4e3640dacf672800d8ed4cea9ca4742b3",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺诺",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "char-nuonuo",
+            "entityKind": "character",
+            "canonicalName": "诺诺",
+            "matchedText": "诺诺",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t他只能本能地对开枪射杀恺撒和楚子航的路明非感觉到戒惧。\r",
+        "\t他关闭了灯，独自在黑暗中坐了一会儿，打开手机接通了电话——“父亲。”\r",
+        "\t讨论区继续高速刷新，留言不停地上移。\r",
+        "\t“也许明天他会在3E吃亏，我觉得他不太行的样子，可能是校长误判了他的级别。”有人留言。\r",
+        "\t“可能他毫无龙族血统，所以不怕楚子航的黄金瞳。”\r",
+        "\t“最大特长是竞技类游戏诶！什么搞笑的特长？”\r",
+        "\t“嗨！不如开盘口好了，有谁赌路明非明天无法通过3E考试的？”带着管理员标志的芬格尔留言。他的出现带来了一股热潮，这个经年不能毕业的废物师兄是卡塞尔学院校网的热门人物，负责新闻频道，总能搞出一些热点新闻。\r",
+        "\t“我觉得下注他能过的少，我开一个好头。下100块，赌他能过！”芬格尔开通了投票区的主题。\r",
+        "\t“芬格尔你准备把还掉卡贷的机会都赌在你的室友身上么？”有人嘲笑。\r",
+        "\t“No”一侧的赌注迅速地飙升，很快突破了两万美金，而“Yes”一侧的仍旧只有芬格尔的100块，在短短的一晚上里，路明非的背景资料都被挖掘出来了，可笑的高中成绩，没谈过女朋友是因为没有任何人看中他，路痴，唯一的特长是打游戏，在海关被扣了几十张盗版盘，无论怎么分析都是个废物，绝不像传说里血统纯正潜力无穷的“S”级学生。\r",
+        "\t“难道没有人有点赌博精神么？”芬格尔留言抱怨，“你们这样没法玩，只能赢我的100块，现在赌路明非通过考试的盘口是1比130！”\r",
+        "\t“我赌500块，路明非能通过考试。”ID名为“村雨”的人留言。\r",
+        "\t一瞬间讨论区沉默了，那是楚子航的ID，很少出现在讨论区。沉默的狮心会会长，被称为“超A”级的男生并不喜欢絮絮叨叨的讨论。而他居然破例赌博，押了500块赌路明非能通过考试。\r",
+        "\t“我赌5000块。”ID名为“狄克推多”的人留言。\r",
+        "\t“恺撒！”有人留言惊叹。\r",
+        "\t“赌路明非不能通过考试。”恺撒说完之后断线了，留下一个暂时被冰封的讨论区。\r",
+        "\t隐隐约约又是一场竞争的开始，如果世界上真有天敌这种东西，那么恺撒和楚子航一定是，学生们的记忆里，他们两人从未在任何一件事上达成一致。不过今天终于有一件了，在“自由一日”神奇地被那个新生两枪结束后，学生会和“狮心会”的领袖都宣布了认可这个结果。\r",
+        "\t他们都会承认自己输给了一个废物？失去了诺顿馆的一年使用权和追求学院里任何一个女生不被拒绝的权力？学生们都觉得这两人未免太大度了一点。当然他们两个并不需要担心追求女生失败的问题，楚子航沉默内敛，光棍至今，看起来对女性非常冷感，而恺撒已经有了闻名学院的诺诺。\r",
+        "\t恺撒捧着无线键盘，半躺在安珀馆大厅的沙发上，看着巨大的投影屏幕上，赌注逐步上升。他退出了“狄克推多”的ID之后以“索尼克”的ID登陆，这个不起眼的ID始终缩在在线列表的角落里不说话。\r",
+        "\t诺诺捧着一杯冰咖啡，靠在他背后的墙上，“你很关注路明非啊。”\r",
+        "\t“是，他会不会通过明天的3E考试，我没把握。”恺撒坦然承认，“我赌他不能，只是我从来不和楚子航在同一边下注而已。”\r",
+        "\t“我知道，5000块对你算不了什么。”诺诺放下咖啡，拎起背包，“走了，这学期我选了曼施坦因教授的课，得啃啃书，有事给我电话。”\r",
+        "\t“要看书的话，跟苏茜住在那么小的宿舍里不会觉得很挤么？而且她白天才给了你一枪……她为了楚子航可是什么都能做。”恺撒伸手似乎想要阻拦诺诺，“在这里好了，安珀馆可比诺顿馆还要舒服很多。”\r",
+        "\t诺诺在门边转身，对恺撒翻了个白眼。\r",
+        "\t恺撒急忙举起双手，以示无辜，“我是说……客房！我有很多的客房！”\r"
+      ],
+      "rationale": "The academy narrative names Nono in relation to Caesar, followed by Nono speaking beside him; same established student, no new relationship fact."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-nono-02",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 252126,
+          "endByte": 252132,
+          "startLine": 1583,
+          "endLine": 1583,
+          "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+          "prefixHash": "90752abd53dad4cabc1a77b40a126f028b02daf165a74ac570f9120a7525dde9",
+          "suffixHash": "887dbd6ef488a01620b3a83e383d8200e6c1fbdf41d050f1a7c3f198a36d9930",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺诺",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-caesar-nono-amber",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-nuonuo",
+        "kind": "character",
+        "canonicalName": "诺诺",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-nono-02",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 252126,
+            "endByte": 252132,
+            "startLine": 1583,
+            "endLine": 1583,
+            "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+            "prefixHash": "90752abd53dad4cabc1a77b40a126f028b02daf165a74ac570f9120a7525dde9",
+            "suffixHash": "887dbd6ef488a01620b3a83e383d8200e6c1fbdf41d050f1a7c3f198a36d9930",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺诺",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-caesar-nono-amber",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "char-nuonuo",
+            "entityKind": "character",
+            "canonicalName": "诺诺",
+            "matchedText": "诺诺",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t讨论区继续高速刷新，留言不停地上移。\r",
+        "\t“也许明天他会在3E吃亏，我觉得他不太行的样子，可能是校长误判了他的级别。”有人留言。\r",
+        "\t“可能他毫无龙族血统，所以不怕楚子航的黄金瞳。”\r",
+        "\t“最大特长是竞技类游戏诶！什么搞笑的特长？”\r",
+        "\t“嗨！不如开盘口好了，有谁赌路明非明天无法通过3E考试的？”带着管理员标志的芬格尔留言。他的出现带来了一股热潮，这个经年不能毕业的废物师兄是卡塞尔学院校网的热门人物，负责新闻频道，总能搞出一些热点新闻。\r",
+        "\t“我觉得下注他能过的少，我开一个好头。下100块，赌他能过！”芬格尔开通了投票区的主题。\r",
+        "\t“芬格尔你准备把还掉卡贷的机会都赌在你的室友身上么？”有人嘲笑。\r",
+        "\t“No”一侧的赌注迅速地飙升，很快突破了两万美金，而“Yes”一侧的仍旧只有芬格尔的100块，在短短的一晚上里，路明非的背景资料都被挖掘出来了，可笑的高中成绩，没谈过女朋友是因为没有任何人看中他，路痴，唯一的特长是打游戏，在海关被扣了几十张盗版盘，无论怎么分析都是个废物，绝不像传说里血统纯正潜力无穷的“S”级学生。\r",
+        "\t“难道没有人有点赌博精神么？”芬格尔留言抱怨，“你们这样没法玩，只能赢我的100块，现在赌路明非通过考试的盘口是1比130！”\r",
+        "\t“我赌500块，路明非能通过考试。”ID名为“村雨”的人留言。\r",
+        "\t一瞬间讨论区沉默了，那是楚子航的ID，很少出现在讨论区。沉默的狮心会会长，被称为“超A”级的男生并不喜欢絮絮叨叨的讨论。而他居然破例赌博，押了500块赌路明非能通过考试。\r",
+        "\t“我赌5000块。”ID名为“狄克推多”的人留言。\r",
+        "\t“恺撒！”有人留言惊叹。\r",
+        "\t“赌路明非不能通过考试。”恺撒说完之后断线了，留下一个暂时被冰封的讨论区。\r",
+        "\t隐隐约约又是一场竞争的开始，如果世界上真有天敌这种东西，那么恺撒和楚子航一定是，学生们的记忆里，他们两人从未在任何一件事上达成一致。不过今天终于有一件了，在“自由一日”神奇地被那个新生两枪结束后，学生会和“狮心会”的领袖都宣布了认可这个结果。\r",
+        "\t他们都会承认自己输给了一个废物？失去了诺顿馆的一年使用权和追求学院里任何一个女生不被拒绝的权力？学生们都觉得这两人未免太大度了一点。当然他们两个并不需要担心追求女生失败的问题，楚子航沉默内敛，光棍至今，看起来对女性非常冷感，而恺撒已经有了闻名学院的诺诺。\r",
+        "\t恺撒捧着无线键盘，半躺在安珀馆大厅的沙发上，看着巨大的投影屏幕上，赌注逐步上升。他退出了“狄克推多”的ID之后以“索尼克”的ID登陆，这个不起眼的ID始终缩在在线列表的角落里不说话。\r",
+        "\t诺诺捧着一杯冰咖啡，靠在他背后的墙上，“你很关注路明非啊。”\r",
+        "\t“是，他会不会通过明天的3E考试，我没把握。”恺撒坦然承认，“我赌他不能，只是我从来不和楚子航在同一边下注而已。”\r",
+        "\t“我知道，5000块对你算不了什么。”诺诺放下咖啡，拎起背包，“走了，这学期我选了曼施坦因教授的课，得啃啃书，有事给我电话。”\r",
+        "\t“要看书的话，跟苏茜住在那么小的宿舍里不会觉得很挤么？而且她白天才给了你一枪……她为了楚子航可是什么都能做。”恺撒伸手似乎想要阻拦诺诺，“在这里好了，安珀馆可比诺顿馆还要舒服很多。”\r",
+        "\t诺诺在门边转身，对恺撒翻了个白眼。\r",
+        "\t恺撒急忙举起双手，以示无辜，“我是说……客房！我有很多的客房！”\r",
+        "\t“其实我最不喜欢你的一点就是你租校内的别墅，你不觉得空么？”诺诺撇嘴，“我也不喜欢你的布加迪威龙。”\r",
+        "\t“好在今天我已经输掉了它。”恺撒耸耸肩。\r"
+      ],
+      "rationale": "The narrator names Nono holding coffee and addressing Caesar about Lumingfei in Amber Hall."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-nono-03",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 252438,
+          "endByte": 252444,
+          "startLine": 1585,
+          "endLine": 1585,
+          "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+          "prefixHash": "bb342886658f3d7a23f0166ab399d082faefacfc04d411d474d8fb9a433efa43",
+          "suffixHash": "d19ba01444826b2ab23b436cbb3363b8562a1bb1c6d9031a469df4f9ea941a04",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺诺",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-lu-study-recollection",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-nuonuo",
+        "kind": "character",
+        "canonicalName": "诺诺",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-nono-03",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 252438,
+            "endByte": 252444,
+            "startLine": 1585,
+            "endLine": 1585,
+            "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+            "prefixHash": "bb342886658f3d7a23f0166ab399d082faefacfc04d411d474d8fb9a433efa43",
+            "suffixHash": "d19ba01444826b2ab23b436cbb3363b8562a1bb1c6d9031a469df4f9ea941a04",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺诺",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-lu-study-recollection",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "char-nuonuo",
+            "entityKind": "character",
+            "canonicalName": "诺诺",
+            "matchedText": "诺诺",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“可能他毫无龙族血统，所以不怕楚子航的黄金瞳。”\r",
+        "\t“最大特长是竞技类游戏诶！什么搞笑的特长？”\r",
+        "\t“嗨！不如开盘口好了，有谁赌路明非明天无法通过3E考试的？”带着管理员标志的芬格尔留言。他的出现带来了一股热潮，这个经年不能毕业的废物师兄是卡塞尔学院校网的热门人物，负责新闻频道，总能搞出一些热点新闻。\r",
+        "\t“我觉得下注他能过的少，我开一个好头。下100块，赌他能过！”芬格尔开通了投票区的主题。\r",
+        "\t“芬格尔你准备把还掉卡贷的机会都赌在你的室友身上么？”有人嘲笑。\r",
+        "\t“No”一侧的赌注迅速地飙升，很快突破了两万美金，而“Yes”一侧的仍旧只有芬格尔的100块，在短短的一晚上里，路明非的背景资料都被挖掘出来了，可笑的高中成绩，没谈过女朋友是因为没有任何人看中他，路痴，唯一的特长是打游戏，在海关被扣了几十张盗版盘，无论怎么分析都是个废物，绝不像传说里血统纯正潜力无穷的“S”级学生。\r",
+        "\t“难道没有人有点赌博精神么？”芬格尔留言抱怨，“你们这样没法玩，只能赢我的100块，现在赌路明非通过考试的盘口是1比130！”\r",
+        "\t“我赌500块，路明非能通过考试。”ID名为“村雨”的人留言。\r",
+        "\t一瞬间讨论区沉默了，那是楚子航的ID，很少出现在讨论区。沉默的狮心会会长，被称为“超A”级的男生并不喜欢絮絮叨叨的讨论。而他居然破例赌博，押了500块赌路明非能通过考试。\r",
+        "\t“我赌5000块。”ID名为“狄克推多”的人留言。\r",
+        "\t“恺撒！”有人留言惊叹。\r",
+        "\t“赌路明非不能通过考试。”恺撒说完之后断线了，留下一个暂时被冰封的讨论区。\r",
+        "\t隐隐约约又是一场竞争的开始，如果世界上真有天敌这种东西，那么恺撒和楚子航一定是，学生们的记忆里，他们两人从未在任何一件事上达成一致。不过今天终于有一件了，在“自由一日”神奇地被那个新生两枪结束后，学生会和“狮心会”的领袖都宣布了认可这个结果。\r",
+        "\t他们都会承认自己输给了一个废物？失去了诺顿馆的一年使用权和追求学院里任何一个女生不被拒绝的权力？学生们都觉得这两人未免太大度了一点。当然他们两个并不需要担心追求女生失败的问题，楚子航沉默内敛，光棍至今，看起来对女性非常冷感，而恺撒已经有了闻名学院的诺诺。\r",
+        "\t恺撒捧着无线键盘，半躺在安珀馆大厅的沙发上，看着巨大的投影屏幕上，赌注逐步上升。他退出了“狄克推多”的ID之后以“索尼克”的ID登陆，这个不起眼的ID始终缩在在线列表的角落里不说话。\r",
+        "\t诺诺捧着一杯冰咖啡，靠在他背后的墙上，“你很关注路明非啊。”\r",
+        "\t“是，他会不会通过明天的3E考试，我没把握。”恺撒坦然承认，“我赌他不能，只是我从来不和楚子航在同一边下注而已。”\r",
+        "\t“我知道，5000块对你算不了什么。”诺诺放下咖啡，拎起背包，“走了，这学期我选了曼施坦因教授的课，得啃啃书，有事给我电话。”\r",
+        "\t“要看书的话，跟苏茜住在那么小的宿舍里不会觉得很挤么？而且她白天才给了你一枪……她为了楚子航可是什么都能做。”恺撒伸手似乎想要阻拦诺诺，“在这里好了，安珀馆可比诺顿馆还要舒服很多。”\r",
+        "\t诺诺在门边转身，对恺撒翻了个白眼。\r",
+        "\t恺撒急忙举起双手，以示无辜，“我是说……客房！我有很多的客房！”\r",
+        "\t“其实我最不喜欢你的一点就是你租校内的别墅，你不觉得空么？”诺诺撇嘴，“我也不喜欢你的布加迪威龙。”\r",
+        "\t“好在今天我已经输掉了它。”恺撒耸耸肩。\r",
+        "\t“哦，乖。”诺诺带门离去。恺撒把手指伸进那头灿烂的金发里挠头，露出无可奈何的表情。\r",
+        "\t“再有三分钟封盘！还未下注的请即刻投下你们的赌注，所有赌注都要在明天3E考试前打入我的账户，由我代为管理，否则视为无效。”芬格尔蜷缩在1区宿舍的活动室里的沙发上，抱着笔记本，手指在键盘上弹跳如飞。十几个学生围绕着他站着，表情严肃，紧盯屏幕。\r"
+      ],
+      "rationale": "Nono continues the same conversation about her course selection; preserve the separate named observation."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-nono-address",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 256649,
+          "endByte": 256655,
+          "startLine": 1611,
+          "endLine": 1611,
+          "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+          "prefixHash": "fb8a1a247c98afd180e0cefaf629c3288b6b8b24496d956b0625a1e57fbd7eab",
+          "suffixHash": "2a8b4c20e0161bdcc3fdab7ccc7e3146ade22ca6bbb9d67ab3ad3ae365b6059c",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺诺",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-lu-study-recollection",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-nuonuo",
+        "kind": "character",
+        "canonicalName": "诺诺",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-nono-address",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 256649,
+            "endByte": 256655,
+            "startLine": 1611,
+            "endLine": 1611,
+            "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+            "prefixHash": "fb8a1a247c98afd180e0cefaf629c3288b6b8b24496d956b0625a1e57fbd7eab",
+            "suffixHash": "2a8b4c20e0161bdcc3fdab7ccc7e3146ade22ca6bbb9d67ab3ad3ae365b6059c",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺诺",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-lu-study-recollection",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "char-nuonuo",
+            "entityKind": "character",
+            "canonicalName": "诺诺",
+            "matchedText": "诺诺",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“准备好了。”数学家一样的男生回答。\r",
+        "\t“一定要在快封盘的时候下注，否则会露马脚的。”\r",
+        "\t“明白。倒计时34秒！我已经同步到系统时间了！”校园高利贷团伙的精英分子打开笔记本上的倒计时软件，以科学家的严谨给出了答案。\r",
+        "\t“提前三到四秒钟，盘口已经锁死，最后几秒该是注资最集中的时间，网络可能会有点卡。”有人提醒。\r",
+        "\t两侧的赌注都在高速翻动，每秒钟都有新的赌注加上去，封盘的时间越来越近了，所有人都如股票交易所的交易员那样心跳加速。\r",
+        "\t“10，9，8，7，6，5，4，”倒计时者舔着略略发干的嘴唇。\r",
+        "\t“注资！封盘！”芬格尔大手一挥，气势惊人。\r",
+        "\t“0！”倒计时者大喊，“成功注资！我们赢了！”\r",
+        "\t“稍等！下注在路明非身上的金额是……39400块，最后一秒钟，有人加注20000块……”有人的声音在颤抖。\r",
+        "\t“20000块！！”芬格尔大惊，“登录我的管理员ID，查他是谁！”\r",
+        "\t一分钟之后芬格尔愣在了笔记本前，屏幕上清楚地显示着加注人的ID，用的是真名，坦坦荡荡，没有丝毫掩饰——格尔德·鲁道夫·曼施坦因。后面还有头衔：“教授”。\r",
+        "\t“风纪委员会主席也来下注么……他不是主抓作弊么？”芬格尔直冒冷汗。\r",
+        "\t此时此刻，路明非正在灯下临摹芬格尔留给他的答卷，一笔一画。芬格尔说不想打搅他努力，带着满脸诡异的笑容出去了，空荡荡的宿舍里只剩下他。距离天亮不到4个小时了，4小时里他必须把八张画都临摹一遍，记在脑海里。那些画上的线条仿佛枝蔓丛生的密林，根本就不是要让人记住的。\r",
+        "\t可还是得记，即使疲倦如涨潮般慢慢地上来了。\r",
+        "\t不会货不对板吧？也许这份价值2500美元的答卷根本就是扯淡？世界上哪有考语言要画画的？他凭什么相信那个有时脱线有时狡诈的芬格尔呢？从头到尾芬格尔都在占他的便宜。他脑子里乱糟糟的。其实过了3E又怎么样？在一个流行爬行类血统的天才学院里，他能活着爬出去么？爬出去又如何？满世界跑去屠龙？\r",
+        "\t此时此刻在遥远的中国该是早晨，白裙子的陈雯雯是否和她的新男友拉着手，走在去一所平民大学的路上？\r",
+        "\t诺诺开车带着他跑在高架路上的那个夜晚，他以为自己找到了出路，结果他还是一只小小的萤火虫，漫无目的地跟着大家一起飞。\r",
+        "\t他抱着膝盖坐在床上，想了很久，轻声对自己说，“诺诺，我很想见你。”\r",
+        "\t就是想见见她，不管发生了什么事。\r",
+        "\r",
+        "第四幕 青铜城\r",
+        "\tThe Bronze City\r",
+        "\t新的地图立刻显示在大屏幕上，短暂的沉默后，所有人都猛地扭头看着路明非，地图被解开之后，再理解就太简单了，每个人都意识到这是正确的结果。\r",
+        "\t控制室里一片死寂，平静中隐藏着巨大的惊叹和不安，像是颗深水炸弹正幽幽地下沉。\r",
+        "\t路明非第一次看见了那个娇小女孩的脸，透明得像是冰雪，冷得也像是冰雪。\r"
+      ],
+      "rationale": "Lumingfei names Nono in his solitary wish to see her, immediately recalling their earlier drive. Resolve the intended referent without inventing her presence or hearing."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-nono-1",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 257221,
+          "endByte": 257227,
+          "startLine": 1619,
+          "endLine": 1619,
+          "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+          "prefixHash": "fd490b3222e839694381cc88c123fa59581ea4e0ab3fcbddf6dc6ea58cc9d75c",
+          "suffixHash": "29279e7864516941753e236e945b4b903f49d94c23b965e862eb11cf048668e6",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺诺",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-exam-scene",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-nuonuo",
+        "kind": "character",
+        "canonicalName": "诺诺",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-nono-1",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 257221,
+            "endByte": 257227,
+            "startLine": 1619,
+            "endLine": 1619,
+            "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+            "prefixHash": "fd490b3222e839694381cc88c123fa59581ea4e0ab3fcbddf6dc6ea58cc9d75c",
+            "suffixHash": "29279e7864516941753e236e945b4b903f49d94c23b965e862eb11cf048668e6",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺诺",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-exam-scene",
+          "confidence": 1
+        },
+        "candidates": [
+          {
+            "entityId": "char-nuonuo",
+            "entityKind": "character",
+            "canonicalName": "诺诺",
+            "matchedText": "诺诺",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“稍等！下注在路明非身上的金额是……39400块，最后一秒钟，有人加注20000块……”有人的声音在颤抖。\r",
+        "\t“20000块！！”芬格尔大惊，“登录我的管理员ID，查他是谁！”\r",
+        "\t一分钟之后芬格尔愣在了笔记本前，屏幕上清楚地显示着加注人的ID，用的是真名，坦坦荡荡，没有丝毫掩饰——格尔德·鲁道夫·曼施坦因。后面还有头衔：“教授”。\r",
+        "\t“风纪委员会主席也来下注么……他不是主抓作弊么？”芬格尔直冒冷汗。\r",
+        "\t此时此刻，路明非正在灯下临摹芬格尔留给他的答卷，一笔一画。芬格尔说不想打搅他努力，带着满脸诡异的笑容出去了，空荡荡的宿舍里只剩下他。距离天亮不到4个小时了，4小时里他必须把八张画都临摹一遍，记在脑海里。那些画上的线条仿佛枝蔓丛生的密林，根本就不是要让人记住的。\r",
+        "\t可还是得记，即使疲倦如涨潮般慢慢地上来了。\r",
+        "\t不会货不对板吧？也许这份价值2500美元的答卷根本就是扯淡？世界上哪有考语言要画画的？他凭什么相信那个有时脱线有时狡诈的芬格尔呢？从头到尾芬格尔都在占他的便宜。他脑子里乱糟糟的。其实过了3E又怎么样？在一个流行爬行类血统的天才学院里，他能活着爬出去么？爬出去又如何？满世界跑去屠龙？\r",
+        "\t此时此刻在遥远的中国该是早晨，白裙子的陈雯雯是否和她的新男友拉着手，走在去一所平民大学的路上？\r",
+        "\t诺诺开车带着他跑在高架路上的那个夜晚，他以为自己找到了出路，结果他还是一只小小的萤火虫，漫无目的地跟着大家一起飞。\r",
+        "\t他抱着膝盖坐在床上，想了很久，轻声对自己说，“诺诺，我很想见你。”\r",
+        "\t就是想见见她，不管发生了什么事。\r",
+        "\r",
+        "第四幕 青铜城\r",
+        "\tThe Bronze City\r",
+        "\t新的地图立刻显示在大屏幕上，短暂的沉默后，所有人都猛地扭头看着路明非，地图被解开之后，再理解就太简单了，每个人都意识到这是正确的结果。\r",
+        "\t控制室里一片死寂，平静中隐藏着巨大的惊叹和不安，像是颗深水炸弹正幽幽地下沉。\r",
+        "\t路明非第一次看见了那个娇小女孩的脸，透明得像是冰雪，冷得也像是冰雪。\r",
+        "\t“熊猫你好！”诺诺认真地说。\r",
+        "\t路明非脸上两大黑眼圈儿，一头撞进图书馆二楼的教室。撞进眼帘的是讲桌边晃悠的一双穿牛仔裤的长腿，穿了双似曾相识的、紫金色玛丽珍鞋。诺诺坐在讲桌上，手指路明非的鼻子。\r",
+        "\t路明非没有料到诺诺还会主动跟人说话，心里激动，“对不起对不起，昨天不知道怎么就爆掉了你男朋友。”\r",
+        "\t教室里立刻有人嘘了起来，路明非才想起这话说得真够欠的。\r",
+        "\t“你爆掉他跟我说对不起干什么？”诺诺耸耸肩，“到你座位上去，快开始了，监考老师是风纪委员会的曼施坦因教授，我负责收答卷。”\r",
+        "\t曼施坦因教授从旁边闪出，冷冷地扫了路明非一眼，看了一眼腕表，“全部人到齐，现在宣布考试纪律！”\r",
+        "\t“作弊是绝对禁止的，违反者会被取消一切资格！不要试图偷看别人的试卷，摄像头覆盖了整个教室，没有任何死角！也不要试图携带电子通讯设备，无线电波在教室里也是被监控的！我知道你们都是天才，但我可以告诉你们，比你们更加天才的人也曾在这个教室里考试，你们现在能想到的作弊手段，都有人尝试过……”曼施坦因教授抑扬顿挫，威风凛凛。\r",
+        "\t每个人的座位前都有名牌，路明非的名牌是“李嘉图·M·路”。\r"
+      ],
+      "rationale": "The classroom greeting names Nono and the following narration places her on the desk. Do not merge her with the petite girl in the preceding control-room scene transition."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-nono",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 441234,
+          "endByte": 441240,
+          "startLine": 2724,
+          "endLine": 2724,
+          "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+          "prefixHash": "7bbdd73866fd984c4a601e8ab09ed8d970d04acefcd25c7800f2ce5b451abe74",
+          "suffixHash": "70995bad3a4a2bd51e712c13567fecaab41f99c94a60e39e2dbd903c4c69a44d",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺诺",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-lake-opening",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-nuonuo",
+        "kind": "character",
+        "canonicalName": "诺诺",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-nono",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 441234,
+            "endByte": 441240,
+            "startLine": 2724,
+            "endLine": 2724,
+            "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+            "prefixHash": "7bbdd73866fd984c4a601e8ab09ed8d970d04acefcd25c7800f2ce5b451abe74",
+            "suffixHash": "70995bad3a4a2bd51e712c13567fecaab41f99c94a60e39e2dbd903c4c69a44d",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺诺",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-lake-opening",
+          "confidence": 1
+        },
+        "candidates": [
+          {
+            "entityId": "char-nuonuo",
+            "entityKind": "character",
+            "canonicalName": "诺诺",
+            "matchedText": "诺诺",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t13号很得意，觉得自己好似一只飞翔于黑夜中的蝙蝠，轻盈地越过了一个又一个屋顶。\r",
+        "\t他在纽约布鲁克林区的兄弟们把他称做“猎豹”，但是他觉得没有蝙蝠那么拉风，有种吸血鬼般的妖冶之气。\r",
+        "\t这座校园的防御远比想象中严密，但这无法阻挡13号。因为13号根本没有从地面推进，他携带了射绳枪，这玩意儿是他从一个军队里搞武器开发的兄弟那里高价买来的，可以隔着几十米把带着绳子的长钉射入岩石，13号就是沿着这些绳子从学生们的头顶上经过，洋洋得意。\r",
+        "\t他对自己一直有信心。\r",
+        "\t只有一个问题，就是他无法找到集合的位置了。他高踞于众人视线不能及的屋顶上，却在这个校园里迷路了。\r",
+        "\t“这时候才知道探路多重要啊！”他暗暗地嘀咕。\r",
+        "\t盘山公路的尽头是一块挡路的石碑，路明非把车停在石碑前。\r",
+        "\t“打开远光灯。”诺诺说。\r",
+        "\t雪亮的光束剑一样刺入远处的天空，也照亮了整片山顶。山顶地形平坦，没有什么树木，长满了草，一处泉水从岩石下涌出来，形成了一小片山顶湖，湖水溢出之后往山下流泻，形成一道雪白的瀑布，隐约的水声从山下传来。\r",
+        "\t“没有星星诶。”诺诺舒展身体，靠在靠背上，看着天空。\r",
+        "\t路明非想真是废话，刚下过雨的天空一片漆黑。刚出校门的时候他就想到了，这山顶其实什么可看的都没有。\r",
+        "\t但为什么他还是屁颠屁颠地当这个司机呢？\r",
+        "\t“好大只啊。”诺诺又说。\r",
+        "\t“什么好大只？有熊么？”路明非探头探脑。\r",
+        "\t“我是说很安静。”诺诺说，“不是你跟曼施坦因教授说，中文俚语，大只就是安静的意思？所以上课的时候他不停地对学生说，请大只，保持大只，再大只一些……他觉得这样很风趣，说明他懂俚语。”\r",
+        "\t路明非默默地捂脸，他想总会有人告诉曼施坦因教授这完全是在扯淡，他还选了曼施坦因教授的课，不知道会不会不及格。\r",
+        "\t“去泉水那边泡泡脚？”诺诺说。\r",
+        "\t她说完就只穿着袜子越过车门跳了出去，路明非跟着她深一脚浅一脚地穿过秋天的草甸，循着哗哗的水声来到山顶泉湖边上。唯一的光源是他们身后布加迪的车灯，泉水反光，水面像是镀了一层银。诺诺选了一块岩石坐下，看见路明非正好奇地上下打量她。\r",
+        "\t“看什么？”\r",
+        "\t“我在想……”路明非说了实话，“你是不是要我转过身去才能把袜子脱下来。”\r",
+        "\t诺诺对他比了个鬼脸，从包里摸出一把精巧的剪刀，沿着脚踝把丝袜剪开，露出赤裸的双脚。\r",
+        "\t“很凉的，要有种！”诺诺说。\r",
+        "\t“作为一个曾经冬泳过长江的人，区区冷水泡脚又有何难？”路明非也选了块岩石坐下，脱掉袜子。\r",
+        "\t两个人对视一眼，一起慢慢地把脚放进泉水。那股寒冷从每个毛孔钻进皮肤里，又沿着脊背往身上蹿，两人不约而同地打了个寒噤。在做这件事的时候，他们都死死地盯着对方的脸，要看看对方的脸上有什么好玩的表情变化。最终他们两个竭力忍住，但同一侧的嘴角还是抽动了一下。\r",
+        "\t“你硬撑！”他们同时指着对方大笑起来，笑得肆无忌惮。\r"
+      ],
+      "rationale": "Nono is named sitting beside the spring after she and Lumingfei leave the Bugatti. Same continuing excursion participant."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-nono-current16",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 503446,
+          "endByte": 503452,
+          "startLine": 3166,
+          "endLine": 3166,
+          "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+          "prefixHash": "3b8f7a6acfdecac7150578a59c6d6a111a64fb6618d299e52d5674826db5cb3d",
+          "suffixHash": "415b99df656ff316717acc843285c1499e9046cb259f0336ff6c46eb7bbfd1ec",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺诺",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-car-return",
+        "confidence": 0.99
+      },
+      "entity": {
+        "id": "char-nuonuo",
+        "kind": "character",
+        "canonicalName": "诺诺",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-nono-current16",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 503446,
+            "endByte": 503452,
+            "startLine": 3166,
+            "endLine": 3166,
+            "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+            "prefixHash": "3b8f7a6acfdecac7150578a59c6d6a111a64fb6618d299e52d5674826db5cb3d",
+            "suffixHash": "415b99df656ff316717acc843285c1499e9046cb259f0336ff6c46eb7bbfd1ec",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺诺",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-car-return",
+          "confidence": 0.99
+        },
+        "candidates": [
+          {
+            "entityId": "char-nuonuo",
+            "entityKind": "character",
+            "canonicalName": "诺诺",
+            "matchedText": "诺诺",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“你是说？”古德里安眼睛一亮。\r",
+        "\t“你的好学生路明非和我的好学生楚子航，他们都很好，很努力，很正常，他们应该在这个校园里接受最完备的教育，而不是作为异类被隔离，他们会成为卡塞尔学院乃至人类的英雄。”施耐德说得极慢，“是不是这样？”\r",
+        "\t古德里安和曼施坦因看着彼此，一瞬间没有反应过来。\r",
+        "\t“是这样！毫无疑问是这样！”古德里安忽然明白了，站起来大声说。\r",
+        "\t“很好，那样我们都是出色的导师了。”施耐德那张布满疤痕的脸上露出难得的笑容，“风纪委员会主席也同意我们的看法吧？”\r",
+        "\t“嗨！你们都是出色的导师和我又有什么关系？路明非是古德里安的学生，楚子航是你的学生，这件事原本跟我就毫无关系的对么？”曼施坦因抗议，“我却神奇地被卷了进来，还要陪着你们撒谎？这样我很吃亏，不是么？”\r",
+        "\t“也不算吃亏，因为你有个新学生，据我所知，她的言灵档案也很异常，只是一直被校长压着，没有深入研究过。”施耐德拍了拍曼施坦因的肩膀。\r",
+        "\t“谁？什么新学生？”曼施坦因愣住了。他是少有的没有带学生的教授，只是代课，因为他兼任风纪委员会主任的职务，这本来就很忙了。\r",
+        "\t“陈墨瞳。”施耐德缓缓地吐出这个名字，“她的前一任导师曼斯指定你为她的下一任导师。你想知道她的言灵档案么？”\r",
+        "\t“曼斯……为什么指定我？”曼施坦因愣住了。\r",
+        "\t“两个原因，首先，她跟古德里安做校园兼职，而你是古德里安的朋友，你势必会照顾她；其次，你的风纪委员会承担的责任之一就是监控言灵，你有查看言灵档案的特权，如果你是她的导师……你这个人虽然又贪财又尖刻，但是你非常没有立场……”\r",
+        "\t“贪财尖刻没有立场……你到底想说明什么？”曼施坦因无奈了。\r",
+        "\t“你会袒护身边的人，这是你的习惯。根据档案，陈墨瞳……没有言灵！”施耐德缓缓地说，“一个‘A’级学生，曼斯却说她没有言灵，连‘F’级的芬格尔都有言灵，而且曼斯阻止了对她的调查。只有一个原因能解释吧？她的言灵很特别，特别到曼斯无法把它写入档案。曼斯很喜欢他这个学生，你们都清楚。”\r",
+        "\t“该死……我已经很忙了，为什么要把她交给我？还有，我为什么要保护这个学生？我大可以如实写一份报告交给校长。”曼施坦因说。\r",
+        "\t施耐德深深地吸了一口气，幽幽地说：“你是不会对陈墨瞳不好的，就当是完成她母亲……对你的嘱托吧。”\r",
+        "\t曼施坦因沉默了很久，没有说话。\r",
+        "\t“你没有言灵？”路明非很好奇。\r",
+        "\t他和诺诺正在回学院的路上。诺诺开车，车内音响里一个女人快活地唱着“斗呀斗呀斗地主”。诺诺的MP3里有各种各样奇怪的歌，说唱乐、北欧神秘主题、圣咏，还有这首烂大街的“斗呀斗呀斗地主”。看了烟花后两个人都乐颠颠的。\r",
+        "\t诺诺说自己收藏音乐的方式好比一个收垃圾的，背着一个篓子走在大街上，看到好的就收到自己的篓子里去，从不分类，也不组织。等她有空的时候就把篓子倒过来，把收来的好东西翻了一地，这边看看那边看看，完全没什么规律。路明非赞赏诺诺的收藏方式，他自己也曾对于收垃圾这种毫无责任感的生活充满向往。\r",
+        "\t“真的没有，虽然很多人不相信。”诺诺耸耸肩，“我对龙文有共鸣，可是我没法驾驭言灵，曼斯教授也很头疼。”\r",
+        "\t“一共有多少种言灵？”路明非歪在副驾驶座上，看着风把诺诺的长发吹得如一蓬暗红色的火焰。\r",
+        "\t“迄今记录在册的言灵一共有118种，它们组合在一起，可以组成一张类似元素周期表的东西，序列号越高的言灵越不稳定，越危险，使用时对于释放者的反噬也越重。”诺诺说，“这些会在下学期开的‘言灵学入门’课上教。”\r",
+        "\t“那最牛的言灵是什么？”\r",
+        "\t“不知道。序列号在88位以后的言灵都不稳定，89到100位评级是‘危险’，101到112位评级是‘高危’，113位以后评级是‘绝密’。”\r",
+        "\t“绝密？”\r"
+      ],
+      "rationale": "The narrator names Nono driving back to the academy with Lumingfei after fireworks. Identity only, without validating her reported lack of an ability."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "em-nono-b19",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00019-observation-16c74a7cd7a6",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00019-observation-16c74a7cd7a6",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 596051,
+          "endByte": 596057,
+          "startLine": 3818,
+          "endLine": 3818,
+          "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+          "prefixHash": "54a1f385336fc1ca6aedc0634e6bb9f1b150bc1e46ac1f7b43eb2ed8ffbb8bdb",
+          "suffixHash": "01dad3b5c4c65a1ddf90df388dfbe39c828a88f270f434b68a068a369f7ee939",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "诺诺",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-dorm-preparation",
+        "confidence": 1
+      },
+      "entity": {
+        "id": "char-nuonuo",
+        "kind": "character",
+        "canonicalName": "诺诺",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "em-nono-b19",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00019-observation-16c74a7cd7a6",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00019-observation-16c74a7cd7a6",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 596051,
+            "endByte": 596057,
+            "startLine": 3818,
+            "endLine": 3818,
+            "exactHash": "b9cdfc884cc42918e6ab2eda8f4833d6ab1f115543ffebdfdddd841da9ef2001",
+            "prefixHash": "54a1f385336fc1ca6aedc0634e6bb9f1b150bc1e46ac1f7b43eb2ed8ffbb8bdb",
+            "suffixHash": "01dad3b5c4c65a1ddf90df388dfbe39c828a88f270f434b68a068a369f7ee939",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "诺诺",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-dorm-preparation",
+          "confidence": 1
+        },
+        "candidates": [
+          {
+            "entityId": "char-nuonuo",
+            "entityKind": "character",
+            "canonicalName": "诺诺",
+            "matchedText": "诺诺",
+            "match": "exact-canonical-name",
+            "status": "canonical",
+            "availability": "canonical",
+            "resolutionMode": "resolved"
+          }
+        ]
+      },
+      "context": [
+        "\t“不，没有，在高温下麻醉成分会瞬间汽化分解，还没来得及进入他的血管就会失效！但是弗里嘉子弹上的动能是会对他产生效果的，也就是说，你打不死他，但是能击退他。”\r",
+        "\t“薯片，你这个后援我还是信得过的，唯一的问题是……”麻衣忽然提高了声音大骂，“你的龟速导致我得重新填一遍弹匣！我刚把33颗普通子弹填到格洛克里去！”\r",
+        "\t她合上手机，和恺撒一对眼神，两个人同时开始换装子弹，他们已经听见英灵殿外传来的脚步声了。\r",
+        "\t在那个纤细却刺眼的人影出现在英灵殿口的瞬间，恺撒和麻衣同时跃起，格洛克和沙漠之鹰以最高的射速把子弹倾泻在那个身影上。\r",
+        "\t弗里嘉子弹产生了效果，人影在弹幕中扭动，不断地后退，弗里嘉子弹在接近他的瞬间就崩溃成一团血红色的烟雾，但是人影被血雾推得向后退去。恺撒和麻衣轮流更换弹匣，交替射击，硬生生把人影逼出了英灵殿。连续射击的巨震让他们的手腕几近麻痹，但他们仍旧咬着牙继续，每一分作用在他们手腕上的力量都会在那个龙类身上产生反作用力，他们只能前进而没有退路，背后这道门绝不能允许那个龙类踏入。\r",
+        "\t施耐德听着英灵殿中的战况，忽然目光一闪，对着麦克风大喊，“对……对！弗里嘉子弹可以击退他！全体换装弗里嘉子弹！连续射击，不要给他释放言灵的机会！”\r",
+        "\t隐蔽在暗处的学生们纷纷起身，暴风雨一样的弹幕射向被推出英灵殿的人影，血雾把他整个地笼罩了。\r",
+        "\t“喂，我们是来游泳的么？”路明非说，“我以为我们是来避难的。”\r",
+        "\t“我们当然是来避难的，水对于火系言灵是最大的敌人。”芬格尔很严肃，“如果你学过言灵学你会明白，言灵的标志是一个五芒星，地水风火和精神五种元素是相互克制的，火系言灵可以穿过很多屏障，但是很难穿越水体，所以如果他是靠着某种火系言灵找到你们的，那么这里是最安全的，这是卡塞尔学院里最大的水体。”\r",
+        "\t“师兄你只穿着内裤在深水区踩水，却说着很学术的话，我就不太能理解你心理感受诶。”路明非说。\r",
+        "\t“继续踩水，要把你手里那柄PPK举出水面别湿水了，如果那家伙真的还是追来了，你就给他一枪。”\r",
+        "\t“可你刚才说如果那家伙追来了，我们就闭气藏进水里的啊。”\r",
+        "\t“说得有道理，我应该给你准备一个塑料袋。”\r",
+        "\t卡塞尔学院偌大的室内游泳池里，芬格尔、路明非、老唐三个人使劲地踩着水，路明非不得不庆幸自己在游泳上还算有点底子。\r",
+        "\t看起来芬格尔说的确实有点道理，他们已经在这里踩水15分钟了，那个龙类没有再追过来，前几次无论找到什么避难处，不到五分钟那家伙就像闻到味道的狗似的追来了。\r",
+        "\t“哦，介绍一下，这是我朋友，老唐。”路明非说，“这是我师兄芬格尔。”\r",
+        "\t“你好。”两个立场本不该一致的人握了握手。\r",
+        "\t“刚才那个是我们学院学生会瓢把子的女朋友诺诺，是我师姐。”路明非说，“老唐你别误解了。”\r",
+        "\t他渐渐地放下心来，觉得可以说两句闲话打发时间了，这么干等让人心里也很不安。\r",
+        "\t“我懂的，泡了大嫂都是三刀六洞，只能做不能说的，虽然我长在美国可我也是个中国人，懂中国文化。”老唐说，“我现在只是有点遗憾，你大嫂怎么没来和我们一起踩水……”\r",
+        "\t“脑补一下这个画面真让人流鼻血啊。”芬格尔说。\r",
+        "\t“我说老唐，到底你怎么会来这里的？”路明非问。\r",
+        "\t“我跟你说过我是个赏金猎人吧？我们这行有个网站，专门接有点灵异的案子。定期那里公布案子，雇主是不露面的，级别足够的人有权查看案子的细节，决定要不要接。如果雇主满意你的履历，你就会收到来信。做完之后，佣金自动打到你账户上。”\r",
+        "\t“想不到你做的是这么拉风的一行。”路明非说。\r",
+        "\t“其实我也没什么别的本事了，”老唐有点羞涩，“我就是对于灵异的事情好像天生就有抵抗力，比如进古墓人家受影响，我就不会受影响，有些业内传闻很灵验的诅咒对我也没效果，所以我的级别还蛮高的，能接这种500万美金的大案子。”\r"
+      ],
+      "rationale": "Lumingfei explicitly names Nono as his senior student when talking to Old Tang at the pool. This is a reference to the absent driver, not evidence of presence at the pool."
+    },
+    {
+      "mention": {
+        "version": 1,
+        "id": "m-chentong-00022",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "derivation": {
+          "runId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+          "worker": "propose_entity_mention",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+          "ontologyVersion": "observation-v1"
+        },
+        "annotationType": "entity-mention",
+        "anchor": {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 711630,
+          "endByte": 711639,
+          "startLine": 4584,
+          "endLine": 4584,
+          "exactHash": "2c212beebbfa995c122ea1018565255d6bfdd8520221ba1d2458ab0136ce06af",
+          "prefixHash": "f7b24f1cd6905be48920ad5af12254587356f3eb3a6e00a97e9d6e440a999a91",
+          "suffixHash": "9a2e19ed896419edb632562b03a3c0e5e6fe4a6c8c60968bddff9a4de62914b0",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        "surface": "陈墨瞳",
+        "form": "proper",
+        "kindCandidates": [
+          "character"
+        ],
+        "sceneId": "ds-underwater-return-00022",
+        "confidence": 0.98
+      },
+      "entity": {
+        "id": "char-nuonuo",
+        "kind": "character",
+        "canonicalName": "诺诺",
+        "aliases": [],
+        "evidence": [
+          {
+            "span": {
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 5290,
+              "endByte": 54279,
+              "startLine": 47,
+              "endLine": 334,
+              "quoteHash": "5c70d7864d1184b6cb7cf02aa4c7bde3510cfa7240471fa05b69fd432573b647"
+            },
+            "strength": "explicit"
+          }
+        ]
+      },
+      "discovery": {
+        "mention": {
+          "version": 1,
+          "id": "m-chentong-00022",
+          "sourceId": "a28585b1cf867f3e3a16",
+          "derivation": {
+            "runId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "a28585b1cf867f3e3a16",
+            "startByte": 711630,
+            "endByte": 711639,
+            "startLine": 4584,
+            "endLine": 4584,
+            "exactHash": "2c212beebbfa995c122ea1018565255d6bfdd8520221ba1d2458ab0136ce06af",
+            "prefixHash": "f7b24f1cd6905be48920ad5af12254587356f3eb3a6e00a97e9d6e440a999a91",
+            "suffixHash": "9a2e19ed896419edb632562b03a3c0e5e6fe4a6c8c60968bddff9a4de62914b0",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "陈墨瞳",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "sceneId": "ds-underwater-return-00022",
+          "confidence": 0.98
+        },
+        "candidates": []
+      },
+      "context": [
+        "\t“是他么？”路明非低声问。\r",
+        "\t“是他，虽然变成了这副模样。”\r",
+        "\t他们正下方的青铜壁上，一张狰狞的面孔浮凸出来。活灵张开了嘴，露出锋利的青铜牙齿，咬着一个人的手臂。那人已经成了一具骷髅，卡塞尔学院特制的潜水服套在骷髅上，在水中轻轻飘动。射灯照进他的面罩里，两只漆黑的眼洞。\r",
+        "\t脖子上的铭牌刻着他的名字——叶胜，卡塞尔学院执行部，助理专员，编号08203118。\r",
+        "\t他们找到了叶胜，叶胜曾到达这里，却没能离开。\r",
+        "\t“他是用自己的血开门的？”路明非问。\r",
+        "\t“命令活灵，需要纯度极高的龙族血统，‘钥匙’是一个例子，你是第二个例子，如果血统的纯度不够……也可以牺牲大量血液，后果是，失血而死。”诺诺低声说，“这种开启龙族秘宫的方法曾经有过记录，在学院的操作手册中是禁止的。以巨大的牺牲为代价强行使用血统……在中世纪这种技术诞生了黑魔法。”\r",
+        "\t“这样啊。”路明非轻轻地叹了口气。\r",
+        "\t两人一起游近叶胜的尸骨，诺诺沉默了片刻，伸手轻轻抚摸叶胜潜水服的面罩。\r",
+        "\t“他没有氧气瓶。”路明非说。\r",
+        "\t“我看到了。”诺诺说，“这就是为什么氧气分明不够，亚纪却能上浮到水面的原因，叶胜把他的氧气瓶给了亚纪，这样亚纪就有了双份的氧气。”\r",
+        "\t路明非点点头，“他真酷诶！”\r",
+        "\t“他一直都很酷的。”诺诺轻声说。\r",
+        "\t“他背后是什么？”\r",
+        "\t叶胜背后，原本氧气瓶的位置，是一个长形的匣子，用索带捆紧了缠在身上。路明非伸手敲了敲，那东西发出低沉的金属鸣响。\r",
+        "\t“应该是和黄铜罐一起找到的，但是亚纪一个人没法带走。不管怎么样，带上吧。”诺诺说，“我来背着。”\r",
+        "\t她从叶胜身上解下了匣子，捆在自己身上。\r",
+        "\t“路明非陈墨瞳，快速脱出！快速脱出！只剩下二十秒钟了！”诺玛的声音响起在耳机中。\r",
+        "\t路明非忽然感觉到有什么不对，一仰头，忽然发现射灯的光束照不远了。他忽然明白了，射灯照不远不是因为水变得浑浊了，而是他们的头顶，巨大的青铜壁正无声地压了下来，如同一台超级水压机！\r",
+        "\t“快！开门！”诺诺大声喊。\r",
+        "\t路明非拼命地挤压手指，想要挤一滴血进活灵的嘴里。但是挤不出来，那只手被箍住了手腕，又在水中泡了太长时间，苍白得和死人的手差不多。路明非抽出潜水刀，把整只手套割掉，抓着手指拼命挤，也只挤出几滴血。可他的手在抖，血珠入水立刻化成丝漂散，根本进不了活灵嘴里。\r",
+        "\t头顶的青铜壁已经压到只有一米多高了，他和诺诺都直不起身，再过几秒钟他们就会被压成肉泥。\r",
+        "\t“把手指割开！”诺诺大喊。\r",
+        "\t“好……好……”路明非握刀贴近自己的手指。\r",
+        "\t毕竟是要把自己的手指割开，下刀一点把握都没有，路明非连着割了两下，留下两道小口子，还是没有什么血涌出来。\r"
+      ],
+      "rationale": "Norma addresses the underwater pair as Lumingfei and Chen Motong, and Nono immediately speaks in that same pair. Full and short names also explicitly equated at the introduction on line 416."
+    }
+  ],
+  "identityIntroduction": {
+    "startLine": 416,
+    "endLine": 418,
+    "context": [
+      "\t“诶？诺诺，我还以为你跑出去玩了。”古德里安教授站了起来，“介绍一下，二年级学生陈墨瞳，华裔，这次是我们的学生考官。这位是你的新同学，路明非。”\r",
+      "\t“诺诺？”路明非一愣，名字听着耳熟。\r",
+      "\t“昨晚吃了大排档，肚子不太舒服，刚才一直在洗手间里。”陈墨瞳坐在酒德亚纪旁边。\r"
+    ]
+  },
+  "ledgers": [],
+  "legacyOrigins": [
+    "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+    "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+    "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+    "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+    "batch-a28585b1cf867f3e3a16-00019-observation-16c74a7cd7a6",
+    "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae"
+  ],
+  "legacyPolicy": "Existing completed observation checkpoints without modern receipts are readable under docs/agent-tool-recovery.md; do not synthesize, replace or certify their missing receipts. All new resolution proposals require a verified completed finish. Initial preflight stopped before any proposal mutation.",
+  "originalReceipts": [],
+  "reason": "Nine individually source-reviewed Nono and Chen Motong identity links. The introduction explicitly equates names, and local dialogue supports the later underwater address. Preserve private wishes, reported relations, speech attribution, absence at the pool and scene boundaries; the preceding petite girl is not Nono merely because text is adjacent. No new aliases, abilities, goals, knowledge, events or physical presence. No relevant original deferral was found; preserve all unrelated deferrals, canonical artifacts, observations, receipts, source accounting and checkpoints."
+}

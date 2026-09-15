@@ -11,6 +11,18 @@ const bundle = () => new Map<string, {kind: string; payload: Record<string, unkn
   ["prop-draft", { kind: "proposition", payload: { id: "p", object: { kind: "literal", value: true } } }],
   ["attr-draft", { kind: "attribution", payload: { id: "a", propositionId: "p" } }],
 ]);
+it("rejects reuse of a later report in a direct observation repair, including relabeling it as observed", () => {
+  const scoped = { ...plan, requireDirectObservation: true };
+  const existing = new Set(["claim:c", "proposition:p", "attribution:a"]);
+  const attempt = (operation: Record<string, unknown>) => new Map([["event", { kind: "canonical-event", payload: { ...event, observedKnowledge: { version: 1, operations: [operation] } } }]]);
+  const report = learned.observedKnowledge.operations[0]!;
+  expect(knowledgeRepairScopeIssues(scoped, attempt(report), existing).join()).toContain("requires direct observation");
+  // The base event schema also rejects an observed operation retaining a speaker.
+  expect(knowledgeRepairScopeIssues(scoped, attempt({ ...report, acquisitionMode: "observed" }), existing).length).toBeGreaterThan(0);
+  const { attributionId, sourceActorId, ...sensory } = report;
+  expect(knowledgeRepairScopeIssues(scoped, attempt({ ...sensory, acquisitionMode: "observed" }), existing)).toEqual([]);
+  expect(knowledgeRepairScopeIssues(plan, attempt(report), existing)).toEqual([]);
+});
 it("allows a typed knowledge dependency closure and rejects orphan artifacts, existing rewrites and unrelated event fields", () => {
   expect(knowledgeRepairScopeIssues(plan, bundle(), new Set())).toEqual([]);
   expect(knowledgeRepairScopeIssues({ ...plan, quotationIds: ["event-utterance"] }, bundle(), new Set()).join()).toContain("host-reviewed event quotationIds");

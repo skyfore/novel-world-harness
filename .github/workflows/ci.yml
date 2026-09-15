@@ -19,8 +19,6 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      NWH_HOME: ${{ runner.temp }}/nwh-ci
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +26,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22.19.0"
+      - name: Initialize isolated test workspace
+        run: echo "NWH_HOME=$RUNNER_TEMP/nwh-ci" >> "$GITHUB_ENV"
       - name: Archive tracked test inputs
         run: git archive --format=tar HEAD > "$RUNNER_TEMP/nwh-source.tar"
       - run: corepack enable

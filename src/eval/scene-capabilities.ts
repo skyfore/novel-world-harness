@@ -1,3 +1,4 @@
+import { buildSceneRequirementAssessment, SCENE_REQUIREMENT_EVALUATOR_VERSION } from "./scene-requirements.js";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { contentHash } from "../world/canonical.js";
@@ -164,9 +165,15 @@ export function evaluateSceneCapabilities(specInput: unknown, sourceBytes: Uint8
       : issue.stage === "ontology" ? "Host design review is required before encoding this source concept. Keep it explicitly unsupported; never substitute another field or certify an empty effect."
         : "Inspect the named source-scoped dependencies and repair only this diagnosed gap in the indicated phase; retain valid drafts.",
   })));
+  const specHash = contentHash(spec);
+  const catalogHash = contentHash(Object.fromEntries(Object.entries(catalog).filter(([, map]) => map instanceof Map)
+    .map(([key, map]) => [key, [...map!.values()].sort((a, b) => a.id.localeCompare(b.id))])));
+  const requirementReport = buildSceneRequirementAssessment(spec, cases, {
+    sourceId: spec.sourceId, sourceSha256: spec.sourceSha256, specHash, catalogHash,
+    evaluatorVersion: SCENE_REQUIREMENT_EVALUATOR_VERSION,
+  });
   return { version: 1, sourceId: spec.sourceId, sourceSha256: spec.sourceSha256, reviewedAt: new Date().toISOString(),
-    specHash: contentHash(spec), catalogHash: contentHash(Object.fromEntries(Object.entries(catalog).filter(([, map]) => map instanceof Map)
-      .map(([key, map]) => [key, [...map!.values()].sort((a, b) => a.id.localeCompare(b.id))]))),
-    review: spec.review, verified: cases.every((test) => test.status === "verified"), cases, repairTasks,
+    specHash, catalogHash, ...requirementReport,
+    review: spec.review, verified: cases.every((test) => test.status === "verified") && requirementReport.requirements.complete, cases, repairTasks,
     scope: "Independent finite scene checks over a read-only catalog. Probes use explicit fixture states and selected event histories; no branch truth, candidate certificate, or full-book playability is written." };
 }

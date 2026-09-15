@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - "agent/**"
+      - "codex/compiler-recovery-fixes"
 
 permissions:
   contents: read
@@ -18,14 +19,29 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      NWH_HOME: ${{ runner.temp }}/nwh-ci
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22.19.0"
+      - name: Archive tracked test inputs
+        run: git archive --format=tar HEAD > "$RUNNER_TEMP/nwh-source.tar"
       - run: corepack enable
       - run: corepack prepare pnpm@11.21.0 --activate
       - run: pnpm install --frozen-lockfile
+      - run: pnpm test:semantic-contracts
       - run: pnpm run check
       - run: pnpm test
       - run: pnpm run build
+      - name: Retain exact source for reproducible CI diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nwh-source-${{ github.sha }}
+          path: ${{ runner.temp }}/nwh-source.tar
+          retention-days: 1
+          if-no-files-found: error

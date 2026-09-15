@@ -4,6 +4,14 @@ A local-first, Pi-backed terminal harness for compiling novels into evidence-bac
 
 The target is not a novel RAG chatbot. Source text is compiled into a canonical model; runtime branches then evolve through validated events without forcing a divergent branch back onto the book's future plot.
 
+## 仓库保留范围 / Repository contents
+
+本项目仅保留源码、必要的测试小说与固定测试预期，以及维护这些内容所需的测试、配置和架构文档。小说解析经验应沉淀为通用世界模型能力和回归测试。
+
+**仓库不保存运行中间状态数据**，包括编译草稿、检查点、世界快照、会话记录、日志、运行报告，以及针对单次小说运行的补修脚本。`run-records/`、构建输出和测试运行输出均不纳入版本控制。历史运行材料仅可从已有 Git 历史追溯。
+
+运行时数据由应用存放于仓库外的 `$NWH_HOME`（默认 `~/.novel-harness/`）；临时实验输出也应放在仓库外。不要将 `NWH_HOME` 指向仓库内。固定测试预期是人工维护的验收输入，不是一次运行产生的状态快照。新增测试小说须有明确的测试用途，并在 [语料说明](fixtures/corpus/README.md) 中登记。
+
 ## Current status
 
 The repository contains a tested, constrained end-to-end novel-player vertical slice. It is not yet evidence that arbitrary full novels compile reliably or that the runtime is a finished role-playing product.

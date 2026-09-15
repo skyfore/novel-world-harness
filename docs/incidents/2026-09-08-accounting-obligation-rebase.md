@@ -1,6 +1,6 @@
 # 2026-09-08：source accounting 页失效与持久义务阻塞
 
-本记录固定已发生的事故；修复进度在[实施计划](../plans/2026-09-08-compiler-recovery-and-capability.md)中维护。完整时间线、现场引用和研究依据见[深度审计](../../run-records/2026-09-07-longzu1-full-rebuild/deep-review-2026-09-08/report.zh-CN.md)，机器快照见同目录 `evidence-snapshot.json`。
+本记录固定已发生的事故；修复进度在[实施计划](../plans/2026-09-08-compiler-recovery-and-capability.md)中维护。完整时间线、现场引用和研究依据见历史深度审计（Git 提交 `1c2ecac` 中的 `run-records/2026-09-07-longzu1-full-rebuild/deep-review-2026-09-08/report.zh-CN.md`），运行数据已从当前仓库清理；历史机器快照见该提交同目录 `evidence-snapshot.json`。
 
 ## 现场边界
 
@@ -45,6 +45,6 @@
 
 ## 实施结果，2026-09-08 17:18 UTC
 
-T0–T7 已完成并分步提交；最终代码 `4439559` 通过 984 项测试和三套 TypeScript 检查。恢复协议、页回执、host coverage review、只读状态、独立场景验收和 finish 中断恢复均已实现，CLI 与 TUI 均有持久完成检查。详细变更、验证记录和时间线见[实施结果](../../run-records/2026-09-07-longzu1-full-rebuild/remediation-2026-09-08/implementation-results.zh-CN.md)。
+T0–T7 已完成并分步提交；最终代码 `4439559` 通过 984 项测试和三套 TypeScript 检查。恢复协议、页回执、host coverage review、只读状态、独立场景验收和 finish 中断恢复均已实现，CLI 与 TUI 均有持久完成检查。详细变更、验证记录和时间线见历史实施结果（Git 提交 `1c2ecac` 中的 `run-records/2026-09-07-longzu1-full-rebuild/remediation-2026-09-08/implementation-results.zh-CN.md`）。
 
 现场仅做只读复核：旧 p07 的 20 单元完整覆盖证明可建立，但尚未 apply。真实状态仍为 52/71、无 candidate，入学 agency、枪击实质性效果、规范范围和知识获取仍需后续受限语义返修。代码修复已交付，不能把真实 incident 状态标成“全书已恢复／可玩”。

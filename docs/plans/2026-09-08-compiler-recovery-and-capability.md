@@ -28,6 +28,8 @@
 
 ## 实施日志
 
+以下路径为历史运行记录，已从当前仓库清理；需要追溯时使用 `git show 1c2ecac:<路径>`，不将中间状态重新纳入仓库。
+
 - 开始：确认分支 `codex/compiler-recovery-fixes`，当前 HEAD 与审计一致。未提交改动只有本案例的审计报告、证据快照、历史 guardian 原文与 issues 更新。
 - T0：写入案例与本计划；保存前一轮审计作为历史记录。
 - T1：宿主读取结构化 recovery 与旧 Pi tagged JSON；创建会话、处理报告、处理网络异常时均检查持久义务。修正 source/prompt recovery 中错误建议换 proposal ID 的文字。6 个相关测试文件、74 项测试通过；服务端 TypeScript 检查通过。回归直接确认原有 blocker 创建 0 次会话，运行中新 blocker 只创建 1 次，可纠正失败仍能创建第 2 次并完成。
@@ -42,4 +44,4 @@
 - T6 验证：10 个相关测试文件、102 项通过，服务端类型检查通过；另新增章节 manifest 已写而 split plan 未写的中断测试后，该文件 5 项通过。故障注入覆盖 annotation acceptance、accounting acceptance、review 写入、完成回执前、checkpoint 前和标题已接受的窗口；重复恢复不重排 review 时间，不增加接受记录，改输入/撤回依赖不能恢复。正常章节和角色复核也能幂等恢复。显式 reparse、resume=false 与缓存 materialization 归档被替换回执及原因，保留历史；legacy 无回执恢复输入仍受原有校验。本轮不声称提供断电级多文件事务。
 - T7 集成补齐：全量测试首先检出 5 个使用旧 finish 协议的用例，进一步复核后将 TUI source-loop 也接入宿主恢复与持久 checkpoint 校验；仅有模型成功消息不能前进，host fatal 或 prepared 回执不能触发特殊阶段草稿清空。显式迁移旧批次时归档回执，测试确认不重新激活被后续解析替代的身份/事件决议。场景验收进一步要求完整操作顺序，知识 cut 保持有序历史前缀，并区分 knows 与 believes/heard 等状态。
 - 2026-09-08 17:14:42 UTC：最终全量回归开始，169 个测试文件、984 项测试全部通过（17.47 秒）；服务端、Web、E2E 三套 TypeScript 检查通过。Playwright 浏览器执行和真实模型全书续跑不在本次验证范围。原始审计指纹集包含代码文件，因此实现涉及的 5 个代码哈希按预期改变；集内 7 个原文/用户状态文件全部保持原哈希。
-- T7 结果归档：[实施结果与完整提交时间线](../../run-records/2026-09-07-longzu1-full-rebuild/remediation-2026-09-08/implementation-results.zh-CN.md)、最终 status／scene review、验证日志与完整性比较均保存。两项历史义务的关键字段投影未变化。现场仍为 52/71、无 candidate，p07 preview 未 apply；本轮任务完成不等于现场全书编译或语义返修已完成。
+- T7 结果归档：历史实施结果与完整提交时间线（Git 提交 `1c2ecac` 中的 `run-records/2026-09-07-longzu1-full-rebuild/remediation-2026-09-08/implementation-results.zh-CN.md`）、最终 status／scene review、验证日志与完整性比较均保存。两项历史义务的关键字段投影未变化。现场仍为 52/71、无 candidate，p07 preview 未 apply；本轮任务完成不等于现场全书编译或语义返修已完成。

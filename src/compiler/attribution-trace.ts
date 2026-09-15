@@ -1,3 +1,4 @@
+import { assessQuotationContentSupport } from "./content-support.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import {
   attributionSchema,
@@ -97,13 +98,12 @@ export function attributionContentTraceIssues(attribution: Attribution, assertio
   if (!attribution.quotationIds?.length) return [];
   const content = assertions.filter(a => a.target.artifactKind === "proposition" && a.target.artifactId === attribution.propositionId
     && (a.target.jsonPointer === "/object" || a.target.jsonPointer.startsWith("/object/")) && a.relation === "supports");
-  // Legacy segment-only artifacts have no exact object anchors to compare. This
-  // check never treats their absence as semantic certification.
+  // Retain legacy readability, not certification. Once object evidence exists,
+  // structural-only selectors cannot be used as a substitute for its content.
   if (!content.length) return [];
   const cited = attribution.quotationIds.flatMap(id => { const q = quotations.get(id); return q ? [q.anchor] : []; });
-  const supported = content.some(assertion => assertion.anchors.length > 0 && assertion.anchors.every(anchor =>
-    cited.some(quote => quote.sourceId === anchor.sourceId && quote.startByte <= anchor.startByte && quote.endByte >= anchor.endByte)));
-  return supported ? [] : [`Attribution ${attribution.id}: proposition ${attribution.propositionId} object evidence is outside its cited quotation content. The defective dependency is proposition ${attribution.propositionId} at /object (or its child pointer), not the attribution evidence. Inspect and correct that proposition content selector; changing attribution /propositionId, /holderEntityId or /quotationIds selectors cannot repair it. Read the exact quotation and proposition evidence with find_compiler_artifacts, copying readArguments.ref. A shared segment or speaker is insufficient. Correct the named trace once only when source supports it; if a quotation revision or wider authority is needed, preserve drafts and stop for host source review. Do not remove content assertions, change acquisition mode, or substitute IDs to bypass this check.`];
+  const assessment = assessQuotationContentSupport(attribution.propositionId, content, cited);
+  return assessment.status === "supported" ? [] : [`Attribution ${attribution.id}: proposition ${attribution.propositionId} object evidence is outside its cited quotation content or lacks content-bearing support (${assessment.status}: ${assessment.missingPaths.join(", ")}). The defective dependency is proposition ${attribution.propositionId} at /object (or its child pointer), not the attribution evidence. Inspect and correct that proposition content selector; changing attribution /propositionId, /holderEntityId or /quotationIds selectors cannot repair it. Read the exact quotation and proposition evidence with find_compiler_artifacts, copying readArguments.ref. A shared segment or speaker is insufficient. Correct the named trace once only when source supports it; if a quotation revision or wider authority is needed, preserve drafts and stop for host source review. Do not remove content assertions, change acquisition mode, or substitute IDs to bypass this check.`];
 }
 
 async function propositionAssertions(root: string, propositionId: string, proposalIds: readonly string[] = []): Promise<EvidenceAssertion[]> {

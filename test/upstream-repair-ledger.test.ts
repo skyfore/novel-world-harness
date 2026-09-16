@@ -1017,3 +1017,34 @@ it("binds regenerated findings to unresolved scene obligations through actual ca
   await expect(f.ledger.register(bound.plan)).rejects.toThrow("Active dependency changed");
   expect(await f.ledger.history()).toEqual([]);
 });
+
+it("preparation resumes original finish without staging and requires host review before a new model turn", async () => {
+  const { prepareAuthorizedUpstreamRepair } = await import("../src/compiler/upstream-repair-preparation.js");
+  const f = await frozenQuotationFinish(false), stage = vi.fn(async () => ({ planHash: f.plan.planHash, phase: "staged" as const, results: [] }));
+  await expect(prepareAuthorizedUpstreamRepair(f.root, f.sourceId, f.plan.planHash, undefined, {}, stage)).rejects.toThrow("before invoking any model");
+  await expect(prepareAuthorizedUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { ...f.finishInput, reviewed_segments: [] }, {}, stage)).rejects.toThrow("exact complete host finish review");
+  expect(stage).not.toHaveBeenCalled();
+  const original = SourceAnnotationStore.prototype.commitProposals;
+  vi.spyOn(SourceAnnotationStore.prototype, "commitProposals").mockImplementationOnce(async function (...args) { await original.apply(this, args); throw new Error("preparation interrupted after commit"); });
+  await expect(prepareAuthorizedUpstreamRepair(f.root, f.sourceId, f.plan.planHash, f.finishInput, {}, stage)).rejects.toThrow("preparation interrupted");
+  expect(stage).toHaveBeenCalledOnce(); stage.mockClear();
+  await expect(prepareAuthorizedUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { ...f.finishInput, summary: "replacement" }, {}, stage)).rejects.toThrow("cannot replace");
+  const recovered = await prepareAuthorizedUpstreamRepair(f.root, f.sourceId, f.plan.planHash, undefined, {}, stage);
+  expect(recovered.state).toBe("converged"); expect(recovered.issues).toEqual([]);
+  expect(stage).not.toHaveBeenCalled();
+  expect(await prepareAuthorizedUpstreamRepair(f.root, f.sourceId, f.plan.planHash, undefined, {}, stage)).toEqual(recovered);
+});
+
+it("cancels an isolated upstream model through Pi and retains its original session outcome", async () => {
+  const { runUpstreamRepairModelSlot } = await import("../src/compiler/pi-upstream-repair.js");
+  const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  const controller = new AbortController(), reason = new Error("host cancelled preparation");
+  const abort = vi.fn(async () => {}), dispose = vi.fn(async () => {});
+  const create = vi.fn(async () => ({ abort, dispose, promptWithReport: async () => { controller.abort(reason); return {} as never; } }));
+  await expect(runUpstreamRepairModelSlot(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, { signal: controller.signal }, create)).rejects.toBe(reason);
+  expect(abort).toHaveBeenCalledOnce(); expect(dispose).toHaveBeenCalledOnce();
+  expect((await f.ledger.inspect()).modelSessions[0]).toMatchObject({ closed: true, chargedFailure: true });
+  expect((await f.ledger.history()).at(-1)!.payload).toMatchObject({ kind: "model-session-ended", diagnostic: expect.stringContaining("host cancelled preparation") });
+  await expect(runUpstreamRepairModelSlot(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, { signal: controller.signal }, create)).rejects.toBe(reason);
+  expect(create).toHaveBeenCalledOnce();
+});

@@ -1024,3 +1024,30 @@ discovery does not infer those expected anchors. Core-role binding is still a
 separate host-review scope. The output remains diagnostic-only: register and
 authorize the exact `plan` through the normal lifecycle, then independently evaluate
 actual capability results after finish/convergence.
+
+### Authorized upstream phase in normal preparation
+
+`prepare-all --source <id> --upstream-plan <hash> --upstream-finish <review.json>`
+continues an existing authorized plan before ordinary compilation, cache restore
+or broad reconciliation. Copy the exact hash from `requirements inspect-upstream`.
+The first run checks a complete host review and exact source segment inventory
+before any model call; it does not invent source review or implicitly authorize a
+planned/stopped task. With an existing frozen intent, omit `--upstream-finish` to
+recover it; a replacement input is rejected.
+
+This phase reuses the slot DAG scheduler, original finish executor and actual
+convergence observer under the existing compiler lock. Prepared/partly committed
+finish resumes without staging or invoking a model again. Deterministic authority
+failures stop normal preparation. Pending downstream work retains its original
+issues for the existing workflow. Successful upstream execution disables cache
+restore for this preparation invocation, so an old published snapshot cannot be
+restored over the repair. It does not modify that immutable publication. The
+normal requirement settlement, candidate and certification gates still run.
+
+The CLI now forwards SIGINT/SIGTERM cooperatively through preparation. Isolated
+Pi turns receive abort, dispose and retain their original journal outcome before
+the lock unwinds. A pre-aborted call creates no new reservation. An invoked turn
+with no typed result follows the existing persisted failed-session policy; do not
+reopen it or reset its budget. An unresolved write retains the original reservation
+and must use exact-draft recovery. Process loss/SIGKILL still uses the original
+owning-host lock recovery protocol, never automatic lock deletion.

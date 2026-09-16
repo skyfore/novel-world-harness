@@ -811,3 +811,27 @@ describe("prepare-all command", () => {
       .rejects.toThrow("Re-run with --yes");
   });
 });
+
+it("routes an explicit authorized upstream repair under the compiler lock before ordinary compilation", async () => {
+  const { WorkspaceOperationLock } = await import("../src/util/workspace-lock.js");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-upstream-")); roots.push(root);
+  const source = await createEvidenceFixture(root, "Ari waits.");
+  const compileSource = vi.fn(async () => {});
+  const repairUpstream = vi.fn(async (actualRoot: string, sourceId: string, planHash: string) => {
+    expect(actualRoot).toBe(root); expect(sourceId).toBe(source.source.id); expect(planHash).toBe("a".repeat(64));
+    expect((await WorkspaceOperationLock.inspect(root)).owner?.pid).toBe(process.pid);
+    throw new Error("original authorized repair requires recovery");
+  });
+  await expect(prepareAllCommand({ root, sourceId: source.source.id, upstreamRepairPlan: "a".repeat(64), yes: true, onProgress: () => {} }, { repairUpstream, compileSource })).rejects.toThrow("original authorized repair requires recovery");
+  expect(repairUpstream).toHaveBeenCalledOnce(); expect(compileSource).not.toHaveBeenCalled();
+  expect((await WorkspaceOperationLock.inspect(root)).owner).toBeUndefined();
+  await expect(prepareAllCommand({ root, upstreamRepairFinishFile: "unused.json", yes: true }, { repairUpstream, compileSource })).rejects.toThrow("requires --upstream-plan");
+  expect(repairUpstream).toHaveBeenCalledOnce();
+  const restore = vi.spyOn(PreparedNovelCache.prototype, "restore");
+  repairUpstream.mockResolvedValueOnce({ planHash: "a".repeat(64), state: "converged", receiptFingerprint: "b".repeat(64), issues: [] } as never);
+  compileSource.mockRejectedValueOnce(new Error("ordinary compilation reached"));
+  await expect(prepareAllCommand({ root, sourceId: source.source.id, upstreamRepairPlan: "a".repeat(64), yes: true, onProgress: () => {} }, { repairUpstream, compileSource })).rejects.toThrow("ordinary compilation reached");
+  expect(compileSource).toHaveBeenCalledOnce();
+  expect(restore).not.toHaveBeenCalled();
+  expect((await WorkspaceOperationLock.inspect(root)).owner).toBeUndefined();
+});

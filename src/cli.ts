@@ -608,9 +608,12 @@ program
   .option("--model <model>", "override compiler model; use provider/model when ambiguous")
   .option("-y, --yes", "accept every recommended preparation decision without prompting")
   .option("--candidate-only", "continue compilation and archive a candidate without publishing Play or creating a branch")
+  .option("--upstream-plan <hash>", "resume an exact already-authorized upstream repair before normal preparation")
+  .option("--upstream-finish <path>", "original host finish review JSON, required before the repair finish is frozen")
   .description("guide full compilation, validation and playable-branch preparation")
   .action(async (novel, options) => {
-    await prepareAllCommand({
+    await withCompilerSignals(signal => prepareAllCommand({
+      signal,
       root: rootFor(options),
       configPath: configFor(options),
       ...(novel ? { novelPath: novel } : {}),
@@ -618,8 +621,10 @@ program
       ...(options.branch ? { branchId: options.branch } : {}),
       model: options.model ?? program.opts().model,
       yes: Boolean(options.yes),
+      upstreamRepairPlan: options.upstreamPlan,
+      upstreamRepairFinishFile: options.upstreamFinish,
       ...(options.candidateOnly ? { candidateOnly: true, createBranch: false, restoreCache: false } : {}),
-    });
+    }));
   });
 
 program

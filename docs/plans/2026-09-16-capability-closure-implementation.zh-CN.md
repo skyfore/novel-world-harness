@@ -507,3 +507,19 @@ resolution 候选只选实际 discovery 目录的同类型 ID，revision 由宿�
 没有可注册 baseline 表示的路径节点明确停止，不省略 revision guard。当前 evidence-binding/无对应可读工件的结构 discourse 路径、核心角色自动绑定和独立复核 quotation extension 仍需原宿主审阅；本段未把文字重叠当作绑定替代品。P2 与正常编译流程的自动调度接线、修订类根因和完整退出验收仍待完成，P3–P7 保持原目标。未调用真实 provider 或人工体验评价。
 
 验证：63 项最终定向回归通过；全仓 190 文件、1152 tests 通过（90.26 秒）；服务端、Web、E2E TypeScript、plan-bound-upstream-repair CLI 帮助与 diff whitespace 检查通过。
+
+P2r 已提交为 `0eac855`。
+
+## P2s：正常 prepare-all 的已授权修复阶段与取消恢复
+
+新增 prepareAuthorizedUpstreamRepair，接入 prepare-all --upstream-plan / --upstream-finish。在现有 compiler lock 内、普通编译/缓存恢复/广泛协调之前执行明确选定的已有授权计划。首次运行先检查完整 host review 与精确 segment 集合，之后调用原 DAG staging、finish 冻结/提交和实际 convergence observation；已有 intent 时直接恢复原回执，不重新 staging。
+
+计划仍需先经原宿主策略登记授权，不把 diagnostic-only 输出或 planned/stopped 状态当权限。坏输入在模型调用前停止；冻结输入不可替换。原 finish 部分提交可用同一 planHash 省略 review 文件恢复。成功后本次 prepare-all 禁用旧缓存恢复，继续原要求结算、候选和认证流程，不修改旧 published bundle，不将 converged 当作 evaluated。
+
+新增协作取消：prepare-all CLI 传递 SIGINT/SIGTERM，单槽调用转发 Pi abort、清理会话并保存原结束原因；预先取消不增加预留。已调用且没有 typed 结果仍遵循既有失败预算与停止协议，未解决写入保持原恢复约束。没有新增外层模型重试循环或模型写工具。
+
+测试验证选定修复先于普通 compile、确实持锁、失败释放锁并阻止后续编译、成功后不调用 cache restore、错误选项组合拒绝、首次 review 缺失/错误不调用模型、部分提交恢复不重新 staging、重复恢复幂等，以及取消传播和持久原始诊断。
+
+本段为明确选定授权计划的正常流程入口；自动发现/规划/授权策略尚未默认调度所有根因。核心角色及不支持路径/修订策略、P2 完整退出验收和 P3–P7 仍待完成。未调用真实 provider 或人工体验评价。
+
+验证：65 项最终定向回归通过；全仓 190 文件、1155 tests 通过（91.13 秒）；最终服务端、Web、E2E TypeScript、prepare-all CLI 帮助与 diff whitespace 检查通过。

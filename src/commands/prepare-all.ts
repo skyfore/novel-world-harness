@@ -14,7 +14,8 @@ import { reviewNovelRoles } from "../workflow/role-review.js";
 import { stdout } from "node:process";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { convergeWorldProposals, quarantineUncommittableProposals, type WorldProposalConvergence } from "../compiler/converge.js";
-import { loadOptionalConfig } from "../config/load.js";
+import { prepareAuthorizedUpstreamRepair } from "../compiler/upstream-repair-preparation.js";
+import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import { inspectPreparation, resolvePreparationBranchId, type PreparationInspection } from "../workflow/prepare.js";
 import { askUserQuestion, recommendedAnswer, type AskUserQuestion } from "../util/ask-user-question.js";
 import { compileCommand } from "./compile.js";
@@ -59,6 +60,9 @@ export type PrepareAllCommandOptions = {
   createBranch?: boolean;
   /** Finish compilation and archive the candidate; independent Play certification can follow later. */
   candidateOnly?: boolean;
+  /** Exact already-authorized repair; complete it before ordinary compilation/reconciliation. */
+  upstreamRepairPlan?: string;
+  upstreamRepairFinishFile?: string;
   restoreCache?: boolean;
   /** Immutable revision that an enclosing reparse/repair is using as its rollback baseline. */
   reparseBaselineBundleHash?: string;
@@ -81,6 +85,7 @@ type PrepareAllDependencies = {
   compileSource: typeof compileSourceCommand;
   compileInitialWorld: typeof compileCommand;
   converge: typeof convergeWorldProposals;
+  repairUpstream: typeof prepareAuthorizedUpstreamRepair;
   createBranch: typeof worldCreateCommand;
   ask: AskUserQuestion;
   reparse: (options: ReparseCommandOptions) => Promise<unknown>;
@@ -90,6 +95,7 @@ const defaultDependencies: PrepareAllDependencies = {
   compileSource: compileSourceCommand,
   compileInitialWorld: compileCommand,
   converge: convergeWorldProposals,
+  repairUpstream: prepareAuthorizedUpstreamRepair,
   createBranch: worldCreateCommand,
   ask: askUserQuestion,
   reparse: async (options) => (await import("./reparse.js")).reparseCommand(options),
@@ -102,6 +108,7 @@ export async function prepareAllCommand(
   dependencyOverrides: Partial<PrepareAllDependencies> = {},
 ): Promise<PreparationInspection> {
   options.signal?.throwIfAborted();
+  if (options.upstreamRepairFinishFile && !options.upstreamRepairPlan) throw new Error("--upstream-finish requires --upstream-plan; correct the host selection before retrying.");
   const root = path.resolve(options.root);
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(root, "compiler", () =>
@@ -156,6 +163,23 @@ export async function prepareAllCommand(
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
   sourceId = inspection.source!.id;
+  if (options.upstreamRepairPlan) {
+    const config = await loadOptionalConfig(configPath);
+    const input: unknown = options.upstreamRepairFinishFile ? JSON.parse(await fs.readFile(options.upstreamRepairFinishFile, "utf8")) : undefined;
+    const profile = config ? profileForRole(config, "extractor").profile : undefined;
+    report(`Continuing authorized upstream repair ${options.upstreamRepairPlan}.`);
+    const result = await dependencies.repairUpstream(root, sourceId, options.upstreamRepairPlan, input, {
+      ...(profile ? { profile } : {}), ...(options.model ? { model: options.model } : {}), signal: options.signal,
+      onText: options.onModelText, onThinking: options.onModelThinking, onTool: options.onModelToolCall,
+      onToolResult: options.onModelToolResult, onEvent: options.onModelEvent,
+    });
+    report(`Upstream repair ${result.planHash}: ${result.state}; original receipt ${result.receiptFingerprint}.`);
+    for (const issue of result.issues) report(issue);
+    // The active published cache remains immutable; never restore it over this authorized repair.
+    options = { ...options, restoreCache: false };
+    inspection = await inspectPreparation(root, { sourceId, branchId });
+    options.signal?.throwIfAborted();
+  }
   let preferNewBranch = false;
   const refreshDerivedBranchId = async (): Promise<boolean> => {
     if (options.branchId || !inspection.source) return false;

@@ -22,6 +22,7 @@ export function upstreamRepairSlotOrder(raw: UpstreamRepairPlan) {
 /** Caller holds compiler lock. Sequential, no retry loop, no inferred or expanded authority. */
 export async function stageUpstreamRepairPlan(root: string, sourceId: string, planHash: string,
   options: UpstreamRepairModelOptions = {}, runSlot: typeof runUpstreamRepairModelSlot = runUpstreamRepairModelSlot) {
+  options.signal?.throwIfAborted();
   const ledger = new UpstreamRepairLedger(root, sourceId);
   let state = await ledger.inspect();
   const current = state.plans.find(item => item.plan.planHash === planHash);
@@ -39,6 +40,7 @@ export async function stageUpstreamRepairPlan(root: string, sourceId: string, pl
   }
   const results = [];
   for (const target of upstreamRepairSlotOrder(current.plan)) {
+    options.signal?.throwIfAborted();
     state = await ledger.inspect();
     const retained = state.attempts.find(item => item.started.planHash === planHash && item.started.artifactKind === target.kind && item.started.artifactId === target.id && item.staged);
     if (retained) {

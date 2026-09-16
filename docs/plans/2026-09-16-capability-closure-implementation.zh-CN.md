@@ -429,3 +429,19 @@ P2l 已提交为 `5b6d41c`。
 P2 仍待从结构化诊断生成授权计划、计划/finish 正常宿主命令与整体退出证据；P3–P7 尚未实施。不得将本段 staged 调度等同于完整修复闭环。
 
 验证：全量 189 文件、1142 tests 通过（89.44 秒）；补强前置失败停止状态后，40 项最终定向回归及服务端、Web、E2E TypeScript 检查通过。stage-upstream-plan CLI 帮助与 diff whitespace 检查通过。
+
+P2m 已提交为 `80210eb`。
+
+## P2n：宿主计划生命周期命令
+
+新增 register-upstream-plan、authorize-upstream-plan、finish-upstream-plan、stop-upstream-plan 和 observe-upstream-convergence。登记只保存严格校验后的冻结计划，不授予写权限；授权在 compiler lock 内重新检查当前源和依赖。停止保留原原因、草案和预算，不允许重开原计划。正常宿主范围不新增人工批准步骤。
+
+首次 finish 必须提供原 host review JSON，通过原 schema、精确 segment/inventory、证据及身份校验后冻结再提交；已有 intent 时不重新准备，直接恢复原回执。外部文件若更改输入则拒绝，省略输入即可沿用原 frozen input，支持输出部分接受后的恢复。完成后继续使用实际 convergence 和独立 evaluation，命令不自动认证或发布。
+
+observe-upstream-convergence 核对已提交的实际修订，不接受无关 pending 世界提案；仍有同源 pending 时保留原 finished 状态和诊断。这样已有合法冻结计划可经正常 CLI 完成登记→授权→依赖 staging→finish→convergence observation→evaluation，不必借用批量 accept 操作推进其记录。
+
+新增集成测试使用真实文件/账本/annotation 存储，验证跨源登记拒绝、重复登记幂等、登记不等于授权、首次缺 review 不改 canonical、commit 时确实持有 compiler lock、annotation 提交后中断释放锁、替换 frozen input 被拒、原输入恢复和重复 finish 幂等，以及停止后不能重新授权或 finish。没有调用真实外部模型。
+
+P2 自动诊断到严格授权计划及完整退出证据仍未完成；P3–P7 保留原范围。
+
+验证：41 项相关测试通过；最终服务端、Web、E2E TypeScript、requirements 命令列表及 register/finish/convergence 帮助入口、diff whitespace 检查通过。本段未重复全仓测试，最近全仓证据仍是上一段 189 文件、1142 项通过。

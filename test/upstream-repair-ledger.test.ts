@@ -796,3 +796,46 @@ it("rejects scheduler text-only success and unresolved original reservations bef
   await expect(stageUpstreamRepairPlan(f.root, f.sourceId, f.plan.planHash, {}, run)).rejects.toThrow("no recoverable validated result");
   expect(run).not.toHaveBeenCalled();
 });
+
+it("runs frozen host registration, authorization and interrupted finish through locked commands", async () => {
+  const { registerUpstreamRepairPlanCommand, authorizeUpstreamRepairPlanCommand, finishUpstreamRepairPlanCommand, stopUpstreamRepairPlanCommand } = await import("../src/commands/upstream-repair.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { WorkspaceOperationLock } = await import("../src/util/workspace-lock.js");
+  const f = await fixture(), planFile = path.join(f.root, "host-plan.json"), inputFile = path.join(f.root, "host-finish.json");
+  await fs.writeFile(planFile, JSON.stringify(f.plan));
+  await expect(registerUpstreamRepairPlanCommand(f.root, "wrong-source", planFile)).rejects.toThrow("differs from --source");
+  expect(await f.ledger.history()).toEqual([]);
+  expect((await registerUpstreamRepairPlanCommand(f.root, f.sourceId, planFile)).state).toBe("planned");
+  const registered = await f.ledger.history();
+  await registerUpstreamRepairPlanCommand(f.root, f.sourceId, planFile);
+  expect(await f.ledger.history()).toEqual(registered);
+  const raw = { proposal_id: "command-proposal", annotation_id: "quote-one", selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 };
+  await expect(stageUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, raw)).rejects.toThrow("not authorized");
+  expect((await authorizeUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash)).state).toBe("authorized");
+  await stageUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, raw);
+  await expect(finishUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("First finish requires");
+  expect(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")).toEqual(f.annotation);
+  const input = { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Reviewed original source" }], summary: "Bounded quotation repair" };
+  await fs.writeFile(inputFile, JSON.stringify(input));
+  const original = SourceAnnotationStore.prototype.commitProposals;
+  vi.spyOn(SourceAnnotationStore.prototype, "commitProposals").mockImplementationOnce(async function (...args) {
+    expect((await WorkspaceOperationLock.inspect(f.root)).owner?.pid).toBe(process.pid);
+    await original.apply(this, args);
+    throw new Error("command interrupted after authorized annotation commit");
+  });
+  await expect(finishUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash, inputFile)).rejects.toThrow("command interrupted");
+  expect((await WorkspaceOperationLock.inspect(f.root)).owner).toBeUndefined();
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("finish-frozen");
+  const partial = await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one");
+  await fs.writeFile(inputFile, JSON.stringify({ ...input, summary: "replacement review" }));
+  await expect(finishUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash, inputFile)).rejects.toThrow("Original frozen finish input changed");
+  expect(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")).toEqual(partial);
+  const result = await finishUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash);
+  expect(result.state).toBe("finished"); expect(result.receipt.state).toBe("completed");
+  const records = await f.ledger.history();
+  expect((await finishUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash)).receipt).toEqual(result.receipt);
+  expect(await f.ledger.history()).toEqual(records);
+  expect((await stopUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash, "Host reviewed a dependency revision")).state).toBe("needs-host-review");
+  await expect(authorizeUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("stopped");
+  await expect(finishUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("Original active frozen finish intent is missing");
+});

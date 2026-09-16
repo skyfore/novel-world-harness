@@ -95,6 +95,37 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
   });
+requirementsCommand.command("register-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--file <path>", "exact frozen host plan JSON, including planHash")
+  .option("--predecessor <hash>", "exact predecessor plans[].plan.planHash when revising host dependencies")
+  .description("Validate and retain frozen host policy without authorizing mutation")
+  .action(async options => {
+    const { registerUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await registerUpstreamRepairPlanCommand(rootFor({}), options.source, options.file, options.predecessor ?? null), null, 2));
+  });
+requirementsCommand.command("authorize-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact registered plans[].plan.planHash")
+  .description("Recheck current source and dependencies, then authorize the frozen bounded host plan")
+  .action(async options => {
+    const { authorizeUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await authorizeUpstreamRepairPlanCommand(rootFor({}), options.source, options.plan), null, 2));
+  });
+requirementsCommand.command("finish-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact plans[].plan.planHash")
+  .option("--input <path>", "host finish review JSON; required only before the original input is frozen")
+  .description("Validate and commit exact authorized drafts, or recover the original frozen finish without a model call")
+  .action(async options => {
+    const { finishUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await finishUpstreamRepairPlanCommand(rootFor({}), options.source, options.plan, options.input), null, 2));
+  });
+requirementsCommand.command("stop-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact plans[].plan.planHash")
+  .requiredOption("--reason <text>", "host diagnostic or review reason; preserves original drafts and budgets")
+  .description("Stop the original repair for host review without erasing history")
+  .action(async options => {
+    const { stopUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await stopUpstreamRepairPlanCommand(rootFor({}), options.source, options.plan, options.reason), null, 2));
+  });
 requirementsCommand.command("stage-upstream-plan").requiredOption("--source <id>", "registered source ID")
   .requiredOption("--plan <hash>", "exact authorized plans[].plan.planHash from inspect-upstream")
   .option("--config <path>", "explicit extractor profile configuration")
@@ -125,6 +156,15 @@ requirementsCommand.command("recover-upstream-session").requiredOption("--source
   .action(async options => {
     const { recoverUpstreamRepairSessionCommand } = await import("./commands/upstream-repair.js");
     console.log(JSON.stringify(await recoverUpstreamRepairSessionCommand(rootFor({}), options.source, options.sessionRef), null, 2));
+  });
+requirementsCommand.command("observe-upstream-convergence").requiredOption("--source <id>", "registered source ID")
+  .description("Verify actual committed repair revisions without accepting unrelated pending proposals")
+  .action(async options => {
+    const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
+    const { observeUpstreamRepairConvergence } = await import("./compiler/upstream-repair-convergence.js");
+    const issues = await withWorkspaceOperationLock(rootFor({}), "compiler", () => observeUpstreamRepairConvergence(rootFor({}), options.source));
+    console.log(JSON.stringify({ issues }, null, 2));
+    if (issues.length) process.exitCode = 2;
   });
 requirementsCommand.command("evaluate-upstream").requiredOption("--source <id>", "registered source ID")
   .description("Evaluate converged upstream repairs against actual independent requirements without model replay")

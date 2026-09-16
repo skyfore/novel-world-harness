@@ -854,3 +854,42 @@ model calls retain the existing per-requirement budget and stop this invocation;
 the scheduler contains no outer retry loop. It returns `phase: staged`, not a
 completed repair or certification result. Finish, convergence, evaluation and
 publication retain their existing separate host checks.
+
+### Host plan lifecycle commands
+
+All mutating lifecycle commands hold the workspace compiler lock. They are host
+commands, never tools exposed to an isolated repair model:
+
+1. `requirements register-upstream-plan --source <id> --file <plan.json>` reads
+   an exact frozen plan including its validated `planHash`. It retains policy
+   without authorizing mutation. A successor additionally supplies `--predecessor`
+   copied from `inspect-upstream plans[].plan.planHash`; all existing source,
+   revision, receipt, overlap and shared-budget checks still apply.
+2. `requirements authorize-upstream-plan --source <id> --plan <hash>` rechecks
+   the actual source and dependencies before persisting authorization. It cannot
+   reopen a stopped plan or grant a new namespace to reset attempts.
+3. `requirements stage-upstream-plan --source <id> --plan <hash>` stages the
+   authorized dependency graph as described above.
+4. `requirements finish-upstream-plan --source <id> --plan <hash> --input <review.json>`
+   validates the existing compiler finish schema, exact reviewed segments,
+   authorized inventory and all original evidence/identity validators, then
+   freezes input before committing. The first invocation requires the host review;
+   the command does not invent segment review from model success. After freezing,
+   omit `--input` to recover the original receipt. Supplying a different input is
+   rejected even after a partial authorized commit. Never rerun model slots to
+   recover finish. Completion is not requirement satisfaction or publication.
+5. `requirements observe-upstream-convergence --source <id>` verifies actual
+   committed revisions and absence of pending source work without accepting
+   unrelated proposals. It exits 2 on issues. Resolve pending downstream work
+   through its original workflow, then observe again without upstream model replay.
+6. `requirements evaluate-upstream --source <id>` evaluates actual independent
+   obligations; unresolved results still exit 2 and retain certification gates.
+
+`requirements stop-upstream-plan --source <id> --plan <hash> --reason <text>`
+preserves the original diagnostic, drafts, receipt and budgets while stopping
+execution. A repeat stop does not replace its original reason. Stopping is not
+permission to reopen: a successor still requires the existing verified dependency
+or definition change. For a missing plan, inspect this source and copy exactly
+`plans[].plan.planHash` for one corrected host selection; never guess IDs or edit
+frozen JSON hashes to bypass a mismatch. Storage and scope failures require host
+repair, not repeated model calls.

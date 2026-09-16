@@ -854,3 +854,18 @@ P3e 已提交为 `91fc24e`。
 范围仍有边界：action 当前限制所有 actor 发起事件，没有细分身体/心理行动；晚入口携带已开始失能过程的原始起始时间，以及 scene/entry 独立认证执行器的完整接线，仍需后续阶段补齐，不能把本段作为 P4 完整退出证明。新分支的正常起始和同分支继续/重放已有工程验证，不替代晚入口验证。未调用真实 provider，也没有新增独立人工体验评分；P1–P7 总体尚未完成。
 
 最终验证：15 项定向测试通过；全仓 206 文件、1244 tests 全部通过（107.82 秒），服务端、Web、E2E TypeScript 和 diff whitespace 检查通过。新增重复起始反例首轮使用了不合法 localRef，被 schema 正确拒绝；改为合法 local- 前缀后验证了预期的重复起始门禁。类型检查发现闭包中的 union narrowing 丢失，固定局部 action 引用后重新检查通过。
+
+
+P4e 已提交为 `4ffedd7`。
+
+## P4f：独立场景执行消费失能过程
+
+修复独立 executeSceneEvent 只验证种子过程却丢弃其状态、且未读取 semanticEffects 的遗漏。场景执行现在保留过程投影，在每个实际重放 occurrence 上验证原始 semantic effect 与对应模板，再复用运行时起始降级、materializer、过程权限验证与 reducer。行动开始 cut 和知识接收 cut 复用能力门禁；未映射效果不能认证为空操作成功。无过程操作的事件不向要求非空的提案 materializer 提交空数组。
+
+场景 cut hash 增加起始知识及过程投影；认证依赖包括实际消费的 semantic effects 和 process templates，并列入 requiredMechanismIds。过程模板修订使合同 revisionHash 改变。pipeline 41 不将旧语义批次检查点自动视作已满足该消费协议。
+
+沿用两组原创中英文编译场景，各检查已知/未知持续时间：实际归档 bundle 的独立场景入口没有提前激活未来失能，起始后产生三个过程，后续行动被拒，unmapped 阻止认证；过程模板变化使合同失效。测试为消费侧有序 cut 构造了 ordinal 事件安排，不将该测试安排声称为模型从原文抽取的时间证据。
+
+本段解决已提交 P4e 所记录的场景消费遗漏，仍不宣称所有 P4 能力完成。canonical recovery occurrence 的显式过程执行契约、晚入口原始起始时间及历史获知种子语义仍需完整实现；当前执行器不根据恢复文字或时间流逝虚构恢复操作。真实模型和独立人工体验证据仍未取得。
+
+最终验证：12 项相关定向检查通过，补充认证依赖修订断言后 7 项场景/失能检查通过；全仓 206 文件、1244 tests 全部通过（108.29 秒），TypeScript 和 diff whitespace 检查通过。首轮暴露非失能场景向非空提案 schema 提交空过程操作，已改为复用空归约；新增合同测试首轮缺 participation ID，补齐后验证了机制依赖。

@@ -1,3 +1,5 @@
+import { buildSceneExecutionContracts } from "../src/compiler/scene-execution-contracts.js";
+import { executeSceneEvent } from "../src/compiler/scene-state.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -56,6 +58,28 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
   await new CompilerBatchStore(root).replaceCompleted(source.source.id, (await prepareCompilerBatches(root, source.source)).map(item => item.id));
   const cacheRoot = path.join(root, "cache"), cache = new PreparedNovelCache(root, cacheRoot), bundle = await cache.candidateSnapshot(source.source), archived = await cache.archiveCandidate(source.source);
   expect(buildPreparedClosure(bundle).nodes.find(node => node.kind === "semantic-effect")?.dependsOn.some(ref => ref.kind === "process")).toBe(true);
+  // The independent scene consumer must retain onset processes while replaying
+  // an ordered cut, and must not certify an action that runtime rejects.
+  const sceneBundle = structuredClone(bundle);
+  const sceneOnset = { ...event, storyTime: { kind: "ordinal" as const, label: "onset", orderHint: 1 } };
+  const attempt = { ...event, id: "attempt", storyTime: { kind: "ordinal" as const, label: "attempt", orderHint: 2 }, observedOutcome: { version: 1 as const, operations: [{ op: "set" as const, entityId: "patient", field: "character.plan", value: "leave now" }] } };
+  sceneBundle.canonical.events = [sceneOnset, attempt];
+  sceneBundle.canonical.semanticEffects = sceneBundle.canonical.semanticEffects!.map(effect => ({ ...effect, validTime: sceneOnset.storyTime }));
+  sceneBundle.canonical.initialWorld.checkpoint = { beforeCanonicalEventId: sceneOnset.id, storyTime: sceneOnset.storyTime } as never;
+  sceneBundle.canonical.eventParticipations = [{ id: "attempt-agent", eventId: attempt.id, entityId: "patient", role: "agent", evidence: source.evidence(text) }] as never;
+  const sceneStart = executeSceneEvent(sceneBundle, sceneOnset);
+  expect(Object.keys(sceneStart.beforeProcesses.instances)).toHaveLength(0);
+  expect(Object.keys(sceneStart.processes.instances)).toHaveLength(3);
+  expect(() => executeSceneEvent(sceneBundle, attempt)).toThrow("CHARACTER_ACTION_INCAPACITATED");
+  sceneBundle.canonical.sceneOccurrences = [{ ontologyVersion: "scene-occurrence-v1", id: "loss-scene", discourseSegmentIds: [source.segmentId], eventIds: [sceneOnset.id], viewpointActorIds: ["patient"], presentActorIds: ["patient"], entryConditions: [], exitConditions: [], evidence: source.evidence(text) }];
+  const sceneContract = buildSceneExecutionContracts(sceneBundle).contracts[0]!;
+  expect(sceneContract.requiredMechanismIds).toEqual(capacities.map(capacity => `process/incapacity-${capacity}`).sort());
+  const revisedMechanism = structuredClone(sceneBundle);
+  revisedMechanism.canonical.processTemplates[0]!.name += " revised";
+  expect(buildSceneExecutionContracts(revisedMechanism).contracts[0]!.revisionHash).not.toBe(sceneContract.revisionHash);
+  const unmappedScene = structuredClone(sceneBundle);
+  unmappedScene.canonical.semanticEffects![0]!.lowering = { status: "unmapped", reason: "No supported mechanism" } as never;
+  expect(() => executeSceneEvent(unmappedScene, sceneOnset)).toThrow("SEMANTIC_EFFECT_UNMAPPED");
   const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-capacity-clone-")); roots.push(cloneRoot);
   const cloneSource = await createEvidenceFixture(cloneRoot, text); await new PreparedNovelCache(cloneRoot, cacheRoot).restoreCompilerCheckpoint(cloneSource.source, archived.bundleHash!);
   const contexts = new WorldContextStore(cloneRoot), context = await contexts.captureCurrent(cloneSource.source.id), engine = new WorldEngine(cloneRoot, context);

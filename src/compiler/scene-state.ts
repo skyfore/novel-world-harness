@@ -1,3 +1,6 @@
+import { validateSemanticEffect } from "../world/semantic-effect.js";
+import { capacityUseIssues, incapacityOnsets, validateIncapacityChanges } from "../world/process-capacity.js";
+import { materializeProcessProposal } from "../world/process-ontology.js";
 import { contentHash } from "../world/canonical.js";
 import { deriveEntryCut } from "../world/entry-cut.js";
 import { validateEventProposal, type WorldModelContext } from "../world/engine.js";
@@ -26,6 +29,7 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS), events: new Map(events.map((item) => [item.id, item])),
     claims: new Map(c.claims.map((item) => [item.id, item])), propositions: new Map(c.propositions.map((item) => [item.id, item])), attributions: new Map(c.attributions.map((item) => [item.id, item])),
     sourceEventRevisions: new Map(c.events.map(event => [event.id, contentHash(event)])),
+    semanticEffects: new Map((c.semanticEffects ?? []).map(item => [item.id, item])),
     acquisitions: new Map((c.acquisitions ?? []).map(item => [item.id, item])), utteranceExpressions: new Map((c.utteranceExpressions ?? []).map(item => [item.id, item])), perceptionObservations: new Map((c.perceptionObservations ?? []).map(item => [item.id, item])),
     actionSchemas: new Map(c.actionSchemas.map((item) => [item.id, item])), actionConstraints: new Map(c.actionConstraints.map((item) => [item.id, item])),
     processTemplates: new Map(c.processTemplates.map((item) => [item.id, item])), normTemplates: new Map(c.normTemplates.map((item) => [item.id, item])),
@@ -43,14 +47,18 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     entities: context.entities, canonicalPropositionIds: new Set(context.propositions?.keys()), canonicalAttributionIds: new Set(context.attributions?.keys()),
     canonicalClaimIds: new Set(context.claims?.keys()), canonicalGoalIds: new Set(c.goals.map((goal) => goal.id)), canonicalEventIds: new Set(context.events?.keys()), knownCommittedEventIds: new Set(),
   }, provenance) : emptyBranchSemanticState(state.atCommit);
+  const processContext = { entities: context.entities, templates: context.processTemplates! };
+  let processes = emptyProcessState(state.atCommit);
   if (seed) {
-    applyProcessDelta(emptyProcessState(state.atCommit), seed.processes, { entities: context.entities, templates: context.processTemplates! }, provenance, state.logicalTime.elapsedDays ?? 0);
+    processes = applyProcessDelta(emptyProcessState(state.atCommit), seed.processes, { entities: context.entities, templates: context.processTemplates! }, provenance, state.logicalTime.elapsedDays ?? 0);
     applyNormDelta(emptyNormState(state.atCommit), seed.norms, { entities: context.entities, templates: context.normTemplates!, postState: state,
       normativeRuleIds: new Set(c.rules.filter(isNormativeWorldRule).map((rule) => rule.id)) }, provenance);
   }
   const knowledgeContext = { acquisitions: context.acquisitions, utteranceExpressions: context.utteranceExpressions, perceptionObservations: context.perceptionObservations, entities: context.entities, claims: context.claims, propositions: context.propositions, attributions: context.attributions, branchSemantics: semantics };
   let knowledge = emptyKnowledgeState(state.atCommit);
   const initialKnowledge = checkpoint?.knowledge ?? (!checkpoint ? opening.knowledge : undefined);
+  const initialCapacityIssues = capacityUseIssues({ knowledge: initialKnowledge }, processes, processes, processContext.templates, context.perceptionObservations);
+  if (initialCapacityIssues.length) throw new Error(initialCapacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
   if (initialKnowledge) knowledge = applyKnowledgeDelta(knowledge, initialKnowledge, state.atCommit, { ...knowledgeContext, currentCanonicalEventIds: new Set<string>(), realizedCanonicalEventIds: new Set<string>() });
   const aliases = new Map(events.map((occurrence) => [occurrence.id, new Set([occurrence.id])]));
   for (const relation of c.eventRelations.filter((item) => item.type === "coreference" && item.status !== "contested")) {
@@ -61,9 +69,17 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
   const pendingIds = new Set(cut.replayEventIds.flatMap((id) => [...(aliases.get(id) ?? [id])]));
   const realized = new Set(cut.completedEventIds.filter((id) => !pendingIds.has(id)));
   const execute = (occurrence: CanonicalEvent, before: WorldState) => {
+    const meaningIssues = [...(context.semanticEffects?.values() ?? [])].filter(effect => effect.canonicalEventId === occurrence.id).flatMap(effect => validateSemanticEffect(effect, {
+      entities: context.entities, events: new Map(c.events.map(item => [item.id, item])), processTemplates: context.processTemplates,
+      actionSchemas: context.actionSchemas, eventExecutions: new Map((c.eventExecutions ?? []).map(item => [item.id, item])),
+      eventParticipations: new Map(c.eventParticipations.map(item => [item.id, item])),
+    }));
+    if (meaningIssues.length) throw new Error(meaningIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
     const schema = occurrence.action?.lane === "schema-bound" ? context.actionSchemas?.get(occurrence.action.schemaId) : undefined;
     const initiator = occurrence.action?.lane === "schema-bound" ? occurrence.action.roleBindings.find((role) => role.roleId === schema?.initiatorRoleId)?.entityIds[0]
       : c.eventParticipations.find((participation) => participation.eventId === occurrence.id && participation.role === "agent")?.entityId;
+    const useIssues = capacityUseIssues({ actorId: initiator }, processes, processes, processContext.templates);
+    if (useIssues.length) throw new Error(useIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
     const result = validateEventProposal({ proposalId: `scene-${occurrence.id}`, branchId: "scene-validation", expectedParentCommit: before.atCommit,
       source: initiator ? "actor" : "canon-candidate", possibilityId: `canon-${occurrence.id}`, ...(initiator ? { actorId: initiator } : {}), title: occurrence.title, participants: occurrence.participants,
       proposedTime: occurrence.storyTime, preconditions: occurrence.preconditions, proposedDelta: occurrence.observedOutcome,
@@ -71,10 +87,21 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
       ...(occurrence.timeAdvance ? { timeAdvance: occurrence.timeAdvance } : {}), causalParents: occurrence.causalParents, evidence: occurrence.evidence,
     }, before.atCommit, before, context, { knowledge, branchSemantics: semantics, realizedCanonicalEventIds: realized, deferMateriality: true });
     if (!result.report.accepted || !result.postState) throw new Error(result.report.errors.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
+    const onsets = incapacityOnsets(context.semanticEffects?.values() ?? [], new Set([occurrence.id]), processContext.templates);
+    const processDelta = onsets.length ? materializeProcessProposal({ version: 1, operations: onsets }, {
+      branchId: "scene-validation", parentCommitId: before.atCommit, proposalHash: contentHash(occurrence),
+      templates: processContext.templates, elapsedDays: result.postState.logicalTime.elapsedDays ?? 0,
+    }).delta : { version: 1 as const, operations: [] };
+    const eventProvenance = { commitId: before.atCommit, eventId: occurrence.id, eventHash: contentHash(occurrence) };
+    validateIncapacityChanges({ actorId: initiator, action: occurrence.action }, processDelta, processes, processContext, before, result.postState, eventProvenance, onsets);
+    const afterProcesses = applyProcessDelta(processes, processDelta, processContext, eventProvenance, result.postState.logicalTime.elapsedDays ?? 0);
+    const receiptIssues = capacityUseIssues({ knowledge: occurrence.observedKnowledge }, processes, afterProcesses, processContext.templates, context.perceptionObservations);
+    if (receiptIssues.length) throw new Error(receiptIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+    processes = afterProcesses;
     if (occurrence.observedKnowledge) knowledge = applyKnowledgeDelta(knowledge, occurrence.observedKnowledge, before.atCommit, { ...knowledgeContext, currentCanonicalEventIds: new Set([occurrence.id]), realizedCanonicalEventIds: new Set([...realized, occurrence.id]), perceptionOccurrence: { eventIds: new Set([occurrence.id]), before, after: result.postState, schema: context.stateSchema } });
     return result.postState;
   };
   for (const id of cut.replayEventIds) { state = execute(context.events!.get(id)!, state); for (const alias of aliases.get(id) ?? [id]) realized.add(alias); }
-  const before = state, after = execute(event, before);
-  return { cut, before, after, context, knowledge, hash: contentHash({ cut, before, actorId: actorId ?? null }) };
+  const before = state, beforeProcesses = processes, beforeKnowledge = knowledge, after = execute(event, before);
+  return { cut, before, after, context, knowledge, beforeProcesses, processes, hash: contentHash({ cut, before, beforeProcesses, beforeKnowledge, actorId: actorId ?? null }) };
 }

@@ -75,7 +75,10 @@ export function buildSceneExecutionContracts(bundle: PreparedNovelBundle, roster
       }
       for (const knowledge of event.observedKnowledge?.operations ?? []) if (knowledge.op === "learn" && (!knowledge.propositionId || !knowledge.acquisitionMode)) fail("SCENE_KNOWLEDGE_PATH_MISSING", `Event ${event.id} has an acquisition without its proposition and epistemic path`);
     }
-    const nodeKeys = new Set([`scene/${scene.id}`, ...sceneEvents.map((event) => `event/${event.id}`), ...[...mechanisms].map((id) => id.startsWith("spatial/") ? id : `action/${id}`)]);
+    const consumedEvents = new Set([...sceneEvents.map(event => event.id), ...executions.flatMap(execution => execution.cut.replayEventIds)]);
+    const consumedEffects = (canonical.semanticEffects ?? []).filter(effect => consumedEvents.has(effect.canonicalEventId));
+    for (const effect of consumedEffects) if (effect.kind === "temporary-incapacity" && effect.lowering.status === "mapped") mechanisms.add(`process/${effect.lowering.processTemplateId}`);
+    const nodeKeys = new Set([`scene/${scene.id}`, ...sceneEvents.map((event) => `event/${event.id}`), ...consumedEffects.map(effect => `semantic-effect/${effect.id}`), ...[...mechanisms].map((id) => /^(spatial|process)\//.test(id) ? id : `action/${id}`)]);
     const nodeIndex = new Map(graph.nodes.map((node) => [`${node.kind}/${node.id}`, node]));
     const pending = [...nodeKeys];
     while (pending.length) for (const ref of nodeIndex.get(pending.pop()!)?.dependsOn ?? []) {

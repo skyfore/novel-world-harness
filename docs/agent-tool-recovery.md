@@ -252,6 +252,24 @@ once while preserving every valid draft; an unchanged diagnostic stops for host
 review. `unsupported` and `capability-gap` reports preserve unresolved work and
 are not assertions that the novel lacks evidence.
 
+Version 3 reconciliation plans also freeze `repairPlan.requirements`. Every
+target report must carry `requirement_reviews` with one record per listed
+capability, copying `requirementId` from the isolated prompt's
+`repairPlan.requirements[].id`. A goal cannot substitute for ontology migration;
+an empty action is not driver proposal work. Partial proposals may coexist with
+an unresolved requirement report. Preserve these reports even when global ratios
+improve. Never move a remaining capability gap into free-text summary alone.
+For an ID miss, reread this exact active plan, copy its offered ID, and make at
+most one corrected retry; do not search outside the plan or guess.
+
+Version 2 finish identities freeze these capability requirements and the entire
+plan hash. A changed/missing plan stops receipt recovery; preserve original
+receipts and drafts, do not rewrite a plan or switch namespaces. Host deferral
+reviews for these receipts name each deferred requirement ID in `reviews[].target`,
+not just its containing character/event. Historical target-only receipts retain
+their original version and review identity. None of these progress reports is a
+semantic capability certificate.
+
 Finish receipts freeze these reports. Post-convergence target audits are stored
 in `compiler/reconciliation-reviews/`; a completed batch or accepted proposal is
 not semantic resolution. Publication scans durable receipts across repair

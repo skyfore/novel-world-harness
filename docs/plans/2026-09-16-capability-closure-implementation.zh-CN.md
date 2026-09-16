@@ -7,8 +7,9 @@
 | 阶段 | 交付 | 状态 |
 | --- | --- | --- |
 | 设计基线 | `7078f4c`，方案与前序核验记录 | 已提交 |
-| P1a 独立场景要求的持久约束 | requirement ledger、注册/查询命令、canonical 重评、冻结快照/恢复/closure/certification 接线 | 实现及全仓验证完成；本记录随该段代码提交 |
-| P1b 逐角色能力与批次尝试 | 独立要求发现、角色 ontology/development/driver 拆分、finish attempt 版本绑定及恢复 | 未完成 |
+| P1a 独立场景要求的持久约束 | `52f72ee`，requirement ledger、注册/查询命令、canonical 重评、冻结快照/恢复/closure/certification 接线 | 已提交；1038 项测试与类型检查通过 |
+| P1b 逐能力报告与批次尝试 | 新 reconciliation 计划冻结 ontology/development/driver 项；finish v2 绑定计划与报告；逐要求保留 deferral | 实现及全仓验证完成；本记录随该段代码提交 |
+| P1 后续完整结算 | 核心角色的独立要求分母、上述结构性修复要求与统一 ledger/evaluator 的消费连接、跨 reparse 的完整义务恢复 | 未完成；P1 整体仍进行中 |
 | P2–P7 | 受限修复、语义获知、本体、文学/工作集、自主推进、完整体验验收 | 未完成 |
 
 ## P1a 的实际行为
@@ -38,3 +39,17 @@ nwh review-scenes --spec revised-scenes.json --register opening-scenes --predece
 针对性测试 `test/requirement-ledger.test.ts` 的 8 项通过，覆盖部分成功、重启/幂等、前驱修订、真实坏 finish 不改 canonical、pending/finish 不结算、converge 后结算、缺 head/记录及篡改、冻结快照与恢复拒绝。测试使用原创短文本，未调用真实 provider 或修改用户小说运行数据。
 
 `pnpm test --maxWorkers=2`：180 文件、1038 tests 全部通过（70.68 秒）。`pnpm check`：服务端、Web 和 E2E TypeScript 检查全部通过。`git diff --check` 通过。P7 的真实模型和双人体验评价未执行。
+
+## P1b：部分修复报告协议
+
+新 reconciliation plan 为 v3，保存稳定的 `target:capability` ID。角色缺口分为 ontology、development、opening-driver；现有 event/initial-world 保留各自的待复核项。新计划只冻结已发现的工程缺口，不把它们谎称为独立来源审阅的全书能力分母。
+
+`target_reviews[].requirement_reviews` 对每个冻结要求恰好报告一次 proposed/unsupported/capability-gap。目标层可因已有 goal 保持 proposed，但 ontology 等子项必须保留自己的未完成状态；部分成功不能只写 summary。各 capability 的 proposed 必须有对应类型的有效提案，空 action 或无时间边界的静态愿望不能作为 driver/development 提案工作。
+
+finish identity v2 保存计划 hash 和要求列表，原始 input 冻结子报告。恢复时重读原计划并验证版本；计划被改写、缺失或变换作用域会明确停止。旧 v2 计划及 v1 finish 保持可读，不原地补造子要求。
+
+宿主 deferral 复核对每个未完成的 requirement ID 独立记原因及 audit ref；仅复核其角色 target 不能覆盖这些项。重启和换 namespace 不会清除尚存 finish 回执中的未复核项。`reconciliationAuditResults` 对仍 unresolved 的 target 不再显示 `hostReviewRequired=false`。
+
+复核通过只表示宿主读过缺口，不能作为 semantic satisfied 或发布证据。将这些结构性发现与 P1a 的独立场景/角色评估统一，并在 reparse 归档回执后继续保留全量义务，仍是 P1 的下一项工作。
+
+本段验证：`pnpm test --maxWorkers=2` 的 180 文件、1040 tests 全部通过（70.16 秒），`pnpm check` 全部通过。新增回归包含只提交 goal 的真实 finish、逐能力 deferral、全局比例改善后的计划复用、原计划 hash 被篡改时恢复拒绝，以及宿主不能用整个角色的单条 review 清掉多个能力义务。

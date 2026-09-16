@@ -1,4 +1,4 @@
-import { reconciliationTargetReviewSchema } from "./reconciliation-review.js";
+import { reconciliationTargetReviewSchema, reconciliationRequirementSchema } from "./reconciliation-review.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -29,10 +29,13 @@ export const compilerFinishInputSchema = z.object({
 const dependencySchema = z.object({ store: z.enum(["world", "annotation", "entity-resolution", "event-resolution", "accounting"]), proposalId: idSchema, hash: hashSchema }).strict();
 type Dependency = z.infer<typeof dependencySchema>;
 const identitySchema = z.object({
-  version: z.literal(1), pipelineVersion: z.number().int().positive(), sourceId: idSchema, sourceSha256: hashSchema, batchId: idSchema,
+  version: z.union([z.literal(1), z.literal(2)]), pipelineVersion: z.number().int().positive(), sourceId: idSchema, sourceSha256: hashSchema, batchId: idSchema,
+  requirementScope: z.object({ planHash: hashSchema, requirements: z.array(reconciliationRequirementSchema) }).strict().optional(),
   input: compilerFinishInputSchema, segments: z.array(sourceSegmentSchema), dependencies: z.array(dependencySchema),
   metadata: z.object({ title: sourceTitleProposalSchema.optional(), chapterSplit: chapterSplitPlanSchema.optional(), roleReview: roleRosterReviewSchema.optional() }).strict(),
-}).strict();
+}).strict().superRefine((identity, ctx) => {
+  if ((identity.version === 2) !== Boolean(identity.requirementScope)) ctx.addIssue({ code: "custom", message: "Finish requirement scope/version mismatch" });
+});
 export const compilerFinishReceiptSchema = z.object({
   identity: identitySchema, fingerprint: hashSchema, state: z.enum(["prepared", "completed"]),
   preparedAt: z.string().datetime(), completedAt: z.string().datetime().optional(),
@@ -93,6 +96,11 @@ export class CompilerFinishReceipts {
       const identity = receipt.identity;
       if (identity.pipelineVersion !== COMPILER_PIPELINE_VERSION) throw new Error("finish compiler pipeline changed");
       if (identity.sourceId !== this.sourceId || identity.batchId !== this.batchId) throw new Error("finish scope mismatch");
+      if (identity.requirementScope) {
+        const { reconciliationReviewScope } = await import("./reconcile-world.js");
+        const current = await reconciliationReviewScope(this.root, this.sourceId, this.batchId);
+        if (current?.planHash !== identity.requirementScope.planHash || contentHash(current.requirements) !== contentHash(identity.requirementScope.requirements)) throw new Error("finish requirement definition or plan changed");
+      }
       const source = await WorkspaceStore.openReadOnly(this.root).getSource(this.sourceId);
       if (source?.contentSha256 !== identity.sourceSha256) throw new Error("finish source changed");
       const bytes = await new SourceMaterialStore().read(source);

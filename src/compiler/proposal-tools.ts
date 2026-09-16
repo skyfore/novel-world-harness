@@ -118,7 +118,7 @@ import {
   COMPILER_TOOL_CALL_SAFETY_FUSE,
 } from "./limits.js";
 import {
-  reconciliationReviewTargets,
+  reconciliationReviewScope,
   graphAdjudicationIterationFromBatchId,
   semanticReconciliationBatchFromBatchId,
   validateGraphAdjudicationProposalScope,
@@ -2771,6 +2771,11 @@ export function createCompilerProposalToolset(
       disposition: Type.Union([Type.Literal("proposed"), Type.Literal("unsupported"), Type.Literal("capability-gap")]),
       evidence_segment_ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
       summary: Type.String({ minLength: 1, maxLength: 2000 }),
+      requirement_reviews: Type.Optional(Type.Array(Type.Object({
+        requirementId: Type.String({ minLength: 1 }),
+        disposition: Type.Union([Type.Literal("proposed"), Type.Literal("unsupported"), Type.Literal("capability-gap")]),
+        summary: Type.String({ minLength: 1, maxLength: 2000 }),
+      }, { additionalProperties: false }), { maxItems: 16 })),
     }, { additionalProperties: false }), { maxItems: 128 })),
     outcome: Type.Union([Type.Literal("complete"), Type.Literal("no-artifacts")]),
     reviewed_segments: Type.Array(Type.Object({
@@ -2866,15 +2871,16 @@ export function createCompilerProposalToolset(
       if (input.outcome === "complete" && expected.length === 0) {
         return failFinish("complete requires at least one active successful proposal submission.");
       }
-      const targetScope = activeSourceId && compilerBatchId
-        ? await reconciliationReviewTargets(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+      const reviewScope = activeSourceId && compilerBatchId
+        ? await reconciliationReviewScope(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+      const targetScope = reviewScope?.targets;
       if (targetScope !== undefined) {
         const proposals = new Map<string, { kind: string; payload: Record<string, unknown> }>();
         for (const id of listed) {
           const envelope = await new ProposalStore(workspaceRoot).readEnvelope("pending", id);
           proposals.set(id, { kind: String(envelope.kind), payload: envelope.payload as Record<string, unknown> });
         }
-        const issues = reconciliationReviewIssues(targetScope, input.target_reviews ?? [], proposals);
+        const issues = reconciliationReviewIssues(targetScope, input.target_reviews ?? [], proposals, reviewScope?.requirements);
         const knowledgePlan = await readKnowledgeRepairPlan(workspaceRoot, activeSourceId!, compilerBatchId!);
         if (knowledgePlan) {
           const canon = new CanonicalModelStore(workspaceRoot);
@@ -2886,7 +2892,7 @@ export function createCompilerProposalToolset(
           try { resolveEvidenceSegmentIds(review.evidence_segment_ids); }
           catch (error) { issues.push(`${review.target}: ${error instanceof Error ? error.message : String(error)}`); }
         }
-        if (issues.length) return failFinish(`Reconciliation target review: ${issues.join(" ")} Read each listed target and its same-source evidence. Copy read_source_evidence.evidence_segment_id; use find_source_evidence and its exact returned ref if discovery is needed. Preserve all active drafts. Correct the complete report once; if unchanged, stop for host review. Unsupported reports remain unresolved until host review; never invent a proposal to fill the report.`);
+        if (issues.length) return failFinish(`Reconciliation target review: ${issues.join(" ")} Read each listed target and its same-source evidence. Copy requirementId from the isolated prompt's repairPlan.requirements[].id; never guess or search outside that plan. Copy read_source_evidence.evidence_segment_id; use find_source_evidence and its exact returned ref if discovery is needed. Preserve all active drafts. Correct the complete report once; if unchanged, stop for host review. Unsupported reports remain unresolved until host review; never invent a proposal to fill the report.`);
       } else if (input.target_reviews?.length) {
         return failFinish("target_reviews is outside this batch's versioned target-review scope. Preserve drafts and stop for host review; do not change the plan or batch ID.");
       }
@@ -3137,7 +3143,8 @@ export function createCompilerProposalToolset(
       const receipts = finishReceipts();
       const finishSource = activeSourceId ? await WorkspaceStore.openReadOnly(workspaceRoot).getSource(activeSourceId) : undefined;
       const receipt = receipts && finishSource && compilerBatchId ? await receipts.prepare({
-        version: 1, sourceId: finishSource.id, sourceSha256: finishSource.contentSha256, batchId: compilerBatchId,
+        version: reviewScope?.requirements ? 2 : 1, sourceId: finishSource.id, sourceSha256: finishSource.contentSha256, batchId: compilerBatchId,
+        ...(reviewScope?.requirements ? { requirementScope: { planHash: reviewScope.planHash!, requirements: reviewScope.requirements } } : {}),
         input, segments: validatedSourceSegments,
         dependencies: await receipts.dependencies({ world: listed, annotation: listedAnnotations,
           "entity-resolution": listedEntityResolutions, "event-resolution": listedEventResolutions, accounting: listedAccounting }),

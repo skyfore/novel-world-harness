@@ -1,4 +1,5 @@
 import { selectOpeningDriverActor } from "./opening-driver.js";
+import { reconciliationRequirementSchema, type ReconciliationRequirement } from "./reconciliation-review.js";
 import { readKnowledgeRepairPlan, isKnowledgeRepairBatch } from "./knowledge-repair.js";
 import { CHARACTER_ONTOLOGY_VERSION, CHARACTER_DIMENSION_IDS, CHARACTER_CONTEXT_IDS } from "../world/character-ontology.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
@@ -41,7 +42,8 @@ const RECONCILIATION_RESERVED_CALLS = 7;
 export type WorldReconciliationMode = "bounded" | "reparse-finalization" | "graph-adjudication";
 
 const reconciliationPlanSchema = z.object({
-  version: z.literal(2),
+  version: z.union([z.literal(2), z.literal(3)]),
+  requirements: z.array(reconciliationRequirementSchema).optional(),
   sourceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
   mode: z.enum(["bounded", "reparse-finalization", "graph-adjudication"]),
   namespace: z.string().min(1).optional(),
@@ -53,7 +55,14 @@ const reconciliationPlanSchema = z.object({
   targetReviewRequired: z.boolean().optional(),
   focus: z.literal("opening-driver").optional(),
   createdAt: z.string().datetime(),
-}).strict();
+}).strict().superRefine((plan, ctx) => {
+  if (plan.version === 3 && !plan.requirements) ctx.addIssue({ code: "custom", message: "Version 3 requires frozen capability requirements" });
+  const requirements = plan.requirements ?? [];
+  const targets = [...plan.eventIds.map(id => `event:${id}`), ...plan.actorIds.map(id => `character:${id}`), ...(plan.includeInitialWorld ? ["initial-world:singleton"] : [])];
+  if (new Set(requirements.map(item => item.id)).size !== requirements.length) ctx.addIssue({ code: "custom", message: "Duplicate reconciliation requirement" });
+  for (const item of requirements) if (!targets.includes(item.target) || item.id !== `${item.target}:${item.capability}`) ctx.addIssue({ code: "custom", message: "Invalid reconciliation requirement identity or scope" });
+  if (plan.version === 3 && plan.mode !== "graph-adjudication" && targets.some(target => !requirements.some(item => item.target === target))) ctx.addIssue({ code: "custom", message: "Every target requires at least one frozen requirement" });
+});
 type ReconciliationPlan = z.infer<typeof reconciliationPlanSchema>;
 
 function reconciliationPlanPath(workspaceRoot: string, sourceId: string, mode: WorldReconciliationMode, namespace?: string): string {
@@ -85,6 +94,7 @@ async function readReconciliationPlan(
       await fs.readFile(reconciliationPlanPath(workspaceRoot, sourceId, mode, namespace), "utf8"),
     ));
     if (plan.namespace !== namespace) throw new Error("Reconciliation plan namespace mismatch; stop for host review.");
+    if (plan.sourceId !== sourceId) throw new Error("Reconciliation plan source mismatch; stop for host review.");
     if (plan.mode !== mode) throw new Error(`Reconciliation plan mode mismatch: expected ${mode}, found ${plan.mode}.`);
     return plan;
   } catch (error) {
@@ -108,9 +118,9 @@ export async function hasWorldReconciliationTargets(
 }
 
 /** Old immutable receipts remain readable; only new plans require target reports. */
-export async function reconciliationReviewTargets(root: string, sourceId: string, batchId: string): Promise<string[] | undefined> {
+export async function reconciliationReviewScope(root: string, sourceId: string, batchId: string): Promise<{ targets: string[]; planHash?: string; requirements?: ReconciliationRequirement[] } | undefined> {
   const knowledgePlan = await readKnowledgeRepairPlan(root, sourceId, batchId);
-  if (knowledgePlan) return knowledgePlan.events.map(event => `event:${event.id}`);
+  if (knowledgePlan) return { targets: knowledgePlan.events.map(event => `event:${event.id}`) };
   const mode = batchId.startsWith(`reconcile-${sourceId}-bounded-`) ? "bounded"
     : batchId.startsWith(`reconcile-${sourceId}-reparse-finalization-`) ? "reparse-finalization" : undefined;
   if (!mode) return undefined;
@@ -127,11 +137,16 @@ export async function reconciliationReviewTargets(root: string, sourceId: string
   if (!plan.targetReviewRequired) return undefined;
   const eventSize = mode === "bounded" ? MAX_EVENT_REPAIR_TARGETS : MAX_REPARSE_EVENT_REPAIR_TARGETS;
   const actorSize = mode === "bounded" ? MAX_CHARACTER_REPAIR_TARGETS : MAX_REPARSE_CHARACTER_REPAIR_TARGETS;
-  return [
+  const targets = [
     ...plan.eventIds.slice((iteration - 1) * eventSize, iteration * eventSize).map(id => `event:${id}`),
     ...plan.actorIds.slice((iteration - 1) * actorSize, iteration * actorSize).map(id => `character:${id}`),
     ...(iteration === 1 && plan.includeInitialWorld ? ["initial-world:singleton"] : []),
   ];
+  return { targets, ...(plan.requirements ? { planHash: contentHash(plan), requirements: plan.requirements.filter(item => targets.includes(item.target)) } : {}) };
+}
+
+export async function reconciliationReviewTargets(root: string, sourceId: string, batchId: string): Promise<string[] | undefined> {
+  return (await reconciliationReviewScope(root, sourceId, batchId))?.targets;
 }
 
 /** Host-owned lifecycle snapshot for the exact active batch; retired IDs are never reusable. */
@@ -671,9 +686,27 @@ export async function buildWorldReconciliationPrompt(
   const planExists = await fs.stat(reconciliationPlanPath(workspaceRoot, sourceId, mode, namespace))
     .then(() => true).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return false; throw error; });
   const createPlan = iteration === 1 && !planExists;
+  const requirements: ReconciliationRequirement[] = [];
+  const addRequirement = (target: string, capability: ReconciliationRequirement["capability"]) => requirements.push({ id: `${target}:${capability}`, target, capability });
+  if (mode !== "graph-adjudication") {
+    if (options.focus !== "opening-driver") {
+      for (const { event } of allWeakEvents) addRequirement(`event:${event.id}`, "event-semantics");
+      if (initialWorldNeedsRepair) addRequirement("initial-world:singleton", "initial-world");
+    }
+    for (const [actorId, count] of allWeakActors.filter(([id]) => options.focus !== "opening-driver" || id === driverActorId)) {
+      const target = `character:${actorId}`;
+      // Freeze discoveries once: later global ratios cannot remove an actor's
+      // original ontology/development/driver obligation from its plan.
+      if (!sourceModels.some(model => model.actorId === actorId && model.ontologyVersion === CHARACTER_ONTOLOGY_VERSION)) addRequirement(target, "ontology");
+      if ((audit.coverage.characterDevelopmentCoverage ?? 1) < 0.5 && count >= 3 && !developed.has(actorId)) addRequirement(target, "development");
+      if (requireAutonomousDriver && actorId === driverActorId) addRequirement(target, "opening-driver");
+      if (!requirements.some(item => item.target === target)) addRequirement(target, "ontology");
+    }
+  }
   const plan = createPlan
     ? reconciliationPlanSchema.parse({
-        version: 2,
+        version: 3,
+        requirements,
         sourceId,
         mode,
         ...(namespace ? { namespace } : {}),
@@ -723,9 +756,9 @@ export async function buildWorldReconciliationPrompt(
           }
         : { id: actorId },
       eventCount,
-      needsExecutableDriver: plan.requireAutonomousDriver && actorId === (plan.driverActorId ?? plan.actorIds[0]),
-      needsDevelopmentRepair: (audit.coverage.characterDevelopmentCoverage ?? 1) < 0.5 && eventCount >= 3 && !developed.has(actorId),
-      needsOntologyMigration: sourceModels.some(model => model.actorId === actorId && model.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION),
+      needsExecutableDriver: plan.requirements ? plan.requirements.some(item => item.target === `character:${actorId}` && item.capability === "opening-driver") : plan.requireAutonomousDriver && actorId === (plan.driverActorId ?? plan.actorIds[0]),
+      needsDevelopmentRepair: plan.requirements ? plan.requirements.some(item => item.target === `character:${actorId}` && item.capability === "development") : (audit.coverage.characterDevelopmentCoverage ?? 1) < 0.5 && eventCount >= 3 && !developed.has(actorId),
+      needsOntologyMigration: plan.requirements ? plan.requirements.some(item => item.target === `character:${actorId}` && item.capability === "ontology") : sourceModels.some(model => model.actorId === actorId && model.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION),
       requiredOntologyVersion: CHARACTER_ONTOLOGY_VERSION,
       currentModelRef: sourceModels.some((model) => model.actorId === actorId)
         ? `canonical:character-model:${actorId}`
@@ -766,6 +799,7 @@ export async function buildWorldReconciliationPrompt(
       targetCount: repairTargetCount,
       targetReviewRequired: plan.targetReviewRequired ?? false,
       reviewTargets: [...weakEvents.map(({ event }) => `event:${event.id}`), ...weakActors.map(({ actor }) => `character:${actor.id}`), ...(includeInitialWorld ? ["initial-world:singleton"] : [])],
+      ...(plan.requirements ? { requirements: plan.requirements.filter(item => weakEvents.some(({ event }) => item.target === `event:${event.id}`) || weakActors.some(({ actor }) => item.target === `character:${actor.id}`) || (includeInitialWorld && item.target === "initial-world:singleton")) } : {}),
       eventTargetOffset: weakEventOffset,
       characterTargetOffset: weakActorOffset,
       proposalIdSuffix,
@@ -886,7 +920,7 @@ ${graphAdjudicationPolicy}
 - If the initial world appears below and lacks a checkpoint, a comparable storyTime, readerSetup, structured readerContext, one direct actorObservation per physical opening role, or explicit physical participantPresence for its actionable opening role, replace it only when exact source evidence supports one coherent chronological or textual-frame checkpoint. Treat the player as an unread reader: readerContext must establish focal identity, time/place, every needed first-use character gloss, causal premises, the actual holder/direction of relevant stance or pressure, completed pre-checkpoint beats, and the unresolved immediate situation. Give readerSetup and every fact/gloss/situation/observation field an exact explicit or strong-inference evidence selector; weak inference is insufficient. Later discourse may supply only facts already true by the checkpoint; mark them later-discourse-preexisting and never import a later outcome or acquired knowledge. readerSetup/readerContext are presentation-only, never actor knowledge. Never merge narrator-frame and flashback selves.
 - A seasonal or day-part phrase such as "spring afternoon" is not an exact calendar value. When the source establishes it as the opening ordering point but supplies no parseable year/date, encode storyTime as ordinal with a deterministic numeric orderHint; never label natural-language relative time as exact merely to satisfy the audit.
 - Repair every listed target or report its exact source-grounded blocker. A character may require both a model and a goal; do not substitute one for the other. Never merely add an ontology version label to claim a migration.
-- If repairPlan.targetReviewRequired=true, finish must include target_reviews accounting exactly once for every repairPlan.reviewTargets entry. Each record has target, disposition (proposed, unsupported, or capability-gap), evidence_segment_ids (copy evidence_segment_id from read_source_evidence), and summary (all requested weaknesses addressed or each remaining reason, with exact source findings). Read the relevant source for every target. unsupported/capability-gap is an untrusted report awaiting host review, never permission to drop a target or publish. The host automatically links all active proposals to their target; do not enumerate proposal IDs. A proposed record is not proof of repair: the host re-audits committed artifacts. A generic finish summary cannot replace target_reviews.
+- If repairPlan.targetReviewRequired=true, finish must include target_reviews accounting exactly once for every repairPlan.reviewTargets entry. Each record has target, disposition (proposed, unsupported, or capability-gap), evidence_segment_ids (copy evidence_segment_id from read_source_evidence), and summary. When repairPlan.requirements is present, each target record also requires requirement_reviews: exactly one {requirementId, disposition, summary} for each listed requirement of that target. Copy requirementId from repairPlan.requirements[].id, never invent one. Report ontology, development and opening-driver separately. An active goal cannot represent an ontology migration. If part remains unsupported, report that requirement as capability-gap or unsupported even when another proposal exists. Read the relevant source for every target. These reports record proposal progress, never satisfaction; unsupported/capability-gap remains a durable host-review obligation. The host links proposals automatically; do not enumerate proposal IDs. A summary cannot replace structured reports.
 - Do not use propose_state_delta. Finish with reviewed_segments=[] and outcome=complete if proposals were recorded, otherwise outcome=no-artifacts.
 
 <reconciliation-context>

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { worldStorageRoot } from "../world/paths.js";
 import { idSchema } from "../world/model.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
+import { reconciliationDeferredRequirementIds } from "./reconciliation-review.js";
 
 const decisionSchema = z.object({
   sourceId: idSchema, batchId: idSchema, finishFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
@@ -21,7 +22,7 @@ export async function reviewReconciliationDeferrals(root: string, input: z.infer
   const receipt = await receipts.read();
   if (!receipt || receipt.state !== "completed" || receipt.fingerprint !== decision.finishFingerprint) throw new Error("Host review must name the exact completed finish fingerprint.");
   await receipts.verify(receipt);
-  const expected = receipt.identity.input.target_reviews?.filter(review => review.disposition !== "proposed").map(review => review.target).sort() ?? [];
+  const expected = reconciliationDeferredRequirementIds(receipt.identity.input.target_reviews ?? []);
   const actual = decision.reviews.map(review => review.target).sort();
   if (JSON.stringify(expected) !== JSON.stringify(actual)) throw new Error("Host review must cover every deferred target exactly once.");
   const file = decisionPath(root, decision.sourceId, decision.finishFingerprint);
@@ -39,7 +40,7 @@ export async function assertReconciliationDeferralsReviewed(root: string, source
     const saved = JSON.parse(await fs.readFile(path.join(directory, file), "utf8"));
     const receipts = new CompilerFinishReceipts(root, sourceId, saved.identity.batchId);
     const receipt = await receipts.read();
-    const targets = receipt?.identity.input.target_reviews?.filter(review => review.disposition !== "proposed").map(review => review.target).sort() ?? [];
+    const targets = reconciliationDeferredRequirementIds(receipt?.identity.input.target_reviews ?? []);
     if (!receipt || !targets.length) continue;
     let decision;
     try { decision = decisionSchema.parse(JSON.parse(await fs.readFile(decisionPath(root, sourceId, receipt.fingerprint), "utf8"))); }

@@ -1069,8 +1069,14 @@ export type CanonicalAdaptation = z.infer<typeof canonicalAdaptationSchema>;
  * that character can perceive, and readerSetup is presentation-only context.
  */
 /** Complete nonphysical projection at a source-evidenced pre-event checkpoint. */
+export const entryKnowledgeHistorySchema = z.object({
+  version: z.literal(1), actorId: idSchema, beforeCanonicalEventId: idSchema,
+  cutHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type EntryKnowledgeHistory = z.infer<typeof entryKnowledgeHistorySchema>;
 export const entryProjectionSeedSchema = z.object({
   version: z.literal(1),
+  knowledgeHistory: entryKnowledgeHistorySchema.optional(),
   semantics: branchSemanticDeltaSchema,
   processes: processDeltaSchema,
   norms: normDeltaSchema,
@@ -1597,6 +1603,7 @@ export const committedEventSchema = z
     spokenUtterances: z.array(spokenUtteranceSchema).max(32).optional(),
     participants: z.array(idSchema),
     participantPresence: z.array(participantPresenceSchema).max(128).optional(),
+    entryKnowledgeHistory: entryKnowledgeHistorySchema.optional(),
     effects: eventEffectsRefSchema,
     progressCertificate: progressCertificateSchema,
     evidence: z.array(evidenceRefSchema),
@@ -1864,4 +1871,4 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
 export const WORLD_SCHEMA_VERSION = 3;
-export const WORLD_ENGINE_VERSION = "0.20.0";
+export const WORLD_ENGINE_VERSION = "0.21.0";

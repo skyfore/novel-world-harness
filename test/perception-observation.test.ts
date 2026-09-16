@@ -1,3 +1,4 @@
+import { deriveCharacterEntrySeed } from "../src/world/entry-context.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -138,8 +139,10 @@ it.each(scenes)("retains unsupported sensory meaning without granting observed k
   expect(validatePerceptionAcquisition(operation, { observations: new Map([[observation.id, observation]]), propositions: new Map((await canon.listPropositions()).map(item => [item.id, item])) }).some(item => item.code === "PERCEPTION_UNMAPPED")).toBe(true);
 });
 it.each(scenes)("consumes independently evidenced observed acquisition at its actual cut: $actor", async original => {
-  const scene = { ...original, sentence: `${original.sentence} ${original.actor} understands the closure and believes the observation.` };
+  const reopening = original.actor === "Ada" ? "Later the gate reopens." : "后来码头重新开放。";
+  const scene = { ...original, sentence: `${original.sentence} ${original.actor} understands the closure and believes the observation.`, report: `${original.report} ${reopening}` };
   const { root, source, canon, event, input, operation, initial } = await setup(scene);
+  await canon.putEvent({ ...event, readerSummary: scene.sentence, observedKnowledge: { version: 1, operations: [{ ...operation, acquisitionId: "saw-closure", status: "believes" }] } });
   const tools = createCompilerProposalToolset(root); await tools.beginBatch([], "observed-acquisition", source.source.id);
   const invoke = (name: string, payload: unknown) => tools.tools.find(tool => tool.name === name)!.execute(name, payload as never, undefined, undefined, {} as never);
   await invoke("propose_perception_observation", input);
@@ -158,4 +161,24 @@ it.each(scenes)("consumes independently evidenced observed acquisition at its ac
   const replay = await engine.projections.project(committed.newHead, { fresh: true, useCheckpoints: false });
   expect(replay.knowledge.acquisitions?.[payload.id]?.reception).toEqual(payload.reception);
   expect(replay.knowledge.actors.observer?.["closed-claim"]).toMatchObject({ acquisitionId: payload.id, perceptionId: "perception", status: "believes" });
+  // Consumer cut fixture: a later world change must not re-run the old perception there.
+  const reporter = original.actor === "Ada" ? "Bo" : "维";
+  await canon.putEntity({ id: "reporter", kind: "character", canonicalName: reporter, aliases: [], evidence: source.evidence(reporter) });
+  const reopen = canonicalEventSchema.parse({ ...event, id: "reopen", title: "The site reopens", evidence: source.evidence(reopening), readerSummary: "The world has changed after the observation", observedOutcome: { version: 1, operations: [{ op: "set", entityId: "site", field: "location.open", value: true }] } });
+  const lateEvent = canonicalEventSchema.parse({ ...event, id: "late-entry", title: "After reopening", readerSummary: "The earlier observation remains a past experience", observedOutcome: { version: 1, operations: [] }, characterEntryCheckpoints: [{ actorId: "observer", readerSetup: "The earlier closure was witnessed", actorObservation: "I witnessed the closure", participantPresence: [{ entityId: "observer", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "observer", field: "character.location", value: "site" }] } }] });
+  await canon.putEvent(reopen); await canon.putEvent(lateEvent);
+  for (const [fromEventId, toEventId] of [[event.id, reopen.id], [reopen.id, lateEvent.id]]) await canon.putEventRelation({ id: `${fromEventId}-before-${toEventId}`, fromEventId: fromEventId!, toEventId: toEventId!, type: "before", operationality: "non-operational", status: "explicit", confidence: 1, evidence: source.evidence(scene.sentence) });
+  await new InitialWorldStore(root).put({ version: 1, delta: initial, evidence: source.evidence(scene.sentence), participantPresence: [{ entityId: "reporter", mode: "physical" }], checkpoint: { mode: "chronological", rationale: "Before closure", beforeCanonicalEventId: event.id, storyTime: event.storyTime } });
+  const lateContext = await new WorldContextStore(root).captureCurrent(source.source.id);
+  const cutBundle = { source: { id: source.source.id }, canonical: { initialWorld: lateContext.initialWorld!, events: [...lateContext.events!.values()], entities: [...lateContext.entities.values()], eventRelations: lateContext.eventRelations, eventExecutions: [], semanticEffects: [], processTemplates: [], actionSchemas: [], rules: [], eventParticipations: [] } } as never;
+  const lateSeed = deriveCharacterEntrySeed(cutBundle, "observer");
+  const lateEngine = new WorldEngine(root, lateContext);
+  const lateHead = await lateEngine.createBranch("historical-perception", "After reopening", lateSeed.delta, lateSeed.knowledge, undefined, undefined, [], {}, { projectionSeed: lateSeed.projectionSeed, realizesCanonicalEventIds: lateSeed.realizesCanonicalEventIds });
+  const lateReplay = await lateEngine.projections.project(lateHead, { fresh: true, useCheckpoints: false });
+  expect(lateReplay.state.values.site?.["location.open"]).toBe(true);
+  expect(lateReplay.knowledge.acquisitions?.[payload.id]?.acquiredAtCommit).toBe(lateHead);
+  expect(lateReplay.knowledge.actors.observer?.["closed-claim"]?.perceptionId).toBe("perception");
+  const strippedSeed = structuredClone(lateSeed.projectionSeed!); delete strippedSeed.knowledgeHistory;
+  await expect(lateEngine.createBranch("wrong-cut", "Old perception at current cut", lateSeed.delta, lateSeed.knowledge, undefined, undefined, [], {}, { projectionSeed: strippedSeed, realizesCanonicalEventIds: lateSeed.realizesCanonicalEventIds })).rejects.toThrow("PERCEPTION_ACCESS_NOT_PROVEN");
+
 });

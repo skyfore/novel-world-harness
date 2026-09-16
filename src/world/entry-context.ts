@@ -256,7 +256,8 @@ export function deriveCharacterEntrySeed(
         processes.operations.push(...delta.operations);
       }
     }
-    projectionSeed = { version: 1, semantics: { version: 1, operations: [] }, processes, norms: { version: 1, operations: [] },
+    projectionSeed = { version: 1,
+      ...(targetEvent && forwardEvents.some(event => event.observedKnowledge?.operations.length) ? { knowledgeHistory: { version: 1 as const, actorId, beforeCanonicalEventId: targetEvent.id, cutHash: cut.hash } } : {}), semantics: { version: 1, operations: [] }, processes, norms: { version: 1, operations: [] },
       activeRuleIds: [...activeRuleIds].sort(), elapsedDays };
   }
   const evidence = uniqueEvidence([

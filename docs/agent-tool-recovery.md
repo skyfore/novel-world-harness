@@ -1432,3 +1432,21 @@ stop for host branch review, do not guess an instance. `PROCESS_RECOVERY_UNRESOL
 retains that underlying cause in runtime validation. `PROCESS_RECOVERY_EFFECT_MISSING`
 is a history or entry-seed integrity failure: preserve head and stop, never
 rewrite committed history or let rendering supply the missing recovery.
+
+### Historical entry knowledge
+
+`ENTRY_KNOWLEDGE_HISTORY_INVALID` preserves the real cause (missing frozen opening,
+unproved embodied checkpoint, recursive baseline, stale cut, future/unrealized
+occurrence or changed historical operations). Preserve branch head and drafts;
+stop for host source/entry review. Do not guess cutHash, delete acquisitionId,
+relabel an old observation, change actorId or retry unchanged. The host derives
+knowledgeHistory from the frozen opening and ordered pre-entry events. Models
+never supply receipt objects. A history reference is permitted only in Genesis;
+a non-Genesis occurrence carrying one is rejected during replay.
+
+A missing or ambiguous chronological baseline keeps the existing ENTRY_* error;
+it is not permission to substitute source order or elapsed zero. Exact opening
+`beforeCanonicalEventId` establishes the referenced occurrence as after that
+pre-event seed even when its absolute story time is unknown. A later source
+checkpoint can use a reviewed history reference, but an opening that recursively
+requires itself cannot be reconstructed and must stop.

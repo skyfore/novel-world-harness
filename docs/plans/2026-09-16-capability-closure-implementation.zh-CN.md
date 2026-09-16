@@ -905,3 +905,20 @@ pipeline 43、engine 0.20.0。能力限制仍沿用既有 action/speech/percepti
 第二轮全仓通过（109.65 秒）后，入口复核补齐 opening seed 活动规则集的带入，避免已激活规则前置条件被误判。另加消费侧 synthetic 规则守卫反例：活动时恢复成功，撤去活动资格即停止；该额外规则不是原文抽取证据。9 项入口/失能检查与 TypeScript 通过，最终状态再次运行全仓。
 
 最终验证：全仓 206 文件、1244 tests 全部通过（109.91 秒），服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。原文恢复绑定、首次缺证据后同 ID 修复、完整 typed participation、历史恢复与活动规则入口反例均已纳入该最终状态。所有测试为确定性工程验证，不替代真实 Pi 或独立人工角色体验证据。
+
+
+P4h 已提交为 `5042ba9`。
+
+## P3f：晚入口按历史 cut 重建 Acquisition 收据
+
+修复多个事件的知识操作在 Genesis 被合并成一次获知的问题。WorldContext 冻结原始 initialWorld，capture/load 均检查源作用域；旧快照没有该基线时不能凭当前可变 store 补齐历史。EntryProjectionSeed 可携带宿主派生的 knowledgeHistory（actor、入口 occurrence、cut hash）；实际 Genesis 将该引用写入事件，模型不提供 KnowledgeState 或 receipt 对象。
+
+将既有场景执行器移到共享 world/source-history，compiler 保留原导出入口。历史重建从冻结 opening 按已证明的事件顺序使用原 state/knowledge/process reducer，逐次检查表达、感知、Acquisition 前提及能力限制，只执行入口之前的事件。切片 hash、完成事件集合与聚合知识操作必须完全匹配；不能偷加未来事件或知识。收据 acquiredAtCommit 指向接纳该历史的 Genesis，并通过 Acquisition 的冻结 occurrence 保留原经历身份，不伪造过去的 branch commits。
+
+同一引用在 createBranch、fresh replay、完整 entry checkpoint 的场景认证中重建。合并后的 knowledge delta 仍保留为承诺内容，即使 learn/forget 使净知识为空也不能丢弃其经历；当前时点不重新观察过去的现象。角色视图继续隔离各自经历，未来 canon 不因历史重建而激活。若显式 opening.beforeCanonicalEventId 指向正在重放的同一 occurrence，则该原文身份足以确定它在 pre-event seed 之后；未知绝对时间不被擅自填成日期。
+
+两组原创中英文编译/归档场景增加晚入口：保留听闻收据后可继续推断；先听闻再回忆可在同一 Genesis 恢复两个有序经历；完整 checkpoint 认证复用历史；未来回忆/推断不提前进入，另一个角色看不到收据。坏 cut、追加未来 realization、额外知识均被拒。另两组直接感知场景在原文追加重新开放，验证入口世界已经开放但仍保留此前目睹关闭的经历；删除历史引用而在当前 cut 重做旧感知会被拒。检查保存快照后改变可变 opening 不改冻结基线。入口元数据及消费侧顺序构造是工程 fixture，不冒充真实模型质量证据。
+
+pipeline 44、engine 0.21.0。该路径要求能从冻结 opening 证明有序历史；递归 opening 基线、无法证明的历史顺序、重述旧 Acquisition 的额外 checkpoint 知识仍明确停止。旧无 Acquisition 记录不自动升为有证明收据；分支临时获知的完整新协议及 P3 整体退出审计仍未完成。其余 P4/P5/P6/P7 保持原目标，未运行真实 provider 或新增独立人工评分。
+
+最终验证：27 项相关定向检查通过；全仓 206 文件、1244 tests 全部通过（109.05 秒），服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。新冻结基线校验发现旧消费 fixture 缺 checkpoint.mode/rationale，已补齐；关系 fixture 的 status 改为 schema 要求的 explicit。未知绝对时间下的同一 opening occurrence 初次被误判 baseline unknown，已按明确事件身份修复并通过反例检查。没有放宽感知或 Acquisition 门禁来使测试通过。

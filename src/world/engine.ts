@@ -1,3 +1,5 @@
+import { replayEntryKnowledge } from "./entry-knowledge.js";
+import type { InitialWorld } from "./initial.js";
 import type { EventExecution } from "./event-execution.js";
 import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateIncapacityChanges } from "./process-capacity.js";
 import { acquisitionCatalog, validateAcquisitionOperation, validateAcquisition, type Acquisition } from "./acquisition.js";
@@ -108,6 +110,7 @@ import {
 } from "./semantic-effects.js";
 
 export type WorldModelContext = {
+  initialWorld?: InitialWorld;
   canonicalSnapshotHash?: ObjectHash;
   sourceId?: string;
   preparedRevisionHash?: string;
@@ -569,13 +572,13 @@ export class WorldEngine {
       canonicalGoalIds: new Set(this.context.actorGoals?.map((goal) => goal.id) ?? []), canonicalEventIds: new Set(this.context.events?.keys() ?? []),
       knownCommittedEventIds: new Set(),
     }, seedProvenance) : undefined;
-    if (knowledge) applyKnowledgeDelta(emptyKnowledgeState("genesis"), knowledge, "genesis", {
+    if (knowledge && !completeSeed?.knowledgeHistory) applyKnowledgeDelta(emptyKnowledgeState("genesis"), knowledge, "genesis", {
       entities: this.context.entities, claims: this.context.claims, propositions: this.context.propositions,
       attributions: this.context.attributions, acquisitions: this.context.acquisitions, utteranceExpressions: this.context.utteranceExpressions, perceptionObservations: this.context.perceptionObservations, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
     });
     if (completeSeed) {
       const seedProcesses = applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map(), allowHistoricalStarts: true }, seedProvenance, logicalTime.elapsedDays ?? 0);
-      const seedCapacityIssues = capacityUseIssues({ knowledge }, seedProcesses, seedProcesses, this.context.processTemplates ?? new Map(), this.context.perceptionObservations);
+      const seedCapacityIssues = capacityUseIssues({ knowledge: completeSeed.knowledgeHistory ? undefined : knowledge }, seedProcesses, seedProcesses, this.context.processTemplates ?? new Map(), this.context.perceptionObservations);
       if (seedCapacityIssues.length) throw new Error(seedCapacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
       applyNormDelta(emptyNormState("genesis"), completeSeed.norms, { entities: this.context.entities, templates: this.context.normTemplates ?? new Map(), postState: initialState,
         normativeRuleIds: new Set([...this.context.rules.values()].filter(isNormativeWorldRule).map((rule) => rule.id)) }, seedProvenance);
@@ -587,7 +590,7 @@ export class WorldEngine {
     const effectiveInitialKnowledgeIndexes = knowledge
       ? effectiveKnowledgeOperationIndexes(emptyKnowledgeState("genesis"), knowledge, this.context.acquisitions)
       : [];
-    const knowledgeDeltaHash = knowledge && effectiveInitialKnowledgeIndexes.length
+    const knowledgeDeltaHash = knowledge && (effectiveInitialKnowledgeIndexes.length || completeSeed?.knowledgeHistory && knowledge.operations.length)
       ? await this.objects.putKnowledgeDelta(knowledge)
       : undefined;
     const semanticDeltaHash = completeSeed?.semantics.operations.length ? await this.objects.putSemanticDelta(completeSeed.semantics) : undefined;
@@ -644,11 +647,15 @@ export class WorldEngine {
     for (const eventId of realizesCanonicalEventIds) {
       if (!this.context.events?.has(eventId)) throw new Error(`Genesis realizes unknown canonical event: ${eventId}`);
     }
-    const acquisitionIssues = (knowledge?.operations ?? []).flatMap(operation => validateAcquisitionOperation(operation, acquisitionCatalog(this.context), { knowledge: emptyKnowledgeState("genesis"), currentEventIds: new Set(realizesCanonicalEventIds), realizedEventIds: new Set(realizesCanonicalEventIds) }));
+    if (completeSeed?.knowledgeHistory) {
+      if (genesisOptions.entryActorId && completeSeed.knowledgeHistory.actorId !== genesisOptions.entryActorId) throw new Error("ENTRY_KNOWLEDGE_HISTORY_INVALID: Entry actor does not match historical cut; stop for host review.");
+      replayEntryKnowledge(completeSeed.knowledgeHistory, this.context, realizesCanonicalEventIds, knowledge, "genesis");
+    }
+    const acquisitionIssues = (completeSeed?.knowledgeHistory ? [] : knowledge?.operations ?? []).flatMap(operation => validateAcquisitionOperation(operation, acquisitionCatalog(this.context), { knowledge: emptyKnowledgeState("genesis"), currentEventIds: new Set(realizesCanonicalEventIds), realizedEventIds: new Set(realizesCanonicalEventIds) }));
     if (acquisitionIssues.length) throw new Error(acquisitionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
-    const perceptionIssues = (knowledge?.operations ?? []).flatMap(operation => validatePerceptionAcquisition(operation, { observations: this.context.perceptionObservations ?? new Map(), propositions: this.context.propositions ?? new Map() }, { eventIds: new Set(realizesCanonicalEventIds), before: initialState, after: initialState, schema: this.context.stateSchema }));
+    const perceptionIssues = (completeSeed?.knowledgeHistory ? [] : knowledge?.operations ?? []).flatMap(operation => validatePerceptionAcquisition(operation, { observations: this.context.perceptionObservations ?? new Map(), propositions: this.context.propositions ?? new Map() }, { eventIds: new Set(realizesCanonicalEventIds), before: initialState, after: initialState, schema: this.context.stateSchema }));
     if (perceptionIssues.length) throw new Error(perceptionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
-    const expressionIssues = (knowledge?.operations ?? []).flatMap(operation => validateExpressionAcquisition(operation, this.context.utteranceExpressions ?? new Map(), new Set(realizesCanonicalEventIds), this.context.attributions));
+    const expressionIssues = (completeSeed?.knowledgeHistory ? [] : knowledge?.operations ?? []).flatMap(operation => validateExpressionAcquisition(operation, this.context.utteranceExpressions ?? new Map(), new Set(realizesCanonicalEventIds), this.context.attributions));
     if (expressionIssues.length) throw new Error(expressionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     const evidence: EvidenceRef[] = structuredClone([...initialEvidence]);
     const eventId = contentHash({
@@ -660,6 +667,7 @@ export class WorldEngine {
       realizesCanonicalEventIds,
       evidence,
       entryActorId: genesisOptions.entryActorId,
+      entryKnowledgeHistory: completeSeed?.knowledgeHistory,
       participantPresence,
       actorObservations,
     });
@@ -676,6 +684,7 @@ export class WorldEngine {
       branchId,
       logicalTime,
       title: "Genesis",
+      ...(completeSeed?.knowledgeHistory ? { entryKnowledgeHistory: completeSeed.knowledgeHistory } : {}),
       ...(actorObservations.length ? { actorObservations } : {}),
       participants,
       ...(participantPresence.length ? { participantPresence } : {}),
@@ -1437,6 +1446,7 @@ function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
     entities: [...context.entities.entries()].sort(([left], [right]) => left.localeCompare(right)),
     claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    initialWorld: context.initialWorld ?? null,
     eventExecutions: [...(context.eventExecutions?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     semanticEffects: [...(context.semanticEffects?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     perceptionObservations: [...(context.perceptionObservations?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),

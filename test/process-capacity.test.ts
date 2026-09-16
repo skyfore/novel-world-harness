@@ -75,7 +75,7 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
   sceneBundle.canonical.events = [sceneOnset, attempt];
   sceneBundle.canonical.eventExecutions = [];
   sceneBundle.canonical.semanticEffects = sceneBundle.canonical.semanticEffects!.map(effect => ({ ...effect, validTime: sceneOnset.storyTime }));
-  sceneBundle.canonical.initialWorld.checkpoint = { beforeCanonicalEventId: sceneOnset.id, storyTime: sceneOnset.storyTime } as never;
+  sceneBundle.canonical.initialWorld.checkpoint = { mode: "chronological", rationale: "Fixture starts before the spell", beforeCanonicalEventId: sceneOnset.id, storyTime: sceneOnset.storyTime } as never;
   sceneBundle.canonical.eventParticipations = [{ id: "attempt-agent", eventId: attempt.id, entityId: "patient", role: "agent", evidence: source.evidence(text) }] as never;
   const sceneStart = executeSceneEvent(sceneBundle, sceneOnset);
   expect(Object.keys(sceneStart.beforeProcesses.instances)).toHaveLength(0);

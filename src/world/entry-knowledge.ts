@@ -1,0 +1,43 @@
+import { contentHash } from "./canonical.js";
+import { entryKnowledgeHistorySchema, type EntryKnowledgeHistory, type KnowledgeDelta } from "./model.js";
+import { executeSceneEvent } from "./source-history.js";
+import { applyKnowledgeDelta, type KnowledgeState } from "./knowledge.js";
+import { emptyBranchSemanticState } from "./semantic-effects.js";
+import type { WorldModelContext } from "./engine.js";
+import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
+
+/** A committed entry reference reconstructs experience; serialized receipts are never input. */
+export function replayEntryKnowledge(input: EntryKnowledgeHistory, context: WorldModelContext, realized: readonly string[], expected: KnowledgeDelta | undefined, commitId: string): KnowledgeState {
+  const history = entryKnowledgeHistorySchema.parse(input), opening = context.initialWorld;
+  const stop = (message: string): never => { throw new Error(`ENTRY_KNOWLEDGE_HISTORY_INVALID: ${message}. Preserve head and stop for host source/entry review; do not guess a cut, relabel acquisition or retry unchanged.`); };
+  if (!opening || !context.sourceId) return stop("Frozen opening baseline is missing");
+  if (opening.projectionSeed?.knowledgeHistory) return stop("Recursive opening knowledge history is not supported");
+  const target = context.events?.get(history.beforeCanonicalEventId);
+  if (!target || context.entities.get(history.actorId)?.kind !== "character") return stop("Entry occurrence or character is outside the frozen scope");
+  const checkpoint = target.characterEntryCheckpoints?.find(item => item.actorId === history.actorId);
+  if (!checkpoint?.participantPresence.some(item => item.entityId === history.actorId && item.mode === "physical")) return stop("Entry character has no grounded embodied checkpoint");
+  const bundle = { source: { id: context.sourceId }, canonical: {
+    initialWorld: opening, entities: [...context.entities.values()], events: [...(context.events?.values() ?? [])], rules: [...context.rules.values()],
+    claims: [...(context.claims?.values() ?? [])], propositions: [...(context.propositions?.values() ?? [])], attributions: [...(context.attributions?.values() ?? [])],
+    acquisitions: [...(context.acquisitions?.values() ?? [])], utteranceExpressions: [...(context.utteranceExpressions?.values() ?? [])], perceptionObservations: [...(context.perceptionObservations?.values() ?? [])],
+    semanticEffects: [...(context.semanticEffects?.values() ?? [])], eventExecutions: [...(context.eventExecutions?.values() ?? [])],
+    actionSchemas: [...(context.actionSchemas?.values() ?? [])], actionConstraints: [...(context.actionConstraints?.values() ?? [])],
+    processTemplates: [...(context.processTemplates?.values() ?? [])], normTemplates: [...(context.normTemplates?.values() ?? [])],
+    eventRelations: context.eventRelations ?? [], eventParticipations: context.eventParticipations ?? [], spatialRelations: context.spatialRelations ?? [], goals: context.actorGoals ?? [],
+  } } as unknown as PreparedNovelBundle;
+  const result = executeSceneEvent(bundle, target, undefined, { beforeOnly: true, ignoreCheckpoint: true, sourceEventRevisions: context.sourceEventRevisions });
+  if (result.cut.hash !== history.cutHash || contentHash([...result.cut.completedEventIds].sort()) !== contentHash([...new Set(realized)].sort())) return stop("Entry cut is stale or imports a future/unrealized occurrence");
+  const checkpointKnowledge = checkpoint.projectionSeed?.knowledgeHistory ? undefined : checkpoint.knowledge;
+  const operations = [...(opening.knowledge?.operations ?? []), ...result.cut.replayEventIds.flatMap(id => context.events!.get(id)!.observedKnowledge?.operations ?? []), ...(checkpointKnowledge?.operations ?? [])];
+  if (contentHash({ version: 1, operations }) !== contentHash(expected ?? { version: 1, operations: [] })) return stop("Entry knowledge differs from the exact frozen historical operations");
+  let knowledge = result.beforeKnowledge;
+  if (checkpointKnowledge) knowledge = applyKnowledgeDelta(knowledge, checkpointKnowledge, commitId, {
+    ...context, currentCanonicalEventIds: new Set(), realizedCanonicalEventIds: new Set(result.cut.completedEventIds),
+    branchSemantics: emptyBranchSemanticState(commitId), perceptionOccurrence: { eventIds: new Set(), before: result.before, after: result.before, schema: context.stateSchema },
+  });
+  knowledge = structuredClone(knowledge);
+  knowledge.atCommit = commitId;
+  for (const facts of Object.values(knowledge.actors)) for (const fact of Object.values(facts)) fact.acquiredAtCommit = commitId;
+  for (const receipt of Object.values(knowledge.acquisitions ?? {})) receipt.acquiredAtCommit = commitId;
+  return knowledge;
+}

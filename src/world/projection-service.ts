@@ -1,3 +1,4 @@
+import { replayEntryKnowledge } from "./entry-knowledge.js";
 import { contentHash } from "./canonical.js";
 import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateIncapacityChanges } from "./process-capacity.js";
 import { semanticEffectRealizationIssues } from "./semantic-effect.js";
@@ -298,9 +299,12 @@ export class ProjectionService {
           }
           if (entry.commit.parentCommitId && effects.processDelta) validateIncapacityChanges(event, effects.processDelta, processes, processContext, eventIndex === 0 ? stateBeforeCommit : stateBeforeEffects, state, provenance, onsets);
           const processesAfter = effects.processDelta ? applyProcessDelta(processes, effects.processDelta, { ...processContext, allowHistoricalStarts: !entry.commit.parentCommitId }, provenance, entry.commit.logicalTime.elapsedDays ?? 0) : processes;
-          const capacityIssues = capacityUseIssues({ ...(entry.commit.parentCommitId ? { actorId: event.actorId, spokenUtterances: event.spokenUtterances, action: event.action } : {}), knowledge: effects.knowledgeDelta }, processes, processesAfter, processContext.templates, context.perceptionObservations, context.actionSchemas);
+          const capacityIssues = capacityUseIssues({ ...(entry.commit.parentCommitId ? { actorId: event.actorId, spokenUtterances: event.spokenUtterances, action: event.action } : {}), knowledge: event.entryKnowledgeHistory ? undefined : effects.knowledgeDelta }, processes, processesAfter, processContext.templates, context.perceptionObservations, context.actionSchemas);
           if (capacityIssues.length) throw new Error(capacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
-          if (effects.knowledgeDelta) {
+          if (event.entryKnowledgeHistory) {
+            if (entry.commit.parentCommitId) throw new Error("ENTRY_KNOWLEDGE_HISTORY_INVALID: Historical seed is Genesis-only; stop for history review.");
+            knowledge = replayEntryKnowledge(event.entryKnowledgeHistory, context, event.realizesCanonicalEventIds ?? [], effects.knowledgeDelta, entry.id);
+          } else if (effects.knowledgeDelta) {
             knowledge = applyKnowledgeDelta(knowledge, effects.knowledgeDelta, entry.id, {
               entities: context.entities,
               claims: context.claims,

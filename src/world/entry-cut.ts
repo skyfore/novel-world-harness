@@ -75,7 +75,7 @@ export function deriveEntryCut(input: {
     if (before || ordering === -1) {
       completed.push(event);
       const baselineOrder = compareStoryTime(event.storyTime, baselineTime);
-      if (!input.completeCheckpoint && (baselineOrder === 0 || baselineOrder === 1 || input.baselineEventId && precedes(input.baselineEventId, event.id))) replay.push(event);
+      if (!input.completeCheckpoint && (baselineOrder === 0 || baselineOrder === 1 || input.baselineEventId && (root(input.baselineEventId) === root(event.id) || precedes(input.baselineEventId, event.id)))) replay.push(event);
       else if (!input.completeCheckpoint && baselineOrder === undefined && material(event)) {
         ambiguous.push(event.id); issues.push({ code: "ENTRY_BASELINE_UNKNOWN", message: `Cannot place ${event.id} relative to the opening seed` });
       }

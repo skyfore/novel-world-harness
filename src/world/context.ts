@@ -1,3 +1,4 @@
+import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "./initial.js";
 import { validateAcquisition, type Acquisition } from "./acquisition.js";
 import { validatePerceptionObservation, type PerceptionObservation } from "./perception-observation.js";
 import { validateAttributionExpressions, validateUtteranceExpression, type UtteranceExpression } from "./utterance-expression.js";
@@ -42,6 +43,7 @@ export const canonicalSnapshotSchema = z.object({
   schedulingPolicyVersion: z.enum(["world-pressure-v2", "legality-first-v3", "legal-alternatives-v4", "active-goal-pressure-v5", "host-world-pressure-v6", "effective-norm-scope-v7", "unknown-world-rule-v8", "bounded-rule-time-v9", SCHEDULING_POLICY_VERSION]).optional(),
   sourceId: idSchema.optional(),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  initialWorld: initialWorldSchema.optional(),
   entities: z.array(revisionRefSchema),
   propositions: z.array(revisionRefSchema),
   attributions: z.array(revisionRefSchema),
@@ -70,6 +72,7 @@ export const canonicalSnapshotSchema = z.object({
 export type CanonicalSnapshot = z.infer<typeof canonicalSnapshotSchema>;
 
 export type ScopedWorldArtifacts = {
+  initialWorld?: InitialWorld;
   entities: readonly Entity[];
   propositions: readonly Proposition[];
   attributions: readonly Attribution[];
@@ -99,7 +102,7 @@ export class WorldContextStore {
   readonly root: string;
   private readonly actors: ActorModelStore;
   private readonly possibilities: PossibilityTemplateStore;
-  constructor(workspaceRoot: string, private readonly canon = new CanonicalModelStore(workspaceRoot)) {
+  constructor(private readonly workspaceRoot: string, private readonly canon = new CanonicalModelStore(workspaceRoot)) {
     this.root = path.join(worldStorageRoot(workspaceRoot), "canon", "snapshots");
     this.actors = new ActorModelStore(workspaceRoot);
     this.possibilities = new PossibilityTemplateStore(workspaceRoot);
@@ -129,7 +132,9 @@ export class WorldContextStore {
     ]);
     const belongsToSource = (item: { evidence: readonly { span: { sourceId: string } }[] }) =>
       !sourceId || item.evidence.some((reference) => reference.span.sourceId === sourceId);
+    const initialWorld = await new InitialWorldStore(this.workspaceRoot).get();
     const artifacts: ScopedWorldArtifacts = {
+      ...(initialWorld && belongsToSource(initialWorld) ? { initialWorld } : {}),
       entities: entities.filter(belongsToSource),
       propositions: propositions.filter(belongsToSource),
       attributions: attributions.filter(belongsToSource),
@@ -163,6 +168,7 @@ export class WorldContextStore {
     artifacts: ScopedWorldArtifacts,
   ): Promise<WorldModelContext> {
     if (!/^[a-f0-9]{64}$/.test(preparedRevisionHash)) throw new Error(`Invalid prepared revision hash: ${preparedRevisionHash}`);
+    if (sourceId && artifacts.initialWorld) assertEvidenceExclusiveToSource(artifacts.initialWorld.evidence, sourceId, "Frozen opening baseline");
     assertSemanticEffectProjection(artifacts);
     assertPerceptionObservationProjection(artifacts);
     assertAcquisitionProjection(artifacts);
@@ -206,6 +212,7 @@ export class WorldContextStore {
     preparedRevisionHash?: string,
     refsFromContent = false,
   ): Promise<WorldModelContext> {
+    if (sourceId && artifacts.initialWorld) assertEvidenceExclusiveToSource(artifacts.initialWorld.evidence, sourceId, "Frozen opening baseline");
     assertSemanticEffectProjection(artifacts);
     assertPerceptionObservationProjection(artifacts);
     assertAcquisitionProjection(artifacts);
@@ -262,6 +269,7 @@ export class WorldContextStore {
       schedulingPolicyVersion: SCHEDULING_POLICY_VERSION,
       ...(sourceId ? { sourceId } : {}),
       ...(preparedRevisionHash ? { preparedRevisionHash } : {}),
+      ...(artifacts.initialWorld ? { initialWorld: artifacts.initialWorld } : {}),
       entities: await canonicalRefs("entities", artifacts.entities),
       propositions: await canonicalRefs("propositions", artifacts.propositions),
       attributions: await canonicalRefs("attributions", artifacts.attributions),
@@ -357,6 +365,7 @@ export class WorldContextStore {
     assertAcquisitionProjection({ entities, events, claims, propositions, attributions, utteranceExpressions, perceptionObservations, acquisitions });
     assertUtteranceExpressionProjection({ entities, events, propositions, attributions, utteranceExpressions });
     if (snapshot.sourceId) {
+      if (snapshot.initialWorld) assertEvidenceExclusiveToSource(snapshot.initialWorld.evidence, snapshot.sourceId, "Frozen opening baseline");
       assertArtifactCollectionsExclusiveToSource(snapshot.sourceId, [
         entities,
         propositions,
@@ -405,6 +414,7 @@ export class WorldContextStore {
       canonicalSnapshotHash: snapshotHash,
       ...(snapshot.sourceId ? { sourceId: snapshot.sourceId } : {}),
       ...(snapshot.preparedRevisionHash ? { preparedRevisionHash: snapshot.preparedRevisionHash } : {}),
+      ...(snapshot.initialWorld ? { initialWorld: snapshot.initialWorld } : {}),
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       propositions: new Map(propositions.map((proposition) => [proposition.id, proposition])),
       attributions: new Map(attributions.map((attribution) => [attribution.id, attribution])),

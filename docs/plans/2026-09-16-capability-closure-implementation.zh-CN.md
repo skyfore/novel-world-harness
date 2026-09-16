@@ -10,7 +10,8 @@
 | P1a 独立场景要求的持久约束 | `52f72ee`，requirement ledger、注册/查询命令、canonical 重评、冻结快照/恢复/closure/certification 接线 | 已提交；1038 项测试与类型检查通过 |
 | P1b 逐能力报告与批次尝试 | `fb4c738`，新 reconciliation 计划冻结 ontology/development/driver 项；finish v2 绑定计划与报告；逐要求保留 deferral | 已提交；1040 项测试与类型检查通过 |
 | P1c 归档与快照中的义务保留 | `e9976cf`，当前/历史 finish 统一读取、历史宿主复核、候选认证和恢复前置检查 | 实现完成；1044 项测试与类型检查通过；本记录随该段提交 |
-| P1d 独立角色发展预期 | 版本化原文审阅、稳定/变化/未知、双审冲突保留、认证未知门 | 实现完成；1048 项测试及类型检查通过，尚不代表角色语义结算完成 |
+| P1d 独立角色发展预期 | `db1d006`，版本化原文审阅、稳定/变化/未知、双审冲突保留、认证未知门 | 实现完成；1048 项测试及类型检查通过，尚不代表角色语义结算完成 |
+| P1e 真实入口自主驱动 | 排除玩家的引擎提交探针、冻结事件/效果凭据、认证检查 | 实现完成；1056 项测试及类型检查通过，P1 整体仍未完成 |
 | P1 后续完整结算 | 核心角色的独立要求分母、上述结构性修复要求与统一 ledger/evaluator 的消费连接、跨 reparse 的完整义务恢复 | 未完成；P1 整体仍进行中 |
 | P2–P7 | 受限修复、语义获知、本体、文学/工作集、自主推进、完整体验验收 | 未完成 |
 
@@ -78,3 +79,16 @@ finish identity v2 保存计划 hash 和要求列表，原始 input 冻结子报
 编译流水线版本提升到 35。34 的有效原文编译检查点继续保留，独立角色审阅使用新协议；33 的既有 observation/semantic 迁移规则不变。修订后的回滚回归用明确的历史版本 33，避免相对版本号随升级改变测试含义。
 
 本段最终验证：`pnpm test --maxWorkers=2` 的 181 文件、1048 tests 全部通过（71.08 秒）；`pnpm check` 和 `git diff --check` 通过。回归包含真实角色审阅 finish/recovery、冻结候选及伪造 readiness 拒绝、双审冲突、旧 review 数据未知、外源单元拒绝、流水线迁移与旧回滚保存。未执行真实 provider 或双人体验验收。
+
+
+## P1e：实际入口自主驱动
+
+每个核心角色入口新增 driver 探针。它在任何合成的玩家 consider/wait 之前，从相同 genesis 分别 fork NPC 与 background 分支，使用现有确定性 actor scheduler、frontier、adjudication 和 WorldEngine.commitProposal。NPC 分支排除被扮演角色；后台排除 player-choice、canon-analogue 及 canonicalEventId，不用未来 canon 的成功回放作为驱动证据。模板按来源筛选，已有的到期 process/norm 继续走生产运行时的派生路径。
+
+只有引擎实际提交、且有效进展证书非空的事件才作为凭据。空 goal、玩家自己的 goal、条件未满足、死亡角色、重复写相同值都不通过。两个分支独立起于原入口，前一个失败/无进展尝试不能改变后一个的检查起点。探针最多考察 32 个 actor candidates 和一个后台提交，在 current-window 内运行；未找到返回 unproven，不声称穷尽所有未来或模型推理可能性。它没有模型预算，也不代替 P6 的真实模型自主推进。
+
+冻结结果包含入口 scope、head、事件正文、所有引用的 state/knowledge/semantic/process/norm 效果正文。临时工作区删除后仍可检查内容 hash、进展指针和来源；domain-module 到期事件使用已在该入口实例化的 process/norm 和冻结模板版本，不伪造小说 EvidenceRefs。认证从冻结输入重新计算角色 cut，核对凭据身份和内容；旧六项探针缺 driver 必须重新评估。此凭据是生产引擎内部 operability 的审计记录，不是独立来源语义召回或真人体验证书。
+
+尚未完成的 P1 项保持不变：把角色 ontology/development/driver 的独立定义、尝试与实际结果统一接入持久 requirement ledger，以及历史角色审阅的保留式修订。P2–P7 仍未完成。
+
+本段验证：`pnpm test --maxWorkers=2` 的 181 文件、1056 tests 全部通过（72.61 秒）；`pnpm check` 和 `git diff --check` 通过。9 项入口测试覆盖 NPC/环境/到期 process 的实际提交，以及静态目标、玩家行动、未满足条件、死亡 NPC、同值写入、未来 canon、坏效果 hash/进展指针和过期 cut。未调用真实模型，未进行 P7 人工体验验收。

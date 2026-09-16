@@ -12,6 +12,7 @@ import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, validationIssueSchema } fro
 import { worldStorageRoot } from "../world/paths.js";
 import { buildPreparedClosure, closureGraphSchema } from "./closure.js";
 import { buildRoleRoster, majorRoleCandidates, roleRosterSchema, validateRoleRoster, validateRoleDevelopmentExpectations } from "./role-roster.js";
+import { entryDriverWitnessIssues } from "./entry-driver-probe.js";
 import { playabilityManifestSchema, probeMajorRoleEntries } from "./playability.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { NovelPlayQualityStore, novelPlayQualitySchema, validateNovelPlayQuality } from "../eval/novel-play-quality.js";
@@ -101,6 +102,14 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
   if (contentHash(buildSceneExecutionContracts(bundle, assessment.roster).contracts) !== contentHash(assessment.sceneContracts)) issues.push("SCENE_CONTRACT_STALE: scene execution inputs changed");
   if (contentHash(assessSemanticSupport(bundle, assessment.quality?.supportReviews).assessments) !== contentHash(assessment.supportAssessments)) issues.push("SUPPORT_ASSESSMENT_STALE: support review inputs changed");
   if (assessment.playability && (assessment.playability.subjectSnapshotHash !== assessment.subjectSnapshotHash || assessment.playability.rosterHash !== contentHash(assessment.roster))) issues.push("MAJOR_ROLE_ROSTER_MISMATCH: entry probes refer to another source or roster");
+  for (const role of assessment.playability?.roles ?? []) {
+    if (!role.actorId) { issues.push(`ENTRY_DRIVER_NOT_EVALUATED: ${role.candidateId}`); continue; }
+    try {
+      const cut = deriveCharacterEntrySeed(bundle, role.actorId).cut;
+      issues.push(...entryDriverWitnessIssues(role.driverWitness, { sourceId: bundle.source.id,
+        subjectSnapshotHash: assessment.subjectSnapshotHash, entryCutHash: cut.hash, actorId: role.actorId }));
+    } catch (error) { issues.push(`ENTRY_DRIVER_CUT_INVALID: ${role.candidateId}: ${String(error)}`); }
+  }
   return issues;
 }
 
@@ -128,12 +137,12 @@ export function assertPreparedReadiness(bundle: PreparedNovelBundle): void {
         try {
           if (role.entryCutHash !== deriveCharacterEntrySeed(bundle, candidate.entityId).cut.hash) issues.push(`ENTRY_CUT_STALE: ${candidate.id}`);
         } catch (error) { issues.push(`MAJOR_ROLE_ENTRY_BLOCKED: ${String(error)}`); }
-        if (canonicalJson(role.probes.map((probe) => probe.kind).sort()) !== canonicalJson(["decision", "fork", "genesis", "intent", "resume", "wait"])) issues.push(`MAJOR_ROLE_PROBES_INCOMPLETE: ${candidate.id}`);
+        if (canonicalJson(role.probes.map((probe) => probe.kind).sort()) !== canonicalJson(["decision", "driver", "fork", "genesis", "intent", "resume", "wait"])) issues.push(`MAJOR_ROLE_PROBES_INCOMPLETE: ${candidate.id}`);
       }
       issues.push(...assessment.playability.issues.map((issue) => `${issue.code}: ${issue.message}`));
     }
   }
-  if (assessment.playability && (assessment.playability.majorTotal === 0 || assessment.playability.majorTotal !== assessment.playability.readyTotal || assessment.playability.roles.some((role) => role.status !== "ready" || !role.actorId || !role.entryCutHash || role.issues.length || role.probes.length !== 6 || role.probes.some((probe) => !probe.passed)))) issues.push("MAJOR_ROLE_NOT_CERTIFIED: role probe results are incomplete");
+  if (assessment.playability && (assessment.playability.majorTotal === 0 || assessment.playability.majorTotal !== assessment.playability.readyTotal || assessment.playability.roles.some((role) => role.status !== "ready" || !role.actorId || !role.entryCutHash || role.issues.length || role.probes.length !== 7 || role.probes.some((probe) => !probe.passed)))) issues.push("MAJOR_ROLE_NOT_CERTIFIED: role probe results are incomplete");
   if (issues.length) throw new Error(`WORLD_CLOSURE_BLOCKED: ${[...new Set(issues)].join("; ")}`);
 }
 

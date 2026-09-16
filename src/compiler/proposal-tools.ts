@@ -3144,7 +3144,7 @@ export function createCompilerProposalToolset(
       const finishSource = activeSourceId ? await WorkspaceStore.openReadOnly(workspaceRoot).getSource(activeSourceId) : undefined;
       const receipt = receipts && finishSource && compilerBatchId ? await receipts.prepare({
         version: reviewScope?.requirements ? 2 : 1, sourceId: finishSource.id, sourceSha256: finishSource.contentSha256, batchId: compilerBatchId,
-        ...(reviewScope?.requirements ? { requirementScope: { planHash: reviewScope.planHash!, requirements: reviewScope.requirements } } : {}),
+        ...(reviewScope?.requirements ? { requirementScope: { planHash: reviewScope.planHash!, requirements: reviewScope.requirements, ...(reviewScope.coreRoleScope !== undefined ? { coreRoleScope: reviewScope.coreRoleScope } : {}) } } : {}),
         input, segments: validatedSourceSegments,
         dependencies: await receipts.dependencies({ world: listed, annotation: listedAnnotations,
           "entity-resolution": listedEntityResolutions, "event-resolution": listedEventResolutions, accounting: listedAccounting }),

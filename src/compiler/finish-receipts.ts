@@ -1,3 +1,4 @@
+import { coreRoleAttemptSchema, coreRoleAttemptScopeSchema, coreRoleAttemptReports, linkCoreRoleAttemptProposals, coreRoleAttemptScope } from "./requirement-attempts.js";
 import { reconciliationTargetReviewSchema, reconciliationRequirementSchema } from "./reconciliation-review.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
@@ -30,10 +31,22 @@ const dependencySchema = z.object({ store: z.enum(["world", "annotation", "entit
 type Dependency = z.infer<typeof dependencySchema>;
 const identitySchema = z.object({
   version: z.union([z.literal(1), z.literal(2)]), pipelineVersion: z.number().int().positive(), sourceId: idSchema, sourceSha256: hashSchema, batchId: idSchema,
-  requirementScope: z.object({ planHash: hashSchema, requirements: z.array(reconciliationRequirementSchema) }).strict().optional(),
+  requirementScope: z.object({ planHash: hashSchema, requirements: z.array(reconciliationRequirementSchema), coreRoleScope: coreRoleAttemptScopeSchema.nullable().optional() }).strict().optional(),
+  requirementAttempts: z.array(coreRoleAttemptSchema).optional(),
   input: compilerFinishInputSchema, segments: z.array(sourceSegmentSchema), dependencies: z.array(dependencySchema),
   metadata: z.object({ title: sourceTitleProposalSchema.optional(), chapterSplit: chapterSplitPlanSchema.optional(), roleReview: roleRosterReviewSchema.optional() }).strict(),
 }).strict().superRefine((identity, ctx) => {
+  const scope = identity.requirementScope?.coreRoleScope;
+  if (Boolean(scope) !== Boolean(identity.requirementAttempts)) ctx.addIssue({ code: "custom", message: "Finish independent attempts/scope mismatch" });
+  if (scope && identity.requirementAttempts) {
+    const expected = coreRoleAttemptReports({ batchId: identity.batchId, scope, requirements: identity.requirementScope!.requirements, reviews: identity.input.target_reviews ?? [] });
+    if (contentHash(expected) !== contentHash(identity.requirementAttempts.map(attempt => ({ ...attempt, proposalRefs: [] })))) ctx.addIssue({ code: "custom", message: "Finish attempt reports differ from independent scope" });
+    for (const attempt of identity.requirementAttempts) {
+      if (attempt.modelOutcome === "proposed" && !attempt.proposalRefs.length) ctx.addIssue({ code: "custom", message: "Proposed attempt has no proposal dependency" });
+      if (new Set(attempt.proposalRefs.map(ref => ref.proposalId)).size !== attempt.proposalRefs.length || attempt.proposalRefs.some(ref => ref.store !== "world" || !identity.dependencies.some(dependency => contentHash(dependency) === contentHash(ref)))) ctx.addIssue({ code: "custom", message: "Attempt proposal escapes frozen dependencies" });
+      if (attempt.evidenceRefs.some(ref => !identity.segments.some(segment => ref === `source-segment:${segment.id}`))) ctx.addIssue({ code: "custom", message: "Attempt evidence escapes frozen source segments" });
+    }
+  }
   if ((identity.version === 2) !== Boolean(identity.requirementScope)) ctx.addIssue({ code: "custom", message: "Finish requirement scope/version mismatch" });
 });
 export const compilerFinishReceiptSchema = z.object({
@@ -44,7 +57,7 @@ export const compilerFinishReceiptSchema = z.object({
   if ((receipt.state === "completed") !== Boolean(receipt.completedAt)) ctx.addIssue({ code: "custom", message: "finish completion timestamp mismatch" });
 });
 export type CompilerFinishReceipt = z.infer<typeof compilerFinishReceiptSchema>;
-export type CompilerFinishIdentity = Omit<z.infer<typeof identitySchema>, "pipelineVersion">;
+export type CompilerFinishIdentity = Omit<z.infer<typeof identitySchema>, "pipelineVersion" | "requirementAttempts">;
 const archivedFinishSchema = z.object({ receipt: compilerFinishReceiptSchema, reason: z.string().trim().min(1), archivedAt: z.string().datetime() }).strict();
 
 export function finishHostError(reason: string): Error {
@@ -100,7 +113,13 @@ export class CompilerFinishReceipts {
       if (identity.requirementScope) {
         const { reconciliationReviewScope } = await import("./reconcile-world.js");
         const current = await reconciliationReviewScope(this.root, this.sourceId, this.batchId);
-        if (current?.planHash !== identity.requirementScope.planHash || contentHash(current.requirements) !== contentHash(identity.requirementScope.requirements)) throw new Error("finish requirement definition or plan changed");
+        if (current?.planHash !== identity.requirementScope.planHash || contentHash(current.requirements) !== contentHash(identity.requirementScope.requirements) || contentHash(current.coreRoleScope ?? null) !== contentHash(identity.requirementScope.coreRoleScope ?? null)) throw new Error("finish requirement definition or plan changed");
+      }
+      if (identity.requirementScope?.coreRoleScope) {
+        const { RequirementLedger } = await import("./requirement-ledger.js");
+        const definition = (await new RequirementLedger(this.root, this.sourceId).coreRoleDefinitionHistory()).at(-1);
+        if (!definition || definition.sourceSha256 !== identity.sourceSha256 || contentHash(coreRoleAttemptScope(definition)) !== contentHash(identity.requirementScope.coreRoleScope)) throw new Error("independent requirement revision changed; preserve this attempt and stop model retries");
+        if (contentHash(await this.attempts(identity)) !== contentHash(identity.requirementAttempts)) throw new Error("finish attempt proposal links changed");
       }
       const source = await WorkspaceStore.openReadOnly(this.root).getSource(this.sourceId);
       if (source?.contentSha256 !== identity.sourceSha256) throw new Error("finish source changed");
@@ -112,8 +131,20 @@ export class CompilerFinishReceipts {
       for (const dependency of identity.dependencies) if (contentHash(await this.readDependency(dependency.store, dependency.proposalId)) !== dependency.hash) throw new Error(`finish dependency ${dependency.store}:${dependency.proposalId} changed`);
     } catch (error) { throw finishHostError(String(error)); }
   }
+  private async attempts(identity: CompilerFinishIdentity) {
+    const scope = identity.requirementScope!.coreRoleScope!;
+    const reports = coreRoleAttemptReports({ batchId: identity.batchId, scope, requirements: identity.requirementScope!.requirements, reviews: identity.input.target_reviews ?? [] });
+    const proposals = [];
+    for (const ref of identity.dependencies.filter(dependency => dependency.store === "world")) {
+      const envelope = await this.readDependency(ref.store, ref.proposalId) as { kind: string; payload: Record<string, unknown> };
+      proposals.push({ ref, kind: envelope.kind, payload: envelope.payload });
+    }
+    return linkCoreRoleAttemptProposals(reports, identity.requirementScope!.requirements, proposals);
+  }
   async prepare(identityInput: CompilerFinishIdentity) {
-    const identity = identitySchema.parse({ ...identityInput, pipelineVersion: COMPILER_PIPELINE_VERSION }), fingerprint = contentHash(identity);
+    const identity = identitySchema.parse({ ...identityInput, pipelineVersion: COMPILER_PIPELINE_VERSION,
+      ...(identityInput.requirementScope?.coreRoleScope ? { requirementAttempts: await this.attempts(identityInput) } : {}),
+    }), fingerprint = contentHash(identity);
     const existing = await this.read();
     if (existing && existing.fingerprint !== fingerprint) throw finishHostError("original finish input, metadata or proposal set changed");
     const receipt = existing ?? compilerFinishReceiptSchema.parse({ identity, fingerprint, state: "prepared", preparedAt: new Date().toISOString() });
@@ -125,12 +156,22 @@ export class CompilerFinishReceipts {
     const receipt = await this.read();
     if (!receipt || receipt.fingerprint !== fingerprint) throw finishHostError("completion has no matching prepared intent");
     await this.verify(receipt);
-    if (receipt.state !== "completed") await this.write({ ...receipt, state: "completed", completedAt: new Date().toISOString() });
+    const completed = receipt.state === "completed" ? receipt : { ...receipt, state: "completed" as const, completedAt: new Date().toISOString() };
+    if (receipt.state !== "completed") await this.write(completed);
+    await this.retainRequirementAttempts(completed);
   }
   async assertCompleted() {
     const receipt = await this.read();
     if (receipt?.state !== "completed") throw finishHostError("checkpoint requires a completed durable finish receipt");
     await this.verify(receipt);
+    await this.retainRequirementAttempts(receipt);
+  }
+  async retainRequirementAttempts(receipt: CompilerFinishReceipt) {
+    if (!receipt.identity.requirementAttempts) return;
+    try {
+      const { RequirementLedger } = await import("./requirement-ledger.js");
+      await new RequirementLedger(this.root, this.sourceId).recordCoreRoleAttempts(receipt);
+    } catch (error) { throw finishHostError(String(error)); }
   }
   /** Explicit reparse/restore retirement retains the original intent and reason. */
   async archive(reason: string) {

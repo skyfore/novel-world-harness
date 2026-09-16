@@ -1,3 +1,4 @@
+import { CompilerFinishReceipts } from "./finish-receipts.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
 import { CanonicalModelStore } from "../world/canonical-model.js";
@@ -21,6 +22,11 @@ export async function requirementInputs(root: string, sourceId: string) {
 /** Canonical-only: pending drafts may diagnose, never settle an obligation. */
 export async function settleSourceRequirements(root: string, sourceId: string) {
   const ledger = new RequirementLedger(root, sourceId), sets = await ledger.definitions();
+  // Recover an interrupted post-finish append from immutable receipts only.
+  // Archived work remains historical; this never replays proposals or settles it.
+  for (const { receipt } of await CompilerFinishReceipts.listRetained(root, sourceId)) {
+    if (receipt.state === "completed" && receipt.identity.requirementAttempts) await ledger.recordCoreRoleAttempts(receipt);
+  }
   if (!sets.length) return { sets, results: [], issues: [] };
   const { bytes, catalog, source } = await requirementInputs(root, sourceId);
   if (sets.some(set => set.spec.sourceSha256 !== source.contentSha256)) throw new Error("Requirement source revision changed; stop for host source review.");

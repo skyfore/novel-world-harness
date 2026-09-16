@@ -1,3 +1,5 @@
+import { compilerFinishReceiptSchema, type CompilerFinishReceipt } from "./finish-receipts.js";
+import { coreRoleAttemptScope } from "./requirement-attempts.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -32,6 +34,7 @@ export const requirementResultSchema = z.object({
 }).strict();
 export type RequirementResult = z.infer<typeof requirementResultSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("core-role-attempt"), receipt: compilerFinishReceiptSchema }).strict(),
   z.object({ kind: z.literal("definition"), definition: requirementSetSchema }).strict(),
   z.object({ kind: z.literal("evaluation"), result: requirementResultSchema }).strict(),
   z.object({ kind: z.literal("core-role-definition"), definition: coreRoleRequirementDefinitionSchema }).strict(),
@@ -163,6 +166,8 @@ export class RequirementLedger {
         if (record.payload.definition.sourceId !== this.sourceId) throw new Error("Core role definition escapes its source; stop for host review.");
         coreHistory.push(record.payload.definition);
         coreRoleRequirementHistorySchema.parse(coreHistory);
+      } else if (record.payload.kind === "core-role-attempt") {
+        assertCoreRoleAttemptDefinition(record.payload.receipt, coreHistory, this.sourceId);
       } else {
         const active = coreHistory.at(-1);
         if (!active || record.payload.definitionRevision !== active.revisionHash || record.payload.result.setId !== "core-roles" || record.payload.result.revisionHash !== active.specHash) throw new Error("Core role evaluation has no active definition; stop for host review.");
@@ -201,6 +206,21 @@ export class RequirementLedger {
     assertCoreRoleDefinitionEvidence(definition, bytes);
     await this.publish({ kind: "core-role-definition", definition });
     return definition;
+  }
+  async assertCoreRoleAttemptsRestorable(receipts: readonly CompilerFinishReceipt[], definitions: readonly CoreRoleRequirementDefinition[]): Promise<void> {
+    const attempts = receipts.filter(receipt => receipt.state === "completed" && receipt.identity.requirementAttempts);
+    for (const receipt of attempts) assertCoreRoleAttemptDefinition(compilerFinishReceiptSchema.parse(receipt), definitions, this.sourceId);
+    for (const record of await this.history()) {
+      const payload = record.payload;
+      if (payload.kind === "core-role-attempt" && !attempts.some(receipt => receipt.fingerprint === payload.receipt.fingerprint)) throw new Error("Core role restore would forget a repair attempt; preserve its receipt and stop for host review");
+    }
+  }
+  async recordCoreRoleAttempts(input: CompilerFinishReceipt): Promise<void> {
+    const receipt = compilerFinishReceiptSchema.parse(input);
+    assertCoreRoleAttemptDefinition(receipt, await this.coreRoleDefinitionHistory(), this.sourceId);
+    const history = await this.history();
+    if (history.some(record => record.payload.kind === "core-role-attempt" && record.payload.receipt.fingerprint === receipt.fingerprint)) return;
+    await this.publish({ kind: "core-role-attempt", receipt });
   }
   async recordCoreRoleEvaluation(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): Promise<void> {
     const definition = (await this.coreRoleDefinitionHistory()).at(-1);
@@ -292,4 +312,22 @@ export class RequirementLedger {
       await this.publish({ kind: "definition", definition: set });
     }
   }
+}
+
+export function assertCoreRoleAttemptDefinition(receipt: CompilerFinishReceipt, history: readonly CoreRoleRequirementDefinition[], sourceId: string): void {
+  const scope = receipt.identity.requirementScope?.coreRoleScope;
+  const definition = history.find(item => item.revisionHash === scope?.definitionRevision);
+  if (receipt.state !== "completed" || !scope || !receipt.identity.requirementAttempts || !definition
+    || receipt.identity.sourceId !== sourceId || receipt.identity.sourceSha256 !== definition.sourceSha256
+    || contentHash(scope) !== contentHash(coreRoleAttemptScope(definition))) throw new Error("Core role attempt lacks its completed receipt and retained independent definition; preserve history and stop model retries");
+}
+
+export function coreRoleAttemptHistoryIssues(receipts: readonly CompilerFinishReceipt[], definitions: readonly CoreRoleRequirementDefinition[], sourceId: string): string[] {
+  const issues: string[] = [];
+  for (const receipt of receipts) {
+    if (receipt.state !== "completed" || !receipt.identity.requirementAttempts) continue;
+    try { assertCoreRoleAttemptDefinition(receipt, definitions, sourceId); }
+    catch { issues.push(`CORE_ROLE_ATTEMPT_DEFINITION_MISMATCH: ${receipt.fingerprint}`); }
+  }
+  return issues;
 }

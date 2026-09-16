@@ -39,6 +39,7 @@ export async function recoverCompilerFinish(root: string, sourceId: string, batc
             throw new Error(`accepted finish artifact ${envelope.id} is missing or has changed`);
           }
         }
+        await store.retainRequirementAttempts(receipt);
         return true;
       } catch (error) { throw finishHostError(String(error)); }
     }

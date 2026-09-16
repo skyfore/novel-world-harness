@@ -1,3 +1,5 @@
+import { RequirementLedger } from "./requirement-ledger.js";
+import { coreRoleAttemptScope, coreRoleAttemptScopeSchema, type CoreRoleAttemptScope } from "./requirement-attempts.js";
 import { selectOpeningDriverActor } from "./opening-driver.js";
 import { reconciliationRequirementSchema, type ReconciliationRequirement } from "./reconciliation-review.js";
 import { readKnowledgeRepairPlan, isKnowledgeRepairBatch } from "./knowledge-repair.js";
@@ -42,7 +44,8 @@ const RECONCILIATION_RESERVED_CALLS = 7;
 export type WorldReconciliationMode = "bounded" | "reparse-finalization" | "graph-adjudication";
 
 const reconciliationPlanSchema = z.object({
-  version: z.union([z.literal(2), z.literal(3)]),
+  version: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+  coreRoleScope: coreRoleAttemptScopeSchema.nullable().optional(),
   requirements: z.array(reconciliationRequirementSchema).optional(),
   sourceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
   mode: z.enum(["bounded", "reparse-finalization", "graph-adjudication"]),
@@ -56,12 +59,13 @@ const reconciliationPlanSchema = z.object({
   focus: z.literal("opening-driver").optional(),
   createdAt: z.string().datetime(),
 }).strict().superRefine((plan, ctx) => {
-  if (plan.version === 3 && !plan.requirements) ctx.addIssue({ code: "custom", message: "Version 3 requires frozen capability requirements" });
+  if (plan.version >= 3 && !plan.requirements) ctx.addIssue({ code: "custom", message: "Version 3+ requires frozen capability requirements" });
+  if (plan.version === 4 && plan.coreRoleScope === undefined) ctx.addIssue({ code: "custom", message: "Version 4 requires explicit independent scope" });
   const requirements = plan.requirements ?? [];
   const targets = [...plan.eventIds.map(id => `event:${id}`), ...plan.actorIds.map(id => `character:${id}`), ...(plan.includeInitialWorld ? ["initial-world:singleton"] : [])];
   if (new Set(requirements.map(item => item.id)).size !== requirements.length) ctx.addIssue({ code: "custom", message: "Duplicate reconciliation requirement" });
   for (const item of requirements) if (!targets.includes(item.target) || item.id !== `${item.target}:${item.capability}`) ctx.addIssue({ code: "custom", message: "Invalid reconciliation requirement identity or scope" });
-  if (plan.version === 3 && plan.mode !== "graph-adjudication" && targets.some(target => !requirements.some(item => item.target === target))) ctx.addIssue({ code: "custom", message: "Every target requires at least one frozen requirement" });
+  if (plan.version >= 3 && plan.mode !== "graph-adjudication" && targets.some(target => !requirements.some(item => item.target === target))) ctx.addIssue({ code: "custom", message: "Every target requires at least one frozen requirement" });
 });
 type ReconciliationPlan = z.infer<typeof reconciliationPlanSchema>;
 
@@ -118,7 +122,7 @@ export async function hasWorldReconciliationTargets(
 }
 
 /** Old immutable receipts remain readable; only new plans require target reports. */
-export async function reconciliationReviewScope(root: string, sourceId: string, batchId: string): Promise<{ targets: string[]; planHash?: string; requirements?: ReconciliationRequirement[] } | undefined> {
+export async function reconciliationReviewScope(root: string, sourceId: string, batchId: string): Promise<{ targets: string[]; planHash?: string; requirements?: ReconciliationRequirement[]; coreRoleScope?: CoreRoleAttemptScope | null } | undefined> {
   const knowledgePlan = await readKnowledgeRepairPlan(root, sourceId, batchId);
   if (knowledgePlan) return { targets: knowledgePlan.events.map(event => `event:${event.id}`) };
   const mode = batchId.startsWith(`reconcile-${sourceId}-bounded-`) ? "bounded"
@@ -142,7 +146,7 @@ export async function reconciliationReviewScope(root: string, sourceId: string, 
     ...plan.actorIds.slice((iteration - 1) * actorSize, iteration * actorSize).map(id => `character:${id}`),
     ...(iteration === 1 && plan.includeInitialWorld ? ["initial-world:singleton"] : []),
   ];
-  return { targets, ...(plan.requirements ? { planHash: contentHash(plan), requirements: plan.requirements.filter(item => targets.includes(item.target)) } : {}) };
+  return { targets, ...(plan.coreRoleScope !== undefined ? { coreRoleScope: plan.coreRoleScope } : {}), ...(plan.requirements ? { planHash: contentHash(plan), requirements: plan.requirements.filter(item => targets.includes(item.target)) } : {}) };
 }
 
 export async function reconciliationReviewTargets(root: string, sourceId: string, batchId: string): Promise<string[] | undefined> {
@@ -703,9 +707,11 @@ export async function buildWorldReconciliationPrompt(
       if (!requirements.some(item => item.target === target)) addRequirement(target, "ontology");
     }
   }
+  const independentDefinition = createPlan ? (await new RequirementLedger(workspaceRoot, sourceId).coreRoleDefinitionHistory()).at(-1) : undefined;
   const plan = createPlan
     ? reconciliationPlanSchema.parse({
-        version: 3,
+        version: 4,
+        coreRoleScope: independentDefinition ? coreRoleAttemptScope(independentDefinition) : null,
         requirements,
         sourceId,
         mode,
@@ -720,6 +726,10 @@ export async function buildWorldReconciliationPrompt(
         createdAt: new Date().toISOString(),
       })
     : await readReconciliationPlan(workspaceRoot, sourceId, mode, namespace);
+  if (plan.coreRoleScope) {
+    const currentDefinition = (await new RequirementLedger(workspaceRoot, sourceId).coreRoleDefinitionHistory()).at(-1);
+    if (!currentDefinition || contentHash(coreRoleAttemptScope(currentDefinition)) !== contentHash(plan.coreRoleScope)) throw new Error("Reconciliation independent requirement revision changed. Preserve the plan and attempts; stop model retries for host replanning, never reset the ledger.");
+  }
   if (plan.focus !== options.focus) throw new Error("Reconciliation focus mismatch; preserve the original plan and stop for host review.");
   if (createPlan) await writeReconciliationPlan(workspaceRoot, plan);
   const attemptToken = contentHash({ sourceId, mode, createdAt: plan.createdAt }).slice(0, 12);
@@ -798,6 +808,7 @@ export async function buildWorldReconciliationPrompt(
       requireAutonomousDriver: plan.requireAutonomousDriver,
       targetCount: repairTargetCount,
       targetReviewRequired: plan.targetReviewRequired ?? false,
+      ...(plan.coreRoleScope !== undefined ? { coreRoleScope: plan.coreRoleScope } : {}),
       reviewTargets: [...weakEvents.map(({ event }) => `event:${event.id}`), ...weakActors.map(({ actor }) => `character:${actor.id}`), ...(includeInitialWorld ? ["initial-world:singleton"] : [])],
       ...(plan.requirements ? { requirements: plan.requirements.filter(item => weakEvents.some(({ event }) => item.target === `event:${event.id}`) || weakActors.some(({ actor }) => item.target === `character:${actor.id}`) || (includeInitialWorld && item.target === "initial-world:singleton")) } : {}),
       eventTargetOffset: weakEventOffset,

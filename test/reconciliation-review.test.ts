@@ -1,23 +1,29 @@
+import { RequirementLedger, coreRoleAttemptHistoryIssues } from "../src/compiler/requirement-ledger.js";
+import { buildRoleRoster } from "../src/compiler/role-roster.js";
+import { baseStructuralUnits, ensureSourceStructure } from "../src/compiler/structure.js";
+import { coreRoleAttemptScope } from "../src/compiler/requirement-attempts.js";
+import { recoverCompilerFinish } from "../src/compiler/finish-recovery.js";
+import { settleSourceRequirements } from "../src/compiler/requirement-service.js";
 import { assertReconciliationDeferralsReviewed, reviewReconciliationDeferrals } from "../src/compiler/reconciliation-review-ledger.js";
 import { ActorModelStore } from "../src/world/actors.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { reconciliationReviewIssues, reconciliationAuditResults, reconciliationDeferredRequirementIds } from "../src/compiler/reconciliation-review.js";
 import { buildWorldReconciliationPrompt, reconciliationReviewTargets } from "../src/compiler/reconcile-world.js";
 import { auditCompiler } from "../src/compiler/audit.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
-import { CompilerFinishReceipts } from "../src/compiler/finish-receipts.js";
+import { CompilerFinishReceipts, compilerFinishReceiptSchema } from "../src/compiler/finish-receipts.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { writeKnowledgeRepairPlan } from "../src/compiler/knowledge-repair.js";
 import { worldStorageRoot } from "../src/world/paths.js";
 import { contentHash } from "../src/world/canonical.js";
 
 const roots: string[] = [];
-afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 const review = { target: "event:arrival", disposition: "proposed" as const, evidence_segment_ids: ["segment"], summary: "Time repaired; effect remains unsupported." };
 it("does not let a goal proposal account for ontology or hide partial repair in a summary", () => {
   const target = "character:hero", requirements = [
@@ -124,6 +130,14 @@ it("freezes capability-level partial success through finish, restart, plan reuse
   await new ActorModelStore(root).putModel({ actorId: "hero", traits: {}, decisionBiases: {}, evidence: fixture.evidence("Hero") });
   const audit = await auditCompiler(root, { sourceId: fixture.source.id });
   const request = { ...audit, coverage: { ...audit.coverage, autonomousDriverCoverage: 0 as const }, semanticRepairTargets: { ...audit.semanticRepairTargets, characterIds: ["hero"] } };
+  const structure = await ensureSourceStructure(root, fixture.source);
+  const roster = buildRoleRoster({ sourceId: fixture.source.id, sourceSha256: fixture.source.contentSha256, unitIds: structure.baseUnitIds, entities: await canon.listEntities(), annotations: [], resolutions: [] });
+  roster.reviews = ["one", "two"].map(runId => ({ version: 2, runId, subjectHash: roster.subjectHash, reviewedUnitIds: roster.unitIds,
+    entries: roster.candidates.map(candidate => ({ candidateId: candidate.id, importance: "major", rationale: "Independent source review", basisUnitIds: roster.unitIds,
+      developmentExpectation: { kind: "stable", rationale: "The short source supports stability", basisUnitIds: roster.unitIds } })),
+  }));
+  const ledger = new RequirementLedger(root, fixture.source.id);
+  const definition = await ledger.registerCoreRoles({ roster, units: baseStructuralUnits(structure), scopeDecisionRef: "two-independent-reviews", scopeChangeReason: "Initial source scope" }, Buffer.from("Hero arrives. Hero waits for a signal."));
   const namespace = "partial";
   const prompt = await buildWorldReconciliationPrompt(root, fixture.source.id, request, 1, { proposalIdSuffixTail: namespace });
   const context = JSON.parse(prompt.match(/<reconciliation-context>\n([\s\S]+)\n<\/reconciliation-context>/u)![1]!);
@@ -137,9 +151,36 @@ it("freezes capability-level partial success through finish, restart, plan reuse
     requirement_reviews: context.repairPlan.requirements.filter((item: { target: string }) => item.target === target).map((item: { id: string }) => ({ requirementId: item.id, disposition: "capability-gap" as const, summary: "No supported migration or executable driver yet" })),
   }));
   const input = { outcome: "complete", reviewed_segments: [], summary: "Partial repair", target_reviews: reports };
-  await call("finish_compiler_batch", input);
+  const append = vi.spyOn(RequirementLedger.prototype, "recordCoreRoleAttempts").mockRejectedValueOnce(new Error("simulated attempt publication failure"));
+  await expect(call("finish_compiler_batch", input)).rejects.toThrow("simulated attempt publication failure");
+  expect((await new CompilerFinishReceipts(root, fixture.source.id, batchId).read())?.state).toBe("completed");
+  expect((await ledger.history()).filter(item => item.payload.kind === "core-role-attempt")).toHaveLength(0);
+  expect(await recoverCompilerFinish(root, fixture.source.id, batchId)).toBe(true);
+  append.mockRestore();
   const receipts = new CompilerFinishReceipts(root, fixture.source.id, batchId), receipt = (await receipts.read())!;
   expect(receipt.identity.requirementScope?.requirements).toEqual(context.repairPlan.requirements);
+  expect(receipt.identity.requirementScope?.coreRoleScope).toEqual(coreRoleAttemptScope(definition));
+  const attempts = receipt.identity.requirementAttempts!;
+  expect(attempts.map(item => item.requirementId).sort()).toEqual([`${roster.candidates[0]!.id}:ontology`, `${roster.candidates[0]!.id}:opening-driver`].sort());
+  expect(attempts.every(item => item.modelOutcome === "capability-gap" && item.proposalRefs.length === 0 && item.definitionRevision === definition.revisionHash)).toBe(true);
+  const forged = structuredClone(receipt);
+  forged.identity.requirementAttempts![0]!.definitionHash = "0".repeat(64);
+  forged.fingerprint = contentHash(forged.identity);
+  expect(() => compilerFinishReceiptSchema.parse(forged)).toThrow("differ from independent scope");
+  expect(coreRoleAttemptHistoryIssues([receipt], [], fixture.source.id)).toContain(`CORE_ROLE_ATTEMPT_DEFINITION_MISMATCH: ${receipt.fingerprint}`);
+  expect(coreRoleAttemptHistoryIssues([receipt], [definition], fixture.source.id)).toEqual([]);
+  const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-attempt-restore-")); roots.push(cloneRoot);
+  const clonedLedger = new RequirementLedger(cloneRoot, fixture.source.id);
+  await clonedLedger.restoreCoreRoles([definition], Buffer.from("Hero arrives. Hero waits for a signal."));
+  await clonedLedger.recordCoreRoleAttempts(receipt);
+  await clonedLedger.recordCoreRoleAttempts(receipt);
+  expect((await clonedLedger.history()).filter(item => item.payload.kind === "core-role-attempt")).toHaveLength(1);
+  await receipts.assertCompleted();
+  await settleSourceRequirements(root, fixture.source.id);
+  expect((await ledger.history()).filter(item => item.payload.kind === "core-role-attempt")).toHaveLength(1);
+  expect((await ledger.history()).filter(item => item.payload.kind === "core-role-evaluation")).toHaveLength(0);
+  await expect(ledger.assertCoreRoleAttemptsRestorable([], [definition])).rejects.toThrow("forget a repair attempt");
+  await expect(ledger.assertCoreRoleAttemptsRestorable([receipt], [definition])).resolves.toBeUndefined();
   expect(reconciliationDeferredRequirementIds(receipt.identity.input.target_reviews!)).toContain("character:hero:ontology");
   expect(reconciliationDeferredRequirementIds(receipt.identity.input.target_reviews!)).toContain("character:hero:opening-driver");
   await expect(assertReconciliationDeferralsReviewed(root, fixture.source.id)).rejects.toThrow("character:hero:ontology");
@@ -163,4 +204,13 @@ it("freezes capability-level partial success through finish, restart, plan reuse
   await expect(assertReconciliationDeferralsReviewed(root, fixture.source.id)).resolves.toBeUndefined();
   const status = reconciliationAuditResults(context.repairPlan.reviewTargets, reports, improved).find(item => item.target === "character:hero");
   expect(status?.hostReviewRequired).toBe(true);
+  await settleSourceRequirements(root, fixture.source.id);
+  expect((await new RequirementLedger(root, fixture.source.id).history()).filter(item => item.payload.kind === "core-role-attempt")).toHaveLength(1);
+  const next = structuredClone(definition.roster); next.reviews.forEach(review => { review.runId += "-next"; });
+  await ledger.registerCoreRoles({ roster: next, units: definition.units, predecessorRevision: definition.revisionHash, scopeDecisionRef: "new-independent-reviews", scopeChangeReason: "Explicit host revision" }, Buffer.from("Hero arrives. Hero waits for a signal."));
+  await expect(buildWorldReconciliationPrompt(root, fixture.source.id, improved, 1, { proposalIdSuffixTail: namespace })).rejects.toThrow("independent requirement revision changed");
+  await expect(receipts.verify(receipt)).rejects.toThrow("independent requirement revision changed");
+  // The old attempt remains valid historical work; its report is never success.
+  await settleSourceRequirements(root, fixture.source.id);
+  expect((await ledger.history()).filter(item => item.payload.kind === "core-role-attempt")).toHaveLength(1);
 });

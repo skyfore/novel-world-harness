@@ -1,6 +1,6 @@
 import { coreRoleRequirementHistorySchema, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
-import { RequirementLedger, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
+import { RequirementLedger, coreRoleAttemptHistoryIssues, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
 import { captureReconciliationObligations, assertReconciliationObligationsRestorable, restoreReconciliationObligations, reconciliationObligationSnapshotSchema, type ReconciliationObligationSnapshot } from "./reconciliation-review-ledger.js";
 import { eventExecutionSchema } from "../world/event-execution.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
@@ -180,6 +180,8 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     throw new Error("Prepared bundle chapter split plan does not match its source identity.");
   }
   const snapshot = bundle.compilerSnapshot;
+  const attemptIssues = coreRoleAttemptHistoryIssues((snapshot.reconciliationObligations ?? []).map(item => item.receipt), snapshot.coreRoleRequirementDefinitions ?? [], sourceId);
+  if (attemptIssues.length) throw new Error(attemptIssues.join("; "));
   if (snapshot.roleRoster && (snapshot.roleRoster.sourceId !== sourceId || snapshot.roleRoster.sourceSha256 !== bundle.source.contentSha256)) throw new Error("Prepared role roster escapes its source identity");
   if (snapshot.structure.sourceId !== sourceId
     || snapshot.structure.sourceSha256 !== bundle.source.contentSha256) {
@@ -1109,6 +1111,7 @@ export class PreparedNovelCache {
     const coreSource = coreDefinitions.length ? await WorkspaceStore.openReadOnly(this.workspaceRoot).getSource(sourceId) : null;
     const coreBytes = coreSource ? await readSourceMaterial(this.workspaceRoot, coreSource) : undefined;
     await new RequirementLedger(this.workspaceRoot, sourceId).assertCoreRolesRestorable(coreDefinitions, coreBytes);
+    await new RequirementLedger(this.workspaceRoot, sourceId).assertCoreRoleAttemptsRestorable((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), coreDefinitions);
     await assertReconciliationObligationsRestorable(this.workspaceRoot, sourceId, bundle.compilerSnapshot.reconciliationObligations ?? []);
     const workspace = await WorkspaceStore.create(this.workspaceRoot);
     await assertPreparedCompilerSnapshotEvidence(this.workspaceRoot, bundle);
@@ -1179,6 +1182,9 @@ export class PreparedNovelCache {
     await new RequirementLedger(this.workspaceRoot, sourceId).restore(snapshot.requirementDefinitions ?? []);
     await new RequirementLedger(this.workspaceRoot, sourceId).restoreCoreRoles(snapshot.coreRoleRequirementDefinitions ?? [], coreBytes);
     await restoreReconciliationObligations(this.workspaceRoot, sourceId, snapshot.reconciliationObligations ?? []);
+    for (const { receipt } of snapshot.reconciliationObligations ?? []) {
+      if (receipt.state === "completed" && receipt.identity.requirementAttempts) await new RequirementLedger(this.workspaceRoot, sourceId).recordCoreRoleAttempts(receipt);
+    }
     await new SourceStructureStore(this.workspaceRoot).write(snapshot.structure);
     await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.annotations);
     await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.entityResolutions);

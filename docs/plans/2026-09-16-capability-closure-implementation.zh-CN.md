@@ -125,3 +125,18 @@ prepare-all 的候选检查把逐项角色评估追加到账本，绑定冻结 s
 本段仍未完成 reconciliation attempts 与独立角色要求的关联、converge 后角色结算及失效记录，也未提供旧审阅的保留式重新双审工作流。P1 仍未完成，P2–P7 保持未完成；真实模型和独立人工体验验收尚未执行。
 
 验证：全量 183 文件、1071 tests 通过（74.46 秒），服务端、Web、E2E TypeScript 检查通过。新增回归覆盖定义重启幂等、显式前驱/范围缩减、审阅不可改写、坏原文字节/锚点/分区、恢复历史前缀、真实冻结候选与确定性结算，以及审阅已保存但登记失败的 finish recovery。随后补充源 hash 拒绝断言，并复跑针对性测试及类型检查。
+
+
+P1g 已提交为 `1a71717`。
+
+## P1h：独立要求与修复尝试关联
+
+新 reconciliation plan v4 在创建时冻结当时已登记的核心角色 definition revision、spec hash 和每项要求 hash；没有已登记范围时显式保存 null。工程 target/capability 通过精确 targetRef 和 capability 对应独立角色 ID，可以保留同一实体的多个独立候选要求。旧 v2/v3 计划和旧 finish 不重写，也不事后补造它们未曾冻结的关联。
+
+finish v2 增加宿主生成的 requirementAttempts，保存独立 definition hash、repair run、原报告 ID、modelOutcome、原文 segment 引用及匹配本能力的提案 hash。匹配调用既有逐能力 proposal accounting：静态 goal 不充当 ontology 或 opening-driver，另一角色的可执行 goal 也不能代替。模型仍不能报告 satisfied；completed 只意味着 finish 协议完成。
+
+完成回执以原 fingerprint 追加到 requirement ledger，重复完成、checkpoint 校验、宿主 finish recovery 和收敛后的 requirement service 都可幂等补齐。归档回执只补历史尝试，不重放写入或要求旧工件仍 active。prepared snapshot 复用已冻结的 reconciliation receipts，认证检查尝试的原独立定义，恢复先检查不能遗失本地尝试，再导入定义和历史回执。独立要求修订后，旧计划在打开模型前停止，旧 finish 不能重放，但其尝试历史保留。
+
+范围限制：首次 prepare-all 的独立双审当前仍位于最终候选阶段，尚须前移到修复计划之前，才能使首次修复也绑定独立范围。converge 后逐角色评估与 stale 事件、receipt/definition/subject 结算幂等键，以及旧审阅的保留式重新双审仍待实施。本段只记录尝试，不将其当作能力满足或 P1 完成。P2–P7 和真实模型/人工体验验收仍未完成。
+
+本段验证：`pnpm test --maxWorkers=2` 的 184 文件、1073 tests 通过（75.78 秒）；服务端、Web、E2E TypeScript 检查与 `git diff --check` 通过。真实 finish 回归覆盖只修静态 goal 的逐项缺口、完成后账本失败的恢复、重复补齐、归档重启、计划复用、修订后拒绝重放、缺定义认证诊断、历史导入及恢复前拒绝遗失尝试；独立匹配测试验证按角色及能力选择提案、禁止 satisfied 和禁止猜测范围。未调用真实 provider，未进行人工体验验收。

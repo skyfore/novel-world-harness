@@ -354,3 +354,25 @@ Candidate evaluation is deterministic and tied to its frozen definition, source
 bytes and subject hash. Missing or stale inputs require host re-evaluation, not
 replaying model writes. Restoring a candidate that would discard current
 definitions stops before world materialization; preserve the current ledger.
+
+
+### Independent requirement attempts in reconciliation finish
+
+New reconciliation plans (v4) freeze the registered core-role definition revision
+and per-requirement hashes, or explicitly record that no such scope existed.
+Older plans and receipts keep their original identities. A later registration
+does not retroactively bind old reports to new requirements. If the frozen
+independent revision changes, stop model retries and preserve the old plan,
+receipt and drafts for host replanning; changing namespace does not remove the
+old obligations or authorize replaying writes.
+
+The host creates `requirementAttempts` inside finish v2 from validated reports
+and matching typed proposal dependencies. Models still report only
+`proposed`, `unsupported`, or `capability-gap`; `satisfied` is not accepted.
+If the completed receipt was saved but the requirement-ledger append failed,
+preserve it and use host finish recovery. The checkpoint assertion and
+post-convergence requirement service can also idempotently retain the original
+attempt without rerunning model writes. A bad plan, source, dependency or
+definition must stop for host review, never be replaced with a guessed ID.
+Historical snapshot import validates the original scope and preserves attempts;
+it does not require old dependencies to be current and does not settle them.

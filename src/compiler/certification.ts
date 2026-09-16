@@ -1,3 +1,4 @@
+import { coreRoleAttemptHistoryIssues } from "./requirement-ledger.js";
 import fs from "node:fs/promises";
 import { activeRequirementSets, evaluateRequirementSet, requirementResultSchema, requirementResultIssues } from "./requirement-ledger.js";
 import { reconciliationObligationIssues } from "./reconciliation-review-ledger.js";
@@ -49,6 +50,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   const subjectSnapshotHash = preparedSubjectHash(bundle), closure = buildPreparedClosure(bundle);
   const issues = [...closure.issues, ...validateFrozenAccounting(bundle)];
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));
+  issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id).map(message => ({ code: "CORE_ROLE_ATTEMPT_DEFINITION_MISMATCH", message })));
   const snapshot = bundle.compilerSnapshot;
   const requirementSets = activeRequirementSets(snapshot.requirementDefinitions ?? []);
   const coreDefinitions = snapshot.coreRoleRequirementDefinitions ?? [];
@@ -108,6 +110,7 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
     sourceSha256: bundle.source.contentSha256, roster: assessment.roster, specHash: assessment.coreRoleResult?.revisionHash }));
   issues.push(...coreRoleResultIssues(bundle, assessment.roster, assessment.playability, assessment.subjectSnapshotHash, assessment.coreRoleResult));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256));
+  issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id));
   issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));
   if (bundle.compilerSnapshot.roleRoster) issues.push(...validateRoleDevelopmentExpectations(bundle.compilerSnapshot.roleRoster).map(issue => `${issue.code}: ${issue.path}`));
   if (preparedSubjectHash(bundle) !== assessment.subjectSnapshotHash) issues.push("ENTRY_CUT_STALE: prepared inputs changed after entry evaluation");

@@ -7,6 +7,7 @@ import { idSchema } from "../world/model.js";
 import { worldStorageRoot } from "../world/paths.js";
 import { upstreamRepairPlanSchema, upstreamRepairKindSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import { upstreamRepairHostError, verifyUpstreamRepairPlan } from "./upstream-repair-preflight.js";
+import { upstreamRepairFinishIntentSchema, type UpstreamRepairFinishIntent } from "./upstream-repair-finish-intent.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const stagedDependencySchema = z.object({ attemptRef: hash, proposalHash: hash }).strict();
@@ -14,6 +15,7 @@ export type UpstreamStagedDependency = z.infer<typeof stagedDependencySchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("planned"), plan: upstreamRepairPlanSchema, predecessorPlanHash: hash.nullable() }).strict(),
   z.object({ kind: z.literal("authorized"), planHash: hash }).strict(),
+  z.object({ kind: z.literal("finish-frozen"), planHash: hash, intent: upstreamRepairFinishIntentSchema }).strict(),
   z.object({ kind: z.literal("attempt-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, inputHash: hash, toolInput: z.unknown().optional() }).strict(),
   z.object({ kind: z.literal("attempt-staged"), planHash: hash, attemptRef: hash, proposalHash: hash }).strict(),
   z.object({ kind: z.literal("attempt-validated"), planHash: hash, attemptRef: hash, payloadHash: hash, dependencies: z.array(stagedDependencySchema).max(256).optional() }).strict(),
@@ -24,7 +26,7 @@ const recordSchema = z.object({ version: z.literal(1), sourceId: idSchema, seque
 type Record = z.infer<typeof recordSchema>;
 export type UpstreamRepairRecord = Record;
 type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
-type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "needs-host-review" };
+type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "needs-host-review"; finishIntent?: UpstreamRepairFinishIntent };
 function project(records: Record[]) {
   const plans = new Map<string, PlanState>();
   const attempts = new Map<string, { started: Started; failed: boolean; staged: boolean; validatedHash?: string; dependencies?: UpstreamStagedDependency[] }>();
@@ -48,6 +50,19 @@ function project(records: Record[]) {
     if (event.kind === "authorized") {
       if (current.state !== "planned") throw upstreamRepairHostError("Repair authorization was consumed or stopped");
       current.state = "authorized";
+    } else if (event.kind === "finish-frozen") {
+      const { intent } = event, plan = current.plan;
+      if (current.state !== "staging" || intent.authorizationHeadHash !== record.predecessorHash || intent.planHash !== plan.planHash || intent.sourceId !== record.sourceId || intent.sourceSha256 !== plan.sourceScope.sourceSha256 || intent.requirementSetHash !== plan.requirementSetHash) throw upstreamRepairHostError("Finish intent is outside its active authorization");
+      const slots = [...plan.allowedWrites, ...plan.allowedCreations].map(ref => `${ref.kind}:${ref.id}`).sort();
+      if (contentHash(slots) !== contentHash(intent.proposals.map(ref => `${ref.artifactKind}:${ref.artifactId}`).sort()) || contentHash(plan.sourceScope.segmentIds.slice().sort()) !== contentHash(intent.input.reviewed_segments.map(item => item.segment_id).sort())) throw upstreamRepairHostError("Finish must preserve all planned slots and reviewed source segments");
+      if (contentHash(plan.baselineRefs.slice().sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`))) !== contentHash(intent.baselines.map(({ payload: _payload, ...ref }) => ref).sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`)))) throw upstreamRepairHostError("Finish original baselines differ from the plan");
+      for (const proposal of intent.proposals) {
+        const attempt = attempts.get(proposal.attemptRef);
+        const staged = records.slice(0, index).find(item => item.payload.kind === "attempt-staged" && item.payload.attemptRef === proposal.attemptRef)?.payload;
+        if (!attempt?.staged || attempt.started.planHash !== plan.planHash || attempt.started.artifactKind !== proposal.artifactKind || attempt.started.artifactId !== proposal.artifactId || attempt.started.proposalId !== proposal.proposalId || attempt.validatedHash !== proposal.payloadHash || staged?.kind !== "attempt-staged" || staged.proposalHash !== proposal.proposalHash) throw upstreamRepairHostError("Finish proposal differs from its validated staged result");
+      }
+      if ([...attempts.values()].some(attempt => attempt.started.planHash === plan.planHash && !attempt.failed && !attempt.staged)) throw upstreamRepairHostError("Finish has an unresolved reserved attempt");
+      current.state = "finish-frozen"; current.finishIntent = intent;
     } else if (event.kind === "attempt-started") {
       if (event.toolInput !== undefined && contentHash(event.toolInput) !== event.inputHash) throw upstreamRepairHostError("Reserved tool input hash mismatch");
       assertStart(current, event, plans, attempts);
@@ -180,7 +195,7 @@ export class UpstreamRepairLedger {
   }
   async authorize(planHash: string): Promise<void> {
     const current = project(await this.history()).plans.get(planHash);
-    if (!current || current.state === "needs-host-review") throw upstreamRepairHostError("Plan is missing or stopped");
+    if (!current || current.state === "needs-host-review" || current.state === "finish-frozen") throw upstreamRepairHostError("Plan is missing, stopped or already frozen for finish");
     await this.verifyOrStop(current.plan);
     if (current.state === "planned") await this.append({ kind: "authorized", planHash });
   }
@@ -230,5 +245,13 @@ export class UpstreamRepairLedger {
     if (!state) throw upstreamRepairHostError("Plan is missing");
     if (state.state === "needs-host-review") return;
     await this.append({ kind: "needs-host-review", planHash, reason });
+  }
+  async freezeFinish(raw: UpstreamRepairFinishIntent): Promise<void> {
+    const intent = upstreamRepairFinishIntentSchema.parse(raw), state = project(await this.history()).plans.get(intent.planHash);
+    if (state?.finishIntent) {
+      if (state.state !== "finish-frozen" || contentHash(state.finishIntent) !== contentHash(intent)) throw upstreamRepairHostError("Original finish intent was changed or stopped");
+      return;
+    }
+    await this.append({ kind: "finish-frozen", planHash: intent.planHash, intent });
   }
 }

@@ -617,8 +617,8 @@ exact active authorization. Failed initialization leaves that toolset unusable
 until the host establishes a valid batch; catching the error cannot permit later
 tool execution. Even the host staging path currently rejects ordinary finish,
 world proposals, retrieval and unrelated metadata tools. There is no autonomous
-repair-session entrypoint yet. Authorization-aware finish, staged dependency
-consumption and snapshot recovery remain prerequisites for the full executor.
+repair-session entrypoint yet. Authorization-aware finish execution and live
+draft snapshot recovery remain prerequisites for the full executor.
 
 ### Consuming staged upstream dependencies
 
@@ -664,3 +664,24 @@ rejects pending proposal work. This stage therefore preserves archiveable
 candidate history and budgets; it does not yet provide a portable checkpoint
 for a live pending upstream draft graph. Preserve those original drafts for host
 recovery until draft/finish snapshot support is implemented.
+
+### Frozen upstream finish intent
+
+`prepareUpstreamRepairFinish` is a host-only preparation operation. It verifies
+all original baselines, every planned staged slot and its dependency closure,
+and the exact batch inventory before appending `finish-frozen`. The intent binds
+the original finish input, authorization head, source and requirement revisions,
+proposal envelope/payload hashes and read-only original baseline payloads.
+It does not create a completed compiler receipt, commit artifacts or satisfy a
+requirement. Ordinary finish remains unavailable to managed repair tools.
+
+After freezing, do not authorize or stage the plan again. Host preparation may
+resume only with the identical original input and matching retained drafts and
+baselines; this returns the same intent without another event or tool execution.
+Use `requirements inspect-upstream --source <sourceId>` and copy the exact
+`plans[].plan.planHash` to identify the retained plan. Missing/changed drafts,
+baselines, unrelated batch artifacts or a conflicting ordinary receipt require
+host review. Preserve all records and drafts; do not retry unchanged, invent a
+new batch, or reset the budget. Journal restoration retains this intent but does
+not recreate pending drafts. Actual authorized finish execution and recovery
+remain a separate implementation gate.

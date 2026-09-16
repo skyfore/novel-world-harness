@@ -309,3 +309,17 @@ compilerSnapshot 新增 upstreamRepairJournal，冻结完整计划、授权、�
 当前 candidate 仍拒绝 pending proposal，因此本段证明的是可归档候选的完整上游历史及预算恢复；尚未提供带活动 pending 草案图的可移植 checkpoint。导入 journal 不补造丢失草案，也不会执行模型或提案。授权 finish、pending/finish 快照、converge 后核验与逐项评估仍待落地。P1 完整验收映射及 P3–P7 保持待完成，未调用真实 provider 或人工体验评价。
 
 验证：全量 188 文件、1112 tests 通过（80.06 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。
+
+P2e 已提交为 `7ee0ddf`。
+
+## P2f：冻结原 finish 输入、完整草案集合与基线
+
+新增宿主 prepareUpstreamRepairFinish，重新校验原始依赖修订、全部计划槽和已冻结的 staged 依赖闭包，再检查 batch 的精确 proposal 集合。额外 annotation/resolution、accounting、world proposal、无关 metadata 或已有普通 finish 回执均不能混入该授权。
+
+finish-frozen 事件绑定原输入、授权链 head、来源与要求版本、每项 attemptRef/envelope hash/payload hash，并保留只读原 baseline payload。账本校验计划槽、reviewed segments 与 baseline 集合完整一致，拒绝未解决的预留尝试。冻结后不能再次授权或追加草案；重复准备只接受相同原输入和仍匹配的草案/基线，返回同一 intent。独立提取原 compilerFinishInputSchema，保留原导出兼容性和字段语义。
+
+新增回归证明冻结及重放不提交当前 annotation、不生成 CompilerFinishReceipt，拒绝额外草案、遗漏 reviewed segments、基线变化、修改输入和伪造 hash；journal 恢复保留原冻结意图，不补造 pending 草案。
+
+本段只是授权 finish 的冻结意图，尚未执行原 finish 验证与提交，也不代表 completed 或能力满足。授权 finish 的实际执行/中断恢复、活动 pending checkpoint、converge 后评估仍需落地。P1 完整验收映射及 P3–P7 保持待完成，未调用真实 provider 或人工体验评价。
+
+验证：定向 26 tests 通过；全量 188 文件、1114 tests 通过（80.37 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。

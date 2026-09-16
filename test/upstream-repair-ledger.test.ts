@@ -289,3 +289,51 @@ it("freezes and restores upstream budgets with candidates and rejects old or unb
   const corrupt = structuredClone(records); corrupt[0]!.hash = "0".repeat(64);
   await expect(new UpstreamRepairLedger(emptyRoot, f.sourceId).restore(corrupt, Buffer.from('Ada said, "Wait." Nothing changes.'))).rejects.toThrow("chain mismatch");
 });
+
+it("freezes the exact upstream finish input, staged set and original baselines without committing", async () => {
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { prepareUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { upstreamRepairFinishIntentSchema } = await import("../src/compiler/upstream-repair-finish-intent.js");
+  const { CompilerFinishReceipts } = await import("../src/compiler/finish-receipts.js");
+  const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  const input = { outcome: "complete" as const, reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed" as const, summary: "Reviewed exact quotation" }], summary: "Host-reviewed bounded upstream repair" };
+  await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, input)).rejects.toThrow("fully staged");
+  const staged = await stageUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, { proposal_id: "repair-proposal", annotation_id: "quote-one", selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 });
+  const priorHead = (await f.ledger.history()).at(-1)!.hash;
+  const intent = await prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, input);
+  expect(intent.authorizationHeadHash).toBe(priorHead);
+  expect(intent.proposals).toEqual([{ artifactKind: "quotation", artifactId: "quote-one", proposalId: staged.proposalId, proposalHash: staged.proposalHash, attemptRef: staged.attemptRef, payloadHash: (await f.ledger.inspect()).attempts[0]!.validatedHash }]);
+  expect(intent.baselines[0]!.payload).toEqual(f.annotation);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("finish-frozen");
+  expect(await prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, input)).toEqual(intent);
+  expect((await f.ledger.history()).filter(record => record.payload.kind === "finish-frozen")).toHaveLength(1);
+  await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, { ...input, summary: "Changed after freezing" })).rejects.toThrow("frozen finish input changed");
+  await expect(f.ledger.authorize(f.plan.planHash)).rejects.toThrow("already frozen");
+  await expect(f.ledger.startAttempt(f.plan.planHash, { ...f.input, inputHash: contentHash("after-finish") })).rejects.toThrow("not authorized");
+  const annotations = new SourceAnnotationStore(f.root);
+  expect(await annotations.read(f.sourceId, "quote-one")).toEqual(f.annotation);
+  expect((await annotations.listProposals(f.sourceId, "pending")).map(item => item.id)).toEqual([staged.proposalId]);
+  expect(await new CompilerFinishReceipts(f.root, f.sourceId, f.plan.batchId).read()).toBeUndefined();
+  expect(() => upstreamRepairFinishIntentSchema.parse({ ...intent, intentHash: "0".repeat(64) })).toThrow("hash mismatch");
+  const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-frozen-finish-journal-")); roots.push(cloneRoot);
+  const clone = new UpstreamRepairLedger(cloneRoot, f.sourceId), history = await f.ledger.history();
+  await clone.restore(history, Buffer.from('Ada said, "Wait." Nothing changes.'));
+  expect((await clone.inspect()).plans[0]!.finishIntent).toEqual(intent);
+});
+
+it("refuses stray batch proposals and stale baselines before freezing finish authority", async () => {
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { prepareUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  await stageUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, { proposal_id: "repair-proposal", annotation_id: "quote-one", selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 });
+  const annotations = new SourceAnnotationStore(f.root);
+  await annotations.stage(f.sourceId, { version: 1, id: "stray-proposal", annotationType: "quotation", payload: { ...f.annotation, id: "not-authorized" }, generatedBy: { worker: "fixture", compilerBatchId: f.plan.batchId }, createdAt: "2026-09-16T00:00:00Z" });
+  const input = { outcome: "complete" as const, reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed" as const, summary: "Reviewed" }], summary: "Bounded repair" };
+  await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, input)).rejects.toThrow("unauthorized upstream proposals");
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("staging");
+  await annotations.withdraw(f.sourceId, "stray-proposal");
+  await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, { ...input, reviewed_segments: [] })).rejects.toThrow("reviewed source segments");
+  await f.write({ ...f.annotation, attributionConfidence: 0.7 }, "host-changed-baseline");
+  await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, input)).rejects.toThrow("Active dependency changed");
+  expect((await f.ledger.history()).some(record => record.payload.kind === "finish-frozen")).toBe(false);
+});

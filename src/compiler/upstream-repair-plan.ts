@@ -18,7 +18,7 @@ const fields: Record<UpstreamRepairKind, readonly string[]> = {
   "event-resolution": ["eventMentionIds", "status", "canonicalEventId", "relation", "candidates", "supersedesResolutionIds", "rationale"],
 };
 const refSchema = z.object({ kind: upstreamRepairKindSchema, id: idSchema }).strict();
-const readableRefSchema = z.object({ kind: z.enum([...upstreamRepairKindSchema.options, "entity", "canonical-event", "proposition", "source-segment", "evidence-assertion"]), id: idSchema }).strict();
+export const upstreamRepairReadableRefSchema = z.object({ kind: z.enum([...upstreamRepairKindSchema.options, "entity", "canonical-event", "proposition", "source-segment", "evidence-assertion"]), id: idSchema }).strict();
 const key = (ref: { kind: string; id: string }) => `${ref.kind}:${ref.id}`;
 const unique = <T>(values: T[]) => new Set(values).size === values.length;
 
@@ -43,11 +43,11 @@ const identitySchema = z.object({
   requirementSetHash: hash, requirementIds: z.array(text).min(1).max(128),
   predecessorReceiptRefs: z.array(hash).max(128),
   sourceScope: z.object({ sourceId: idSchema, sourceSha256: hash, segmentIds: z.array(idSchema).min(1).max(128) }).strict(),
-  baselineRefs: z.array(readableRefSchema.extend({ revisionHash: hash }).strict()).max(256),
+  baselineRefs: z.array(upstreamRepairReadableRefSchema.extend({ revisionHash: hash }).strict()).max(256),
   allowedWrites: z.array(writeSchema).max(128),
   // Host allocates one exact logical ID per dependency slot; no model-chosen IDs.
   allowedCreations: z.array(refSchema.extend({ maxCount: z.literal(1), dependencyOf: text }).strict()).max(128),
-  readableRefs: z.array(readableRefSchema).max(256), citableEvidenceRefs: z.array(idSchema).min(1).max(128),
+  readableRefs: z.array(upstreamRepairReadableRefSchema).max(256), citableEvidenceRefs: z.array(idSchema).min(1).max(128),
   dependencyEdges: z.array(z.object({ from: text, to: text, purpose: z.enum(["source-evidence", "identity", "quotation", "requirement"]) }).strict()).max(512),
   postconditionIds: z.array(text).min(1).max(128), authorizationRef: text, retryBudgetRef: idSchema,
 }).strict();

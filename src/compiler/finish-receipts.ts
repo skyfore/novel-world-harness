@@ -1,5 +1,7 @@
+import { compilerFinishInputSchema } from "./finish-input.js";
+export { compilerFinishInputSchema } from "./finish-input.js";
 import { coreRoleAttemptSchema, coreRoleAttemptScopeSchema, coreRoleAttemptReports, linkCoreRoleAttemptProposals, coreRoleAttemptScope } from "./requirement-attempts.js";
-import { reconciliationTargetReviewSchema, reconciliationRequirementSchema } from "./reconciliation-review.js";
+import { reconciliationRequirementSchema } from "./reconciliation-review.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -21,12 +23,6 @@ import { roleRosterReviewSchema } from "./role-roster.js";
 import { COMPILER_PIPELINE_VERSION } from "./batch-progress.js";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
-export const compilerFinishInputSchema = z.object({
-  target_reviews: z.array(reconciliationTargetReviewSchema).max(128).optional(),
-  outcome: z.enum(["complete", "no-artifacts"]),
-  reviewed_segments: z.array(z.object({ segment_id: idSchema, disposition: z.enum(["proposed", "no-artifacts"]), summary: z.string().min(1).max(500) }).strict()),
-  summary: z.string().min(1).max(2_000),
-}).strict();
 const dependencySchema = z.object({ store: z.enum(["world", "annotation", "entity-resolution", "event-resolution", "accounting"]), proposalId: idSchema, hash: hashSchema }).strict();
 type Dependency = z.infer<typeof dependencySchema>;
 const identitySchema = z.object({

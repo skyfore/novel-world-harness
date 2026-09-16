@@ -11,7 +11,7 @@ import { canonicalJson, contentHash } from "../world/canonical.js";
 import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, validationIssueSchema } from "../world/model.js";
 import { worldStorageRoot } from "../world/paths.js";
 import { buildPreparedClosure, closureGraphSchema } from "./closure.js";
-import { buildRoleRoster, majorRoleCandidates, roleRosterSchema, validateRoleRoster } from "./role-roster.js";
+import { buildRoleRoster, majorRoleCandidates, roleRosterSchema, validateRoleRoster, validateRoleDevelopmentExpectations } from "./role-roster.js";
 import { playabilityManifestSchema, probeMajorRoleEntries } from "./playability.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { NovelPlayQualityStore, novelPlayQualitySchema, validateNovelPlayQuality } from "../eval/novel-play-quality.js";
@@ -68,6 +68,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
     const saved = snapshot.roleRoster;
     roster = saved?.subjectHash === fresh.subjectHash ? saved : fresh;
     issues.push(...validateRoleRoster(roster));
+    issues.push(...validateRoleDevelopmentExpectations(roster));
     playability = await probeMajorRoleEntries(bundle, roster, subjectSnapshotHash);
     issues.push(...playability.issues, ...playability.roles.flatMap((role) => role.issues));
   } catch (error) {
@@ -92,6 +93,7 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
   const issues: string[] = [];
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256));
   issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));
+  if (bundle.compilerSnapshot.roleRoster) issues.push(...validateRoleDevelopmentExpectations(bundle.compilerSnapshot.roleRoster).map(issue => `${issue.code}: ${issue.path}`));
   if (preparedSubjectHash(bundle) !== assessment.subjectSnapshotHash) issues.push("ENTRY_CUT_STALE: prepared inputs changed after entry evaluation");
   if (assessment.sourceId !== bundle.source.id || assessment.sourceSha256 !== bundle.source.contentSha256) issues.push("WORLD_SOURCE_MISMATCH: certificate belongs to another source");
   if (assessment.engineVersion !== WORLD_ENGINE_VERSION || assessment.schemaVersion !== WORLD_SCHEMA_VERSION) issues.push("WORLD_VERSION_UNSUPPORTED: evaluator fingerprint changed");

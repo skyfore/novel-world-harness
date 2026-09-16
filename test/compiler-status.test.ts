@@ -21,7 +21,7 @@ async function snapshot(root: string) {
   }));
 }
 
-it.each([33, 34])("reports effective checkpoint sets for pipeline %s without inventing sequential progress or mutating the run", async (pipelineVersion) => {
+it.each([33, 34, 35])("reports effective checkpoint sets for pipeline %s without inventing sequential progress or mutating the run", async (pipelineVersion) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-status-progress-")); roots.push(root);
   const { source } = await createEvidenceFixture(root, "Chapter 1\nHero waits.\n\nChapter 2\nHero leaves.\n");
   const plan = await prepareCompilerBatches(root, source);

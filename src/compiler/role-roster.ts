@@ -7,6 +7,7 @@ import { idSchema, type Entity, type ValidationIssue } from "../world/model.js";
 import { worldStorageRoot } from "../world/paths.js";
 import type { SourceAnnotation } from "./annotations.js";
 import type { IdentityResolution } from "./entity-resolution.js";
+import { characterDimensionIdSchema } from "../world/character-ontology.js";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const roleCandidateSchema = z.object({
@@ -15,13 +16,28 @@ export const roleCandidateSchema = z.object({
 }).strict();
 export type RoleCandidate = z.infer<typeof roleCandidateSchema>;
 
+/** Source reviewers record expectations before seeing compiled character models. */
+export const roleDevelopmentExpectationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("stable"), rationale: z.string().trim().min(1).max(2000), basisUnitIds: z.array(idSchema).min(1) }).strict(),
+  z.object({ kind: z.literal("unknown"), rationale: z.string().trim().min(1).max(2000), basisUnitIds: z.array(idSchema).min(1) }).strict(),
+  z.object({ kind: z.literal("changes"), rationale: z.string().trim().min(1).max(2000), changes: z.array(z.object({
+    dimensionId: characterDimensionIdSchema,
+    direction: z.enum(["increase", "decrease"]),
+    rationale: z.string().trim().min(1).max(2000),
+    beforeUnitIds: z.array(idSchema).min(1), afterUnitIds: z.array(idSchema).min(1),
+  }).strict()).min(1).max(32) }).strict(),
+]);
+export type RoleDevelopmentExpectation = z.infer<typeof roleDevelopmentExpectationSchema>;
+
 export const roleRosterEntrySchema = z.object({
   candidateId: idSchema,
   importance: z.enum(["major", "supporting", "incidental"]),
   rationale: z.string().trim().min(1).max(2000),
   basisUnitIds: z.array(idSchema).min(1),
+  developmentExpectation: roleDevelopmentExpectationSchema.optional(),
 }).strict();
 export const roleRosterReviewSchema = z.object({
+  version: z.literal(2).optional(),
   runId: idSchema,
   subjectHash: hashSchema,
   reviewedUnitIds: z.array(idSchema).min(1),
@@ -83,7 +99,14 @@ export function validateRosterReview(roster: RoleRoster, review: RoleRosterRevie
   if (actual.size !== review.entries.length || actual.size !== expected.size || [...expected].some((id) => !actual.has(id))) fail("ROSTER_DENOMINATOR_MISMATCH", "Review must classify every candidate exactly once, including unresolved people");
   const units = new Set(roster.unitIds);
   if (new Set(review.reviewedUnitIds).size !== units.size || review.reviewedUnitIds.some((id) => !units.has(id))) fail("ROSTER_FULL_SOURCE_REVIEW_REQUIRED", "Review must account for the complete source unit inventory");
-  for (const entry of review.entries) if (entry.basisUnitIds.some((id) => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Role ${entry.candidateId} uses an unknown source unit`);
+  for (const entry of review.entries) {
+    if (entry.basisUnitIds.some((id) => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Role ${entry.candidateId} uses an unknown source unit`);
+    const development = entry.developmentExpectation;
+    if (review.version === 2 && !development) fail("ROSTER_DEVELOPMENT_EXPECTATION_REQUIRED", `Role ${entry.candidateId} needs an independent source development expectation, including unknown when evidence is insufficient`);
+    if (!development) continue;
+    const references = development.kind === "changes" ? development.changes.flatMap(change => [...change.beforeUnitIds, ...change.afterUnitIds]) : development.basisUnitIds;
+    if (references.some(id => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Role ${entry.candidateId} development expectation uses an unknown source unit`);
+  }
   for (const omitted of review.missingMajorCharacters ?? []) if (omitted.basisUnitIds.some((id) => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Omitted major ${omitted.name} uses an unknown source unit`);
   return issues;
 }
@@ -99,6 +122,35 @@ export function majorRoleCandidates(roster: RoleRoster): RoleCandidate[] {
     name: person.name, mentionIds: [], resolutionIds: [],
   })));
   return [...new Map([...candidates, ...omissions].map((candidate) => [candidate.id, candidate])).values()];
+}
+
+/** These are independent requirements, not character-model satisfaction results. */
+export function reviewedRoleDevelopmentRequirements(roster: RoleRoster) {
+  const accumulated: RoleRoster = { ...roster, reviews: [] };
+  let reviewsValid = roster.reviews.length === 2;
+  for (const review of roster.reviews) {
+    if (validateRosterReview(accumulated, review).length) reviewsValid = false;
+    accumulated.reviews.push(review);
+  }
+  return majorRoleCandidates(roster).map(candidate => {
+    const reviews = roster.reviews.map(review => ({
+      runId: review.runId,
+      expectation: review.version === 2 ? review.entries.find(entry => entry.candidateId === candidate.id)?.developmentExpectation ?? null : null,
+    }));
+    const kinds = reviews.map(review => review.expectation?.kind ?? "unknown");
+    const status = !reviewsValid || kinds.includes("unknown") || new Set(kinds).size !== 1
+      ? "unknown" as const : kinds[0] === "stable" ? "stable" as const : "changes" as const;
+    const definition = { id: `${candidate.id}:development`, sourceId: roster.sourceId, sourceSha256: roster.sourceSha256,
+      rosterSubjectHash: roster.subjectHash, candidateId: candidate.id, ...(candidate.entityId ? { actorId: candidate.entityId } : {}), reviews, status };
+    return { ...definition, revisionHash: contentHash(definition) };
+  });
+}
+
+export function validateRoleDevelopmentExpectations(roster: RoleRoster): ValidationIssue[] {
+  return reviewedRoleDevelopmentRequirements(roster).filter(requirement => requirement.status === "unknown").map(requirement => ({
+    code: "ROSTER_DEVELOPMENT_EXPECTATION_UNKNOWN", path: requirement.id,
+    message: `Role ${requirement.candidateId} lacks two compatible independent development expectations; missing legacy data, conflicting reviews and insufficient evidence cannot certify stable development`,
+  }));
 }
 
 export function validateRoleRoster(roster: RoleRoster): ValidationIssue[] {

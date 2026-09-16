@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRoleRoster, majorRoleCandidates, validateRoleRoster, validateRosterReview, type RoleRosterReview } from "../src/compiler/role-roster.js";
+import { buildRoleRoster, majorRoleCandidates, validateRoleRoster, validateRosterReview, reviewedRoleDevelopmentRequirements, validateRoleDevelopmentExpectations, roleRosterSchema, type RoleRosterReview } from "../src/compiler/role-roster.js";
 import type { SourceAnnotation } from "../src/compiler/annotations.js";
 import type { Entity } from "../src/world/model.js";
 
@@ -36,5 +36,55 @@ describe("independent role roster", () => {
     }));
     expect(majorRoleCandidates(roster).map((role) => role.name)).toEqual(["Hero", "The late queen"]);
     expect(validateRoleRoster(roster)).toContainEqual(expect.objectContaining({ code: "ROSTER_MAJOR_IDENTITY_UNRESOLVED" }));
+  });
+});
+
+
+describe("source-reviewed development requirements", () => {
+  const create = () => {
+    const roster = buildRoleRoster({ ...input, annotations: [] });
+    roster.reviews = ["review-1", "review-2"].map(runId => ({ version: 2, runId, subjectHash: roster.subjectHash,
+      reviewedUnitIds: input.unitIds, entries: roster.candidates.map(candidate => ({ candidateId: candidate.id,
+        importance: "major", rationale: "Central", basisUnitIds: ["unit-1"],
+        developmentExpectation: { kind: "stable", rationale: "Source supports continuity", basisUnitIds: input.unitIds },
+      })),
+    }));
+    return roster;
+  };
+
+  it("retains legacy omissions, insufficient evidence and reviewer disagreements as unknown", () => {
+    const roster = create();
+    expect(reviewedRoleDevelopmentRequirements(roster)[0]?.status).toBe("stable");
+    const stable = reviewedRoleDevelopmentRequirements(roster)[0]!;
+    delete roster.reviews[0]!.version;
+    expect(reviewedRoleDevelopmentRequirements(roleRosterSchema.parse(roster))[0]?.status).toBe("unknown");
+    roster.reviews[0]!.version = 2;
+    roster.reviews[0]!.entries[0]!.developmentExpectation = { kind: "unknown", rationale: "Evidence insufficient", basisUnitIds: ["unit-1"] };
+    expect(validateRoleDevelopmentExpectations(roster)).toContainEqual(expect.objectContaining({ path: stable.id, code: "ROSTER_DEVELOPMENT_EXPECTATION_UNKNOWN" }));
+    roster.reviews[0]!.entries[0]!.developmentExpectation = { kind: "changes", rationale: "Changed choice under comparable pressure", changes: [{ dimensionId: "trust-readiness", direction: "increase", rationale: "Becomes willing to trust", beforeUnitIds: ["unit-1"], afterUnitIds: ["unit-2"] }] };
+    const conflict = reviewedRoleDevelopmentRequirements(roster)[0]!;
+    expect(conflict.status).toBe("unknown");
+    expect(conflict.id).toBe(stable.id);
+    expect(conflict.revisionHash).not.toBe(stable.revisionHash);
+    expect(conflict.reviews.map(review => review.expectation?.kind)).toEqual(["changes", "stable"]);
+    roster.reviews[1]!.entries[0]!.developmentExpectation = structuredClone(roster.reviews[0]!.entries[0]!.developmentExpectation);
+    roster.reviews[1]!.entries[0]!.importance = "supporting";
+    expect(reviewedRoleDevelopmentRequirements(roster)).toHaveLength(1);
+    expect(reviewedRoleDevelopmentRequirements(roster)[0]?.status).toBe("changes");
+    expect(reviewedRoleDevelopmentRequirements(roster)[0]?.reviews).toHaveLength(2);
+  });
+
+  it("rejects missing or foreign evidence and does not infer an omitted person's development", () => {
+    const roster = create();
+    const first = roster.reviews[0]!;
+    delete first.entries[0]!.developmentExpectation;
+    expect(validateRosterReview({ ...roster, reviews: [] }, first)).toContainEqual(expect.objectContaining({ code: "ROSTER_DEVELOPMENT_EXPECTATION_REQUIRED" }));
+    first.entries[0]!.developmentExpectation = { kind: "changes", rationale: "Changed", changes: [{ dimensionId: "trust-readiness", direction: "increase", rationale: "Changed", beforeUnitIds: ["unit-1"], afterUnitIds: ["foreign-unit"] }] };
+    expect(validateRosterReview({ ...roster, reviews: [] }, first)).toContainEqual(expect.objectContaining({ code: "ROSTER_UNKNOWN_EVIDENCE_UNIT" }));
+    expect(reviewedRoleDevelopmentRequirements(roster)[0]?.status).toBe("unknown");
+    first.missingMajorCharacters = [{ name: "The Queen", rationale: "Drives the ending", basisUnitIds: ["unit-2"] }];
+    const omitted = reviewedRoleDevelopmentRequirements(roster).find(requirement => !requirement.actorId)!;
+    expect(omitted.status).toBe("unknown");
+    expect(omitted.reviews.every(review => review.expectation === null)).toBe(true);
   });
 });

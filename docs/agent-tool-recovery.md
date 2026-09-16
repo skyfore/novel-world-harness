@@ -311,3 +311,21 @@ validation remains unchanged.
 `find_source_annotations` searches quotation content only after verifying its exact source anchor. Returned `readArguments.ref` is the read handle; `annotationId` remains the logical ID for attribution references. A failed annotation read must discover the exact failed ID in the same source, omitting status, copy the returned ref and retry once. Neighboring dialogue returning no matches is not proof that the designated quotation is missing. Invalid source anchors stop for host review; no unverified text fallback is allowed.
 
 Knowledge-repair prompts provide designated quotation read arguments and verified source text as untrusted evidence. After a no-progress finish, the compile-loop host independently checks those dependencies and preserves the original model report and finish receipt. Failure identity includes the target, deterministic failure category and dependency IDs; a target-only coverage gap is not a root-cause fingerprint. This does not authorize automatic reopening of completed receipts or a stopped loop.
+
+
+Independent role reviews now capture version 2 development expectations from
+original source pages. Every candidate needs `developmentExpectation`: `stable`,
+`changes` with dimensional before/after unit references, or `unknown` with an
+explanation. These are requirement definitions, never satisfaction claims.
+For unknown evidence-unit errors, call same-scope `read_roster_source_page` and
+copy its exact `unitIds` into `basisUnitIds`, `beforeUnitIds`, or `afterUnitIds`.
+For candidate/subject errors, call `read_role_roster` and copy `candidates[].id`
+and `subjectHash`. Make at most one corrected retry; never guess or repeat
+unchanged arguments. Single-use capture still requires finish, not resubmission.
+Legacy reviews remain readable, but missing development data, insufficient
+source evidence, or disagreement between reviewers remains an unknown
+requirement at certification. Stop unchanged model retries; do not delete
+reviews or recast unknown as stable to bypass the gate. Completing the semantic
+requirement or migrating historical reviews needs a host-controlled review
+revision with preserved history; the current role-review tool does not grant
+that mutation capability.

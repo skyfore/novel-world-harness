@@ -4,7 +4,7 @@ import path from "node:path";
 import { worldStorageRoot } from "../world/paths.js";
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 34;
+export const COMPILER_PIPELINE_VERSION = 35;
 const SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION = 30;
 
 export type BatchProgress = {
@@ -57,6 +57,12 @@ export class CompilerBatchStore {
         completedBatchIds: parsed.completedBatchIds.filter((id) =>
           id.startsWith(`structure-${sourceId}-`) || (id.startsWith(`batch-${sourceId}-`)
             && /-(observation|semantic)-/.test(id))) };
+    }
+    if (parsed.pipelineVersion === 34) {
+      // Version 35 changes independent role-review requirements only. Keep
+      // source compilation; dedicated role reviews must use the new protocol.
+      return { ...parsed, pipelineVersion: COMPILER_PIPELINE_VERSION,
+        completedBatchIds: parsed.completedBatchIds.filter(id => !id.startsWith(`role-roster-${sourceId}-`)) };
     }
     if (parsed.pipelineVersion !== COMPILER_PIPELINE_VERSION) {
       return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };

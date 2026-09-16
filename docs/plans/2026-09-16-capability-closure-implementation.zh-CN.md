@@ -323,3 +323,19 @@ finish-frozen 事件绑定原输入、授权链 head、来源与要求版本、�
 本段只是授权 finish 的冻结意图，尚未执行原 finish 验证与提交，也不代表 completed 或能力满足。授权 finish 的实际执行/中断恢复、活动 pending checkpoint、converge 后评估仍需落地。P1 完整验收映射及 P3–P7 保持待完成，未调用真实 provider 或人工体验评价。
 
 验证：定向 26 tests 通过；全量 188 文件、1114 tests 通过（80.37 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。
+
+P2f 已提交为 `352d18b`。
+
+## P2g：授权 finish 实际提交与原回执恢复
+
+新增 executeUpstreamRepairFinish 宿主执行入口，仅接受原 source/planHash，复用已冻结输入和既有 finish 的图闭包、来源及生命周期验证。新增 v3 回执绑定完整 upstream intent、精确 proposal dependencies 和空 metadata，保留 v1/v2 兼容读取。先持久化原回执，再由原 annotation/resolution 提交路径写入；该权限不包含 source accounting、world 或无关 metadata。
+
+恢复读取原 pending/accepted envelope，校验 envelope/payload hash。只有持久原回执已存在，预检才允许计划槽的 active revision 为原 baseline 或本次精确输出；其他修订拒绝覆盖。字段/证据 guard 始终对冻结原 baseline 重验，不能用部分提交结果作自身基线。完成回执前再次核实全部输出已经 active。recoverCompilerFinish 自动将 v3 回执路由到相同宿主入口，不启动模型、不重跑提案工具。
+
+finished 事件绑定实际 completed receipt fingerprint；回执完成后记账中断可幂等补齐。追加后重新观察独立要求有效性，重启也可补齐这一步。候选历史保留上游回执，finished journal 必须与对应原回执绑定，仍以未 evaluated 阻止认证。
+
+测试覆盖 quotation 扩展、annotation 写后/完成前/账本记账前中断、三层 discourse→mention→resolution 的跨存储部分提交恢复、第三方修订拒绝覆盖、重复恢复不重复接受、不写 source accounting，以及原 finish 在提交前拒绝错误 discourse kind 并停止计划。完成仅代表批次协议，不代表缺口评估成功。
+
+P2 仍待活动 pending/finish 可移植 checkpoint、converge 后实际修订复核及逐项评估、宿主修复调度与模型会话接入；P1 完整验收映射及 P3–P7 仍未完成。未调用真实 provider 或人工体验评价。
+
+验证：全量 188 文件、1120 tests 通过（82.60 秒）；随后补强持久回执修订授权、快照回执绑定和确定性 finish 失败停止状态，32 项定向回归通过。服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。

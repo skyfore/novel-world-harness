@@ -232,6 +232,15 @@ it("consumes only declared same-plan staged mentions and freezes their exact rev
   await recoverUpstreamRepairStage(f.root, f.sourceId, plan.planHash, resolved.attemptRef);
   expect(noReplay).not.toHaveBeenCalled();
   await expect(f.ledger.recordValidated(plan.planHash, resolved.attemptRef, attempt.validatedHash!, [])).rejects.toThrow("dependencies were rewritten");
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Reviewed full dependency chain" }], summary: "Repair missing mention and resolution" });
+  vi.spyOn(EntityResolutionStore.prototype, "commitProposals").mockRejectedValueOnce(new Error("injected between annotation and resolution stores"));
+  await expect(executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash)).rejects.toThrow("injected between");
+  expect((await annotations.read(f.sourceId, "new-mention")).id).toBe("new-mention");
+  expect(await new EntityResolutionStore(f.root).list(f.sourceId)).toEqual([]);
+  await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
+  expect((await new EntityResolutionStore(f.root).list(f.sourceId)).map(item => item.id)).toEqual(["new-resolution"]);
+  expect(noReplay).not.toHaveBeenCalled();
 });
 
 it("freezes and restores upstream budgets with candidates and rejects old or unbound history before world writes", async () => {
@@ -336,4 +345,89 @@ it("refuses stray batch proposals and stale baselines before freezing finish aut
   await f.write({ ...f.annotation, attributionConfidence: 0.7 }, "host-changed-baseline");
   await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, input)).rejects.toThrow("Active dependency changed");
   expect((await f.ledger.history()).some(record => record.payload.kind === "finish-frozen")).toBe(false);
+});
+
+async function frozenQuotationFinish() {
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { prepareUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  await stageUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, { proposal_id: "repair-proposal", annotation_id: "quote-one", selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 });
+  const intent = await prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Reviewed" }], summary: "Bounded repair" });
+  return { ...f, intent };
+}
+
+it.each(["none", "annotation", "completion", "journal"])("executes the original authorized finish and recovers after %s without model replay", async point => {
+  const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { CompilerFinishReceipts, compilerFinishReceiptSchema } = await import("../src/compiler/finish-receipts.js");
+  const { recoverCompilerFinish } = await import("../src/compiler/finish-recovery.js");
+  const { SourceAccountingStore } = await import("../src/compiler/source-accounting.js");
+  const f = await frozenQuotationFinish(), receipts = new CompilerFinishReceipts(f.root, f.sourceId, f.plan.batchId);
+  const accounting = new SourceAccountingStore(f.root), beforeAccounting = await accounting.read(f.sourceId);
+  if (point === "annotation") {
+    const original = SourceAnnotationStore.prototype.commitProposals;
+    vi.spyOn(SourceAnnotationStore.prototype, "commitProposals").mockImplementationOnce(async function (...args) { await original.apply(this, args); throw new Error("injected post-annotation crash"); });
+  } else if (point === "completion") vi.spyOn(CompilerFinishReceipts.prototype, "complete").mockRejectedValueOnce(new Error("injected completion crash"));
+  else if (point === "journal") vi.spyOn(UpstreamRepairLedger.prototype, "recordFinished").mockRejectedValueOnce(new Error("injected journal crash"));
+  if (point !== "none") {
+    await expect(executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("injected");
+    expect((await receipts.read())?.state).toBe(point === "journal" ? "completed" : "prepared");
+    expect((await f.ledger.inspect()).plans[0]!.state).toBe("finish-frozen");
+    await expect(recoverCompilerFinish(f.root, f.sourceId, f.plan.batchId)).resolves.toBe(true);
+  } else await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  const receipt = await receipts.read();
+  expect(receipt).toMatchObject({ state: "completed", identity: { version: 3, upstreamRepairIntent: f.intent, metadata: {} } });
+  expect(() => compilerFinishReceiptSchema.parse({ ...receipt, identity: { ...receipt!.identity, version: 1 }, fingerprint: contentHash({ ...receipt!.identity, version: 1 }) })).toThrow("upstream scope/version");
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("finished");
+  const annotations = new SourceAnnotationStore(f.root), active = await annotations.read(f.sourceId, "quote-one");
+  expect(active.anchor.endByte).toBe(f.annotation.anchor.endByte + 1);
+  expect(active.attributionConfidence).toBe(f.annotation.attributionConfidence);
+  expect(await accounting.read(f.sourceId)).toEqual(beforeAccounting);
+  const records = await f.ledger.history();
+  if (point === "none") {
+    const { captureReconciliationObligations } = await import("../src/compiler/reconciliation-review-ledger.js");
+    const { upstreamRepairSnapshotIssues } = await import("../src/compiler/upstream-repair-snapshot.js");
+    const { RequirementLedger } = await import("../src/compiler/requirement-ledger.js");
+    const obligations = await captureReconciliationObligations(f.root, f.sourceId);
+    expect(obligations.some(item => item.receipt.fingerprint === receipt!.fingerprint)).toBe(true);
+    const snapshot = { upstreamRepairJournal: records, reconciliationObligations: obligations, requirementDefinitions: await new RequirementLedger(f.root, f.sourceId).definitions() };
+    expect(upstreamRepairSnapshotIssues(snapshot, f.sourceId, f.source.source.contentSha256)).toEqual([]);
+    expect(upstreamRepairSnapshotIssues({ ...snapshot, reconciliationObligations: [] }, f.sourceId, f.source.source.contentSha256)).toContain("UPSTREAM_REPAIR_FINISH_RECEIPT_MISSING");
+  }
+  await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  expect(await f.ledger.history()).toEqual(records);
+  expect(await receipts.read()).toEqual(receipt);
+  expect(await annotations.listProposals(f.sourceId, "pending")).toEqual([]);
+  expect((await annotations.listProposals(f.sourceId, "accepted")).filter(item => item.id === "repair-proposal")).toHaveLength(1);
+});
+
+it("does not overwrite a third-party revision during authorized partial-finish recovery", async () => {
+  const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { CompilerFinishReceipts } = await import("../src/compiler/finish-receipts.js");
+  const f = await frozenQuotationFinish();
+  vi.spyOn(CompilerFinishReceipts.prototype, "complete").mockRejectedValueOnce(new Error("injected before completion"));
+  await expect(executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("injected");
+  const changed = { ...f.annotation, attributionConfidence: 0.4 }; await f.write(changed, "host-intervened");
+  await expect(executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("Active dependency changed");
+  expect(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")).toEqual(changed);
+  expect((await new CompilerFinishReceipts(f.root, f.sourceId, f.plan.batchId).read())?.state).toBe("prepared");
+});
+
+it("runs the original finish graph validation before any authorized canonical mutation", async () => {
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { CompilerFinishReceipts } = await import("../src/compiler/finish-receipts.js");
+  const f = await fixture(), requirement = f.identity.requirementIds[0]!;
+  const discourse = { version: 1 as const, sourceId: f.sourceId, id: "summary-context", annotationType: "discourse-segment" as const, kind: "summary" as const, anchors: [f.annotation.anchor], confidence: 1, derivation: f.annotation.derivation };
+  const store = new SourceAnnotationStore(f.root);
+  await store.stage(f.sourceId, { version: 1, id: "summary-original", annotationType: "discourse-segment", payload: discourse, generatedBy: { worker: "fixture" }, createdAt: "2026-09-16T00:00:00Z" });
+  await store.commitProposals(f.sourceId, ["summary-original"]);
+  const plan = freezeUpstreamRepairPlan({ ...f.identity, allowedWrites: [], baselineRefs: [...f.identity.baselineRefs, { kind: "discourse-segment", id: discourse.id, revisionHash: contentHash(discourse) }], readableRefs: [...f.identity.readableRefs, { kind: "discourse-segment", id: discourse.id }], allowedCreations: [{ kind: "entity-mention", id: "bad-surface", maxCount: 1, dependencyOf: requirement }], dependencyEdges: [{ from: `requirement:${requirement}`, to: "entity-mention:bad-surface", purpose: "source-evidence" }] });
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "entity-mention", id: "bad-surface" }, { proposal_id: "bad-mention-proposal", annotation_id: "bad-surface", selector: { segment_id: f.source.segmentId, exact: "Ada" }, surface: "Ada", scene_id: discourse.id, form: "proper", kind_candidates: ["character"], confidence: 1 });
+  await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Reviewed" }], summary: "Invalid semantic trace" });
+  const annotations = new SourceAnnotationStore(f.root), before = await annotations.list(f.sourceId);
+  await expect(executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash)).rejects.toThrow("scene");
+  expect(await annotations.list(f.sourceId)).toEqual(before);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("needs-host-review");
+  expect(await new CompilerFinishReceipts(f.root, f.sourceId, plan.batchId).read()).toBeUndefined();
 });

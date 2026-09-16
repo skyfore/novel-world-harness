@@ -26,3 +26,6 @@ export function freezeUpstreamRepairFinishIntent(input: z.input<typeof identityS
   const identity = identitySchema.parse(input);
   return upstreamRepairFinishIntentSchema.parse({ ...identity, intentHash: contentHash(identity) });
 }
+
+/** Deterministic original-finish rejection, distinct from interrupted host I/O. */
+export class UpstreamRepairFinishValidationError extends Error {}

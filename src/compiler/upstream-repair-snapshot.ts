@@ -17,6 +17,14 @@ export function upstreamRepairSnapshotIssues(snapshot: {
   const issues: string[] = [];
   for (const record of parsed.data) {
     if (record.sourceId !== sourceId) issues.push("UPSTREAM_REPAIR_JOURNAL_SOURCE_MISMATCH");
+    if (record.payload.kind === "finished") {
+      const event = record.payload;
+      const receipt = snapshot.reconciliationObligations?.find(item => item.receipt.fingerprint === event.receiptFingerprint)?.receipt;
+      const frozen = parsed.data.find(item => item.payload.kind === "finish-frozen" && item.payload.planHash === event.planHash)?.payload;
+      const planned = parsed.data.find(item => item.payload.kind === "planned" && item.payload.plan.planHash === event.planHash)?.payload;
+      if (!receipt || receipt.state !== "completed" || receipt.identity.sourceId !== sourceId || receipt.identity.sourceSha256 !== sourceSha256 || frozen?.kind !== "finish-frozen" || planned?.kind !== "planned"
+        || receipt.identity.batchId !== planned.plan.batchId || contentHash(receipt.identity.upstreamRepairIntent ?? null) !== contentHash(frozen.intent)) issues.push("UPSTREAM_REPAIR_FINISH_RECEIPT_MISSING");
+    }
     if (record.payload.kind !== "planned") continue;
     const plan = record.payload.plan;
     if (plan.sourceScope.sourceId !== sourceId || plan.sourceScope.sourceSha256 !== sourceSha256) issues.push("UPSTREAM_REPAIR_PLAN_SOURCE_MISMATCH");

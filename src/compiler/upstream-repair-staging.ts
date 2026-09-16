@@ -24,7 +24,7 @@ async function pending(root: string, sourceId: string, kind: UpstreamRepairKind,
 function derivation(kind: UpstreamRepairKind, batchId: string) {
   return { runId: batchId, compilerBatchId: batchId, worker: toolNames[kind], ontologyVersion: kind === "entity-resolution" ? "entity-resolution-v1" : kind === "event-resolution" ? "event-resolution-v1" : "observation-v1" };
 }
-function checkMutation(verified: Awaited<ReturnType<typeof verifyUpstreamRepairPlan>>, kind: UpstreamRepairKind, id: string, payload: unknown, stagedDependencies: ReadonlyMap<string, unknown> = new Map()) {
+export function checkUpstreamRepairMutation(verified: Awaited<ReturnType<typeof verifyUpstreamRepairPlan>>, kind: UpstreamRepairKind, id: string, payload: unknown, stagedDependencies: ReadonlyMap<string, unknown> = new Map()) {
   const { plan, bytes, payloads, activeRevisions } = verified;
   const anchors: Array<ReturnType<typeof textAnchorSchema.parse>> = [];
   const collect = (value: unknown): void => {
@@ -71,7 +71,7 @@ async function stagedDependencies(root: string, verified: Awaited<ReturnType<typ
       const staged = state.records.find(record => record.payload.kind === "attempt-staged" && record.payload.attemptRef === attempt.attemptRef)?.payload;
       if (staged?.kind !== "attempt-staged" || staged.proposalHash !== contentHash(envelope) || attempt.validatedHash !== contentHash(envelope.payload)
         || contentHash(envelope.generatedBy) !== contentHash({ compilerBatchId: plan.batchId, worker: toolNames[slot.kind] })) throw upstreamRepairHostError(`Declared staged dependency differs from its original envelope: ${edge.to}`);
-      checkMutation(verified, slot.kind, slot.id, envelope.payload, children.payloads);
+      checkUpstreamRepairMutation(verified, slot.kind, slot.id, envelope.payload, children.payloads);
       for (const [key, payload] of children.payloads) payloads.set(key, payload);
       for (const ref of children.refs) refs.set(ref.attemptRef, ref);
       payloads.set(edge.to, envelope.payload);
@@ -97,7 +97,7 @@ export async function stageUpstreamRepair(root: string, sourceId: string, planHa
     const tools = createCompilerProposalToolset(root, {}, { upstreamRepair: { planHash, beforeStage: async (kind, id, payload) => {
       if (kind !== target.kind || id !== target.id) throw upstreamRepairHostError("Proposed artifact differs from the reserved host slot");
       const verified = await verifyUpstreamRepairPlan(root, current.plan), dependencies = await stagedDependencies(root, verified, target);
-      checkMutation(verified, kind, id, payload, dependencies.payloads);
+      checkUpstreamRepairMutation(verified, kind, id, payload, dependencies.payloads);
       await ledger.recordValidated(planHash, attemptRef, contentHash(payload), dependencies.refs);
     } } });
     await tools.beginBatch(current.plan.sourceScope.segmentIds, current.plan.batchId, sourceId);
@@ -135,7 +135,7 @@ export async function recoverUpstreamRepairStage(root: string, sourceId: string,
   if (contentHash(envelope.payload) !== attempt.validatedHash || envelope.id !== attempt.started.proposalId || contentHash(envelope.generatedBy) !== contentHash(generatedBy)) throw upstreamRepairHostError("Pending repair draft differs from its original validated intent");
   const dependencies = await stagedDependencies(root, verified, { kind: attempt.started.artifactKind, id: attempt.started.artifactId });
   if (contentHash(attempt.dependencies ?? []) !== contentHash(dependencies.refs)) throw upstreamRepairHostError("Original validated repair dependency revisions changed");
-  checkMutation(verified, attempt.started.artifactKind, attempt.started.artifactId, envelope.payload, dependencies.payloads);
+  checkUpstreamRepairMutation(verified, attempt.started.artifactKind, attempt.started.artifactId, envelope.payload, dependencies.payloads);
   const proposalHash = contentHash(envelope);
   await ledger.recordStaged(planHash, attemptRef, proposalHash);
   return { attemptRef, proposalId: envelope.id, proposalHash };

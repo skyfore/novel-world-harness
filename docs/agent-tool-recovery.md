@@ -617,8 +617,8 @@ exact active authorization. Failed initialization leaves that toolset unusable
 until the host establishes a valid batch; catching the error cannot permit later
 tool execution. Even the host staging path currently rejects ordinary finish,
 world proposals, retrieval and unrelated metadata tools. There is no autonomous
-repair-session entrypoint yet. Authorization-aware finish execution and live
-draft snapshot recovery remain prerequisites for the full executor.
+repair-session entrypoint yet. The host finish executor described below is
+separate from staging; live draft snapshot recovery remains outstanding.
 
 ### Consuming staged upstream dependencies
 
@@ -639,8 +639,8 @@ closure as exact `attemptRef` and `proposalHash` pairs. The journal requires eac
 reference to name an earlier same-plan staged result and rejects omitted or
 extraneous dependency slots. Consumer recovery checks the same closure without
 executing tools. These references provide staged compiler inputs only; ordinary
-finish and publication remain unavailable for managed repair batches until the
-authorization-aware finish protocol is implemented.
+finish remains unavailable to staging tools. Only the host's frozen finish
+executor may commit this exact authorized batch; publication is a later gate.
 
 ### Upstream history in prepared candidates
 
@@ -683,5 +683,30 @@ Use `requirements inspect-upstream --source <sourceId>` and copy the exact
 baselines, unrelated batch artifacts or a conflicting ordinary receipt require
 host review. Preserve all records and drafts; do not retry unchanged, invent a
 new batch, or reset the budget. Journal restoration retains this intent but does
-not recreate pending drafts. Actual authorized finish execution and recovery
-remain a separate implementation gate.
+not recreate pending drafts. Actual execution uses the separate host gate below.
+
+### Executing and recovering an authorized upstream finish
+
+`executeUpstreamRepairFinish` takes the original source ID and exact retained
+`plans[].plan.planHash`; it takes no replacement model input. It runs the existing
+compiler finish graph/source/lifecycle validators, then writes a v3 receipt
+binding the complete frozen upstream intent before committing annotations or
+resolutions. Unrelated metadata, world proposals and source-accounting writes
+remain outside this authorization. A failed graph validation stops the plan for
+host review before any commit; do not retry it unchanged or restart the model.
+
+After a storage interruption, preserve the original receipt, journal and draft
+envelopes. `recoverCompilerFinish` routes v3 receipts to this same host executor.
+Recovery verifies pending or accepted envelope hashes, source bytes, independent
+requirements and every original baseline. An active repair slot may contain its
+original baseline or the exact validated output only when the matching original
+receipt is already durable. An unrelated revision, missing envelope or changed
+input requires host review, never an overwrite or a new proposal namespace.
+The mutation guard still compares against the frozen original baseline payload.
+
+Completion verifies every output is active, then records the exact completed
+receipt fingerprint as `finished`. Recovery after receipt completion resumes
+journal recording without rerunning mutation tools. Finished records and their
+original receipts are retained in candidate history and still block certification
+until convergence and independent requirement evaluation are implemented. This
+does not provide portable recovery for missing live draft envelopes.

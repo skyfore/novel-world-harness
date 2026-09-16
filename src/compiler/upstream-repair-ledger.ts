@@ -15,6 +15,7 @@ export type UpstreamStagedDependency = z.infer<typeof stagedDependencySchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("planned"), plan: upstreamRepairPlanSchema, predecessorPlanHash: hash.nullable() }).strict(),
   z.object({ kind: z.literal("authorized"), planHash: hash }).strict(),
+  z.object({ kind: z.literal("finished"), planHash: hash, receiptFingerprint: hash }).strict(),
   z.object({ kind: z.literal("finish-frozen"), planHash: hash, intent: upstreamRepairFinishIntentSchema }).strict(),
   z.object({ kind: z.literal("attempt-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, inputHash: hash, toolInput: z.unknown().optional() }).strict(),
   z.object({ kind: z.literal("attempt-staged"), planHash: hash, attemptRef: hash, proposalHash: hash }).strict(),
@@ -26,7 +27,7 @@ const recordSchema = z.object({ version: z.literal(1), sourceId: idSchema, seque
 type Record = z.infer<typeof recordSchema>;
 export type UpstreamRepairRecord = Record;
 type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
-type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "needs-host-review"; finishIntent?: UpstreamRepairFinishIntent };
+type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "needs-host-review"; finishIntent?: UpstreamRepairFinishIntent };
 function project(records: Record[]) {
   const plans = new Map<string, PlanState>();
   const attempts = new Map<string, { started: Started; failed: boolean; staged: boolean; validatedHash?: string; dependencies?: UpstreamStagedDependency[] }>();
@@ -63,6 +64,9 @@ function project(records: Record[]) {
       }
       if ([...attempts.values()].some(attempt => attempt.started.planHash === plan.planHash && !attempt.failed && !attempt.staged)) throw upstreamRepairHostError("Finish has an unresolved reserved attempt");
       current.state = "finish-frozen"; current.finishIntent = intent;
+    } else if (event.kind === "finished") {
+      if (current.state !== "finish-frozen" || !current.finishIntent) throw upstreamRepairHostError("Finished repair lacks its original frozen intent");
+      current.state = "finished";
     } else if (event.kind === "attempt-started") {
       if (event.toolInput !== undefined && contentHash(event.toolInput) !== event.inputHash) throw upstreamRepairHostError("Reserved tool input hash mismatch");
       assertStart(current, event, plans, attempts);
@@ -195,7 +199,7 @@ export class UpstreamRepairLedger {
   }
   async authorize(planHash: string): Promise<void> {
     const current = project(await this.history()).plans.get(planHash);
-    if (!current || current.state === "needs-host-review" || current.state === "finish-frozen") throw upstreamRepairHostError("Plan is missing, stopped or already frozen for finish");
+    if (!current || current.state === "needs-host-review" || ["finish-frozen", "finished"].includes(current.state)) throw upstreamRepairHostError("Plan is missing, stopped or already frozen for finish");
     await this.verifyOrStop(current.plan);
     if (current.state === "planned") await this.append({ kind: "authorized", planHash });
   }
@@ -245,6 +249,20 @@ export class UpstreamRepairLedger {
     if (!state) throw upstreamRepairHostError("Plan is missing");
     if (state.state === "needs-host-review") return;
     await this.append({ kind: "needs-host-review", planHash, reason });
+  }
+  async recordFinished(planHash: string, receiptFingerprint: string): Promise<void> {
+    const { CompilerFinishReceipts } = await import("./finish-receipts.js");
+    const state = await this.inspect(), current = state.plans.find(item => item.plan.planHash === planHash);
+    if (!current?.finishIntent) throw upstreamRepairHostError("Original finish intent is missing");
+    const store = new CompilerFinishReceipts(this.root, this.sourceId, current.plan.batchId), receipt = await store.read();
+    if (!receipt || receipt.state !== "completed" || receipt.fingerprint !== receiptFingerprint || contentHash(receipt.identity.upstreamRepairIntent ?? null) !== contentHash(current.finishIntent)) throw upstreamRepairHostError("Repair finish lacks its matching completed receipt");
+    await store.verify(receipt);
+    const existing = state.records.find(record => record.payload.kind === "finished" && record.payload.planHash === planHash);
+    if (existing) {
+      if (existing.payload.kind !== "finished" || existing.payload.receiptFingerprint !== receiptFingerprint) throw upstreamRepairHostError("Original finish receipt changed");
+      return;
+    }
+    await this.append({ kind: "finished", planHash, receiptFingerprint });
   }
   async freezeFinish(raw: UpstreamRepairFinishIntent): Promise<void> {
     const intent = upstreamRepairFinishIntentSchema.parse(raw), state = project(await this.history()).plans.get(intent.planHash);

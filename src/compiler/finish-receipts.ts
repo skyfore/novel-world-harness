@@ -1,3 +1,4 @@
+import { upstreamRepairFinishIntentSchema } from "./upstream-repair-finish-intent.js";
 import { compilerFinishInputSchema } from "./finish-input.js";
 export { compilerFinishInputSchema } from "./finish-input.js";
 import { coreRoleAttemptSchema, coreRoleAttemptScopeSchema, coreRoleAttemptReports, linkCoreRoleAttemptProposals, coreRoleAttemptScope } from "./requirement-attempts.js";
@@ -26,12 +27,20 @@ const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const dependencySchema = z.object({ store: z.enum(["world", "annotation", "entity-resolution", "event-resolution", "accounting"]), proposalId: idSchema, hash: hashSchema }).strict();
 type Dependency = z.infer<typeof dependencySchema>;
 const identitySchema = z.object({
-  version: z.union([z.literal(1), z.literal(2)]), pipelineVersion: z.number().int().positive(), sourceId: idSchema, sourceSha256: hashSchema, batchId: idSchema,
+  version: z.union([z.literal(1), z.literal(2), z.literal(3)]), pipelineVersion: z.number().int().positive(), sourceId: idSchema, sourceSha256: hashSchema, batchId: idSchema,
+  upstreamRepairIntent: upstreamRepairFinishIntentSchema.optional(),
   requirementScope: z.object({ planHash: hashSchema, requirements: z.array(reconciliationRequirementSchema), coreRoleScope: coreRoleAttemptScopeSchema.nullable().optional() }).strict().optional(),
   requirementAttempts: z.array(coreRoleAttemptSchema).optional(),
   input: compilerFinishInputSchema, segments: z.array(sourceSegmentSchema), dependencies: z.array(dependencySchema),
   metadata: z.object({ title: sourceTitleProposalSchema.optional(), chapterSplit: chapterSplitPlanSchema.optional(), roleReview: roleRosterReviewSchema.optional() }).strict(),
 }).strict().superRefine((identity, ctx) => {
+  if ((identity.version === 3) !== Boolean(identity.upstreamRepairIntent)) ctx.addIssue({ code: "custom", message: "Finish upstream scope/version mismatch" });
+  const upstream = identity.upstreamRepairIntent;
+  if (upstream) {
+    const expected = upstream.proposals.map(p => ({ store: p.artifactKind.endsWith("resolution") ? p.artifactKind : "annotation", proposalId: p.proposalId, hash: p.proposalHash })).sort((a, b) => `${a.store}:${a.proposalId}`.localeCompare(`${b.store}:${b.proposalId}`));
+    if (identity.requirementScope || identity.requirementAttempts || Object.keys(identity.metadata).length || upstream.sourceId !== identity.sourceId || upstream.sourceSha256 !== identity.sourceSha256 || contentHash(upstream.input) !== contentHash(identity.input)
+      || contentHash(expected) !== contentHash(identity.dependencies.slice().sort((a, b) => `${a.store}:${a.proposalId}`.localeCompare(`${b.store}:${b.proposalId}`)))) ctx.addIssue({ code: "custom", message: "Finish differs from frozen upstream authority" });
+  }
   const scope = identity.requirementScope?.coreRoleScope;
   if (Boolean(scope) !== Boolean(identity.requirementAttempts)) ctx.addIssue({ code: "custom", message: "Finish independent attempts/scope mismatch" });
   if (scope && identity.requirementAttempts) {
@@ -114,6 +123,10 @@ export class CompilerFinishReceipts {
       const identity = receipt.identity;
       if (identity.pipelineVersion !== COMPILER_PIPELINE_VERSION) throw new Error("finish compiler pipeline changed");
       if (identity.sourceId !== this.sourceId || identity.batchId !== this.batchId) throw new Error("finish scope mismatch");
+      if (identity.upstreamRepairIntent) {
+        const { verifyUpstreamRepairFinish } = await import("./upstream-repair-finish.js");
+        await verifyUpstreamRepairFinish(this.root, this.sourceId, identity.upstreamRepairIntent.planHash, identity.upstreamRepairIntent, receipt.state === "completed", identity.batchId);
+      }
       if (identity.requirementScope) {
         const { reconciliationReviewScope } = await import("./reconcile-world.js");
         const current = await reconciliationReviewScope(this.root, this.sourceId, this.batchId);
@@ -161,6 +174,7 @@ export class CompilerFinishReceipts {
     if (!receipt || receipt.fingerprint !== fingerprint) throw finishHostError("completion has no matching prepared intent");
     await this.verify(receipt);
     const completed = receipt.state === "completed" ? receipt : { ...receipt, state: "completed" as const, completedAt: new Date().toISOString() };
+    if (completed.identity.upstreamRepairIntent) await this.verify(completed);
     if (receipt.state !== "completed") await this.write(completed);
     await this.retainRequirementAttempts(completed);
   }

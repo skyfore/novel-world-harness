@@ -9,6 +9,11 @@ import { contentHash } from "../world/canonical.js";
 export async function recoverCompilerFinish(root: string, sourceId: string, batchId: string): Promise<boolean> {
   const store = new CompilerFinishReceipts(root, sourceId, batchId), receipt = await store.read();
   if (!receipt) return false;
+  if (receipt.identity.upstreamRepairIntent) {
+    const { executeUpstreamRepairFinish } = await import("./upstream-repair-finish.js");
+    await executeUpstreamRepairFinish(root, sourceId, receipt.identity.upstreamRepairIntent.planHash);
+    return true;
+  }
   new CompilerProposalObligations(root, sourceId, batchId).assertFinishable();
   await store.verify(receipt);
   // World-only reconciliation finishes are followed by a separate convergence

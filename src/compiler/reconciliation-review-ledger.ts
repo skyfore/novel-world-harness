@@ -60,7 +60,7 @@ export async function captureReconciliationObligations(root: string, sourceId: s
   const snapshot: ReconciliationObligationSnapshot = [];
   const upstreamPredecessors = new Set((await new UpstreamRepairLedger(root, sourceId).history()).flatMap(record => record.payload.kind === "planned" ? record.payload.plan.predecessorReceiptRefs : []));
   for (const { receipt, archived } of await CompilerFinishReceipts.listRetained(root, sourceId)) {
-    if (!receipt.identity.input.target_reviews?.length && !receipt.identity.metadata.roleReview && !upstreamPredecessors.has(receipt.fingerprint)) continue;
+    if (!receipt.identity.input.target_reviews?.length && !receipt.identity.metadata.roleReview && !receipt.identity.upstreamRepairIntent && !upstreamPredecessors.has(receipt.fingerprint)) continue;
     let decision;
     try { decision = decisionSchema.parse(JSON.parse(await fs.readFile(decisionPath(root, sourceId, receipt.fingerprint), "utf8"))); }
     catch (error) {

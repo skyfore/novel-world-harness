@@ -1,3 +1,4 @@
+import { UpstreamRepairFinishValidationError } from "./upstream-repair-finish-intent.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { reconciliationReviewIssues } from "./reconciliation-review.js";
 import { readKnowledgeRepairPlan, knowledgeRepairScopeIssues } from "./knowledge-repair.js";
@@ -995,7 +996,7 @@ function safeTextSuffix(text: string, maxChars: number): string {
 export function createCompilerProposalToolset(
   workspaceRoot: string,
   generatedBy: { provider?: string; model?: string } = {},
-  hostOptions: { recoverPreparedFinish?: boolean; upstreamRepair?: { planHash: string; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown) => Promise<void> } } = {},
+  hostOptions: { recoverPreparedFinish?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown) => Promise<void> } } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
@@ -1051,6 +1052,7 @@ export function createCompilerProposalToolset(
     return circuitBreakResult(reason, totalFinishFailures);
   };
   const failFinish = (reason: string) => {
+    if (hostOptions.upstreamFinish) throw new UpstreamRepairFinishValidationError(reason);
     totalFinishFailures += 1;
     consecutiveFinishFailures += 1;
     const identicalFailures = (finishFailureCounts.get(reason) ?? 0) + 1;
@@ -2847,6 +2849,11 @@ export function createCompilerProposalToolset(
       const blocked = beginToolCall("finish");
       if (blocked) return blocked;
       obligations()?.assertFinishable();
+      if (hostOptions.upstreamFinish) {
+        const { verifyUpstreamRepairFinish } = await import("./upstream-repair-finish.js");
+        if (!isDeepStrictEqual(input, hostOptions.upstreamFinish.input)) throw finishHostError("upstream finish input changed");
+        await verifyUpstreamRepairFinish(workspaceRoot, activeSourceId!, hostOptions.upstreamFinish.planHash, hostOptions.upstreamFinish);
+      }
       const existingFinish = await finishReceipts()?.read();
       if (existingFinish && !hostOptions.recoverPreparedFinish) throw finishHostError("a prepared finish must be resumed by the host");
       if (existingFinish && !isDeepStrictEqual(existingFinish.identity.input, input)) throw finishHostError("the original finish input is frozen");
@@ -2922,7 +2929,7 @@ export function createCompilerProposalToolset(
       let accountingStructure: Awaited<ReturnType<typeof ensureSourceStructure>> | undefined;
       let accountingBytes: Buffer | undefined;
       const stage = activeSemanticStage();
-      const recordsSourceAccounting = !stage || stage === "executable";
+      const recordsSourceAccounting = !managedUpstream && (!stage || stage === "executable");
       const graphAdjudicationIteration = graphAdjudicationIterationFromBatchId(compilerBatchId, activeSourceId);
       const semanticReconciliationBatch = semanticReconciliationBatchFromBatchId(compilerBatchId, activeSourceId);
       if (recordsSourceAccounting && activeSourceId && compilerBatchId && input.reviewed_segments.length) {
@@ -3148,7 +3155,8 @@ export function createCompilerProposalToolset(
       const receipts = finishReceipts();
       const finishSource = activeSourceId ? await WorkspaceStore.openReadOnly(workspaceRoot).getSource(activeSourceId) : undefined;
       const receipt = receipts && finishSource && compilerBatchId ? await receipts.prepare({
-        version: reviewScope?.requirements ? 2 : 1, sourceId: finishSource.id, sourceSha256: finishSource.contentSha256, batchId: compilerBatchId,
+        version: hostOptions.upstreamFinish ? 3 : reviewScope?.requirements ? 2 : 1,
+        ...(hostOptions.upstreamFinish ? { upstreamRepairIntent: hostOptions.upstreamFinish } : {}), sourceId: finishSource.id, sourceSha256: finishSource.contentSha256, batchId: compilerBatchId,
         ...(reviewScope?.requirements ? { requirementScope: { planHash: reviewScope.planHash!, requirements: reviewScope.requirements, ...(reviewScope.coreRoleScope !== undefined ? { coreRoleScope: reviewScope.coreRoleScope } : {}) } } : {}),
         input, segments: validatedSourceSegments,
         dependencies: await receipts.dependencies({ world: listed, annotation: listedAnnotations,
@@ -3249,13 +3257,16 @@ export function createCompilerProposalToolset(
       finishTool,
     ].map(trackProposal).map((tool) => ({ ...tool, async execute(id, input, signal, onUpdate, context) {
       if (!batchReady) throw finishHostError("compiler batch initialization did not complete; stop tool calls and preserve the original scope for host review");
-      if (managedUpstream && !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution"].includes(tool.name)) {
-        throw finishHostError("managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
+      if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution"].includes(tool.name))) {
+        throw finishHostError(hostOptions.upstreamFinish
+          ? "frozen upstream finish authorizes only the original host finish; preserve its receipt and drafts, and stop other tool calls"
+          : "managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
       }
       if (tool.name !== "finish_compiler_batch" && /^(?:propose_|account_source_units$|withdraw_|configure_|defer_|replace_)/u.test(tool.name)
         && await finishReceipts()?.read()) throw finishHostError("a prepared finish freezes this batch's mutation set");
       try { return await tool.execute(id, input, signal, onUpdate, context); }
       catch (error) {
+        if (error instanceof UpstreamRepairFinishValidationError) throw error;
         if (tool.name === "finish_compiler_batch" && await finishReceipts()?.read()) throw finishHostError(String(error));
         throw error;
       }
@@ -3282,10 +3293,12 @@ export function createCompilerProposalToolset(
         const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
         const managed = (await new UpstreamRepairLedger(workspaceRoot, activeSourceId).inspect()).plans.find(item => item.plan.batchId === compilerBatchId);
         if (managed) {
-          if (!hostOptions.upstreamRepair || hostOptions.upstreamRepair.planHash !== managed.plan.planHash || !["authorized", "staging"].includes(managed.state)) throw finishHostError("managed upstream batch requires its exact active host authorization; preserve its ledger and stop ordinary batch recovery");
+          const finishPermit = hostOptions.upstreamFinish && managed.finishIntent && isDeepStrictEqual(hostOptions.upstreamFinish, managed.finishIntent) && ["finish-frozen", "finished"].includes(managed.state);
+          const stagePermit = hostOptions.upstreamRepair?.planHash === managed.plan.planHash && ["authorized", "staging"].includes(managed.state);
+          if ((!finishPermit && !stagePermit) || (hostOptions.upstreamFinish && hostOptions.upstreamRepair)) throw finishHostError("managed upstream batch requires its exact active host authorization; preserve its ledger and stop ordinary batch recovery");
           managedUpstream = true;
-        } else if (hostOptions.upstreamRepair) throw finishHostError("upstream authorization has no retained source-local plan");
-      } else if (hostOptions.upstreamRepair) throw finishHostError("upstream staging requires its exact source and batch");
+        } else if (hostOptions.upstreamRepair || hostOptions.upstreamFinish) throw finishHostError("upstream authorization has no retained source-local plan");
+      } else if (hostOptions.upstreamRepair || hostOptions.upstreamFinish) throw finishHostError("upstream staging requires its exact source and batch");
       const resumingFinish = await finishReceipts()?.read();
       finishFrozen = Boolean(resumingFinish);
       if (resumingFinish) await finishReceipts()!.verify(resumingFinish);

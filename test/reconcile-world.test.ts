@@ -233,7 +233,7 @@ describe("world semantic reconciliation", () => {
       "story-time-unknown",
       "no-typed-effect",
     ]));
-    expect(first.repairPlan).toMatchObject({ targetCount: 17, maxIterations: 10 });
+    expect(first.repairPlan).toMatchObject({ targetCount: 18, maxIterations: 10 });
     expect(second.repairPlan).toMatchObject({ targetCount: 16, maxIterations: 10 });
     expect(first.repairPlan).not.toHaveProperty("estimatedToolCalls");
     expect(first.repairPlan).not.toHaveProperty("toolCallLimit");
@@ -275,7 +275,7 @@ describe("world semantic reconciliation", () => {
     expect(reparseFirst.weakEventCandidates).toHaveLength(16);
     expect(reparseSecond.weakEventCandidates).toHaveLength(16);
     expect(reparseFirst.weakCharacterCandidates).toEqual([
-      expect.objectContaining({ actor: expect.objectContaining({ id: "hero" }), needsExecutableDriver: true }),
+      expect.objectContaining({ actor: expect.objectContaining({ id: "hero" }), needsExecutableDriver: false }),
     ]);
     expect(reparseSecond.weakCharacterCandidates).toEqual([]);
     expect(reparseFirst.weakEventCandidates.some(({ id }) =>

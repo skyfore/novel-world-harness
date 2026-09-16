@@ -44,7 +44,7 @@ const RECONCILIATION_RESERVED_CALLS = 7;
 export type WorldReconciliationMode = "bounded" | "reparse-finalization" | "graph-adjudication";
 
 const reconciliationPlanSchema = z.object({
-  version: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+  version: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
   coreRoleScope: coreRoleAttemptScopeSchema.nullable().optional(),
   requirements: z.array(reconciliationRequirementSchema).optional(),
   sourceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
@@ -55,12 +55,22 @@ const reconciliationPlanSchema = z.object({
   includeInitialWorld: z.boolean(),
   requireAutonomousDriver: z.boolean(),
   driverActorId: z.string().min(1).optional(),
+  driverDiscovery: z.literal("opening-context-unresolved").optional(),
   targetReviewRequired: z.boolean().optional(),
   focus: z.literal("opening-driver").optional(),
   createdAt: z.string().datetime(),
 }).strict().superRefine((plan, ctx) => {
   if (plan.version >= 3 && !plan.requirements) ctx.addIssue({ code: "custom", message: "Version 3+ requires frozen capability requirements" });
-  if (plan.version === 4 && plan.coreRoleScope === undefined) ctx.addIssue({ code: "custom", message: "Version 4 requires explicit independent scope" });
+  if (plan.version >= 4 && plan.coreRoleScope === undefined) ctx.addIssue({ code: "custom", message: "Version 4+ requires explicit independent scope" });
+  if (plan.version >= 5 && plan.requireAutonomousDriver && !plan.driverActorId
+    && (!plan.includeInitialWorld || plan.driverDiscovery !== "opening-context-unresolved"
+      || !plan.requirements?.some(item => item.id === "initial-world:singleton:opening-driver"))) {
+    ctx.addIssue({ code: "custom", message: "Unresolved opening driver requires a frozen initial-world driver obligation" });
+  }
+  if (plan.driverDiscovery && (plan.version < 5 || plan.driverActorId || !plan.requireAutonomousDriver || !plan.includeInitialWorld
+    || !plan.requirements?.some(item => item.id === "initial-world:singleton:opening-driver"))) {
+    ctx.addIssue({ code: "custom", message: "Unresolved driver discovery cannot substitute for a frozen character driver scope" });
+  }
   const requirements = plan.requirements ?? [];
   const targets = [...plan.eventIds.map(id => `event:${id}`), ...plan.actorIds.map(id => `character:${id}`), ...(plan.includeInitialWorld ? ["initial-world:singleton"] : [])];
   if (new Set(requirements.map(item => item.id)).size !== requirements.length) ctx.addIssue({ code: "custom", message: "Duplicate reconciliation requirement" });
@@ -664,9 +674,7 @@ export async function buildWorldReconciliationPrompt(
     if (index >= 0) allWeakActors.splice(index, 1);
     allWeakActors.unshift([driverActorId, participation.get(driverActorId) ?? 0]);
   }
-  if (requireAutonomousDriver && allWeakActors.length === 0) {
-    throw new Error("Semantic repair needs an autonomous driver, but no evidence-backed character is available in the compiled event graph or opening checkpoint.");
-  }
+  const unresolvedDriver = requireAutonomousDriver && !driverActorId;
 
   const initialWorldNeedsRepair = mode !== "graph-adjudication" && !temporalOnlyRepair && Boolean(sourceInitialWorld && (
     !sourceInitialWorld.checkpoint
@@ -697,6 +705,10 @@ export async function buildWorldReconciliationPrompt(
       for (const { event } of allWeakEvents) addRequirement(`event:${event.id}`, "event-semantics");
       if (initialWorldNeedsRepair) addRequirement("initial-world:singleton", "initial-world");
     }
+    if (unresolvedDriver) {
+      if (!requirements.some(item => item.id === "initial-world:singleton:initial-world")) addRequirement("initial-world:singleton", "initial-world");
+      addRequirement("initial-world:singleton", "opening-driver");
+    }
     for (const [actorId, count] of allWeakActors.filter(([id]) => options.focus !== "opening-driver" || id === driverActorId)) {
       const target = `character:${actorId}`;
       // Freeze discoveries once: later global ratios cannot remove an actor's
@@ -710,7 +722,7 @@ export async function buildWorldReconciliationPrompt(
   const independentDefinition = createPlan ? (await new RequirementLedger(workspaceRoot, sourceId).coreRoleDefinitionHistory()).at(-1) : undefined;
   const plan = createPlan
     ? reconciliationPlanSchema.parse({
-        version: 4,
+        version: 5,
         coreRoleScope: independentDefinition ? coreRoleAttemptScope(independentDefinition) : null,
         requirements,
         sourceId,
@@ -718,14 +730,19 @@ export async function buildWorldReconciliationPrompt(
         ...(namespace ? { namespace } : {}),
         eventIds: options.focus === "opening-driver" ? [] : allWeakEvents.map(({ event }) => event.id),
         actorIds: options.focus === "opening-driver" ? (driverActorId ? [driverActorId] : []) : allWeakActors.map(([actorId]) => actorId),
-        includeInitialWorld: options.focus === "opening-driver" ? false : initialWorldNeedsRepair,
+        includeInitialWorld: unresolvedDriver || (options.focus !== "opening-driver" && initialWorldNeedsRepair),
         ...(options.focus ? { focus: options.focus } : {}),
         requireAutonomousDriver,
         ...(driverActorId ? { driverActorId } : {}),
+        ...(unresolvedDriver ? { driverDiscovery: "opening-context-unresolved" } : {}),
         targetReviewRequired: mode !== "graph-adjudication",
         createdAt: new Date().toISOString(),
       })
     : await readReconciliationPlan(workspaceRoot, sourceId, mode, namespace);
+  if (plan.requireAutonomousDriver && !plan.driverDiscovery
+    && (!plan.driverActorId || !openingPhysicalActors.has(plan.driverActorId))) {
+    throw new Error("RECONCILIATION_DRIVER_SCOPE_STALE: the frozen driver is not supported by current physical opening presence. Preserve this plan, receipts and requirements; stop model retries for host source review/replanning. Do not substitute a frequent later character, rotate the namespace, or delete the obligation.");
+  }
   if (plan.coreRoleScope) {
     const currentDefinition = (await new RequirementLedger(workspaceRoot, sourceId).coreRoleDefinitionHistory()).at(-1);
     if (!currentDefinition || contentHash(coreRoleAttemptScope(currentDefinition)) !== contentHash(plan.coreRoleScope)) throw new Error("Reconciliation independent requirement revision changed. Preserve the plan and attempts; stop model retries for host replanning, never reset the ledger.");
@@ -806,6 +823,7 @@ export async function buildWorldReconciliationPrompt(
       maxIterations,
       mode,
       requireAutonomousDriver: plan.requireAutonomousDriver,
+      ...(plan.driverDiscovery ? { driverDiscovery: plan.driverDiscovery } : {}),
       targetCount: repairTargetCount,
       targetReviewRequired: plan.targetReviewRequired ?? false,
       ...(plan.coreRoleScope !== undefined ? { coreRoleScope: plan.coreRoleScope } : {}),
@@ -925,6 +943,7 @@ ${graphAdjudicationPolicy}
 - A canonical event is one causally atomic occurrence and may carry all simultaneous typed effects. Repair a weak event only when its cited text explicitly supports the missing storyTime, timeAdvance, state effect, knowledge effect, narrativeContext, precondition, typed causal relation, readerSummary, participantPresence, or later-character entry checkpoint. A readerSummary may recap only facts established through that event. An entry checkpoint describes the unresolved pre-event cut, supplies only already-true state/knowledge and direct actor perception, and must not copy the event outcome. Do not invent an effect to satisfy a percentage.
 - Match field meaning exactly. Never encode illness as alive=true, closure as location.open=true, conscription as character.location, employment as artifact.owner, or work points as character.title.
 - stateFieldCatalog is the host-owned authoritative field/type/range contract. Check each effect and predicate against its exact key, appliesTo, valueType, cardinality and bounds before submission. artifact.condition and location.condition are numeric values in [0,1], not lifecycle labels such as launched, armed, or collapsing. A type failure requires correcting the named value/field, not swapping evidence selectors. Never invent a numeric score or another field to translate an unsupported lifecycle label, and never erase established effects to bypass validation. If a source-grounded change cannot be represented by the existing contract, report that precise capability gap to the host. One corrected retry under the same proposal_id, then stop for host review.
+- If repairPlan.driverDiscovery="opening-context-unresolved", no physical opening character has been established. Repair only source-supported initial-world facts within scope. Keep initial-world:singleton:opening-driver as capability-gap or unsupported in requirement_reviews; an initial-world proposal cannot certify an executable driver. Preserve this separate obligation for host source review and an independent entry-driver probe. Never choose a character by whole-book frequency or invent a goal.
 - Treat each character target as separate requirements: needsOntologyMigration requires a character-model replacement with ontologyVersion=character-v1 and source-backed registered semantics; a developmentPhase or goal alone does not migrate the model. needsExecutableDriver requires a separate character-goal with an executable opening action. Both may be required for the same actor. Only when needsDevelopmentRepair=true, propose an evidence-backed character-model with a real developmentPhase or a phase-bounded character-goal. Preserve the baseline. Activate later phases/goals only through cited world predicates, personally experienced events, acquired knowledge, or story time. Use afterExperiencedCanonicalEventIds when an experience is personal; use afterCanonicalEventIds only for an objective social/world transition. A future phase or goal must not affect the opening self. A driver-only opening actor need not have a later development episode; do not invent one. Preserve existing developmentPhases and developmentEpisodes during ontology migration.
 - Character models with structured dispositions use the character ontology contract: keep new free-form traits and decisionBiases empty. Existing legacy values may be preserved only with their explicit legacy: keys; do not move a rejected key between traits, decisionBiases, traitModifiers, and decisionBiasModifiers. Encode new psychological change with registered dispositions and developmentEpisodes, not unnamespaced developmentPhase modifiers. A phase can retain evidence-backed activation without inventing a numerical modifier. Repair the original proposal_id after inspecting its exact failed fields; one corrected retry only, then stop for host review. Never add legacy: merely to bypass validation of newly invented semantics.
 - When a weakCharacterCandidate has needsExecutableDriver=true, propose a character-goal; also migrate its model if needsOntologyMigration=true. It must have source-grounded opening activation/precondition gates and at least one concrete candidateAction/actionPattern whose proposedDelta or proposedKnowledge is executable under source-grounded activation/precondition gates at the initial-world checkpoint; a later-phase goal does not satisfy this repair. Use only state and character knowledge already true at that checkpoint, and never leak future canon backward to activate it. Do not invent an action merely to pass the audit; leave the target unchanged if the source cannot support one.

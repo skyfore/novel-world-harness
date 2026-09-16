@@ -1322,6 +1322,7 @@ export async function auditCompiler(
       semanticIssues.push("The compiled world has no executable autonomous driver active at the opening checkpoint, so divergence can only wait for canon or repeat local dialogue.");
       const driverActorId = selectOpeningDriverActor(physicalOpeningActorIds, initialWorld?.readerContext?.focalActorId, participationCounts);
       if (driverActorId) semanticRepairCharacterIds.push(driverActorId);
+      else if (initialWorld) semanticRepairInitialWorld = true;
       else semanticRepairRequiresFullReparse = true;
     }
     if (models.length && controlledCharacterModelCoverage !== 1) {

@@ -671,3 +671,19 @@ P6 的入口提示全书频率回退及 reconciliation 义务处理、统一世�
 边界补充：maxActors 是上限，不要求填满。搜索达到 64-preview 边界时，若已有较高排序且完整验证的合法方案，返回这些方案供正常裁决；只在没有任何已确定方案时抛出预算错误。返回子集不宣称其余主体无行动，测试同时保留全空搜索超限和已确定合法主体两种情况。
 
 验证：全仓 197 文件、1196 tests 通过（96.64 秒）；上述最终边界补充后 20 项 source/响应/entry-driver 定向通过；最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。首轮预算夹具漏填 goal 必需的 evidence，被 schema 正确拒绝，已补为原创源证据后再验证预算路径。
+
+P6c 已提交为 `3a90c89`。
+
+## P6d：移除全书频率回退并保留未定位的入口驱动义务
+
+入口驱动提示只从物理入口角色选择，不再在物理集合为空时选择全书高频角色。已有 initial-world 但没有角色可选时，audit 请求入口事实修复。reconciliation plan 升为 v5：无法定位有入口行动事实的物理角色时，冻结 opening-context-unresolved，并分别保留 initial-world 和 opening-driver 两项义务；不将后期角色错误绑定为驱动目标，也不因删除该候选丢失待办。
+
+初始事实提案不能满足 opening-driver 能力项。正常 finish 将缺口写入原 receipt 与独立 review ledger，随后 convergence 才把合法提案收敛为 canonical；恢复原计划或全局覆盖率提升均保持原义务。新的独立规划可以在真实入口事实收敛后定位角色，但不会清理旧缺口。旧计划若绑定了缺少当前物理入口支持的角色，明确 RECONCILIATION_DRIVER_SCOPE_STALE，保留原文件并停止模型重试，要求 host 源文审查，不自动换角色或 namespace。
+
+两个原创场景分别为 Ada 在门口等待信号、Neri 在窗前守望，并让后期人物在 canonical 事件中高频出现。验证入口发现不选后期人物、初始事实伪称驱动完成被拒绝、正常 finish/convergence 分离、receipt 缺口持久保留、事实收敛后新规划选择真实入口角色、旧频率绑定计划拒绝且字节不变。没有编造任何 goal。
+
+初轮全仓 1196 项通过、两项新测试失败：测试遗漏 finish 后独立 convergence，因此新规划正确看不到 pending 事实。补齐正常收敛并核验 accepted proposal 与 canonical participantPresence；随后 16 项定向通过。最终全仓与类型检查结果见下。
+
+本段解决入口提示和义务保存，不把 initial-world 修复当作真实无玩家动作驱动证明。统一世界压力依据、P3/P4/P5 余项及 P7 仍在原范围；未取得真实 provider 或独立人工体验证据。
+
+最终验证：全仓 197 文件、1198 tests 通过（96.91 秒）；16 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

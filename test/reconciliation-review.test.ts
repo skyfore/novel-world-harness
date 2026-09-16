@@ -1,3 +1,4 @@
+import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { RequirementLedger, coreRoleAttemptHistoryIssues } from "../src/compiler/requirement-ledger.js";
 import { buildRoleRoster } from "../src/compiler/role-roster.js";
 import { baseStructuralUnits, ensureSourceStructure } from "../src/compiler/structure.js";
@@ -63,8 +64,9 @@ it("requires every planned target at real finish, freezes deferrals in the recei
   const namespace = "target-review-test";
   const prompt = await buildWorldReconciliationPrompt(root, fixture.source.id, { ...audit, coverage: { ...audit.coverage, autonomousDriverCoverage: 0 }, semanticRepairTargets: { ...audit.semanticRepairTargets, characterIds: ["hero"] } }, 1, { proposalIdSuffixTail: namespace });
   const context = JSON.parse(prompt.match(/<reconciliation-context>\n([\s\S]+)\n<\/reconciliation-context>/u)![1]!);
-  expect(context.weakCharacterCandidates[0]).toMatchObject({ needsExecutableDriver: true, needsOntologyMigration: true, requiredOntologyVersion: "character-v1" });
-  expect(context.openingDriverContext).toMatchObject({ readOnly: true, ref: "canonical:initial-world:singleton", storyTime: { orderHint: 0 }, delta: { operations: [] } });
+  expect(context.weakCharacterCandidates[0]).toMatchObject({ needsExecutableDriver: false, needsOntologyMigration: true, requiredOntologyVersion: "character-v1" });
+  expect(context.repairPlan.driverDiscovery).toBe("opening-context-unresolved");
+  expect(context).not.toHaveProperty("openingDriverContext");
   const batch = `reconcile-${fixture.source.id}-bounded-${namespace}-1`;
   const targets = (await reconciliationReviewTargets(root, fixture.source.id, batch))!;
   expect(targets).toContain("event:arrival");
@@ -106,9 +108,9 @@ it("requires every planned target at real finish, freezes deferrals in the recei
   await expect(assertReconciliationDeferralsReviewed(root, fixture.source.id)).rejects.toThrow("host source review");
   const focused = await buildWorldReconciliationPrompt(root, fixture.source.id, { ...audit, coverage: { ...audit.coverage, autonomousDriverCoverage: 0 } }, 1, { proposalIdSuffixTail: "opening-only", focus: "opening-driver" });
   const focusedContext = JSON.parse(focused.match(/<reconciliation-context>\n([\s\S]+)\n<\/reconciliation-context>/u)![1]!);
-  expect(focusedContext.repairPlan.reviewTargets).toEqual(["character:hero"]);
-  expect(focusedContext).not.toHaveProperty("initialWorld");
-  expect(focusedContext.openingDriverContext.readOnly).toBe(true);
+  expect(focusedContext.repairPlan.reviewTargets).toEqual(["initial-world:singleton"]);
+  expect(focusedContext.initialWorld.ref).toBe("canonical:initial-world:singleton");
+  expect(focusedContext).not.toHaveProperty("openingDriverContext");
   expect(await reconciliationReviewTargets(root, fixture.source.id, batch)).toEqual(targets);
   await expect(assertReconciliationDeferralsReviewed(root, fixture.source.id)).rejects.toThrow("host source review");
 
@@ -128,6 +130,7 @@ it("freezes capability-level partial success through finish, restart, plan reuse
   await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") });
   await canon.putEvent({ id: "arrival", title: "Hero arrives", participants: ["hero"], participantPresence: [{ entityId: "hero", mode: "physical" }], storyTime: { kind: "unknown" }, preconditions: [], observedOutcome: { version: 1, operations: [] }, evidence: fixture.evidence("Hero arrives."), causalParents: [], confidence: 1 });
   await new ActorModelStore(root).putModel({ actorId: "hero", traits: {}, decisionBiases: {}, evidence: fixture.evidence("Hero") });
+  await new InitialWorldStore(root).put({ version: 1, delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "wait for a signal" }] }, participantPresence: [{ entityId: "hero", mode: "physical" }], evidence: fixture.evidence("Hero waits for a signal.") });
   const audit = await auditCompiler(root, { sourceId: fixture.source.id });
   const request = { ...audit, coverage: { ...audit.coverage, autonomousDriverCoverage: 0 as const }, semanticRepairTargets: { ...audit.semanticRepairTargets, characterIds: ["hero"] } };
   const structure = await ensureSourceStructure(root, fixture.source);
@@ -213,4 +216,67 @@ it("freezes capability-level partial success through finish, restart, plan reuse
   // The old attempt remains valid historical work; its report is never success.
   await settleSourceRequirements(root, fixture.source.id);
   expect((await ledger.history()).filter(item => item.payload.kind === "core-role-attempt")).toHaveLength(1);
+});
+
+it.each([
+  { opening: "Ada waits for a signal at the gate.", actor: "Ada", later: "Bo sails away later.", popular: "Bo" },
+  { opening: "Neri keeps watch at the window.", actor: "Neri", later: "Venn arrives much later.", popular: "Venn" },
+])("retains an unresolved opening driver through initial-world repair without using later popularity: $actor", async scene => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-missing-driver-scope-")); roots.push(root);
+  const sourceText = `${scene.opening}\n${scene.later}`;
+  const fixture = await createEvidenceFixture(root, sourceText), canon = new CanonicalModelStore(root);
+  for (const name of [scene.actor, scene.popular]) await canon.putEntity({ id: name, kind: "character", canonicalName: name, aliases: [], evidence: fixture.evidence(name) });
+  for (let index = 0; index < 4; index++) await canon.putEvent({ id: `later-${index}`, title: scene.later, participants: [scene.popular], storyTime: { kind: "ordinal", label: "later", orderHint: index + 1 }, preconditions: [], observedOutcome: { version: 1, operations: [] }, causalParents: [], confidence: 1, evidence: fixture.evidence(scene.later) });
+  const initial = { version: 1 as const, delta: { version: 1 as const, operations: [] }, evidence: fixture.evidence(scene.opening), checkpoint: { mode: "chronological" as const, storyTime: { kind: "ordinal" as const, label: "opening", orderHint: 0 }, rationale: "Opening source" } };
+  await new InitialWorldStore(root).put(initial);
+  const audit = await auditCompiler(root, { sourceId: fixture.source.id });
+  const request = { ...audit, coverage: { ...audit.coverage, autonomousDriverCoverage: 0 } };
+  const namespace = "missing-opening", options = { proposalIdSuffixTail: namespace, focus: "opening-driver" as const };
+  const readContext = (prompt: string) => JSON.parse(prompt.match(/<reconciliation-context>\n([\s\S]+)\n<\/reconciliation-context>/u)![1]!);
+  const context = readContext(await buildWorldReconciliationPrompt(root, fixture.source.id, request, 1, options));
+  expect(context.repairPlan.driverDiscovery).toBe("opening-context-unresolved");
+  expect(context.repairPlan.reviewTargets).toEqual(["initial-world:singleton"]);
+  expect(context.weakCharacterCandidates).toEqual([]);
+  expect(context.repairPlan.requirements.map((item: { id: string }) => item.id)).toEqual(["initial-world:singleton:initial-world", "initial-world:singleton:opening-driver"]);
+  const batch = `reconcile-${fixture.source.id}-bounded-${namespace}-1`, tools = createCompilerProposalToolset(root);
+  await tools.beginBatch([], batch, fixture.source.id);
+  const call = (name: string, input: unknown) => tools.tools.find(tool => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
+  const { evidence: _evidence, ...payload } = initial;
+  await call("propose_initial_world", { proposal_id: "opening-facts", evidence_segment_ids: [fixture.segmentId], payload: { ...payload,
+    participantPresence: [{ entityId: scene.actor, mode: "physical" }],
+    delta: { version: 1, operations: [{ op: "set", entityId: scene.actor, field: "character.alive", value: true }, { op: "set", entityId: scene.actor, field: "character.plan", value: scene.opening }] },
+  } });
+  const reports = [{ target: "initial-world:singleton", disposition: "proposed", evidence_segment_ids: [fixture.segmentId], summary: "Opening facts repaired; independent driver still requires review", requirement_reviews: [
+    { requirementId: "initial-world:singleton:initial-world", disposition: "proposed", summary: "Source-backed opening facts" },
+    { requirementId: "initial-world:singleton:opening-driver", disposition: "proposed", summary: "Incorrectly claiming driver from initial-world proposal" },
+  ] }];
+  const finish = { outcome: "complete", reviewed_segments: [], summary: "Partial opening repair", target_reviews: reports };
+  await expect(call("finish_compiler_batch", finish)).rejects.toThrow("matching capability proposal");
+  expect(await new InitialWorldStore(root).get()).toEqual(initial);
+  reports[0]!.requirement_reviews[1]!.disposition = "capability-gap";
+  await call("finish_compiler_batch", finish);
+  const receipt = (await new CompilerFinishReceipts(root, fixture.source.id, batch).read())!;
+  expect(reconciliationDeferredRequirementIds(receipt.identity.input.target_reviews!)).toEqual(["initial-world:singleton:opening-driver"]);
+  await expect(assertReconciliationDeferralsReviewed(root, fixture.source.id)).rejects.toThrow("initial-world:singleton:opening-driver");
+  const resumed = readContext(await buildWorldReconciliationPrompt(root, fixture.source.id, { ...request, coverage: { ...request.coverage, autonomousDriverCoverage: 1 } }, 1, options));
+  expect(resumed.repairPlan.requirements).toEqual(context.repairPlan.requirements);
+  expect(resumed.weakCharacterCandidates).toEqual([]);
+  expect((await new CompilerFinishReceipts(root, fixture.source.id, batch).read())!.fingerprint).toBe(receipt.fingerprint);
+  const converged = await convergeWorldProposals(root, fixture.source.id);
+  expect(converged.canonical.accepted.map(item => item.id)).toContain("opening-facts");
+  expect((await new InitialWorldStore(root).get())?.participantPresence).toEqual([{ entityId: scene.actor, mode: "physical" }]);
+  const fresh = readContext(await buildWorldReconciliationPrompt(root, fixture.source.id, request, 1, { ...options, proposalIdSuffixTail: "fresh-scope" }));
+  expect(fresh.weakCharacterCandidates.map((item: { actor: { id: string } }) => item.actor.id)).toEqual([scene.actor]);
+  await expect(assertReconciliationDeferralsReviewed(root, fixture.source.id)).rejects.toThrow("host source review");
+  const legacyNamespace = "legacy-popular";
+  const legacy = { version: 4, coreRoleScope: null, sourceId: fixture.source.id, mode: "bounded", namespace: legacyNamespace,
+    eventIds: [], actorIds: [scene.popular], includeInitialWorld: false, requireAutonomousDriver: true, driverActorId: scene.popular,
+    targetReviewRequired: true, focus: "opening-driver", createdAt: new Date().toISOString(),
+    requirements: [{ id: `character:${scene.popular}:opening-driver`, target: `character:${scene.popular}`, capability: "opening-driver" }],
+  };
+  const legacyPath = path.join(worldStorageRoot(root), "compiler", "reconciliation", `${fixture.source.id}.${contentHash(legacyNamespace).slice(0, 24)}.json`), bytes = JSON.stringify(legacy);
+  await fs.writeFile(legacyPath, bytes);
+  await expect(buildWorldReconciliationPrompt(root, fixture.source.id, request, 1, { ...options, proposalIdSuffixTail: legacyNamespace })).rejects.toThrow("RECONCILIATION_DRIVER_SCOPE_STALE");
+  expect(await fs.readFile(legacyPath, "utf8")).toBe(bytes);
+  expect(await new ActorModelStore(root).listGoals()).toEqual([]);
 });

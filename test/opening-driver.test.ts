@@ -14,7 +14,8 @@ it("selects the physically present focal actor even if a later protagonist domin
   expect(selectOpeningDriverActor(["opening-man"], "opening-man", counts)).toBe("opening-man");
   expect(selectOpeningDriverActor(["a", "opening-man"], "opening-man", counts)).toBe("opening-man");
   expect(selectOpeningDriverActor(["a"], "later-protagonist", counts)).toBe("a");
-  expect(selectOpeningDriverActor([], undefined, counts)).toBe("later-protagonist");
+  expect(selectOpeningDriverActor([], undefined, counts)).toBeUndefined();
+  expect(selectOpeningDriverActor([], "later-protagonist", counts)).toBeUndefined();
 });
 it("rejects character replacements that silently erase previously established development", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-character-regression-")); roots.push(root);

@@ -1201,3 +1201,25 @@ The independent background lane may still establish a real witness; if neither
 lane establishes one and actor search was incomplete, report
 `ENTRY_DRIVER_SEARCH_INCOMPLETE` rather than a completed negative search. These
 are host search bounds, not model token-usage measurements or new write authority.
+
+### Opening driver discovery and frozen reconciliation scope
+
+Reconciliation plan v5 never selects an opening driver by whole-book character
+frequency. If no actionable physical opening actor is established,
+`driverDiscovery: "opening-context-unresolved"` freezes separate
+`initial-world:singleton:initial-world` and
+`initial-world:singleton:opening-driver` requirements. Source-backed initial-world
+proposals may repair opening facts, but cannot account for the driver requirement
+as `proposed`. Report that requirement as `capability-gap` or `unsupported`;
+normal finish retains it in the receipt and host review ledger. Convergence is
+still required before proposed world facts become canonical. Coverage changes,
+resume, and a newly planned scope do not clear the old obligation. Do not invent
+a goal to make the audit green; actual independent entry-driver execution remains
+necessary.
+
+`RECONCILIATION_DRIVER_SCOPE_STALE` means a frozen actor scope lacks current
+physical opening support (including old frequency-selected plans). Stop model
+retries and preserve the original plan, receipts, and requirements for host source
+review/replanning. Do not guess another actor ID, repeat unchanged, rotate the
+namespace, or delete the old obligation. This host scope failure grants no new
+mutation authority.

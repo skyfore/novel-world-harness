@@ -563,3 +563,17 @@ P2u 已提交为 `bf461a9`。
 本段为确定性工程验收；原 canonical 背景为测试夹具，不是 fresh model compile，fixture review 不冒充独立人工体验评价。尚未覆盖缺 mention 的完整串联验收、所有角色/修订根因或 P2 全部退出条件；P3–P7 仍待落实。没有真实 provider 调用或人工体验验收证据。
 
 验证：全仓 191 文件、1163 tests 通过（94.35 秒）；最终反例具备完整背景并明确断言 pending 下游导致 candidate 拒绝，4 项定向测试通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P2v 已提交为 `819222e`。
+
+## P2w：缺失 speaker mention 到身份决议及获知结算的串联验收
+
+新增两段原创说话/听话场景，改名、改变对话与叙述顺序并加入无关角色。原文明确听者等候消息，独立冻结听话前后及 believes 预期；初始场景依据原文建立行动 plan，避免以 bare alive 清单跳过生产 candidate 可行动性验证。
+
+真实 discovery 从 quotation 的 dangling speakerMentionId 产生 typed finding，宿主 planner 仅授权对应 ID 的 entity-mention 创建。沿 ledger/staging/finish 创建 mention 后，quotation 全字段不变，下游 attribution/event 仍因未决 speaker identity 阻断，独立要求未满足。随后原普通编译窄工具提交 source-grounded entity resolution，原 finish 提交决议，converge 沿用下游原 proposal ID/envelope，最终相同要求集合满足并进入 evaluated。
+
+每段场景另有 unresolved 决议反例：保留不确定身份，不将 mention 或 resolution 提交成功视为理解/获知成功；原草案保持 pending，原要求保持未满足，candidate 明确因 pending 草案拒绝，原修复停留 finished。首次测试遗漏 mention surface，原工具明确拒绝；补齐真实输入后，多角色 initial-world 可行动性检查进一步要求开场依据，修正源夹具后通过。未降低产品校验或绕过 finish。
+
+本段补齐 P2 缺 mention 的确定性串联证据。新根因的完整调度/策略、核心角色绑定和全部退出审计仍未完成，P3–P7 保持原目标范围。背景 canonical 为工程夹具，不是 fresh model compile；没有真实 provider 或独立人工体验证据。
+
+验证：最终全仓 191 文件、1167 tests 通过（93.08 秒）；8 项串联定向测试通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

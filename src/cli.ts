@@ -95,6 +95,16 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
   });
+requirementsCommand.command("stage-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact authorized plans[].plan.planHash from inspect-upstream")
+  .option("--config <path>", "explicit extractor profile configuration")
+  .option("--model <model>", "override the Pi model")
+  .option("--timeout-ms <number>", "per-slot timeout, 1–600000 milliseconds", Number)
+  .description("Stage the authorized dependency DAG, verifying and reusing original drafts on resume")
+  .action(async options => {
+    const { stageUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await stageUpstreamRepairPlanCommand(rootFor({}), { ...options, model: options.model ?? program.opts().model }), null, 2));
+  });
 requirementsCommand.command("run-upstream-slot").requiredOption("--source <id>", "registered source ID")
   .requiredOption("--plan <hash>", "exact authorized plans[].plan.planHash from inspect-upstream")
   .requiredOption("--kind <kind>", "exact allowedWrites/allowedCreations kind")

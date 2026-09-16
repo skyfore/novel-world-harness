@@ -837,3 +837,20 @@ Host CLI entry points:
 After process termination, first inspect the original compiler lock and follow
 its owning-host recovery protocol if needed. Never delete the lock or start a
 new model invocation to work around the original unresolved session.
+
+`nwh requirements stage-upstream-plan --source <id> --plan <hash>` schedules all
+slots of an already authorized plan under the compiler lock. Copy the plan hash
+from `inspect-upstream plans[].plan.planHash`. Dependency edges point from the
+consumer to its prerequisite; the host uses a stable topological order and
+sequential isolated slot sessions. It verifies retained successful drafts before
+any new model invocation and again when consuming them. A returned model message
+or runner result without a durable validated envelope is never success.
+
+Repeating this command after interruption reuses original verified drafts. Open
+sessions are recoverable only from their original validated result; empty or
+uncertain reservations stop the scheduler without another invocation. Baseline
+or source preflight failure stops the plan with its original diagnostic. Failed
+model calls retain the existing per-requirement budget and stop this invocation;
+the scheduler contains no outer retry loop. It returns `phase: staged`, not a
+completed repair or certification result. Finish, convergence, evaluation and
+publication retain their existing separate host checks.

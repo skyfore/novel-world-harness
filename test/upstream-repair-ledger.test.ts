@@ -749,3 +749,50 @@ it("recovers an interrupted model write without invoking the provider or staging
   expect((await f.ledger.inspect()).attempts).toHaveLength(1);
   expect(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")).toEqual(f.annotation);
 });
+
+it("schedules prerequisite slots and resumes retained drafts without re-running their model calls", async () => {
+  const { stageUpstreamRepairPlan, upstreamRepairSlotOrder } = await import("../src/compiler/upstream-repair-scheduler.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const f = await fixture(), requirement = f.identity.requirementIds[0]!;
+  const plan = freezeUpstreamRepairPlan({ ...f.identity,
+    allowedWrites: [{ kind: "quotation", id: "quote-one", pointers: ["/anchor", "/speakerMentionId"] }],
+    allowedCreations: [{ kind: "entity-mention", id: "new-speaker", maxCount: 1, dependencyOf: requirement }],
+    dependencyEdges: [{ from: `requirement:${requirement}`, to: "entity-mention:new-speaker", purpose: "identity" }, { from: "quotation:quote-one", to: "entity-mention:new-speaker", purpose: "identity" }],
+  });
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  expect(upstreamRepairSlotOrder(plan).map(slot => slot.kind)).toEqual(["entity-mention", "quotation"]);
+  let interrupt = true;
+  const run = vi.fn(async (root: string, sourceId: string, planHash: string, target: { kind: import("../src/compiler/upstream-repair-plan.js").UpstreamRepairKind; id: string }) => {
+    if (target.kind === "quotation" && interrupt) throw new Error("host interrupted before consumer invocation");
+    const raw = target.kind === "entity-mention"
+      ? { proposal_id: "speaker-draft", annotation_id: target.id, selector: { segment_id: f.source.segmentId, exact: "Ada" }, surface: "Ada", form: "proper", kind_candidates: ["character"], confidence: 1 }
+      : { proposal_id: "quote-draft", annotation_id: target.id, selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", speaker_mention_id: "new-speaker", addressee_mention_ids: [], attribution_confidence: 1 };
+    return { sessionRef: "test-host-runner", ...await stageUpstreamRepair(root, sourceId, planHash, target, raw) };
+  });
+  await expect(stageUpstreamRepairPlan(f.root, f.sourceId, plan.planHash, {}, run)).rejects.toThrow("host interrupted");
+  expect((await f.ledger.inspect()).attempts).toHaveLength(1);
+  interrupt = false; run.mockClear();
+  const result = await stageUpstreamRepairPlan(f.root, f.sourceId, plan.planHash, {}, run);
+  expect(result.results.map(item => item.reused)).toEqual([true, false]);
+  expect(run).toHaveBeenCalledOnce();
+  expect(run.mock.calls[0]![3].kind).toBe("quotation");
+  run.mockClear();
+  expect((await stageUpstreamRepairPlan(f.root, f.sourceId, plan.planHash, {}, run)).results.every(item => item.reused)).toBe(true);
+  expect(run).not.toHaveBeenCalled();
+  expect(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")).toEqual(f.annotation);
+  await f.write({ ...f.annotation, attributionConfidence: 0.5 }, "host-drift");
+  await expect(stageUpstreamRepairPlan(f.root, f.sourceId, plan.planHash, {}, run)).rejects.toThrow();
+  expect(run).not.toHaveBeenCalled();
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("needs-host-review");
+});
+
+it("rejects scheduler text-only success and unresolved original reservations before another invocation", async () => {
+  const { stageUpstreamRepairPlan } = await import("../src/compiler/upstream-repair-scheduler.js");
+  const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  const run = vi.fn(async () => ({ sessionRef: "fake", proposalId: "fake", attemptRef: "fake", proposalHash: "fake" }));
+  await expect(stageUpstreamRepairPlan(f.root, f.sourceId, f.plan.planHash, {}, run)).rejects.toThrow("without a durable staged result");
+  await f.ledger.startModelSession(f.plan.planHash, { artifactKind: "quotation", artifactId: "quote-one", proposalId: "reserved", promptHash: "a".repeat(64) });
+  run.mockClear();
+  await expect(stageUpstreamRepairPlan(f.root, f.sourceId, f.plan.planHash, {}, run)).rejects.toThrow("no recoverable validated result");
+  expect(run).not.toHaveBeenCalled();
+});

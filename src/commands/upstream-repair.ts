@@ -22,3 +22,13 @@ export async function recoverUpstreamRepairSessionCommand(root: string, sourceId
   idSchema.parse(sourceId);
   return withWorkspaceOperationLock(root, "compiler", () => recoverUpstreamRepairModelSession(root, sourceId, sessionRef));
 }
+
+export async function stageUpstreamRepairPlanCommand(root: string, options: { source: string; plan: string; config?: string; model?: string; timeoutMs?: number }) {
+  const { stageUpstreamRepairPlan } = await import("../compiler/upstream-repair-scheduler.js");
+  const sourceId = idSchema.parse(options.source);
+  const profile = options.config ? profileForRole(await loadConfig(options.config), "extractor").profile : undefined;
+  return withWorkspaceOperationLock(root, "compiler", () => stageUpstreamRepairPlan(root, sourceId, options.plan, {
+    ...(profile ? { profile } : {}), ...(options.model ? { model: options.model } : {}),
+    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+  }));
+}

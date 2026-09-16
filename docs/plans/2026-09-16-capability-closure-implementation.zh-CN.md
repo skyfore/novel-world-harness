@@ -415,3 +415,17 @@ P2k 已提交为 `a86c42f`。
 新增命令测试验证模型执行期间确实持锁、并发编译被拒、原错误传播和 finally 释放，以及非法类型/缺失配置不进入模型调用。CLI 帮助可显示两条正常入口。仍无真实 provider 调用；自动规划、DAG 调度及完整 P2 退出证据尚未完成，P3–P7 保持待实施。
 
 验证：两个相关测试文件共 38 项通过；服务端、Web、E2E TypeScript、两个 CLI 帮助入口及 diff whitespace 检查通过。此前单槽底层提交的全仓 1139 项通过；命令接线后未重复全仓测试。
+
+P2l 已提交为 `5b6d41c`。
+
+## P2m：授权 DAG 的顺序调度与恢复复用
+
+新增 stageUpstreamRepairPlan 和 requirements stage-upstream-plan。从原冻结计划计算稳定的依赖优先顺序，先核验已有成功 envelope，再逐槽调用原隔离 Pi 入口。只消费 authorized/staging 计划，不注册或扩大权限；源或 baseline 前置检查失败保留原因并停止原计划。
+
+重启时恢复确有 validated 原结果的未结束会话，再复用原 staged 提案；没有可恢复结果的预留禁止新模型调用。对每个槽再次核验原 envelope、依赖修订、证据和授权字段。运行器返回文本或非持久结果不能当作成功。调度器没有外层模型重试循环，持久失败预算仍由原单槽协议管理。最终只返回 staged，finish/converge/evaluation/publication 仍分别受宿主验证约束。
+
+新增测试覆盖缺 speaker mention 的 quotation 依赖顺序、前置槽成功后中断、续跑只执行缺失槽、整计划重复执行零模型调用、原 canonical 保持不变、baseline 漂移停止，以及空会话预留和虚假运行成功拒绝。测试采用受控槽运行器与真实存储/验证，不是外部 provider 证据。
+
+P2 仍待从结构化诊断生成授权计划、计划/finish 正常宿主命令与整体退出证据；P3–P7 尚未实施。不得将本段 staged 调度等同于完整修复闭环。
+
+验证：全量 189 文件、1142 tests 通过（89.44 秒）；补强前置失败停止状态后，40 项最终定向回归及服务端、Web、E2E TypeScript 检查通过。stage-upstream-plan CLI 帮助与 diff whitespace 检查通过。

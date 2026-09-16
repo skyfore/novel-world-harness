@@ -1,3 +1,5 @@
+import { utteranceExpressionInputSchema, hydrateUtteranceExpressionInput } from "./utterance-expression-input.js";
+import { validateUtteranceExpressionProposalTrace } from "./utterance-expression-trace.js";
 import { UpstreamRepairFinishValidationError } from "./upstream-repair-finish-intent.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { reconciliationReviewIssues } from "./reconciliation-review.js";
@@ -147,6 +149,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Typed operationality is authoritative at runtime; narrative sequence and legacy causalParents never imply causation." },
   "scene-occurrence": { name: "propose_scene_occurrence", label: "Propose scene occurrence", description: "Submit one evidence-backed canonical scene occurrence with discourse segments, event membership, location, viewpoint, physical presence, story interval, and entry/exit conditions. It describes source canon and never activates a future runtime scene." },
   "semantic-effect": { name: "propose_semantic_effect", label: "Propose semantic effect", description: "Propose source-grounded typed meaning for one occurrence and subject, with exact support for every semantic field. Unmapped meaning is retained but never executed. Mapped state-change requires an existing validated action execution; do not invent mechanisms or durations." },
+  "utterance-expression": { name: "propose_utterance_expression", label: "Propose utterance expression", description: "Propose one source-grounded expression occurrence. Freeze exact quotation and proposition revisions, preserve ordered separate raw-byte fragments, speaker/addressees/event, and provide this expression’s own exact evidence for every semantic field. Evidence from another occurrence cannot substitute. This never asserts proposition truth." },
   "event-frame": { name: "propose_event_frame", label: "Propose event frame", description: "Submit one reusable evidence-backed event frame with typed semantic roles, kind/cardinality constraints, and temporal shape. A frame classifies occurrences; it is not itself an event or world change." },
   "event-execution": { name: "propose_event_execution", label: "Propose event execution binding", description: "Bind an existing canonical occurrence to an action mechanism and/or a complete character entryCheckpoint. An action requires typed agency and exact effects; an entry-only binding requires embodied presence and never grants action authority. Complete entryCheckpoint includes projectionSeed for semantic, norm, process, active rules and elapsed time; create it after its referenced templates. Never rewrite the original occurrence or copy its outcome into a pre-event entry." },
   "action-schema": { name: "propose_action_schema", label: "Propose action schema", description: "Submit a source-induced reusable action schema only when at least two canonical events support the pattern. Declare role and parameter binding, preconditions, typed effects, and a strict effect envelope; a single occurrence must remain ad hoc, and domain modules are host-managed. Declare visibility explicitly: supportingEventIds are induction evidence, never actor experience prerequisites; knowledge visibility requires exact knownByClaimIds." },
@@ -247,6 +250,7 @@ const SEMANTIC_STAGE_PROPOSAL_TOOLS: Record<CompilerSemanticStage, ReadonlySet<s
     "propose_scene_occurrence",
     "propose_event_frame",
     "propose_semantic_effect",
+    "propose_utterance_expression",
   ]),
   executable: new Set([
     "propose_event_execution",
@@ -356,7 +360,7 @@ export function prepareProposalToolArguments(
 function proposalToolParameters(kind: CompilerProposalKind) {
   const inputSchema = z.object({
     proposal_id: idSchema,
-    payload: compilerProposalSchemas[kind],
+    payload: kind === "utterance-expression" ? utteranceExpressionInputSchema : compilerProposalSchemas[kind],
   }).strict();
   const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(inputSchema, { io: "input" });
   removeModelWritableEvidence(jsonSchema);
@@ -1247,6 +1251,7 @@ export function createCompilerProposalToolset(
     let payload = kind === "state-delta"
       ? input.payload
       : injectHostEvidence(kind, input.payload, evidence);
+    if (kind === "utterance-expression") payload = await hydrateUtteranceExpressionInput(workspaceRoot, activeSourceId!, input.payload, evidence, [...successfulProposalIds], [...successfulAnnotationProposalIds], resolveObservationSelector);
     const selectors = input.evidence_selectors === undefined
       ? []
       : modelEvidenceSelectorsSchema.parse(input.evidence_selectors);
@@ -1267,7 +1272,7 @@ export function createCompilerProposalToolset(
         selectorIssues.push(`Evidence selector ${index + 1} target_path '${selector.target_path}' cannot target host-owned evidence fields.`);
         continue;
       }
-      if (!jsonPointerExists(input.payload, selector.target_path)) {
+      if (!jsonPointerExists(kind === "utterance-expression" ? payload : input.payload, selector.target_path)) {
         selectorIssues.push(`Evidence selector ${index + 1} target_path '${selector.target_path}' does not exist in the proposal payload.`);
         continue;
       }
@@ -2069,6 +2074,7 @@ export function createCompilerProposalToolset(
       description: metadata.description,
       promptSnippet: metadata.description,
       promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "Place proposal_id, payload, evidence_segment_ids and evidence_selectors at the top level. Evidence envelope fields do not belong inside payload.", "For each material field or relation, add an evidence_selector with an exact source quote, its payload JSON Pointer, relation, and independently judged strength. Never submit offsets or hashes.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory.",
+        ...(kind === "utterance-expression" ? ["Supply logical quotation/proposition IDs and exact fragment selectors only. The host freezes their revisions and snapshots. Evidence selector target_path refers to the expanded expression: /canonicalEventId, /speakerId, /addresseeIds/i, /modality, /quotation/quotationId, /propositionId, and /propositions/i/snapshot/{subjectEntityId,relationId,polarity,modality,validStoryTime,object/...}. Use this occurrence’s fragment content for semantic fields; never another quotation. Read referenced propositions first to enumerate every object field including nested propositions."] : []),
         ...(kind === "event-execution" ? ["Never copy an ad-hoc event.action into this binding. First find/read a supported action-schema, then use action.lane=schema-bound with its exact payload.id, role IDs and parameters. Without a supported mechanism, preserve the occurrence; a complete entryCheckpoint is allowed only when independently justified by embodied entry evidence."] : []),
         ...(kind === "initial-world" ? [INITIAL_WORLD_INPUT_GUIDANCE] : []),
         "A failed call that never staged a proposal must be corrected under the same proposal_id. Only replace a successfully staged defective draft under a new ID; a new ID never clears an old failed call."],
@@ -2994,6 +3000,7 @@ export function createCompilerProposalToolset(
         entityTraceIssues,
         attributionTraceIssues,
         acquisitionTraceIssues,
+        expressionTraceIssues,
         eventResolutionClosureIssues,
         eventTraceIssues,
         graphAdjudicationIssues,
@@ -3040,6 +3047,7 @@ export function createCompilerProposalToolset(
             listedEntityResolutions,
           )
           : Promise.resolve([]),
+        activeSourceId ? validateUtteranceExpressionProposalTrace(workspaceRoot, activeSourceId, listed, listedAnnotations, listedEntityResolutions) : Promise.resolve([]),
         activeSourceId
           ? validateEventResolutionClosure(
             workspaceRoot,
@@ -3141,6 +3149,7 @@ export function createCompilerProposalToolset(
         ...finishIssueSection("Canonical entity proposal trace", entityTraceIssues),
         ...finishIssueSection("Attribution quotation trace", attributionTraceIssues),
         ...finishIssueSection("Knowledge acquisition trace", acquisitionTraceIssues),
+        ...finishIssueSection("Utterance expression trace", expressionTraceIssues),
         ...finishIssueSection("Event-resolution graph", eventResolutionClosureIssues),
         ...finishIssueSection("Canonical event proposal trace", eventTraceIssues),
         ...finishIssueSection("Graph-adjudication mutation scope", graphAdjudicationIssues),

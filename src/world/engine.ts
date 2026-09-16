@@ -1,3 +1,5 @@
+import { validateExpressionAcquisition, validateUtteranceExpression, validateAttributionExpressions } from "./utterance-expression.js";
+import type { UtteranceExpression } from "./utterance-expression.js";
 import { SCHEDULING_POLICY_VERSION } from "./scheduling-policy.js";
 import { semanticEffectRealizationIssues, type SemanticEffect } from "./semantic-effect.js";
 import { entryProjectionSeedSchema, type EntryProjectionSeed } from "./model.js";
@@ -119,6 +121,7 @@ export type WorldModelContext = {
   sceneOccurrences?: readonly SceneOccurrence[];
   eventFrames?: ReadonlyMap<string, EventFrame>;
   semanticEffects?: ReadonlyMap<string, SemanticEffect>;
+  utteranceExpressions?: ReadonlyMap<string, UtteranceExpression>;
   actionSchemas?: ReadonlyMap<string, ActionSchema>;
   actionConstraints?: ReadonlyMap<string, ActionConstraint>;
   normTemplates?: ReadonlyMap<string, NormTemplate>;
@@ -330,6 +333,7 @@ export function validateEventProposal(
           if (!isCommunicatingKnowledgeSource(source)) errors.push({ code: "INVALID_KNOWLEDGE_SOURCE", message: `Knowledge source ${operation.sourceActorId} is not a character or communication system`, path: `proposedKnowledge.operations.${index}` });
         }
       }
+      errors.push(...validateExpressionAcquisition(operation, context.utteranceExpressions ?? new Map(), new Set([...(options.realizedCanonicalEventIds ?? []), ...realized]), context.attributions));
       errors.push(...validateKnowledgeSemanticReferences(operation, {
         claims: context.claims ?? new Map(),
         propositions: context.propositions,
@@ -557,7 +561,7 @@ export class WorldEngine {
     }, seedProvenance) : undefined;
     if (knowledge) applyKnowledgeDelta(emptyKnowledgeState("genesis"), knowledge, "genesis", {
       entities: this.context.entities, claims: this.context.claims, propositions: this.context.propositions,
-      attributions: this.context.attributions, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
+      attributions: this.context.attributions, utteranceExpressions: this.context.utteranceExpressions, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
     });
     if (completeSeed) {
       applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map() }, seedProvenance, logicalTime.elapsedDays ?? 0);
@@ -601,8 +605,10 @@ export class WorldEngine {
       utteranceCount: 0,
       timeAdvanced: false,
     });
+    // Equal state outcomes do not prove that a particular expression occurred.
+    const expressionOccurrences = new Set([...(this.context.utteranceExpressions?.values() ?? [])].map(item => item.canonicalEventId));
     const inferredRealizations = [...(this.context.events?.values() ?? [])]
-      .filter((event) => !semanticEffectRealizationIssues(this.context.semanticEffects?.values() ?? [], new Set([event.id])).length && canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
+      .filter((event) => !expressionOccurrences.has(event.id) && !semanticEffectRealizationIssues(this.context.semanticEffects?.values() ?? [], new Set([event.id])).length && canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
       .map((event) => event.id);
     const realizesCanonicalEventIds = [...new Set([
       ...(genesisOptions.realizesCanonicalEventIds === undefined ? inferredRealizations : []),
@@ -613,6 +619,8 @@ export class WorldEngine {
     for (const eventId of realizesCanonicalEventIds) {
       if (!this.context.events?.has(eventId)) throw new Error(`Genesis realizes unknown canonical event: ${eventId}`);
     }
+    const expressionIssues = (knowledge?.operations ?? []).flatMap(operation => validateExpressionAcquisition(operation, this.context.utteranceExpressions ?? new Map(), new Set(realizesCanonicalEventIds), this.context.attributions));
+    if (expressionIssues.length) throw new Error(expressionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     const evidence: EvidenceRef[] = structuredClone([...initialEvidence]);
     const eventId = contentHash({
       kind: "genesis",
@@ -753,6 +761,7 @@ export class WorldEngine {
             claims: context.claims,
             propositions: context.propositions,
             attributions: context.attributions,
+            utteranceExpressions: context.utteranceExpressions,
             branchSemantics: stagedSemantics,
           });
         }
@@ -1318,6 +1327,7 @@ function effectiveKnowledgeOperationIndexes(input: KnowledgeState, delta: Knowle
       claimId: operation.claimId,
       ...(operation.propositionId ? { propositionId: operation.propositionId } : {}),
       ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
+      ...(operation.expressionId ? { expressionId: operation.expressionId } : {}),
       ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
       status: operation.status,
       confidence: operation.confidence,
@@ -1346,6 +1356,8 @@ function withoutAcquisitionCommit<T extends { acquiredAtCommit?: string }>(fact:
 
 function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
   const ontologyIssues = [
+    ...[...(context.utteranceExpressions?.values() ?? [])].flatMap(expression => validateUtteranceExpression(expression, { entities: context.entities, events: context.events ?? new Map(), propositions: context.propositions ?? new Map() })),
+    ...[...(context.attributions?.values() ?? [])].flatMap(attribution => validateAttributionExpressions(attribution, context.utteranceExpressions ?? new Map())),
     ...validateActionConstraintCatalog(context.actionConstraints?.values() ?? [], {
       entities: context.entities,
       actionSchemas: context.actionSchemas ?? new Map(),
@@ -1379,6 +1391,7 @@ function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
     claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     semanticEffects: [...(context.semanticEffects?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    utteranceExpressions: [...(context.utteranceExpressions?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     spatialOntologyVersion: context.spatialOntologyVersion,
     spatialRelations: [...(context.spatialRelations ?? [])].sort((left, right) => left.id.localeCompare(right.id)),
     actionConstraints: [...(context.actionConstraints?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),

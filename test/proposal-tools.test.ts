@@ -301,7 +301,7 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(53);
+    expect(tools).toHaveLength(54);
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "propose_proposition",
       "propose_attribution",
@@ -310,6 +310,7 @@ describe("compiler proposal tools", () => {
       "propose_scene_occurrence",
       "propose_event_frame",
       "propose_semantic_effect",
+      "propose_utterance_expression",
       "propose_event_execution",
       "propose_action_schema",
       "propose_action_constraint",

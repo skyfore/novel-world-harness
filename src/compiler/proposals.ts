@@ -1,3 +1,4 @@
+import { utteranceExpressionSchema, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
 import { semanticEffectSchema, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import { z } from "zod";
@@ -176,7 +177,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "utterance-expression" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -195,6 +196,7 @@ export const compilerProposalSchemas = {
   "scene-occurrence": sceneOccurrenceSchema,
   "event-frame": compilerEventFrameSchema,
   "semantic-effect": semanticEffectSchema,
+  "utterance-expression": utteranceExpressionSchema,
   "action-schema": compilerActionSchema,
   "event-execution": eventExecutionSchema,
   "action-constraint": compilerActionConstraintSchema,
@@ -281,7 +283,7 @@ export class CompilerProposalService {
       );
     }
     const artifactId = compilerProposalArtifactId(kind, payload, input.proposalId);
-    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : [])];
+    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : []), ...(kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions) : [])];
     const characterEvidenceIssues = kind === "character-model"
       ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
       : [];
@@ -426,6 +428,7 @@ type ProposalClosureCatalog = {
   entities: Set<string>;
   entityKinds: Map<string, string>;
   propositions: Set<string>;
+  expressions: Set<string>;
   attributions: Set<string>;
   claims: Set<string>;
   events: Set<string>;
@@ -492,7 +495,9 @@ export async function validateCompilerProposalClosure(
     if (matches) assertEvidenceExclusiveToSource(evidence, sourceId, `Proposal-closure artifact ${item.id ?? "unknown"}`);
     return matches;
   };
+  const canonicalExpressions = (await canon.listUtteranceExpressions()).filter(fromActiveSource);
   const catalog: ProposalClosureCatalog = {
+    expressions: new Set(canonicalExpressions.map(item => item.id)),
     entities: new Set(canonicalEntities.filter(fromActiveSource).map((item) => item.id)),
     entityKinds: new Map(canonicalEntities.filter(fromActiveSource).map((item) => [item.id, item.kind])),
     propositions: new Set(canonicalPropositions.filter(fromActiveSource).map((item) => item.id)),
@@ -532,6 +537,7 @@ export async function validateCompilerProposalClosure(
       catalog.entities.add(entity.id);
       catalog.entityKinds.set(entity.id, entity.kind);
     }
+    if (summary.kind === "utterance-expression") catalog.expressions.add((payload as { id: string }).id);
     if (summary.kind === "proposition") catalog.propositions.add((payload as { id: string }).id);
     if (summary.kind === "attribution") catalog.attributions.add((payload as { id: string }).id);
     if (summary.kind === "claim") catalog.claims.add((payload as { id: string }).id);
@@ -861,6 +867,7 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "attribution") {
     const attribution = payload as Attribution;
+    attribution.expressionIds?.forEach((id, index) => missing("expressions", id, `expressionIds.${index}`));
     missing("propositions", attribution.propositionId, "propositionId");
     if (attribution.holderEntityId) missing("entities", attribution.holderEntityId, "holderEntityId");
     if (attribution.sourceAttributionId) missing("attributions", attribution.sourceAttributionId, "sourceAttributionId");
@@ -913,6 +920,15 @@ function collectProposalClosureIssues(
       collectStoryTimeIssues(scene.storyInterval.start, "storyInterval.start", missing);
       if (scene.storyInterval.end) collectStoryTimeIssues(scene.storyInterval.end, "storyInterval.end", missing);
     }
+    return;
+  }
+  if (proposal.kind === "utterance-expression") {
+    const expression = payload as UtteranceExpression;
+    missing("events", expression.canonicalEventId, "canonicalEventId");
+    missing("entities", expression.speakerId, "speakerId");
+    if (expression.documentId) missing("entities", expression.documentId, "documentId");
+    expression.addresseeIds.forEach((id, index) => missing("entities", id, `addresseeIds.${index}`));
+    expression.propositions.forEach((item, index) => missing("propositions", item.propositionId, `propositions.${index}.propositionId`));
     return;
   }
   if (proposal.kind === "semantic-effect") {
@@ -1198,6 +1214,7 @@ function collectKnowledgeDeltaIssues(delta: KnowledgeDelta, path: string, missin
     const operationPath = `${path}.operations.${index}`;
     missing("entities", operation.actorId, `${operationPath}.actorId`);
     missing("claims", operation.claimId, `${operationPath}.claimId`);
+    if (operation.op === "learn" && operation.expressionId) missing("expressions", operation.expressionId, `${operationPath}.expressionId`);
     if (operation.propositionId) missing("propositions", operation.propositionId, `${operationPath}.propositionId`);
     if (operation.op === "learn" && operation.attributionId) {
       missing("attributions", operation.attributionId, `${operationPath}.attributionId`);

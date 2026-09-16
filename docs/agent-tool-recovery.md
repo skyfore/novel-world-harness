@@ -1347,3 +1347,15 @@ source/time review, then reevaluate after authorized refinement. An inactive
 projection does not certify the policy false or retire the underlying artifact.
 Engine 0.14.0 freezes the change; preserve incompatible histories and follow the
 existing version protocol.
+
+### UtteranceExpression v1 的表达与获知恢复
+
+`propose_utterance_expression` 只接收逻辑 quotation/proposition IDs、有序原文 fragment selectors 和字段 evidence selectors。宿主读取当前或本批草案的实际修订，冻结 quotation anchor、proposition snapshots/hash 与 UTF-8 bytes；模型不能填写这些权威字段。内容证据路径使用宿主展开后的 `/propositions/i/snapshot/...`，不能只给 `/object/kind`。writing 另需 `/documentId`，文档和作者分别引用。
+
+- `EXPRESSION_QUOTATION_MISSING`：在同 source 调用 `find_source_annotations(annotation_type=quotation)`，把 `results[].readArguments.ref` 原样交给 `read_source_annotation.ref`，仅将返回的 `payload.id` 用作 `quotation.quotationId`。其他实体/事件/命题/表达缺失用同 source `find_compiler_artifacts` 的对应 kind；同样复制 readArguments.ref，逻辑字段仅复制 payload.id。最多一次有实质修正的重试；找不到则保留草案并停止，不能猜 ID/hash。
+- 表达内容缺证据、引用/内容不符：读取这次引文和实际命题对象，补齐 schema 要求的每个语义字段。多 anchor 为合取，多条独立支持为替代；断开的片段不能拼接成连续 exact quote。不得借用别处同一 proposition 的证据。未成功 staging 的失败沿用 proposal_id；已成功草案走既有 successor 协议。
+- `EXPRESSION_QUOTATION_REVISION_MISMATCH`、场景图阻断：冻结依据已变或上游未闭合，保留草案和旧 prepared archive，停止模型重试，交宿主按受限源修复/重新编译路径处理。新候选不可覆盖旧快照。身份、annotation 或 source authority 不足同样停止。
+- `ACQUISITION_EXPRESSION_REQUIRED/MISMATCH`：保留 attribution/proposition/mode，查同域表达后最多修正一次；已绑定表达的 attribution 不能删 expressionId 降级为 legacy 路径。
+- `ACQUISITION_EXPRESSION_NOT_REALIZED`：表达尚未在分支历史发生，保留 head 并停止，不能把未来 canon 当获知证据、改 observed 或无变化重试。Genesis、正常提交和无 checkpoint 重放使用相同约束。
+
+旧无 expression 的记录保持可读且不补造证明。新的表达证明须有独立精确证据、修订一致性和身份 trace；完整模式判别 Acquisition/PerceptionObservation 迁移尚未由本段实现。

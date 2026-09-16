@@ -367,6 +367,29 @@ export function buildNwhToolRecoveryAdvice(
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
 
+  if (/(acquisition_expression_not_realized|expression_quotation_revision_mismatch|expression_group_scene_blocked)/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop until the host resolves the source revision, occurrence or scene boundary.",
+      steps: ["Preserve drafts, frozen quotation/proposition revisions and the current branch head.",
+        "Future canonical expressions are not branch events. Do not remove expressionId, relabel acquisition as observed, rewrite anchors, or retry unchanged.",
+        "A reviewed source revision requires the normal compiler proposal, validation and new prepared-candidate path; do not overwrite archived proof."] };
+  }
+  if (/(?:^|\W)(?:expression_|attribution_expression_|acquisition_expression_)/u.test(lower)
+    && !/(budget|circuit.breaker|consumed|outside.*scope)/u.test(lower)) {
+    const quotation = /expression_quotation_missing/u.test(lower);
+    const kind = /expression_event_missing/u.test(lower) ? "canonical-event" : /expression_entity_missing/u.test(lower) ? "entity" : /expression_proposition_/u.test(lower) ? "proposition" : "utterance-expression";
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: /_missing/u.test(lower) ? "lookup-miss" : "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected retry after inspecting same-source evidence within existing authority.",
+      steps: [quotation
+        ? "Call same-source find_source_annotations with annotation_type quotation; copy results[].readArguments.ref into read_source_annotation.ref and payload.id into quotation.quotationId."
+        : `Call same-source find_compiler_artifacts with kind ${kind}; copy results[].readArguments.ref into read_compiler_artifact.ref. Copy payload.id only for logical IDs; never substitute a proposal or read ref.`,
+        "Use logical quotation/proposition IDs and exact fragment selectors. The host freezes revisions, anchors and nested proposition snapshots. Every semantic field needs this occurrence's own evidence; multiple anchors are conjunctive.",
+        "Preserve the failed proposal_id if no draft was staged. Correct once; use the normal successor protocol for a staged draft. Never guess hashes/IDs, drop expression evidence, change acquisition mode or repeat unchanged.",
+        "If source, annotation or identity authority is insufficient, stop for host review with drafts intact."],
+      suggestedCall: quotation ? { tool: "find_source_annotations", arguments: { annotation_type: "quotation", query: "*", max_results: 20 } }
+        : { tool: "find_compiler_artifacts", arguments: { kind, query: "*", max_results: 20 } } };
+  }
+
   if (/semantic_effect_(event_missing|subject_missing|execution_missing)/u.test(lower)
     && !/(budget|circuit.breaker|frozen|consumed)/u.test(lower)) {
     return {

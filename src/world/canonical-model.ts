@@ -1,3 +1,4 @@
+import { utteranceExpressionSchema, type UtteranceExpression } from "./utterance-expression.js";
 import { semanticEffectSchema, type SemanticEffect } from "./semantic-effect.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
@@ -38,7 +39,7 @@ import { processTemplateSchema, type ProcessTemplate } from "./process-ontology.
 import { eventExecutionSchema, type EventExecution } from "./event-execution.js";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "event-participations" | "event-relations" | "spatial-relations" | "scene-occurrences" | "event-frames" | "semantic-effects" | "action-schemas" | "event-executions" | "action-constraints" | "norm-templates" | "process-templates" | "rules";
+export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "event-participations" | "event-relations" | "spatial-relations" | "scene-occurrences" | "event-frames" | "semantic-effects" | "utterance-expressions" | "action-schemas" | "event-executions" | "action-constraints" | "norm-templates" | "process-templates" | "rules";
 export type CanonicalRevisionRef = { id: string; hash: string };
 type StoredCanonicalRef = { version: 1; id: string; hash: string };
 export type ProposalStatus = "pending" | "accepted" | "rejected";
@@ -87,6 +88,7 @@ export class CanonicalModelStore {
   putSceneOccurrence(scene: SceneOccurrence): Promise<void> { const value = sceneOccurrenceSchema.parse(scene); return this.put("scene-occurrences", value.id, value); }
   putEventFrame(frame: EventFrame): Promise<void> { const value = eventFrameSchema.parse(frame); return this.put("event-frames", value.id, value); }
   putSemanticEffect(frame: SemanticEffect): Promise<void> { const value = semanticEffectSchema.parse(frame); return this.put("semantic-effects", value.id, value); }
+  putUtteranceExpression(frame: UtteranceExpression): Promise<void> { const value = utteranceExpressionSchema.parse(frame); return this.put("utterance-expressions", value.id, value); }
   putEventExecution(value: EventExecution): Promise<void> { const parsed = eventExecutionSchema.parse(value); return this.put("event-executions", parsed.id, parsed); }
   putActionSchema(schema: ActionSchema): Promise<void> { const value = actionSchemaSchema.parse(schema); return this.put("action-schemas", value.id, value); }
   putActionConstraint(constraint: ActionConstraint): Promise<void> { const value = actionConstraintSchema.parse(constraint); return this.put("action-constraints", value.id, value); }
@@ -104,6 +106,7 @@ export class CanonicalModelStore {
   ensureSceneOccurrenceRevision(scene: SceneOccurrence): Promise<void> { const value = sceneOccurrenceSchema.parse(scene); return this.ensureRevision("scene-occurrences", value.id, value); }
   ensureEventFrameRevision(frame: EventFrame): Promise<void> { const value = eventFrameSchema.parse(frame); return this.ensureRevision("event-frames", value.id, value); }
   ensureSemanticEffectRevision(frame: SemanticEffect): Promise<void> { const value = semanticEffectSchema.parse(frame); return this.ensureRevision("semantic-effects", value.id, value); }
+  ensureUtteranceExpressionRevision(frame: UtteranceExpression): Promise<void> { const value = utteranceExpressionSchema.parse(frame); return this.ensureRevision("utterance-expressions", value.id, value); }
   ensureEventExecutionRevision(value: EventExecution): Promise<void> { const parsed = eventExecutionSchema.parse(value); return this.ensureRevision("event-executions", parsed.id, parsed); }
   ensureActionSchemaRevision(schema: ActionSchema): Promise<void> { const value = actionSchemaSchema.parse(schema); return this.ensureRevision("action-schemas", value.id, value); }
   ensureActionConstraintRevision(constraint: ActionConstraint): Promise<void> { const value = actionConstraintSchema.parse(constraint); return this.ensureRevision("action-constraints", value.id, value); }
@@ -121,6 +124,7 @@ export class CanonicalModelStore {
   getSceneOccurrence(id: string): Promise<SceneOccurrence> { return this.get("scene-occurrences", id, sceneOccurrenceSchema); }
   getEventFrame(id: string): Promise<EventFrame> { return this.get("event-frames", id, eventFrameSchema); }
   getSemanticEffect(id: string): Promise<SemanticEffect> { return this.get("semantic-effects", id, semanticEffectSchema); }
+  getUtteranceExpression(id: string): Promise<UtteranceExpression> { return this.get("utterance-expressions", id, utteranceExpressionSchema); }
   getEventExecution(id: string): Promise<EventExecution> { return this.get("event-executions", id, eventExecutionSchema); }
   getActionSchema(id: string): Promise<ActionSchema> { return this.get("action-schemas", id, actionSchemaSchema); }
   getActionConstraint(id: string): Promise<ActionConstraint> { return this.get("action-constraints", id, actionConstraintSchema); }
@@ -138,6 +142,7 @@ export class CanonicalModelStore {
   getSceneOccurrenceRevision(id: string, hash: string): Promise<SceneOccurrence> { return this.getRevision("scene-occurrences", id, hash, sceneOccurrenceSchema); }
   getEventFrameRevision(id: string, hash: string): Promise<EventFrame> { return this.getRevision("event-frames", id, hash, eventFrameSchema); }
   getSemanticEffectRevision(id: string, hash: string): Promise<SemanticEffect> { return this.getRevision("semantic-effects", id, hash, semanticEffectSchema); }
+  getUtteranceExpressionRevision(id: string, hash: string): Promise<UtteranceExpression> { return this.getRevision("utterance-expressions", id, hash, utteranceExpressionSchema); }
   getEventExecutionRevision(id: string, hash: string): Promise<EventExecution> { return this.getRevision("event-executions", id, hash, eventExecutionSchema); }
   getActionSchemaRevision(id: string, hash: string): Promise<ActionSchema> { return this.getRevision("action-schemas", id, hash, actionSchemaSchema); }
   getActionConstraintRevision(id: string, hash: string): Promise<ActionConstraint> { return this.getRevision("action-constraints", id, hash, actionConstraintSchema); }
@@ -155,6 +160,7 @@ export class CanonicalModelStore {
   listSceneOccurrences(): Promise<SceneOccurrence[]> { return this.list("scene-occurrences", sceneOccurrenceSchema); }
   listEventFrames(): Promise<EventFrame[]> { return this.list("event-frames", eventFrameSchema); }
   listSemanticEffects(): Promise<SemanticEffect[]> { return this.list("semantic-effects", semanticEffectSchema); }
+  listUtteranceExpressions(): Promise<UtteranceExpression[]> { return this.list("utterance-expressions", utteranceExpressionSchema); }
   listEventExecutions(): Promise<EventExecution[]> { return this.list("event-executions", eventExecutionSchema); }
   listActionSchemas(): Promise<ActionSchema[]> { return this.list("action-schemas", actionSchemaSchema); }
   listActionConstraints(): Promise<ActionConstraint[]> { return this.list("action-constraints", actionConstraintSchema); }
@@ -487,6 +493,7 @@ export class CanonicalCompiler {
   async acceptSceneOccurrence(id: string): Promise<SceneOccurrence> { const proposal = await this.proposals.read("pending", id, sceneOccurrenceSchema); await this.canon.putSceneOccurrence(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptEventFrame(id: string): Promise<EventFrame> { const proposal = await this.proposals.read("pending", id, eventFrameSchema); await this.canon.putEventFrame(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptSemanticEffect(id: string): Promise<SemanticEffect> { const proposal = await this.proposals.read("pending", id, semanticEffectSchema); await this.canon.putSemanticEffect(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
+  async acceptUtteranceExpression(id: string): Promise<UtteranceExpression> { const proposal = await this.proposals.read("pending", id, utteranceExpressionSchema); await this.canon.putUtteranceExpression(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptActionSchema(id: string): Promise<ActionSchema> { const proposal = await this.proposals.read("pending", id, actionSchemaSchema); await this.canon.putActionSchema(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptRule(id: string): Promise<WorldRule> { const proposal = await this.proposals.read("pending", id, worldRuleSchema); await this.canon.putRule(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async reject(id: string): Promise<void> {

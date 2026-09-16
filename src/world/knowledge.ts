@@ -1,3 +1,4 @@
+import { validateExpressionAcquisition, type UtteranceExpression } from "./utterance-expression.js";
 import type {
   Attribution,
   Claim,
@@ -47,6 +48,8 @@ export type KnowledgeReducerContext = {
   claims?: ReadonlyMap<string, Claim>;
   propositions?: ReadonlyMap<string, Proposition>;
   attributions?: ReadonlyMap<string, Attribution>;
+  utteranceExpressions?: ReadonlyMap<string, UtteranceExpression>;
+  realizedCanonicalEventIds?: ReadonlySet<string>;
   branchSemantics: BranchSemanticState;
 };
 
@@ -71,6 +74,8 @@ export function applyKnowledgeDelta(
   const hasAttribution = (id: string) => Boolean(context.branchSemantics.attributions[id]) || Boolean(context.attributions?.has(id));
 
   for (const operation of delta.operations) {
+    const expressionIssues = validateExpressionAcquisition(operation, context.utteranceExpressions ?? new Map(), context.realizedCanonicalEventIds, context.attributions);
+    if (expressionIssues.length) throw new Error(expressionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     const actorEntity = context.entities.get(operation.actorId);
     if (!actorEntity || actorEntity.kind !== "character") {
       throw new Error(`Knowledge actor ${operation.actorId} must be a character`);
@@ -110,6 +115,7 @@ export function applyKnowledgeDelta(
       claimId: operation.claimId,
       ...(operation.propositionId ? { propositionId: operation.propositionId } : {}),
       ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
+      ...(operation.expressionId ? { expressionId: operation.expressionId } : {}),
       ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
       status: operation.status,
       confidence: operation.confidence,

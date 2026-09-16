@@ -1,3 +1,7 @@
+import { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, validateAttributionExpressions } from "../world/utterance-expression.js";
+import { contentHash } from "../world/canonical.js";
+import { entitySchema, canonicalEventSchema } from "../world/model.js";
+import { EvidenceVerifier } from "./evidence.js";
 import { assessExpressionObjectSupport } from "./expression-content.js";
 import { propositionSchema, type Proposition } from "../world/model.js";
 import { assessQuotationContentSupport } from "./content-support.js";
@@ -24,7 +28,7 @@ import {
   type IdentityResolution,
 } from "./entity-resolution.js";
 
-type AttributionTraceCatalog = {
+export type AttributionTraceCatalog = {
   quotations: ReadonlyMap<string, Quotation>;
   resolutions: ReadonlyMap<string, IdentityResolution>;
 };
@@ -44,6 +48,10 @@ export async function validateAttributionProposalTrace(
   const issues: string[] = [];
   for (const attribution of attributions.all.values()) {
     issues.push(...attributionQuotationTraceIssues(attribution, sourceId, catalog));
+    if (attribution.expressionIds?.length) {
+      issues.push(...await expressionAttributionTraceIssues(workspaceRoot, sourceId, attribution, catalog, worldProposalIds));
+      continue;
+    }
     const content = await loadPropositionContent(workspaceRoot, attribution.propositionId, worldProposalIds);
     issues.push(...attributionContentTraceIssues(attribution, content.assertions, catalog.quotations, content.propositions));
   }
@@ -88,10 +96,13 @@ export async function validateCommittedAttributionTrace(
   workspaceRoot: string,
   sourceIdInput: string,
   attributionInput: Attribution,
+  worldProposalIds: readonly string[] = [],
 ): Promise<string[]> {
   const sourceId = idSchema.parse(sourceIdInput);
   const attribution = attributionSchema.parse(attributionInput);
   const catalog = await loadTraceCatalog(workspaceRoot, sourceId);
+  if (attribution.expressionIds?.length) return [...attributionQuotationTraceIssues(attribution, sourceId, catalog),
+    ...await expressionAttributionTraceIssues(workspaceRoot, sourceId, attribution, catalog, worldProposalIds)];
   const content = await loadPropositionContent(workspaceRoot, attribution.propositionId);
   return [...attributionQuotationTraceIssues(attribution, sourceId, catalog),
     ...attributionContentTraceIssues(attribution, content.assertions, catalog.quotations, content.propositions)];
@@ -232,7 +243,7 @@ function knowledgeAcquisitionTraceIssues(
   return issues;
 }
 
-async function loadTraceCatalog(
+export async function loadTraceCatalog(
   workspaceRoot: string,
   sourceId: string,
   annotationProposalIds: readonly string[] = [],
@@ -337,4 +348,40 @@ function evidenceContainsAnchor(reference: EvidenceRef, anchor: Quotation["ancho
 
 function uniqueIds(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => idSchema.parse(value)))].sort();
+}
+
+/** A verified edge has occurrence-local evidence; global proposition proofs are not reused. */
+async function expressionAttributionTraceIssues(root: string, sourceId: string, attribution: Attribution,
+  trace: AttributionTraceCatalog, proposalIds: readonly string[] = []): Promise<string[]> {
+  const canonical = new CanonicalModelStore(root), store = new ProposalStore(root), exact = new EvidenceAssertionStore(root);
+  const expressions = new Map((await canonical.listUtteranceExpressions()).map(item => [item.id, item]));
+  const entities = new Map((await canonical.listEntities()).map(item => [item.id, item]));
+  const events = new Map((await canonical.listEvents()).map(item => [item.id, item]));
+  const propositions = new Map((await canonical.listPropositions()).map(item => [item.id, item]));
+  const draftProofs = new Map<string, EvidenceAssertion[]>();
+  for (const id of proposalIds) {
+    const envelope = await store.readEnvelope("pending", id).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+    if (!envelope) continue;
+    if (envelope.kind === "utterance-expression") { const value = utteranceExpressionSchema.parse(envelope.payload); expressions.set(value.id, value); draftProofs.set(value.id, evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? [])); }
+    if (envelope.kind === "entity") { const value = entitySchema.parse(envelope.payload); entities.set(value.id, value); }
+    if (envelope.kind === "proposition") { const value = propositionSchema.parse(envelope.payload); propositions.set(value.id, value); }
+    if (envelope.kind === "canonical-event") { const value = canonicalEventSchema.parse(envelope.payload); events.set(value.id, value); }
+  }
+  const issues = validateAttributionExpressions(attribution, expressions).map(item => `${item.code}: ${item.message}`);
+  const { validateUtteranceExpressionTrace } = await import("./utterance-expression-trace.js");
+  const verifier = new EvidenceVerifier(root);
+  for (const id of attribution.expressionIds ?? []) {
+    const expression = expressions.get(id);
+    if (!expression) continue;
+    const binding = draftProofs.has(id) ? undefined : await exact.bindingForArtifact("utterance-expression", id);
+    const proofs = draftProofs.get(id) ?? (binding?.artifactHash === contentHash(expression) ? binding.assertions : []);
+    if (expression.quotation.anchor.sourceId !== sourceId) issues.push(`EXPRESSION_SOURCE_MISMATCH: ${id}`);
+    issues.push(...[
+      ...validateUtteranceExpression(expression, { entities, events, propositions }),
+      ...validateUtteranceExpressionEvidence(expression, proofs),
+      ...await validateUtteranceExpressionTrace(root, expression, trace),
+      ...(await verifier.verifyAssertions(proofs)).issues,
+    ].map(item => `${item.code}: ${item.message}`));
+  }
+  return issues;
 }

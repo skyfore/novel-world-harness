@@ -290,6 +290,8 @@ export class ProjectionService {
               claims: context.claims,
               propositions: context.propositions,
               attributions: context.attributions,
+              utteranceExpressions: context.utteranceExpressions,
+              realizedCanonicalEventIds: new Set([...history.flatMap(item => item.event.realizesCanonicalEventIds ?? []), ...(event.realizesCanonicalEventIds ?? [])]),
               branchSemantics: semantics,
             });
           }

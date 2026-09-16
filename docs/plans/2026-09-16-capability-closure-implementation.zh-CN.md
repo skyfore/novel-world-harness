@@ -781,3 +781,23 @@ P4c 已提交为 `00bbc81`。
 策略升为 bounded-policy-time-v10，engine 0.14.0；旧 bounded-rule-time-v9 snapshot 可读，旧 engine history 明确拒绝不兼容解释。未创建新持久类型或自动改写旧模型。P3 表达/感知/获知链、P4 时间 catalog 与其他执行扩展、P5 工作集和 P7 外部验收继续在目标内。
 
 最终验证：全仓 202 文件、1212 tests 通过（99.36 秒）；21 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P4d 已提交为 `39ee919`。
+
+## P3c：UtteranceExpression 完整持久化链与运行时获知消费
+
+新增 utterance-expression-v1：冻结本次 quotation revision/anchor、有序分离的原文片段、根命题及所有可达嵌套命题 revision/snapshot、speaker/addressees/occurrence。writing 单独引用 documentId，文档不充当作者。模型工具只输入逻辑 ID 与源片段 selectors；宿主加载真实修订并生成 UTF-8 anchors/hash 和完整命题快照，不接受模型填写权威 evidence。每条边使用自己的逐语义字段证据，内容分母由实际命题 schema 推导；保留 AND anchors、OR proofs、嵌套引用与内容同时验证、循环/展开边界。内容区间覆盖不宣称自然语言蕴含判定。
+
+同一提交接入 canonical revision store、模型提案工具与 semantic stage、finish 的 annotation/resolution overlay、converge、检索/catalog、audit、prepared capture/archive/restore、closure revision dependencies、reparse invalidation、冻结 WorldContext 与 runtime。表达与其事件/新 attribution 可成组先验证后提交，禁止因果/时间锚点及 attribution-source 循环，保留场景图门禁。prepared 新候选要求本表达自己的精确证据与冻结 compiler snapshot 中真实 quotation/identity revisions；删证明或改上游修订不能沿用旧认证依据。归档快照和旧 head 不读取可变 annotation store。
+
+attribution.expressionIds 是可选的显式新桥接。新桥接只使用各表达自己的证明，不再复用或被另一场话语的 proposition evidence 误阻断；旧无桥接 attribution 维持既有未验证兼容解释。knowledge operation/fact 可保存 expressionId；已绑定 attribution 必须保留有效表达引用，不能删引用绕过门禁。told/read 验证内容、接收者、speaker 或 document，以及表达 occurrence 是否已在本分支发生。只授予知识状态，不写命题世界真值。Genesis、普通提交、fork 和无 checkpoint replay 共用检查。完整 PerceptionObservation、模式判别 Acquisition 和所有旧 acquisition 的迁移仍待后续，不能把本段当作 P3 全完成。
+
+两段原创中英文场景（Ada/Bo 门口；宁/维码头）实际经过 propose→finish→converge→prepared archive→新 workspace rebuild→runtime commit→fresh replay，检查未来话语不能提前获知、发生后正常获知、静默 fork/旧 head 不获得知识。另有两段真实书面告示场景验证作者/文档分离以及 read 提交/重放。反例覆盖缺字段证据、多锚点跨引文、另一处同命题证据、两次同命题表达、嵌套内容及引用缺失、循环、断开片段与伪造连续引文、错误 prefix hash、删 evidence binding、上游 quotation/proposition revision 变化、删 expressionId 和改 observed。未运行外部模型或人工体验评价。
+
+pipeline 升为 37、engine 升为 0.15.0；旧 pipeline 36 仅保留原文 observation/structure 检查点，语义/执行层需重新验收，不改写旧 persisted history。旧 branch engine 契约继续明确拒绝不兼容解释，旧没有表达边的数据不自动变成已验证表达。
+
+首轮全仓 203 文件、1223 tests 中 1222 通过，仅新工具使旧数量断言 53→54，已修正。随后补出的同批后续事件 relative anchor 反例被原提交顺序错误阻断；表达组现按真实 event/attribution 依赖连通范围收集，保留 DAG 门禁，补测循环拒绝。Genesis 不再从状态后果相同自动推断表达事件已发生，须有明确的已发生历史依据。P5 将关键表达绑定实际锁定话语的剩余工作未冒充在本段完成。
+
+定向验证包含 65 项编译工具/表达链检查及最终原创反例；服务端、Web、E2E TypeScript 通过。全仓检查待本段最终验证记录。
+
+最终验证：全仓 203 文件、1225 tests 全部通过（99.50 秒），包含最终时间依赖连通组、循环拒绝和 Genesis 等值状态反例；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

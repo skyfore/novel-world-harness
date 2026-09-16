@@ -30,6 +30,7 @@ export const COMPILER_ARTIFACT_KINDS = [
   "scene-occurrence",
   "event-frame",
   "semantic-effect",
+  "utterance-expression",
   "action-schema",
   "event-execution",
   "action-constraint",
@@ -186,6 +187,7 @@ export async function loadCompilerArtifactRecords(
   addCanonical(eventRelations, "event-relation", (value) => ({ id: value.id, label: `${value.fromEventId} ${value.type} ${value.toEventId}` }));
   addCanonical(sceneOccurrences, "scene-occurrence", (value) => ({ id: value.id, label: `Scene ${value.id}` }));
   addCanonical(await canon.listSemanticEffects(), "semantic-effect", value => ({ id: value.id, label: `${value.kind}: ${value.subjectEntityId}` }));
+  addCanonical(await canon.listUtteranceExpressions(), "utterance-expression", value => ({ id: value.id, label: `${value.modality}: ${value.speakerId}` }));
   addCanonical(eventFrames, "event-frame", (value) => ({ id: value.id, label: value.name }));
   addCanonical(eventExecutions, "event-execution", (value) => ({ id: value.id, label: `${value.canonicalEventId}: ${value.actorId}` }));
   addCanonical(actionSchemas.filter((value) => value.induction.kind === "source-pattern"), "action-schema", (value) => ({ id: value.id, label: value.name }));

@@ -491,3 +491,5 @@ export { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvi
 export { committedUtteranceId, narrationBlocksSchema, renderNarrationBlocks, type NarrationBlocks, type LockedUtterance } from "./world/utterance-rendering.js";
 
 export { SCHEDULING_POLICY_VERSION } from "./world/scheduling-policy.js";
+
+export { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, UTTERANCE_EXPRESSION_VERSION, type UtteranceExpression } from "./world/utterance-expression.js";

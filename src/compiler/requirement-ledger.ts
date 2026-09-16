@@ -1,3 +1,4 @@
+import { roleReviewRevisionSchema, assertRoleReviewRevisionEvidence, type RoleReviewRevision } from "./role-review-revision.js";
 import { compilerFinishReceiptSchema, type CompilerFinishReceipt } from "./finish-receipts.js";
 import { coreRoleAttemptScope } from "./requirement-attempts.js";
 import fs from "node:fs/promises";
@@ -34,6 +35,8 @@ export const requirementResultSchema = z.object({
 }).strict();
 export type RequirementResult = z.infer<typeof requirementResultSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("core-role-review-snapshot"), roster: roleRosterSchema }).strict(),
+  z.object({ kind: z.literal("core-role-review-revision"), revision: roleReviewRevisionSchema }).strict(),
   z.object({ kind: z.literal("core-role-invalidation"), evaluationRef: hash, nextSubjectSnapshotHash: hash, reason: text }).strict(),
   z.object({ kind: z.literal("core-role-attempt-evaluation"), settlementKey: hash, receiptFingerprint: hash, definitionRevision: hash,
     subjectSnapshotHash: hash, evaluationRef: hash, result: requirementResultSchema.shape.requirements.element }).strict(),
@@ -164,6 +167,8 @@ export class RequirementLedger {
     if (incoming.some(record => record.sourceId !== this.sourceId)) throw new Error("Requirement journal restore source mismatch; stop for host review");
     if (incoming.length && !bytes) throw new Error("Requirement journal restore needs immutable source bytes; stop for host storage review");
     for (const record of incoming) {
+      if (record.payload.kind === "core-role-review-snapshot" && record.payload.roster.sourceSha256 !== crypto.createHash("sha256").update(bytes!).digest("hex")) throw new Error("Role review snapshot source hash mismatch; stop for host source review");
+      if (record.payload.kind === "core-role-review-revision") assertRoleReviewRevisionEvidence(record.payload.revision, bytes!);
       if (record.payload.kind === "core-role-definition") assertCoreRoleDefinitionEvidence(record.payload.definition, bytes!);
       if (record.payload.kind === "definition") evaluateRequirementSet(record.payload.definition, bytes!, Object.fromEntries(sceneCatalogKeys.map(key => [key, new Map()])) as SceneReviewCatalog);
     }
@@ -182,8 +187,40 @@ export class RequirementLedger {
   async coreRoleDefinitionHistory(): Promise<CoreRoleRequirementDefinition[]> {
     return (await this.history()).flatMap(record => record.payload.kind === "core-role-definition" ? [record.payload.definition] : []);
   }
+  async recordRoleReviewSnapshot(input: RoleRoster, bytes: Uint8Array): Promise<void> {
+    const roster = roleRosterSchema.parse(input);
+    if (!roster.reviews.length || roster.sourceId !== this.sourceId || roster.sourceSha256 !== crypto.createHash("sha256").update(bytes).digest("hex")) throw new Error("Role review snapshot source or completion mismatch; preserve the saved review and stop model retries");
+    const history = await this.history();
+    const previous = history.findLast(record => record.payload.kind === "core-role-review-snapshot" && record.payload.roster.reviewRevisionId === roster.reviewRevisionId);
+    if (previous?.payload.kind === "core-role-review-snapshot" && contentHash(previous.payload.roster) === contentHash(roster)) return;
+    const payload = { kind: "core-role-review-snapshot" as const, roster };
+    const identity = { version: 1 as const, sourceId: this.sourceId, sequence: history.length, predecessorHash: history.at(-1)?.hash ?? null, payload };
+    requirementJournalSchema.parse([...history, { ...identity, hash: contentHash(identity) }]);
+    await this.publish(payload);
+  }
+  async roleReviewRevisions(): Promise<RoleReviewRevision[]> {
+    return (await this.history()).flatMap(record => record.payload.kind === "core-role-review-revision" ? [record.payload.revision] : []);
+  }
+  async beginRoleReviewRevision(input: Omit<RoleReviewRevision, "revisionHash">, bytes: Uint8Array): Promise<RoleReviewRevision> {
+    input = { ...input, scopeDecisionRef: input.scopeDecisionRef.trim(), reason: input.reason.trim() };
+    const revision = roleReviewRevisionSchema.parse({ ...input, revisionHash: contentHash(input) });
+    assertRoleReviewRevisionEvidence(revision, bytes);
+    const history = await this.history();
+    const existing = history.find(record => record.payload.kind === "core-role-review-revision" && record.payload.revision.id === revision.id);
+    if (existing) {
+      if (existing.payload.kind !== "core-role-review-revision" || contentHash(existing.payload.revision) !== contentHash(revision)) throw new Error("Role review revision ID already has different frozen input; stop unchanged retries and preserve the original decision");
+      return existing.payload.revision;
+    }
+    const payload = { kind: "core-role-review-revision" as const, revision };
+    const identity = { version: 1 as const, sourceId: this.sourceId, sequence: history.length, predecessorHash: history.at(-1)?.hash ?? null, payload };
+    requirementJournalSchema.parse([...history, { ...identity, hash: contentHash(identity) }]);
+    await this.publish(payload);
+    return revision;
+  }
   async registerCoreRoles(input: { roster: RoleRoster; units: StructuralUnit[]; scopeDecisionRef: string; scopeChangeReason: string; predecessorRevision?: string; allowScopeReduction?: boolean }, bytes: Uint8Array): Promise<CoreRoleRequirementDefinition> {
     input = { ...input, roster: roleRosterSchema.parse(input.roster) };
+    const activeReview = (await this.roleReviewRevisions()).at(-1);
+    if (input.roster.reviewRevisionId !== activeReview?.id || (activeReview && input.roster.subjectHash !== activeReview.nextRoster.subjectHash)) throw new Error("Role definition is outside the authorized host review revision; preserve prior reviews and stop model retries");
     const issues = validateRoleRoster(input.roster).filter(issue => !["ROSTER_MAJOR_IDENTITY_UNRESOLVED", "ROSTER_NO_MAJOR_CHARACTERS"].includes(issue.code));
     if (issues.length) throw new Error(`Core role source review is incomplete: ${issues.map(issue => issue.code).join(", ")}; preserve reviews and stop unchanged retries`);
     const retainedDefinitions = await this.coreRoleDefinitionHistory(), previous = retainedDefinitions.at(-1);
@@ -297,7 +334,11 @@ export class RequirementLedger {
   async restoreCoreRoles(input: readonly CoreRoleRequirementDefinition[], bytes?: Uint8Array): Promise<void> {
     await this.assertCoreRolesRestorable(input, bytes);
     const current = await this.coreRoleDefinitionHistory();
-    for (const definition of input.slice(current.length)) await this.publish({ kind: "core-role-definition", definition });
+    for (const definition of input.slice(current.length)) {
+      const revision = (await this.roleReviewRevisions()).at(-1);
+      if (definition.roster.reviewRevisionId !== revision?.id) throw new Error("Role definition restore requires its retained host review revision; restore the complete journal, do not invent authorization");
+      await this.publish({ kind: "core-role-definition", definition });
+    }
   }
   private async publish(payload: z.infer<typeof payloadSchema>): Promise<void> {
     const history = await this.history(), last = history.at(-1);
@@ -394,8 +435,29 @@ export const requirementJournalSchema = z.array(recordSchema).superRefine((recor
     const evaluations = new Map<string, Extract<LedgerRecord["payload"], { kind: "core-role-evaluation" }>>();
     const attempts = new Map<string, CompilerFinishReceipt>();
     const settlementKeys = new Set<string>();
+    const reviewRevisions: RoleReviewRevision[] = [];
+    const retainedReviews = new Map<string, string>();
+    const reviewSnapshots = new Map<string, RoleRoster>();
     for (const record of records) {
-      if (record.payload.kind === "definition") {
+      const roster = record.payload.kind === "core-role-definition" ? record.payload.definition.roster : record.payload.kind === "core-role-review-revision" ? record.payload.revision.priorRoster : record.payload.kind === "core-role-review-snapshot" ? record.payload.roster : undefined;
+      for (const review of roster?.reviews ?? []) {
+        if (retainedReviews.has(review.runId) && retainedReviews.get(review.runId) !== contentHash(review)) throw new Error("Retained role review run was rewritten");
+        retainedReviews.set(review.runId, contentHash(review));
+      }
+      if (record.payload.kind === "core-role-review-snapshot") {
+        const roster = record.payload.roster, activeRevision = reviewRevisions.at(-1), key = roster.reviewRevisionId ?? "";
+        const prior = reviewSnapshots.get(key);
+        if (roster.sourceId !== sourceId || !roster.reviews.length || roster.reviewRevisionId !== activeRevision?.id
+          || (activeRevision && roster.subjectHash !== activeRevision.nextRoster.subjectHash)
+          || (prior && (prior.subjectHash !== roster.subjectHash || prior.reviews.some((review, index) => contentHash(review) !== contentHash(roster.reviews[index] ?? null))))) throw new Error("Role review snapshot would rewrite retained partial work; stop for host review");
+        reviewSnapshots.set(key, roster);
+      } else if (record.payload.kind === "core-role-review-revision") {
+        const revision = record.payload.revision, prior = reviewRevisions.at(-1);
+        if (revision.sourceId !== sourceId || reviewRevisions.some(item => item.id === revision.id)
+          || revision.predecessorDefinitionRevision !== (coreHistory.at(-1)?.revisionHash ?? null)
+          || revision.priorRoster.reviewRevisionId !== prior?.id) throw new Error("Role review revision has stale host scope; preserve history and stop for host review");
+        reviewRevisions.push(revision);
+      } else if (record.payload.kind === "definition") {
         const next = record.payload.definition;
         if (next.spec.sourceId !== sourceId || next.parentRevision !== (definitions.get(next.id)?.revisionHash ?? null)) throw new Error("Requirement definition lineage mismatch; stop for host review.");
         definitions.set(next.id, next);
@@ -403,6 +465,9 @@ export const requirementJournalSchema = z.array(recordSchema).superRefine((recor
         if (definitions.get(record.payload.result.setId)?.revisionHash !== record.payload.result.revisionHash) throw new Error("Requirement evaluation has no active definition; stop for host review.");
       } else if (record.payload.kind === "core-role-definition") {
         if (record.payload.definition.sourceId !== sourceId) throw new Error("Core role definition escapes its source; stop for host review.");
+        const activeReview = reviewRevisions.at(-1);
+        if (record.payload.definition.roster.reviewRevisionId !== activeReview?.id) throw new Error("Role definition lacks its authorized review revision");
+        if (activeReview && record.payload.definition.roster.subjectHash !== activeReview.nextRoster.subjectHash) throw new Error("Role definition changed its frozen review subject");
         coreHistory.push(record.payload.definition);
         coreRoleRequirementHistorySchema.parse(coreHistory);
       } else if (record.payload.kind === "core-role-attempt") {
@@ -437,13 +502,25 @@ export function requirementSnapshotInputs<T extends { requirementJournal?: Ledge
 }
 
 export function requirementJournalBindingIssues(snapshot: {
-  requirementJournal?: LedgerRecord[]; requirementDefinitions?: RequirementSet[]; coreRoleRequirementDefinitions?: CoreRoleRequirementDefinition[];
+  requirementJournal?: LedgerRecord[]; coreRoleReviewRevision?: RoleReviewRevision; roleRoster?: RoleRoster | null; requirementDefinitions?: RequirementSet[]; coreRoleRequirementDefinitions?: CoreRoleRequirementDefinition[];
   reconciliationObligations?: { receipt: CompilerFinishReceipt }[];
 }, sourceId: string, sourceSha256: string, requireHistory = false): string[] {
-  if (!snapshot.requirementJournal) return requireHistory && (snapshot.requirementDefinitions?.length || snapshot.coreRoleRequirementDefinitions?.length) ? ["REQUIREMENT_JOURNAL_MISSING"] : []; // Historical bundles predate full journal transport.
+  if (!snapshot.requirementJournal) {
+    if (snapshot.coreRoleReviewRevision || snapshot.roleRoster?.reviewRevisionId || snapshot.coreRoleRequirementDefinitions?.some(definition => definition.roster.reviewRevisionId)) return ["CORE_ROLE_REVIEW_REVISION_MISMATCH"];
+    return requireHistory && (snapshot.requirementDefinitions?.length || snapshot.coreRoleRequirementDefinitions?.length) ? ["REQUIREMENT_JOURNAL_MISSING"] : []; // Historical bundles predate full journal transport.
+  }
   const parsed = requirementJournalSchema.safeParse(snapshot.requirementJournal);
   if (!parsed.success) return ["REQUIREMENT_JOURNAL_INVALID"];
   const history = parsed.data, issues: string[] = [];
+  const reviewRevision = history.findLast(record => record.payload.kind === "core-role-review-revision");
+  const expectedRevision = reviewRevision?.payload.kind === "core-role-review-revision" ? reviewRevision.payload.revision : undefined;
+  if (contentHash(expectedRevision ?? null) !== contentHash(snapshot.coreRoleReviewRevision ?? null) || (snapshot.roleRoster?.reviewRevisionId && snapshot.roleRoster.reviewRevisionId !== expectedRevision?.id)) issues.push("CORE_ROLE_REVIEW_REVISION_MISMATCH");
+  const reviewSnapshot = history.findLast(record => record.payload.kind === "core-role-review-snapshot" && record.payload.roster.reviewRevisionId === expectedRevision?.id);
+  if (reviewSnapshot?.payload.kind === "core-role-review-snapshot") {
+    const retained = reviewSnapshot.payload.roster, current = snapshot.roleRoster;
+    if (!current || current.subjectHash !== retained.subjectHash || current.reviewRevisionId !== retained.reviewRevisionId || retained.reviews.some((review, index) => contentHash(review) !== contentHash(current.reviews[index] ?? null))) issues.push("CORE_ROLE_REVIEW_SNAPSHOT_MISMATCH");
+  }
+  if (requireHistory && expectedRevision && (snapshot.roleRoster?.reviewRevisionId !== expectedRevision.id || snapshot.coreRoleRequirementDefinitions?.at(-1)?.roster.reviewRevisionId !== expectedRevision.id)) issues.push("CORE_ROLE_REVIEW_REVISION_PENDING");
   if (history.some(record => record.sourceId !== sourceId)) issues.push("REQUIREMENT_JOURNAL_SOURCE_MISMATCH");
   const scenes = history.flatMap(record => record.payload.kind === "definition" ? [record.payload.definition] : []);
   const roles = history.flatMap(record => record.payload.kind === "core-role-definition" ? [record.payload.definition] : []);

@@ -1,3 +1,7 @@
+import { beginCoreRoleReviewRevision, type beginCoreRoleReviewSchema } from "../compiler/role-review-revision-service.js";
+import { RoleRosterStore } from "../compiler/role-roster.js";
+import { contentHash } from "../world/canonical.js";
+import type { z } from "zod";
 import fs from "node:fs/promises";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { registerSourceRequirements, settleSourceRequirements } from "../compiler/requirement-service.js";
@@ -59,11 +63,17 @@ export async function reviewScenesCommand(root: string, specFile: string, regist
 
 export async function inspectRequirementsCommand(root: string, sourceId: string) {
   const ledger = new RequirementLedger(root, sourceId);
-  console.log(JSON.stringify({ definitions: await ledger.definitions(), coreRoleDefinitions: await ledger.coreRoleDefinitionHistory(), history: await ledger.history() }, null, 2));
+  const savedRoster = await new RoleRosterStore(root).read(sourceId);
+  console.log(JSON.stringify({ savedRoster, savedRosterHash: savedRoster ? contentHash(savedRoster) : null, reviewRevisions: await ledger.roleReviewRevisions(), definitions: await ledger.definitions(), coreRoleDefinitions: await ledger.coreRoleDefinitionHistory(), history: await ledger.history() }, null, 2));
 }
 
 export async function registerCoreRoleRequirementsCommand(root: string, sourceId: string, decision: { predecessorRevision?: string; scopeDecisionRef: string; scopeChangeReason: string }) {
   const result = await withWorkspaceOperationLock(root, "compiler", async () => registerReviewedCoreRoles(root, await loadCurrentRoleRoster(root, sourceId), decision));
   if (!result) throw new Error("Core role registration requires two complete source reviews; preserve partial review work and do not retry unchanged");
   console.log(JSON.stringify(result, null, 2));
+}
+
+export async function beginCoreRoleReviewCommand(root: string, input: z.infer<typeof beginCoreRoleReviewSchema>) {
+  const revision = await withWorkspaceOperationLock(root, "compiler", () => beginCoreRoleReviewRevision(root, input));
+  console.log(JSON.stringify({ revision, nextStep: `Resume nwh prepare-all --source ${input.sourceId} to complete two independent reviews. Prior requirements remain unresolved until current evaluation.` }, null, 2));
 }

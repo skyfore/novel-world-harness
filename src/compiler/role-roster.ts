@@ -39,6 +39,7 @@ export const roleRosterEntrySchema = z.object({
 export const roleRosterReviewSchema = z.object({
   version: z.literal(2).optional(),
   runId: idSchema,
+  reviewRevisionId: idSchema.optional(),
   subjectHash: hashSchema,
   reviewedUnitIds: z.array(idSchema).min(1),
   entries: z.array(roleRosterEntrySchema).min(1),
@@ -48,6 +49,7 @@ export type RoleRosterReview = z.infer<typeof roleRosterReviewSchema>;
 
 export const roleRosterSchema = z.object({
   version: z.literal(1), sourceId: idSchema, sourceSha256: hashSchema,
+  reviewRevisionId: idSchema.optional(),
   subjectHash: hashSchema, unitIds: z.array(idSchema).min(1),
   extractionRunIds: z.array(idSchema), candidates: z.array(roleCandidateSchema).min(1),
   reviews: z.array(roleRosterReviewSchema).max(2),
@@ -92,6 +94,7 @@ export function buildRoleRoster(input: {
 export function validateRosterReview(roster: RoleRoster, review: RoleRosterReview): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const fail = (code: string, message: string) => issues.push({ code, message });
+  if (review.reviewRevisionId !== roster.reviewRevisionId) fail("ROSTER_REVIEW_REVISION_STALE", "Review belongs to another host review revision. Preserve its receipt and stop model retries; do not replay it into the new review.");
   if (review.subjectHash !== roster.subjectHash) fail("ROSTER_STALE_REVIEW", "Roster review refers to stale source or identity inputs");
   if (roster.extractionRunIds.includes(review.runId) || roster.reviews.some((x) => x.runId === review.runId)) fail("ROSTER_INDEPENDENT_REVIEW_REQUIRED", "Review must use a separate run from extraction and the other review");
   const expected = new Set(roster.candidates.map((x) => x.id));

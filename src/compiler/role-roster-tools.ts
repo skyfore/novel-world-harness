@@ -1,3 +1,4 @@
+import { RequirementLedger } from "./requirement-ledger.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
@@ -13,7 +14,7 @@ import { buildRoleRoster, RoleRosterStore, roleRosterEntrySchema, roleRosterRevi
 
 export const ROLE_ROSTER_TOOL_NAMES = ["read_role_roster", "read_roster_source_page", "propose_role_roster_review"] as const;
 
-export async function loadCurrentRoleRoster(root: string, sourceId: string) {
+export async function readRoleRosterInputs(root: string, sourceId: string) {
   const source = await (await WorkspaceStore.create(root)).getSource(sourceId);
   if (!source) throw new Error("Roster review source is unavailable. Stop; the host must restore the active source.");
   const [entities, annotations, resolutions, structure, saved] = await Promise.all([
@@ -23,7 +24,16 @@ export async function loadCurrentRoleRoster(root: string, sourceId: string) {
   if (!structure || structure.sourceSha256 !== source.contentSha256) throw new Error("Roster source structure is missing or stale. Stop and recompile structure before retrying.");
   const fresh = buildRoleRoster({ sourceId, sourceSha256: source.contentSha256, unitIds: structure.baseUnitIds,
     entities: entities.filter((x) => x.evidence.some((e) => e.span.sourceId === sourceId)), annotations, resolutions });
-  return { roster: saved?.subjectHash === fresh.subjectHash ? saved : fresh, source, structure };
+  return { roster: saved?.subjectHash === fresh.subjectHash ? saved : fresh, fresh, saved, source, structure };
+}
+
+export async function loadCurrentRoleRoster(root: string, sourceId: string) {
+  const input = await readRoleRosterInputs(root, sourceId);
+  const revision = (await new RequirementLedger(root, sourceId).roleReviewRevisions()).at(-1);
+  if ((input.saved && input.saved.subjectHash !== input.fresh.subjectHash) || (revision && input.saved?.reviewRevisionId !== revision.id)) {
+    throw new Error(`Role source identity or authorized review revision changed. Stop model retries. The host must inspect nwh requirements inspect --source ${sourceId} and start or resume requirements begin-core-role-review with the exact savedRosterHash and original revision decision; never discard the saved reviews.`);
+  }
+  return input;
 }
 
 /** Independent, source-scoped review. Source-page visits are recorded by the host. */
@@ -60,7 +70,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       async execute(_id, input, signal) {
         signal?.throwIfAborted(); const { roster } = await load(); const offset = input.offset ?? 0;
         if (offset >= roster.candidates.length && offset !== 0) throw new Error("Invalid roster offset. Call read_role_roster with offset=0 and copy nextOffset; make one corrected retry, never guess.");
-        const result = { subjectHash: roster.subjectHash, candidates: roster.candidates.slice(offset, offset + 50), totalCandidates: roster.candidates.length,
+        const result = { subjectHash: roster.subjectHash, ...(roster.reviewRevisionId ? { reviewRevisionId: roster.reviewRevisionId } : {}), candidates: roster.candidates.slice(offset, offset + 50), totalCandidates: roster.candidates.length,
           sourcePages: pages.length, ...(offset + 50 < roster.candidates.length ? { nextOffset: offset + 50 } : {}) };
         return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
       },
@@ -84,7 +94,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       signal?.throwIfAborted(); const { roster } = await load(); const input = schema.parse(raw); const current = active();
       if (pending) throw new Error("Role review is single-use. Finish the batch; do not resubmit.");
       if (visited.size !== pages.length) throw new Error(`Role review has unread source pages: ${pages.map((_, i) => i).filter((i) => !visited.has(i)).slice(0, 20).join(", ")}. Read them with read_roster_source_page, then retry once with the completed review.`);
-      const review: RoleRosterReview = { version: 2, runId: current.batchId, subjectHash: input.subjectHash, entries: input.entries, reviewedUnitIds: roster.unitIds, missingMajorCharacters: input.missingMajorCharacters };
+      const review: RoleRosterReview = { version: 2, ...(roster.reviewRevisionId ? { reviewRevisionId: roster.reviewRevisionId } : {}), runId: current.batchId, subjectHash: input.subjectHash, entries: input.entries, reviewedUnitIds: roster.unitIds, missingMajorCharacters: input.missingMajorCharacters };
       const issues = validateRosterReview(roster, review);
       if (issues.length) throw new Error(`${issues.map((x) => `${x.code}: ${x.message}`).join("; ")}. Call read_role_roster in this scope and copy candidates[].id and subjectHash exactly; for evidence-unit errors call read_roster_source_page and copy its unitIds into basisUnitIds/beforeUnitIds/afterUnitIds as appropriate. Make at most one corrected retry. Never guess IDs, delete an unresolved candidate, or repeat unchanged arguments.`);
       pending = review;

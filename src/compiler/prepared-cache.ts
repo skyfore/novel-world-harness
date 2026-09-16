@@ -1,3 +1,4 @@
+import { roleReviewRevisionSchema, type RoleReviewRevision } from "./role-review-revision.js";
 import { coreRoleRequirementHistorySchema, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import { RequirementLedger, requirementJournalSchema, requirementJournalBindingIssues, requirementSnapshotInputs, type LedgerRecord, coreRoleAttemptHistoryIssues, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
@@ -135,6 +136,7 @@ const preparedCanonicalSchema = z.object({
 
 const preparedCompilerSnapshotSchema = z.object({
   requirementJournal: requirementJournalSchema.optional(),
+  coreRoleReviewRevision: roleReviewRevisionSchema.optional(),
   requirementDefinitions: requirementDefinitionHistorySchema.optional(),
   coreRoleRequirementDefinitions: coreRoleRequirementHistorySchema.optional(),
   reconciliationObligations: reconciliationObligationSnapshotSchema.optional(),
@@ -862,6 +864,7 @@ export class PreparedNovelCache {
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
     const requirementJournal = await new RequirementLedger(this.workspaceRoot, source.id).history();
+    const coreRoleReviewRevision = (await new RequirementLedger(this.workspaceRoot, source.id).roleReviewRevisions()).at(-1);
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).definitionHistory();
     const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).coreRoleDefinitionHistory();
     const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, source.id);
@@ -887,6 +890,7 @@ export class PreparedNovelCache {
       canonical: preparedCanonical,
       compilerSnapshot: {
         ...(requirementJournal.length ? { requirementJournal } : {}),
+        ...(coreRoleReviewRevision ? { coreRoleReviewRevision } : {}),
         ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
         ...(coreRoleRequirementDefinitions.length ? { coreRoleRequirementDefinitions } : {}),
         ...(reconciliationObligations.length ? { reconciliationObligations } : {}),
@@ -1068,6 +1072,7 @@ export class PreparedNovelCache {
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
     roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
     requirementJournal?: LedgerRecord[];
+    coreRoleReviewRevision?: RoleReviewRevision;
     requirementDefinitions?: RequirementSet[];
     coreRoleRequirementDefinitions?: CoreRoleRequirementDefinition[];
     reconciliationObligations?: ReconciliationObligationSnapshot;
@@ -1093,11 +1098,13 @@ export class PreparedNovelCache {
       new SourceAccountingStore(this.workspaceRoot).read(sourceId),
     ]);
     const requirementJournal = await new RequirementLedger(this.workspaceRoot, sourceId).history();
+    const coreRoleReviewRevision = (await new RequirementLedger(this.workspaceRoot, sourceId).roleReviewRevisions()).at(-1);
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).definitionHistory();
     const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).coreRoleDefinitionHistory();
     const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, sourceId);
     return {
       ...(requirementJournal.length ? { requirementJournal } : {}),
+      ...(coreRoleReviewRevision ? { coreRoleReviewRevision } : {}),
       ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
       ...(coreRoleRequirementDefinitions.length ? { coreRoleRequirementDefinitions } : {}),
       ...(reconciliationObligations.length ? { reconciliationObligations } : {}),

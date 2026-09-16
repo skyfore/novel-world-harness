@@ -420,3 +420,52 @@ a journal remain readable. If they have independent requirement definitions,
 current certification requires a fresh candidate with retained history; missing
 historical evaluations must not be fabricated. Such a legacy bundle cannot
 restore over an existing local journal by silently dropping its audit history.
+
+
+### Host-controlled migration of historical role reviews
+
+A completed legacy review with missing development fields is still unknown; it
+is never relabeled stable automatically. The host can explicitly open a new
+review while preserving both complete and partial prior reviews:
+
+```sh
+nwh requirements inspect --source SOURCE
+nwh requirements begin-core-role-review --source SOURCE --revision REVISION_ID --roster-hash SAVED_ROSTER_HASH --predecessor DEFINITION_HASH --scope-decision AUDIT_REF --reason "Why a new source review is needed"
+nwh prepare-all --source SOURCE
+```
+
+Copy `savedRosterHash` and the last `coreRoleDefinitions[].revisionHash` from the
+same-source inspection. Omit `--predecessor` only if no definition is registered.
+A stale predecessor permits at most one corrected host retry; never guess IDs.
+The revision command publishes its immutable decision and prior roster before
+switching the current roster. If switching fails, resume the exact original
+command: copy the original `id`, `priorRosterHash`,
+`predecessorDefinitionRevision`, `scopeDecisionRef` and `reason` from
+`reviewRevisions`, not a newer current hash. Recovery preserves already completed
+new reviews and does not start another epoch. An unchanged-scope partial review
+must be resumed rather than reset. A changed source identity needs another
+explicit host decision; saved reviews are never silently replaced.
+
+The host attaches `reviewRevisionId` to each captured review and its finish
+metadata. Models cannot select or change it. An old in-flight or prepared review
+cannot commit into the new epoch: stop retries and preserve that original
+receipt. A pending finish blocks beginning a revision until host recovery or
+explicit retirement through the existing retained-receipt protocol. A source
+unit inventory that cannot be verified against immutable bytes also stops for
+host review; do not invent old anchors.
+
+Opening a revision does not approve shrinking the major-role denominator. If
+new completed reviews omit a retained major role, inspect those concrete reviews
+and use the separate `requirements register-core-roles` command with an exact
+predecessor, scope-decision and reason. Then resume preparation: the host repairs
+the original prepared finish before considering another model session. Prior
+reviews and removed requirements remain in the journal; finish receipts remain
+in retained receipt storage. Pending
+review revisions block certification even if the old roster was once complete.
+
+Each saved role-review snapshot, including the first review of a new epoch, is
+also retained in the journal. Restore must preserve those snapshots; an older
+candidate cannot overwrite a newer partial review. A roster carrying a new
+review epoch without its journal authorization is invalid even for checkpoint
+materialization. This does not upgrade the saved snapshot into a completed
+finish or a capability certificate.

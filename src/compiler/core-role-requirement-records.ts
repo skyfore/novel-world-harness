@@ -62,7 +62,7 @@ export const coreRoleRequirementHistorySchema = z.array(coreRoleRequirementDefin
   }
 });
 
-export function assertCoreRoleDefinitionEvidence(definition: CoreRoleRequirementDefinition, bytes: Uint8Array): void {
+export function assertCoreRoleDefinitionEvidence(definition: Pick<CoreRoleRequirementDefinition, "sourceId" | "sourceSha256" | "units">, bytes: Uint8Array): void {
   if (crypto.createHash("sha256").update(bytes).digest("hex") !== definition.sourceSha256) throw new Error("Core role immutable source hash mismatch; stop for host storage review");
   let cursor = 0;
   for (const unit of [...definition.units].sort((a, b) => a.anchor.startByte - b.anchor.startByte)) {

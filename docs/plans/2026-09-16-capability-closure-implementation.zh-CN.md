@@ -174,3 +174,24 @@ compilerSnapshot 新增可选 requirementJournal，保存既有追加式账本�
 P1 仍待完成旧审阅的保留式重新双审及迁移，并需审计其他 canonical 写入入口的失效观察。P2–P7 保持未完成；本段未调用真实 provider，也未执行独立人工体验验收。
 
 本段最终验证：`pnpm test --maxWorkers=2` 的 185 文件、1077 tests 全部通过（76.33 秒）；`pnpm check` 的服务端、Web、E2E TypeScript 检查及 `git diff --check` 通过。
+
+
+P1j 已提交为 `8b9d48a`。
+
+## P1k：旧角色审阅的保留式迁移
+
+新增宿主命令 `requirements begin-core-role-review`，要求明确 revision ID、旧 savedRosterHash、已有定义前驱（如有）、scope-decision 和原因。`requirements inspect` 提供同源精确字段及原修订决策。命令先将完整旧名单（包括部分审阅）、新来源名单、基础原文单元和决策追加到账本，再切换当前名单；缺原文、坏前驱和未处理的 prepared finish 都不会清空旧工作。新旧名单的原文字节与单元范围必须一致并可验证，不能为迁移伪造历史锚点。
+
+迁移开启新 reviewRevisionId，由宿主自动附加到每份新审阅和 finish metadata，模型不能选择。新双审仍独立读取完整原文、互相隐藏判断，再通过现有单次提案与 finish 握手保存。旧批次即使在开启修订前已捕获提案，也不能提交到新轮次。来源身份变化不再静默抛弃旧名单；必须通过明确宿主修订保留旧工作。
+
+故障发生在决策已记账、当前名单尚未切换时，可用原命令幂等恢复；完成新第一份审阅后再次执行原命令也不会清空它。同范围的新一轮 partial review 不能再次 reset；身份确已变化时，新的明确宿主决策可以保留并替代不能继续的部分审阅。历史 reviewer run ID 不得被改写。
+
+开始重新审阅不自动批准缩减范围。新双审若移除旧名单的核心角色，第二个 finish 保持 prepared，新名单保留供宿主审查；单独登记具体范围决策后，工作流先恢复该原 finish，再继续，不开启多余的模型审阅。这个检查也保护尚未形成完整旧 requirement set 的历史部分审阅。旧版缺字段的数据原样保留为 unknown，既不抹除也不补成 stable。
+
+当前 review revision 随 compilerSnapshot 作为独立输入冻结，并与完整账本核对；它进入 semantic subject hash，因此开始新审阅会改变评估输入。新双审及新定义未完成时不能用旧完整名单取得认证。新工作区恢复保留修订授权和完整前驱历史。
+
+本段仍未宣告 P1 完成：需继续审计所有 canonical 写入入口的失效观察和完整验收映射，再推进 P2–P7。测试里的模型回调执行真实工具与 finish，但不是外部 provider；真实模型及独立人工体验验收仍未执行。
+
+补充边界：每次已保存的角色审阅快照也追加到账本，保护尚未凑齐双审的新第一份审阅。旧候选恢复不能覆盖它；只有 scope 字段而缺少 journal 授权的新轮次快照在材料化前拒绝。这份快照不代替 finish completed 或能力认证。P1 整体验收仍需审计角色未完成 finish 的完整候选恢复路径，而非仅凭当前完成态恢复测试推导全部恢复场景已完成。
+
+最终验证：`pnpm test --maxWorkers=2` 的 186 文件、1081 tests 全部通过（75.29 秒）；随后补充的缺授权边界通过 13 项针对性回归。服务端、Web、E2E TypeScript 检查与 `git diff --check` 通过，新 CLI 帮助入口已验证。没有调用真实 provider 或执行人工体验评价。

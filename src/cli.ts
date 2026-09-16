@@ -10,7 +10,7 @@ import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
 import { reviewAccountingObligation } from "./compiler/accounting-review.js";
 import { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
-import { reviewScenesCommand, inspectRequirementsCommand, registerCoreRoleRequirementsCommand } from "./commands/review-scenes.js";
+import { reviewScenesCommand, inspectRequirementsCommand, registerCoreRoleRequirementsCommand, beginCoreRoleReviewCommand } from "./commands/review-scenes.js";
 import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
 import { resumeCommand } from "./commands/resume.js";
 import { playCommand } from "./commands/play.js";
@@ -89,6 +89,14 @@ program.command("review-scenes").requiredOption("--spec <path>", "independent so
 const requirementsCommand = program.command("requirements").description("Inspect persistent capability definitions and evaluation history");
 requirementsCommand.command("inspect").requiredOption("--source <id>", "registered source ID")
   .action(async options => inspectRequirementsCommand(rootFor({}), options.source));
+requirementsCommand.command("begin-core-role-review").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--revision <id>", "stable host review revision ID; reuse the same ID to recover")
+  .requiredOption("--roster-hash <hash>", "exact savedRosterHash from requirements inspect")
+  .option("--predecessor <hash>", "last coreRoleDefinitions[].revisionHash, if registered")
+  .requiredOption("--scope-decision <ref>", "host audit reference authorizing a new independent review")
+  .requiredOption("--reason <text>", "reason for reviewing again; this does not approve a reduced role scope")
+  .action(async options => beginCoreRoleReviewCommand(rootFor({}), { sourceId: options.source, revisionId: options.revision,
+    priorRosterHash: options.rosterHash, predecessorDefinitionRevision: options.predecessor, scopeDecisionRef: options.scopeDecision, reason: options.reason }));
 requirementsCommand.command("register-core-roles").requiredOption("--source <id>", "registered source ID")
   .option("--predecessor <hash>", "last coreRoleDefinitions[].revisionHash from requirements inspect")
   .requiredOption("--scope-decision <ref>", "host audit reference for this independent source-review revision")

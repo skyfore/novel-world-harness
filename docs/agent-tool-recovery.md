@@ -469,3 +469,25 @@ candidate cannot overwrite a newer partial review. A roster carrying a new
 review epoch without its journal authorization is invalid even for checkpoint
 materialization. This does not upgrade the saved snapshot into a completed
 finish or a capability certificate.
+
+### Role-review finish recovery from a checkpoint
+
+Candidates retain model role-review receipts even without reconciliation target
+reports. Only a pure, dedicated role-review finish that was active and prepared
+when captured receives `resumeRoleReview: true`. It must have no proposal
+dependencies, requirement attempts or unrelated metadata. Checkpoint restoration
+validates the immutable source, frozen roster subject, review epoch and exact
+saved review before restoring that active intent. Preparation then recovers the
+original finish before opening another model session. This narrow path does not
+reactivate ordinary world-proposal finishes or unmarked archived role receipts.
+
+A saved model review with a missing, mismatched or incomplete finish blocks
+certification. Retired incomplete receipts remain historical; do not replay them
+or continue model review to conceal the missing completion. Stop model retries,
+preserve the roster and receipts, and use `nwh requirements inspect --source
+<exact-id>` for host review. If the original finish cannot be resumed, an explicit
+`requirements begin-core-role-review` decision may preserve and supersede that
+partial review. Copy `savedRosterHash` and the last
+`coreRoleDefinitions[].revisionHash` (when present), with at most one corrected
+host retry. An active prepared finish must still be recovered first. Never reset
+the roster, downgrade a completed receipt, guess references or retry unchanged.

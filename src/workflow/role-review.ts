@@ -15,6 +15,10 @@ export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "pro
     }
   }
   let { roster } = await loadCurrentRoleRoster(options.root, options.sourceId);
+  const { captureReconciliationObligations } = await import("../compiler/reconciliation-review-ledger.js");
+  const { roleReviewFinishIssues } = await import("../compiler/role-review-finish.js");
+  const finishIssues = roleReviewFinishIssues(await captureReconciliationObligations(options.root, options.sourceId), roster, options.sourceId);
+  if (finishIssues.length) throw new Error(`ROLE_REVIEW_FINISH_REQUIRES_HOST_REVIEW: ${finishIssues.join("; ")}. Preserve missing or retired receipt evidence and stop model retries. Inspect nwh requirements inspect --source ${options.sourceId}; a new independent review requires an explicit begin-core-role-review decision with the exact savedRosterHash and predecessor, never a reset.`);
   while (roster.reviews.length < 2) {
     options.signal?.throwIfAborted();
     const subjectHash = roster.subjectHash, reviewRevisionId = roster.reviewRevisionId, reviewCount = roster.reviews.length;

@@ -1,3 +1,5 @@
+import { roleReviewFinishIssues, roleReviewResumeIssues } from "../src/compiler/role-review-finish.js";
+import { reconciliationObligationSnapshotSchema } from "../src/compiler/reconciliation-review-ledger.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -140,4 +142,59 @@ it("stops on a stale host predecessor, pending finish or changed identity withou
   expect(revised.roster.subjectHash).not.toBe(f.saved.subjectHash);
   expect((await f.ledger.roleReviewRevisions())[0]!.priorRoster).toEqual(f.saved);
   expect((await CompilerFinishReceipts.listRetained(f.root, f.source.source.id))[0]!.archived).toBe(true);
+});
+
+it.each(["before-save", "before-completion", "retired"])("restores an active prepared pure role finish after %s and completes it before asking for the second review", async interruption => {
+  const f = await fixture(); await beginCoreRoleReviewRevision(f.root, f.input);
+  await new InitialWorldStore(f.root).put({ version: 1, evidence: f.source.evidence("Hero waits."), participantPresence: [{ entityId: "hero", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }] } });
+  const batches = await prepareCompilerBatches(f.root, f.source.source); await new CompilerBatchStore(f.root).replaceCompleted(f.source.source.id, batches.map(batch => batch.id));
+  const batchId = `role-roster-${f.source.source.id}-interrupted`, finish = await prepareReview(f.root, f.source.source.id, batchId);
+  const completion = interruption === "before-save" ? vi.spyOn(RoleRosterStore.prototype, "write").mockRejectedValueOnce(new Error("interruption before completed marker")) : vi.spyOn(CompilerFinishReceipts.prototype, "complete").mockRejectedValueOnce(new Error("interruption before completed marker"));
+  await expect(finish()).rejects.toThrow("interruption before completed marker"); completion.mockRestore();
+  const receipt = (await new CompilerFinishReceipts(f.root, f.source.source.id, batchId).read())!;
+  expect(receipt.state).toBe("prepared");
+  if (interruption === "retired") await new CompilerFinishReceipts(f.root, f.source.source.id, batchId).archive("Explicit host retirement; do not reactivate this role finish");
+  const cache = new PreparedNovelCache(f.root, path.join(f.root, "cache")), candidate = await cache.inspectCandidate(f.source.source);
+  const frozen = candidate.bundle.compilerSnapshot.reconciliationObligations!;
+  expect(frozen.find(item => item.receipt.fingerprint === receipt.fingerprint)?.resumeRoleReview).toBe(interruption === "retired" ? undefined : true);
+  expect(roleReviewFinishIssues(frozen, candidate.bundle.compilerSnapshot.roleRoster, f.source.source.id)).toContain(`ROLE_REVIEW_FINISH_INCOMPLETE: ${batchId}`);
+  expect(candidate.assessment.issues.some(issue => issue.message.includes("ROLE_REVIEW_FINISH_INCOMPLETE"))).toBe(true);
+  if (interruption !== "before-save") expect(roleReviewFinishIssues([], candidate.bundle.compilerSnapshot.roleRoster, f.source.source.id)).toContain(`ROLE_REVIEW_FINISH_MISSING: ${batchId}`);
+  const badScope = structuredClone(candidate.bundle.compilerSnapshot.roleRoster)!; badScope.reviewRevisionId = "other-epoch";
+  if (interruption !== "retired") expect(roleReviewResumeIssues(frozen, badScope, f.source.source.id).join()).toContain("ROLE_REVIEW_RESUME_SCOPE_MISMATCH");
+  const unsafe = structuredClone(frozen); unsafe[0]!.resumeRoleReview = true; unsafe[0]!.receipt.identity.dependencies = [{ store: "world", proposalId: "unrelated-write", hash: "0".repeat(64) }];
+  unsafe[0]!.receipt.fingerprint = contentHash(unsafe[0]!.receipt.identity);
+  expect(() => reconciliationObligationSnapshotSchema.parse(unsafe)).toThrow("Only an active pure prepared role-review");
+  const archive = await cache.archiveCandidate(f.source.source);
+  const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-role-finish-restore-")); roots.push(cloneRoot);
+  const cloneSource = await createEvidenceFixture(cloneRoot, "Hero waits. Friend watches.");
+  const cloneCache = new PreparedNovelCache(cloneRoot, path.join(f.root, "cache"));
+  await cloneCache.restoreCompilerCheckpoint(cloneSource.source, archive.bundleHash!);
+  await cloneCache.restoreCompilerCheckpoint(cloneSource.source, archive.bundleHash!);
+  if (interruption === "retired") {
+    expect(await new CompilerFinishReceipts(cloneRoot, cloneSource.source.id, batchId).read()).toBeUndefined();
+    const model = vi.fn(async () => undefined);
+    await expect(reviewNovelRoles({ root: cloneRoot, sourceId: cloneSource.source.id }, model)).rejects.toThrow("ROLE_REVIEW_FINISH_REQUIRES_HOST_REVIEW");
+    expect(model).not.toHaveBeenCalled();
+    const saved = (await new RoleRosterStore(cloneRoot).read(cloneSource.source.id))!;
+    await beginCoreRoleReviewRevision(cloneRoot, { ...f.input, revisionId: "replacement-for-retired-review", priorRosterHash: contentHash(saved), reason: "Host requests fresh reviews while retaining the unfinished retired report" });
+    expect((await new RequirementLedger(cloneRoot, cloneSource.source.id).roleReviewRevisions()).at(-1)!.priorRoster).toEqual(saved);
+    return;
+  }
+  expect((await new CompilerFinishReceipts(cloneRoot, cloneSource.source.id, batchId).read())!.state).toBe("prepared");
+  let modelCalls = 0;
+  await reviewNovelRoles({ root: cloneRoot, sourceId: cloneSource.source.id }, async options => {
+    modelCalls++;
+    expect((await new CompilerFinishReceipts(cloneRoot, cloneSource.source.id, batchId).read())!.state).toBe("completed");
+    expect((await new RoleRosterStore(cloneRoot).read(cloneSource.source.id))!.reviews).toHaveLength(1);
+    await expect(cloneCache.restoreCompilerCheckpoint(cloneSource.source, archive.bundleHash!)).rejects.toThrow();
+    await (await prepareReview(cloneRoot, cloneSource.source.id, options.compilerBatchId!))();
+  });
+  expect(modelCalls).toBe(1);
+  const reviewed = (await new RoleRosterStore(cloneRoot).read(cloneSource.source.id))!;
+  expect(reviewed.reviews[0]).toEqual(receipt.identity.metadata.roleReview);
+  const finished = await cloneCache.inspectCandidate(cloneSource.source);
+  expect(roleReviewFinishIssues(finished.bundle.compilerSnapshot.reconciliationObligations ?? [], reviewed, cloneSource.source.id)).toEqual([]);
+  expect((await new CompilerFinishReceipts(f.root, f.source.source.id, batchId).read())!.state).toBe("prepared");
+  await expect(cloneCache.restoreCompilerCheckpoint(cloneSource.source, archive.bundleHash!)).rejects.toThrow();
 });

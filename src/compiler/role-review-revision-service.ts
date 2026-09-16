@@ -32,7 +32,12 @@ export async function beginCoreRoleReviewRevision(root: string, raw: z.infer<typ
     return existing;
   }
   if (!saved?.reviews.length) throw new Error("There is no retained review to revise. Continue the current independent review; do not begin another revision or reset partial work");
-  if (saved.reviewRevisionId && saved.reviews.length < 2 && saved.subjectHash === fresh.subjectHash) throw new Error("Authorized independent review is incomplete. Resume that review; do not begin another revision or discard partial work");
+  if (saved.reviewRevisionId && saved.reviews.length < 2 && saved.subjectHash === fresh.subjectHash) {
+    const retained = await CompilerFinishReceipts.listRetained(root, input.sourceId);
+    const lacksCompletedFinish = saved.reviews.some(review => review.runId.startsWith(`role-roster-${input.sourceId}-`)
+      && !retained.some(item => item.receipt.state === "completed" && contentHash(item.receipt.identity.metadata.roleReview ?? null) === contentHash(review)));
+    if (!lacksCompletedFinish) throw new Error("Authorized independent review is incomplete. Resume that review; do not begin another revision or discard partial work");
+  }
   if (contentHash(saved) !== input.priorRosterHash || (await ledger.coreRoleDefinitionHistory()).at(-1)?.revisionHash !== input.predecessorDefinitionRevision) throw new Error(`Role revision predecessor is stale. Run nwh requirements inspect --source ${input.sourceId}, copy savedRosterHash and the last coreRoleDefinitions[].revisionHash, and make at most one corrected host retry; never guess or reset history`);
   if ((await CompilerFinishReceipts.list(root, input.sourceId)).some(receipt => receipt.state === "prepared" && receipt.identity.batchId.startsWith(`role-roster-${input.sourceId}-`))) throw new Error("A role-review finish is still prepared. Stop and recover the original finish before revising; preserve its receipt and drafts, never replay it into a new review");
   const revision = await ledger.beginRoleReviewRevision({ version: 1, id: input.revisionId, sourceId: source.id, sourceSha256: source.contentSha256,

@@ -1,3 +1,4 @@
+import { roleReviewFinishIssues } from "./role-review-finish.js";
 import { coreRoleAttemptHistoryIssues, requirementJournalBindingIssues, requirementSnapshotInputs } from "./requirement-ledger.js";
 import fs from "node:fs/promises";
 import { activeRequirementSets, evaluateRequirementSet, requirementResultSchema, requirementResultIssues } from "./requirement-ledger.js";
@@ -53,6 +54,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));
   issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id).map(message => ({ code: "CORE_ROLE_ATTEMPT_DEFINITION_MISMATCH", message })));
   const snapshot = bundle.compilerSnapshot;
+  issues.push(...roleReviewFinishIssues(snapshot.reconciliationObligations ?? [], snapshot.roleRoster, bundle.source.id).map(message => ({ code: "ROLE_REVIEW_FINISH_NOT_CERTIFIED", message })));
   const requirementSets = activeRequirementSets(snapshot.requirementDefinitions ?? []);
   const coreDefinitions = snapshot.coreRoleRequirementDefinitions ?? [];
   const requirementResults: z.infer<typeof requirementResultSchema>[] = [];
@@ -111,6 +113,7 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
     sourceSha256: bundle.source.contentSha256, roster: assessment.roster, specHash: assessment.coreRoleResult?.revisionHash }));
   issues.push(...coreRoleResultIssues(bundle, assessment.roster, assessment.playability, assessment.subjectSnapshotHash, assessment.coreRoleResult));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256));
+  issues.push(...roleReviewFinishIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.compilerSnapshot.roleRoster, bundle.source.id));
   issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id));
   issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true));
   issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));

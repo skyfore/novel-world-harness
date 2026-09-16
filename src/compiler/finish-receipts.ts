@@ -60,6 +60,14 @@ export type CompilerFinishReceipt = z.infer<typeof compilerFinishReceiptSchema>;
 export type CompilerFinishIdentity = Omit<z.infer<typeof identitySchema>, "pipelineVersion" | "requirementAttempts">;
 const archivedFinishSchema = z.object({ receipt: compilerFinishReceiptSchema, reason: z.string().trim().min(1), archivedAt: z.string().datetime() }).strict();
 
+/** Only a dedicated source review has no proposal or unrelated metadata writes to replay. */
+export function isPureRoleReviewFinish(receipt: CompilerFinishReceipt): boolean {
+  const identity = receipt.identity;
+  return identity.batchId.startsWith(`role-roster-${identity.sourceId}-`) && identity.input.outcome === "complete"
+    && identity.metadata.roleReview?.runId === identity.batchId && Object.keys(identity.metadata).length === 1
+    && identity.dependencies.length === 0 && !identity.requirementScope && !identity.requirementAttempts && !identity.input.target_reviews?.length;
+}
+
 export function finishHostError(reason: string): Error {
   if (reason.startsWith("Error: Compiler finish requires host review:")) return new Error(reason.slice(7));
   if (reason.startsWith("Compiler finish requires host review:")) return new Error(reason);
@@ -235,6 +243,18 @@ export class CompilerFinishReceipts {
     return [...result.values()].sort((a, b) => a.receipt.fingerprint.localeCompare(b.receipt.fingerprint));
   }
 
+  /** Host checkpoint restoration may resume only a pure role finish that was active when frozen. */
+  static async restoreActiveRoleReview(root: string, sourceId: string, input: CompilerFinishReceipt): Promise<void> {
+    const receipt = compilerFinishReceiptSchema.parse(input);
+    if (receipt.identity.sourceId !== sourceId || receipt.state !== "prepared" || !isPureRoleReviewFinish(receipt)) throw finishHostError("restored role finish is outside the source-review-only recovery boundary");
+    const store = new CompilerFinishReceipts(root, sourceId, receipt.identity.batchId), existing = await store.read();
+    if (existing) {
+      if (existing.fingerprint !== receipt.fingerprint || existing.preparedAt !== receipt.preparedAt) throw finishHostError("restored role finish conflicts with the active intent");
+      return;
+    }
+    await store.verify(receipt);
+    await store.write(receipt);
+  }
   /** Restore only historical accountability, without creating an active finish. */
   static async retainSnapshot(root: string, sourceId: string, receiptInput: CompilerFinishReceipt): Promise<void> {
     const receipt = compilerFinishReceiptSchema.parse(receiptInput);

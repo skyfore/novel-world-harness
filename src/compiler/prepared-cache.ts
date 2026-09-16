@@ -1,3 +1,4 @@
+import { roleReviewResumeIssues } from "./role-review-finish.js";
 import { roleReviewRevisionSchema, type RoleReviewRevision } from "./role-review-revision.js";
 import { coreRoleRequirementHistorySchema, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
@@ -183,6 +184,8 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     throw new Error("Prepared bundle chapter split plan does not match its source identity.");
   }
   const snapshot = bundle.compilerSnapshot;
+  const roleResumeIssues = roleReviewResumeIssues(snapshot.reconciliationObligations ?? [], snapshot.roleRoster, sourceId);
+  if (roleResumeIssues.length) throw new Error(roleResumeIssues.join("; "));
   const journalIssues = requirementJournalBindingIssues(snapshot, sourceId, bundle.source.contentSha256);
   if (journalIssues.length) throw new Error(journalIssues.join("; "));
   const attemptIssues = coreRoleAttemptHistoryIssues((snapshot.reconciliationObligations ?? []).map(item => item.receipt), snapshot.coreRoleRequirementDefinitions ?? [], sourceId);

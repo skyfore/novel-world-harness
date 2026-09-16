@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { worldStorageRoot } from "../world/paths.js";
 import { idSchema } from "../world/model.js";
-import { CompilerFinishReceipts, compilerFinishReceiptSchema } from "./finish-receipts.js";
+import { CompilerFinishReceipts, compilerFinishReceiptSchema, isPureRoleReviewFinish } from "./finish-receipts.js";
 import { reconciliationDeferredRequirementIds } from "./reconciliation-review.js";
 import { contentHash } from "../world/canonical.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -18,8 +18,10 @@ export const reconciliationReviewDecisionSchema = z.object({
 const decisionSchema = reconciliationReviewDecisionSchema;
 export const reconciliationObligationSnapshotSchema = z.array(z.object({
   receipt: compilerFinishReceiptSchema,
+  resumeRoleReview: z.literal(true).optional(),
   decision: decisionSchema.optional(),
 }).strict()).superRefine((items, ctx) => {
+  for (const item of items) if (item.resumeRoleReview && (item.receipt.state !== "prepared" || !isPureRoleReviewFinish(item.receipt))) ctx.addIssue({ code: "custom", message: "Only an active pure prepared role-review finish may be resumed" });
   if (new Set(items.map(item => item.receipt.fingerprint)).size !== items.length) ctx.addIssue({ code: "custom", message: "Duplicate reconciliation obligation fingerprint" });
 });
 export type ReconciliationObligationSnapshot = z.infer<typeof reconciliationObligationSnapshotSchema>;
@@ -55,14 +57,14 @@ export async function reviewReconciliationDeferrals(root: string, input: z.infer
 /** Capture active AND retired work. Archiving is not a settlement operation. */
 export async function captureReconciliationObligations(root: string, sourceId: string): Promise<ReconciliationObligationSnapshot> {
   const snapshot: ReconciliationObligationSnapshot = [];
-  for (const { receipt } of await CompilerFinishReceipts.listRetained(root, sourceId)) {
-    if (!receipt.identity.input.target_reviews?.length) continue;
+  for (const { receipt, archived } of await CompilerFinishReceipts.listRetained(root, sourceId)) {
+    if (!receipt.identity.input.target_reviews?.length && !receipt.identity.metadata.roleReview) continue;
     let decision;
     try { decision = decisionSchema.parse(JSON.parse(await fs.readFile(decisionPath(root, sourceId, receipt.fingerprint), "utf8"))); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    snapshot.push({ receipt, ...(decision ? { decision } : {}) });
+    snapshot.push({ receipt, ...(!archived && receipt.state === "prepared" && isPureRoleReviewFinish(receipt) ? { resumeRoleReview: true as const } : {}), ...(decision ? { decision } : {}) });
   }
   return reconciliationObligationSnapshotSchema.parse(snapshot);
 }
@@ -91,14 +93,15 @@ export async function assertReconciliationObligationsRestorable(root: string, so
   for (const item of snapshot) if (item.decision && reconciliationObligationIssues([item], sourceId).length) throw new Error("Imported reconciliation review scope mismatch; stop for host review.");
   for (const current of await captureReconciliationObligations(root, sourceId)) {
     const incoming = snapshot.find(item => item.receipt.fingerprint === current.receipt.fingerprint);
-    if (!incoming || contentHash(incoming.receipt) !== contentHash(current.receipt) || (current.decision && (!incoming.decision || contentHash(current.decision) !== contentHash(incoming.decision)))) throw new Error("Reconciliation restore would forget or alter retained obligations; use an isolated workspace. Do not reset receipts or retry unchanged.");
+    if (!incoming || contentHash(incoming.receipt) !== contentHash(current.receipt) || (current.resumeRoleReview && !incoming.resumeRoleReview) || (current.decision && (!incoming.decision || contentHash(current.decision) !== contentHash(incoming.decision)))) throw new Error("Reconciliation restore would forget or alter retained obligations; use an isolated workspace. Do not reset receipts or retry unchanged.");
   }
 }
 
 export async function restoreReconciliationObligations(root: string, sourceId: string, snapshot: ReconciliationObligationSnapshot): Promise<void> {
   await assertReconciliationObligationsRestorable(root, sourceId, snapshot);
-  for (const { receipt, decision } of snapshot) {
+  for (const { receipt, decision, resumeRoleReview } of snapshot) {
     await CompilerFinishReceipts.retainSnapshot(root, sourceId, receipt);
+    if (resumeRoleReview) await CompilerFinishReceipts.restoreActiveRoleReview(root, sourceId, receipt);
     if (!decision) continue;
     // Review data was frozen with the source. Importing it never replays writes
     // or changes an existing review. Validate scope even for unresolved imports.

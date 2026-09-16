@@ -213,6 +213,7 @@ export async function reparseCommand(
         `Converging proposals · ${progress.phase} ${progress.processed}/${progress.total}`,
       ),
     });
+    for (const issue of convergence.upstreamRepairIssues ?? []) report(`Upstream repair: ${issue}`);
     for (const issue of convergence.requirementValidityIssues ?? []) report(`Requirement validity: ${issue}`);
     const quarantined = await quarantineUncommittableProposals(root, convergence);
     options.signal?.throwIfAborted();

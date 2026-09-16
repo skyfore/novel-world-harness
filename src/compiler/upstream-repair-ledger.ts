@@ -5,7 +5,7 @@ import { z } from "zod";
 import { contentHash, canonicalJson } from "../world/canonical.js";
 import { idSchema } from "../world/model.js";
 import { worldStorageRoot } from "../world/paths.js";
-import { upstreamRepairPlanSchema, upstreamRepairKindSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import { upstreamRepairPlanSchema, upstreamRepairKindSchema, upstreamRepairReadableRefSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import { upstreamRepairHostError, verifyUpstreamRepairPlan } from "./upstream-repair-preflight.js";
 import { upstreamRepairFinishIntentSchema, type UpstreamRepairFinishIntent } from "./upstream-repair-finish-intent.js";
 
@@ -15,6 +15,7 @@ export type UpstreamStagedDependency = z.infer<typeof stagedDependencySchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("planned"), plan: upstreamRepairPlanSchema, predecessorPlanHash: hash.nullable() }).strict(),
   z.object({ kind: z.literal("authorized"), planHash: hash }).strict(),
+  z.object({ kind: z.literal("converged"), planHash: hash, receiptFingerprint: hash, activeRevisions: z.array(upstreamRepairReadableRefSchema.extend({ revisionHash: hash }).strict()) }).strict(),
   z.object({ kind: z.literal("finished"), planHash: hash, receiptFingerprint: hash }).strict(),
   z.object({ kind: z.literal("finish-frozen"), planHash: hash, intent: upstreamRepairFinishIntentSchema }).strict(),
   z.object({ kind: z.literal("attempt-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, inputHash: hash, toolInput: z.unknown().optional() }).strict(),
@@ -27,7 +28,7 @@ const recordSchema = z.object({ version: z.literal(1), sourceId: idSchema, seque
 type Record = z.infer<typeof recordSchema>;
 export type UpstreamRepairRecord = Record;
 type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
-type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "needs-host-review"; finishIntent?: UpstreamRepairFinishIntent };
+type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "converged" | "needs-host-review"; finishIntent?: UpstreamRepairFinishIntent };
 function project(records: Record[]) {
   const plans = new Map<string, PlanState>();
   const attempts = new Map<string, { started: Started; failed: boolean; staged: boolean; validatedHash?: string; dependencies?: UpstreamStagedDependency[] }>();
@@ -67,6 +68,14 @@ function project(records: Record[]) {
     } else if (event.kind === "finished") {
       if (current.state !== "finish-frozen" || !current.finishIntent) throw upstreamRepairHostError("Finished repair lacks its original frozen intent");
       current.state = "finished";
+    } else if (event.kind === "converged") {
+      const finished = records.slice(0, index).find(item => item.payload.kind === "finished" && item.payload.planHash === event.planHash)?.payload;
+      if (current.state !== "finished" || !current.finishIntent || finished?.kind !== "finished" || finished.receiptFingerprint !== event.receiptFingerprint) throw upstreamRepairHostError("Convergence lacks its original completed finish");
+      const expected = new Map(current.plan.baselineRefs.map(ref => [`${ref.kind}:${ref.id}`, ref.revisionHash]));
+      for (const proposal of current.finishIntent.proposals) expected.set(`${proposal.artifactKind}:${proposal.artifactId}`, proposal.payloadHash);
+      if (event.activeRevisions.length !== expected.size || new Set(event.activeRevisions.map(ref => `${ref.kind}:${ref.id}`)).size !== expected.size
+        || event.activeRevisions.some(ref => expected.get(`${ref.kind}:${ref.id}`) !== ref.revisionHash)) throw upstreamRepairHostError("Convergence revisions differ from authorized outputs and original unchanged baselines");
+      current.state = "converged";
     } else if (event.kind === "attempt-started") {
       if (event.toolInput !== undefined && contentHash(event.toolInput) !== event.inputHash) throw upstreamRepairHostError("Reserved tool input hash mismatch");
       assertStart(current, event, plans, attempts);
@@ -204,7 +213,7 @@ export class UpstreamRepairLedger {
   }
   async authorize(planHash: string): Promise<void> {
     const current = project(await this.history()).plans.get(planHash);
-    if (!current || current.state === "needs-host-review" || ["finish-frozen", "finished"].includes(current.state)) throw upstreamRepairHostError("Plan is missing, stopped or already frozen for finish");
+    if (!current || current.state === "needs-host-review" || ["finish-frozen", "finished", "converged"].includes(current.state)) throw upstreamRepairHostError("Plan is missing, stopped or already frozen for finish");
     await this.verifyOrStop(current.plan);
     if (current.state === "planned") await this.append({ kind: "authorized", planHash });
   }
@@ -268,6 +277,17 @@ export class UpstreamRepairLedger {
       return;
     }
     await this.append({ kind: "finished", planHash, receiptFingerprint });
+  }
+  async recordConverged(planHash: string): Promise<void> {
+    const { verifyUpstreamRepairConvergence } = await import("./upstream-repair-convergence.js");
+    const verified = await verifyUpstreamRepairConvergence(this.root, this.sourceId, planHash);
+    const payload = { kind: "converged" as const, planHash, ...verified };
+    const existing = (await this.history()).find(record => record.payload.kind === "converged" && record.payload.planHash === planHash);
+    if (existing) {
+      if (contentHash(existing.payload) !== contentHash(payload)) throw upstreamRepairHostError("Original convergence revisions changed");
+      return;
+    }
+    await this.append(payload);
   }
   async freezeFinish(raw: UpstreamRepairFinishIntent): Promise<void> {
     const intent = upstreamRepairFinishIntentSchema.parse(raw), state = project(await this.history()).plans.get(intent.planHash);

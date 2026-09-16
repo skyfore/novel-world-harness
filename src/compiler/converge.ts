@@ -1,3 +1,4 @@
+import { observeUpstreamRepairConvergence } from "./upstream-repair-convergence.js";
 import { ProposalStore } from "../world/canonical-model.js";
 import type { ValidationIssue } from "../world/model.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -16,6 +17,7 @@ export type WorldProposalConvergence = {
   };
   staging: Array<{ id: string; kind: string }>;
   requirementValidityIssues?: string[];
+  upstreamRepairIssues?: string[];
 };
 
 export type QuarantinedProposal = { id: string; kind: string };
@@ -69,6 +71,7 @@ export async function convergeWorldProposals(
   };
   // Also runs on an empty retry after interruption between commit and observation.
   // Canonical inputs can be shared, so conservatively inspect all retained sources.
+  const upstreamRepairIssues = await observeUpstreamRepairConvergence(workspaceRoot);
   const requirementValidityIssues = await observeRequirementValidity(workspaceRoot);
   options.onProgress?.({
     phase: "complete",
@@ -77,7 +80,7 @@ export async function convergeWorldProposals(
     accepted: canonical.accepted.length + accepted.length,
     blocked: canonical.blocked.length + blocked.length,
   });
-  return { ...result, ...(requirementValidityIssues.length ? { requirementValidityIssues } : {}) };
+  return { ...result, ...(upstreamRepairIssues.length ? { upstreamRepairIssues } : {}), ...(requirementValidityIssues.length ? { requirementValidityIssues } : {}) };
 }
 
 export async function quarantineUncommittableProposals(

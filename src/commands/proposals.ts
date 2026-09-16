@@ -61,6 +61,7 @@ async function acceptProposal(root: string, kind: string, id: string): Promise<v
 
 export async function acceptAllValidProposalsCommand(root: string): Promise<void> {
   const result = await withWorkspaceOperationLock(root, "compiler", () => convergeWorldProposals(root));
+  for (const issue of result.upstreamRepairIssues ?? []) stdout.write(`Upstream repair: ${issue}\n`);
   for (const issue of result.requirementValidityIssues ?? []) stdout.write(`Requirement validity: ${issue}\n`);
   for (const item of result.canonical.accepted) stdout.write(`accepted\t${item.kind}\t${item.id}\n`);
   for (const id of result.possibilities.accepted) stdout.write(`accepted\tpossibility\t${id}\n`);

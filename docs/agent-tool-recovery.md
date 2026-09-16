@@ -709,8 +709,8 @@ until convergence and independent requirement evaluation are implemented.
 
 ### Portable upstream draft and finish checkpoints
 
-Candidates may retain `upstreamRepairCheckpoint` for live staging or frozen
-finish plans. It contains every original staged envelope, pending/accepted
+Candidates may retain `upstreamRepairCheckpoint` for live staging, frozen,
+finished or converged plans. It contains every original staged envelope, pending/accepted
 status and explicitly active v3 receipt. Other pending compiler or world work
 still prevents capture. An unresolved reserved attempt must first use local
 draft recovery; do not rerun the model to manufacture a replacement envelope.
@@ -732,3 +732,28 @@ Historical predecessor receipts remain historical. Restoring the same checkpoint
 is idempotent; later attempts or finish completion prevent rollback to an older
 checkpoint. The host then resumes staging or the original finish through the
 existing bounded services. No provider call or new budget is created by import.
+
+### Post-convergence upstream revision observation
+
+After deterministic world convergence, the host inspects finished and converged
+repairs across retained sources because canonical dependencies may be shared.
+It rereads the completed original receipt, exact output revisions and unchanged
+baselines. Only a source with no pending world, annotation, resolution or
+accounting work can append `converged`. That record binds the original finish
+fingerprint and actual complete dependency/output revision set; it is not a
+requirement evaluation and does not clear certification gates.
+
+`UPSTREAM_REPAIR_CONVERGENCE_PENDING` preserves the finished plan. Complete,
+repair or quarantine the existing downstream work through its original host
+workflow, then run convergence again; do not restart upstream model attempts.
+An interrupted observation can resume through an empty convergence retry.
+Receipt/authority mismatches stop the plan as `needs-host-review`, preserving
+the original reason and current artifacts. The compiler commands report these
+issues separately from committed world results. A later revision change is
+detected even for an already converged plan; repeated unchanged observation
+does not append another convergence record.
+
+Current checkpoints also retain finished/converged envelopes and active receipts
+so observation can continue after workspace migration. Older history-only
+checkpoints remain readable but cannot invent missing envelopes or reactivate
+historical receipts to claim convergence; preserve them for host review.

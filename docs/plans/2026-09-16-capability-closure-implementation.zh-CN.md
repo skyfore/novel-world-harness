@@ -357,3 +357,17 @@ P2g 已提交为 `1300043`。
 该路径仍使用候选的既有前提：原始 compiler batches 已完成、存在 evidence-backed initial world；本段没有新增任意早期编译状态的通用 checkpoint。P2 仍待 converge 后实际修订复核与逐项评估、修复调度/模型会话接入；P1 完整验收映射及 P3–P7 仍未完成，未调用真实 provider 或人工体验评价。
 
 验证：全量 188 文件、1123 tests 通过（82.00 秒）；随后补充 staging 与跨存储依赖链迁移、活动回执/接受状态约束，36 项定向回归通过。服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。
+
+P2h 已提交为 `85ab5cc`。
+
+## P2i：converge 后实际修订核验与停止状态
+
+在通用 converge 完成确定性提交后检查所有保留来源的 finished/converged 修复，重新验证原 completed 回执、输出 active revisions、原未授权变更的 baseline 和独立要求定义。没有同源 pending world/annotation/resolution/accounting 工作时，追加 converged 事件，绑定原 finish fingerprint 与完整实际修订集合；账本拒绝遗漏、重复或与授权输出不符的修订。
+
+下游 pending 和宿主观察 I/O 中断保留 finished 状态，可在处理原工作后通过空 converge 重试宿主观察，不重跑模型、不新增尝试。确定性回执/授权冲突转为 needs-host-review，保留原因和当前工件。已经 converged 的计划仍会重新核对实际依赖；变化后停止，未变化的重复观察幂等。prepare-all、repair-existing、reparse 和 proposals converge 显式报告 upstreamRepairIssues。
+
+可移植 checkpoint 扩展保留 finished/converged 的原 envelope 与活动回执，使迁移后仍可凭原证明继续核验。旧历史型候选继续可读，但缺失的 envelope 不会被补造或当成 convergence 证明。新增测试覆盖提交前禁止 converged、真实输出修订、伪造记录拒绝、pending 延后、存储中断后空重试、收敛前后第三方修订均停止，以及 finished/converged 跨工作区继续观察。
+
+converged 仍不等于 evaluated，认证继续保留 NOT_EVALUATED 阻塞。P2 尚待逐独立要求评估、结果失效及认证接线、修复调度/模型会话入口；P1 完整验收映射及 P3–P7 保持原范围，未调用真实 provider 或人工体验评价。
+
+验证：42 项定向回归通过；全量 188 文件、1130 tests 通过（86.39 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。

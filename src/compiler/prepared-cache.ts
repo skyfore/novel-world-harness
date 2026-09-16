@@ -191,7 +191,7 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
   const snapshot = bundle.compilerSnapshot;
   const upstreamIssues = upstreamRepairSnapshotIssues(snapshot, sourceId, bundle.source.contentSha256);
   if (upstreamIssues.length) throw new Error(upstreamIssues.join("; "));
-  assertUpstreamRepairCheckpoint(snapshot.upstreamRepairCheckpoint ?? { version: 1, drafts: [], activeReceipts: [] }, snapshot.upstreamRepairJournal ?? [], sourceId);
+  assertUpstreamRepairCheckpoint(snapshot.upstreamRepairCheckpoint ?? { version: 1, drafts: [], activeReceipts: [] }, snapshot.upstreamRepairJournal ?? [], sourceId, Boolean(snapshot.upstreamRepairCheckpoint));
   if (snapshot.upstreamRepairCheckpoint) {
     for (const receipt of snapshot.upstreamRepairCheckpoint.activeReceipts) if (!snapshot.reconciliationObligations?.some(item => contentHash(item.receipt) === contentHash(receipt))) throw new Error("Upstream checkpoint receipt is missing its retained history");
     for (const { receipt } of snapshot.reconciliationObligations ?? []) {

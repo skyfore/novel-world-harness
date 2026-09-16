@@ -446,7 +446,7 @@ it("runs the original finish graph validation before any authorized canonical mu
   expect(await new CompilerFinishReceipts(f.root, f.sourceId, plan.batchId).read()).toBeUndefined();
 });
 
-it.each(["staged", "frozen", "partial", "completed"])("ports original upstream drafts and %s finish state into a fresh workspace", async point => {
+it.each(["staged", "frozen", "partial", "completed", "finished", "converged"])("ports original upstream drafts and %s finish state into a fresh workspace", async point => {
   const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
   const { CompilerFinishReceipts } = await import("../src/compiler/finish-receipts.js");
   const { PreparedNovelCache } = await import("../src/compiler/prepared-cache.js");
@@ -465,6 +465,9 @@ it.each(["staged", "frozen", "partial", "completed"])("ports original upstream d
     vi.spyOn(SourceAnnotationStore.prototype, "commitProposals").mockImplementationOnce(async function (...args) { await original.apply(this, args); throw new Error("checkpoint injected crash"); });
   } else if (point === "completed") vi.spyOn(UpstreamRepairLedger.prototype, "recordFinished").mockRejectedValueOnce(new Error("checkpoint injected crash"));
   if (["partial", "completed"].includes(point)) await expect(executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("checkpoint injected");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  if (["finished", "converged"].includes(point)) await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  if (point === "converged") await convergeWorldProposals(f.root, f.sourceId);
   const receipts = new CompilerFinishReceipts(f.root, f.sourceId, f.plan.batchId), originalReceipt = await receipts.read();
   const cacheRoot = path.join(f.root, "portable-cache"), cache = new PreparedNovelCache(f.root, cacheRoot);
   const bundle = await cache.candidateSnapshot(f.source.source), checkpoint = bundle.compilerSnapshot.upstreamRepairCheckpoint!;
@@ -503,6 +506,63 @@ it.each(["staged", "frozen", "partial", "completed"])("ports original upstream d
   expect(noStage).not.toHaveBeenCalled();
   expect((await proposals.read(f.sourceId, "quote-one")).anchor.endByte).toBe(f.annotation.anchor.endByte + 1);
   if (originalReceipt) expect(completed.fingerprint).toBe(originalReceipt.fingerprint);
-  // A later completed journal cannot be replaced by the earlier portable checkpoint.
-  await expect(cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!)).rejects.toThrow();
+  expect((await convergeWorldProposals(cloneRoot, f.sourceId)).upstreamRepairIssues).toBeUndefined();
+  expect((await new UpstreamRepairLedger(cloneRoot, f.sourceId).inspect()).plans[0]!.state).toBe("converged");
+  // Later convergence cannot be replaced by an earlier portable checkpoint.
+  if (point === "converged") await cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!);
+  else await expect(cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!)).rejects.toThrow();
+});
+
+it("observes actual upstream revisions after convergence and preserves the unevaluated gate", async () => {
+  const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const { upstreamRepairJournalSchema, upstreamRepairUnsettledIssues } = await import("../src/compiler/upstream-repair-ledger.js");
+  const f = await frozenQuotationFinish();
+  await expect(f.ledger.recordConverged(f.plan.planHash)).rejects.toThrow("original finished repair");
+  await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("finished");
+  expect((await convergeWorldProposals(f.root, f.sourceId)).upstreamRepairIssues).toBeUndefined();
+  const records = await f.ledger.history(), last = records.at(-1)!;
+  expect(last.payload).toMatchObject({ kind: "converged", planHash: f.plan.planHash, activeRevisions: [{ kind: "quotation", id: "quote-one", revisionHash: contentHash(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")) }] });
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("converged");
+  expect(upstreamRepairUnsettledIssues(records)).toEqual([expect.stringContaining("NOT_EVALUATED")]);
+  await convergeWorldProposals(f.root, f.sourceId);
+  expect(await f.ledger.history()).toEqual(records);
+  const altered = structuredClone(records), bad = altered.at(-1)!;
+  if (bad.payload.kind !== "converged") throw new Error("Expected convergence");
+  bad.payload.activeRevisions[0]!.revisionHash = "0".repeat(64);
+  const { hash: _hash, ...identity } = bad; bad.hash = contentHash(identity);
+  expect(() => upstreamRepairJournalSchema.parse(altered)).toThrow("authorized outputs");
+});
+
+it("defers convergence for downstream pending work and retries only host observation", async () => {
+  const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const f = await frozenQuotationFinish(); await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  const annotations = new SourceAnnotationStore(f.root);
+  await annotations.stage(f.sourceId, { version: 1, id: "downstream-pending", annotationType: "quotation", payload: { ...f.annotation, id: "downstream-quote" }, generatedBy: { worker: "fixture", compilerBatchId: "downstream-batch" }, createdAt: "2026-09-16T00:00:00Z" });
+  expect((await convergeWorldProposals(f.root, f.sourceId)).upstreamRepairIssues).toEqual([expect.stringContaining("CONVERGENCE_PENDING")]);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("finished");
+  await annotations.withdraw(f.sourceId, "downstream-pending");
+  vi.spyOn(UpstreamRepairLedger.prototype, "recordConverged").mockRejectedValueOnce(new Error("injected journal storage interruption"));
+  expect((await convergeWorldProposals(f.root, f.sourceId)).upstreamRepairIssues).toEqual([expect.stringContaining("storage interruption")]);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("finished");
+  await convergeWorldProposals(f.root, f.sourceId);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("converged");
+  expect((await f.ledger.inspect()).attempts).toHaveLength(1);
+});
+
+it.each([false, true])("stops changed active revisions on convergence (previously converged=%s)", async wasConverged => {
+  const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const f = await frozenQuotationFinish(); await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  if (wasConverged) await convergeWorldProposals(f.root, f.sourceId);
+  const changed = { ...f.annotation, attributionConfidence: 0.4 }; await f.write(changed, "later-third-party-revision");
+  const result = await convergeWorldProposals(f.root, f.sourceId);
+  expect(result.upstreamRepairIssues?.[0]).toContain("Active dependency changed");
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("needs-host-review");
+  expect(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")).toEqual(changed);
+  const history = await f.ledger.history();
+  await convergeWorldProposals(f.root, f.sourceId);
+  expect(await f.ledger.history()).toEqual(history);
 });

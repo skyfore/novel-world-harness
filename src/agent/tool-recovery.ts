@@ -367,6 +367,16 @@ export function buildNwhToolRecoveryAdvice(
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
 
+  if (/(?:^|\W)acquisition_(?:dependency|revision|occurrence|content|prior|premise|reception|source|cut|required|evidence)/u.test(lower)
+    && !/(budget|circuit.breaker|consumed|outside.*scope)/u.test(lower)) {
+    const stopped = /(revision_mismatch|dependency_cycle|prior_not_realized|premise_unavailable|cut_not_current)/u.test(lower);
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: stopped ? "host-repair-required" : "invalid-arguments", retryable: !stopped,
+      retryCondition: stopped ? "Stop for host review; frozen or unrealized experience cannot be repaired by model retry." : "At most one materially corrected retry after same-source discovery within existing authority.",
+      steps: stopped ? ["Preserve drafts, frozen dependency revisions and branch head. Do not import future canon, borrow another actor's knowledge, invent premises, delete acquisitionId or reset scope."] : [
+        "Use same-source find_compiler_artifacts with kind acquisition or the dependency kind named in the diagnostic; copy results[].readArguments.ref into read_compiler_artifact.ref and payload.id into the logical ID field. For a missing occurrence use kind canonical-event.",
+        "Check the acquiring event's own receipt, understanding and belief evidence. Host owns hashes; correct once without changing the mode to evade proof. If absent or outside authority, stop with drafts intact.",
+        "Runtime failures preserve the head and stop for host compilation; actor tools must not discover compiler-only evidence. Never guess or retry unchanged."] };
+  }
   if (/(?:^|\W)(?:perception_|acquisition_perception_)/u.test(lower)
     && !/(budget|circuit.breaker|consumed|outside.*scope)/u.test(lower)) {
     const stopped = /(revision_mismatch|quoted_report|unmapped|cut_not_current|access_not_proven)/u.test(lower);

@@ -31,6 +31,7 @@ export const COMPILER_ARTIFACT_KINDS = [
   "event-frame",
   "semantic-effect",
   "perception-observation",
+  "acquisition",
   "utterance-expression",
   "action-schema",
   "event-execution",
@@ -189,6 +190,7 @@ export async function loadCompilerArtifactRecords(
   addCanonical(sceneOccurrences, "scene-occurrence", (value) => ({ id: value.id, label: `Scene ${value.id}` }));
   addCanonical(await canon.listSemanticEffects(), "semantic-effect", value => ({ id: value.id, label: `${value.kind}: ${value.subjectEntityId}` }));
   addCanonical(await canon.listPerceptionObservations(), "perception-observation", value => ({ id: value.id, label: `${value.channel}: ${value.observerId}` }));
+  addCanonical(await canon.listAcquisitions(), "acquisition", value => ({ id: value.id, label: `${value.basis.mode}: ${value.actorId}` }));
   addCanonical(await canon.listUtteranceExpressions(), "utterance-expression", value => ({ id: value.id, label: `${value.modality}: ${value.speakerId}` }));
   addCanonical(eventFrames, "event-frame", (value) => ({ id: value.id, label: value.name }));
   addCanonical(eventExecutions, "event-execution", (value) => ({ id: value.id, label: `${value.canonicalEventId}: ${value.actorId}` }));

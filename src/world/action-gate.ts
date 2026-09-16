@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { WorldEngine } from "./engine.js";
-import { KnowledgeProjector } from "./knowledge.js";
+import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import { eventProposalSchema, type CommitId, type EventProposal, type ValidationIssue } from "./model.js";
 
 export const knowledgeAwareActionSchema = z
@@ -32,7 +32,7 @@ export async function validateActionKnowledge(engine: WorldEngine, input: Knowle
   }
   if (proposal.actorId) {
     const view = await new KnowledgeProjector(engine).view(proposal.actorId, head);
-    const known = new Set(view.knowledge.filter((entry) => entry.fact.status !== "disbelieves").map((entry) => entry.fact.claimId));
+    const known = new Set(view.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
     for (const claimId of action.requiresKnowledge) {
       if (!known.has(claimId)) errors.push({ code: "REQUIRED_KNOWLEDGE_MISSING", message: `${proposal.actorId} does not know ${claimId}` });
     }

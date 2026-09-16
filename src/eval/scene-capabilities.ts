@@ -43,7 +43,7 @@ export const sceneCapabilitySpecSchema = z.object({
   cases: z.array(sceneCapabilityCaseSchema).min(1).max(128).refine((cases) => new Set(cases.map((item) => item.id)).size === cases.length, "case IDs must be unique"),
 }).strict();
 export type SceneCapabilitySpec = z.infer<typeof sceneCapabilitySpecSchema>;
-export type SceneReviewCatalog = Pick<CompilerValidationCatalog, "entities" | "events" | "eventParticipations" | "actionSchemas" | "eventExecutions" | "normTemplates" | "rules" | "claims" | "propositions" | "attributions">;
+export type SceneReviewCatalog = Pick<CompilerValidationCatalog, "entities" | "events" | "eventParticipations" | "actionSchemas" | "eventExecutions" | "normTemplates" | "rules" | "claims" | "propositions" | "attributions" | "acquisitions" | "utteranceExpressions" | "perceptionObservations">;
 export type SceneCapabilityIssue = { code: string; message: string; stage: "semantic" | "executable" | "source-review" | "ontology"; artifactIds: string[] };
 
 /** Expectations come from a separate source review file, never from the candidate schema under test. */
@@ -119,12 +119,14 @@ export function evaluateReviewedSceneCapabilities(specInput: unknown, catalog: S
           const project = (ids: string[]) => {
             if (new Set(ids).size !== ids.length) throw new Error("A knowledge cut cannot replay the same event twice.");
             let knowledge = emptyKnowledgeState(contentHash(ids));
+            const realized = new Set<string>();
             for (const id of ids) {
               const event = catalog.events.get(id);
               if (!event || !event.evidence.some((ref) => ref.span.sourceId === spec.sourceId)) throw new Error(`Invalid source-scoped cut event ${id}`);
               const commit = contentHash({ before: knowledge.atCommit, event });
+              realized.add(id);
               knowledge = applyKnowledgeDelta(knowledge, event.observedKnowledge ?? { version: 1, operations: [] }, commit,
-                { entities: catalog.entities, claims: catalog.claims, propositions: catalog.propositions, attributions: catalog.attributions, branchSemantics: emptyBranchSemanticState(commit) });
+                { acquisitions: catalog.acquisitions, utteranceExpressions: catalog.utteranceExpressions, perceptionObservations: catalog.perceptionObservations, currentCanonicalEventIds: new Set([id]), realizedCanonicalEventIds: realized, entities: catalog.entities, claims: catalog.claims, propositions: catalog.propositions, attributions: catalog.attributions, branchSemantics: emptyBranchSemanticState(commit) });
             }
             return knowledge;
           };

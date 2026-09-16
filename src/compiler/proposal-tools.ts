@@ -1,3 +1,5 @@
+import { acquisitionInputSchema } from "../world/acquisition.js";
+import { hydrateAcquisitionInput } from "./acquisition-input.js";
 import { perceptionObservationInputSchema, hydratePerceptionObservationInput, loadPerceptionTraceCatalog, validatePerceptionObservationProposalTrace } from "./perception-observation-trace.js";
 import { utteranceExpressionInputSchema, hydrateUtteranceExpressionInput } from "./utterance-expression-input.js";
 import { validateUtteranceExpressionProposalTrace } from "./utterance-expression-trace.js";
@@ -145,12 +147,13 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   proposition: { name: "propose_proposition", label: "Propose proposition", description: "Submit evidence-backed semantic content. Acceptance records the content but never makes it world truth; events, state deltas, and rules retain that authority." },
   attribution: { name: "propose_attribution", label: "Propose attribution", description: "Submit who asserts, believes, reports, denies, or questions a proposition, citing quotation IDs when discourse supplies it. Holder identity must trace through quotation-speaker resolution. The attitude remains separate from content and world truth." },
   claim: { name: "propose_claim", label: "Propose claim", description: "Submit an evidence-backed base-world claim candidate. Character knowledge or ignorance is never a claim predicate; represent learning only in a KnowledgeDelta. This does not commit canonical truth." },
-  "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Later canon remains a candidate until runtime commitment." },
+  "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Every new learn operation requires acquisitionId with independent receipt, understanding and belief evidence; use propose_acquisition within scope. Existing unchanged legacy operations remain readable but do not become verified. Later canon remains a candidate until runtime commitment." },
   "event-participation": { name: "propose_event_participation", label: "Propose event participation", description: "Submit one evidence-backed semantic role for an entity in a canonical event as part of a complete same-finish inventory. Role and character scene-presence are independent; accepting this record does not create or execute the event." },
   "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Typed operationality is authoritative at runtime; narrative sequence and legacy causalParents never imply causation." },
   "scene-occurrence": { name: "propose_scene_occurrence", label: "Propose scene occurrence", description: "Submit one evidence-backed canonical scene occurrence with discourse segments, event membership, location, viewpoint, physical presence, story interval, and entry/exit conditions. It describes source canon and never activates a future runtime scene." },
   "semantic-effect": { name: "propose_semantic_effect", label: "Propose semantic effect", description: "Propose source-grounded typed meaning for one occurrence and subject, with exact support for every semantic field. Unmapped meaning is retained but never executed. Mapped state-change requires an existing validated action execution; do not invent mechanisms or durations." },
   "perception-observation": { name: "propose_perception_observation", label: "Propose perception observation", description: "Propose source-grounded perception at a specific event cut, with observer/event mention IDs, a typed phenomenon, channel, exact access conditions and field evidence. The host freezes original annotation/resolution revisions. Unmapped perception is retained but cannot grant observed knowledge. A quotation or later report is not direct perception." },
+  "acquisition": { name: "propose_acquisition", label: "Propose acquisition", description: "Propose independently evidenced receipt, understanding and belief at an acquiring event cut. Use typed expression/perception or this actor's prior acquisition references. Host freezes exact dependency revisions; compiler knowledge is not branch experience. Never relabel reports, invent premises, merge receipt with belief, or assert world truth." },
   "utterance-expression": { name: "propose_utterance_expression", label: "Propose utterance expression", description: "Propose one source-grounded expression occurrence. Freeze exact quotation and proposition revisions, preserve ordered separate raw-byte fragments, speaker/addressees/event, and provide this expression’s own exact evidence for every semantic field. Evidence from another occurrence cannot substitute. This never asserts proposition truth." },
   "event-frame": { name: "propose_event_frame", label: "Propose event frame", description: "Submit one reusable evidence-backed event frame with typed semantic roles, kind/cardinality constraints, and temporal shape. A frame classifies occurrences; it is not itself an event or world change." },
   "event-execution": { name: "propose_event_execution", label: "Propose event execution binding", description: "Bind an existing canonical occurrence to an action mechanism and/or a complete character entryCheckpoint. An action requires typed agency and exact effects; an entry-only binding requires embodied presence and never grants action authority. Complete entryCheckpoint includes projectionSeed for semantic, norm, process, active rules and elapsed time; create it after its referenced templates. Never rewrite the original occurrence or copy its outcome into a pre-event entry." },
@@ -253,6 +256,7 @@ const SEMANTIC_STAGE_PROPOSAL_TOOLS: Record<CompilerSemanticStage, ReadonlySet<s
     "propose_event_frame",
     "propose_semantic_effect",
     "propose_perception_observation",
+    "propose_acquisition",
     "propose_utterance_expression",
   ]),
   executable: new Set([
@@ -363,7 +367,7 @@ export function prepareProposalToolArguments(
 function proposalToolParameters(kind: CompilerProposalKind) {
   const inputSchema = z.object({
     proposal_id: idSchema,
-    payload: kind === "perception-observation" ? perceptionObservationInputSchema : kind === "utterance-expression" ? utteranceExpressionInputSchema : compilerProposalSchemas[kind],
+    payload: kind === "acquisition" ? acquisitionInputSchema : kind === "perception-observation" ? perceptionObservationInputSchema : kind === "utterance-expression" ? utteranceExpressionInputSchema : compilerProposalSchemas[kind],
   }).strict();
   const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(inputSchema, { io: "input" });
   removeModelWritableEvidence(jsonSchema);
@@ -1256,6 +1260,7 @@ export function createCompilerProposalToolset(
       : injectHostEvidence(kind, input.payload, evidence);
     if (kind === "utterance-expression") payload = await hydrateUtteranceExpressionInput(workspaceRoot, activeSourceId!, input.payload, evidence, [...successfulProposalIds], [...successfulAnnotationProposalIds], resolveObservationSelector);
     if (kind === "perception-observation") payload = hydratePerceptionObservationInput(input.payload, evidence, await loadPerceptionTraceCatalog(workspaceRoot, activeSourceId!, [...successfulAnnotationProposalIds], [...successfulEntityResolutionProposalIds], [...successfulEventResolutionProposalIds]));
+    if (kind === "acquisition") payload = await hydrateAcquisitionInput(workspaceRoot, input.payload, evidence, [...successfulProposalIds]);
     const selectors = input.evidence_selectors === undefined
       ? []
       : modelEvidenceSelectorsSchema.parse(input.evidence_selectors);
@@ -2908,8 +2913,8 @@ export function createCompilerProposalToolset(
         const knowledgePlan = await readKnowledgeRepairPlan(workspaceRoot, activeSourceId!, compilerBatchId!);
         if (knowledgePlan) {
           const canon = new CanonicalModelStore(workspaceRoot);
-          const [claims, propositions, attributions, expressions, perceptions] = await Promise.all([canon.listClaims(), canon.listPropositions(), canon.listAttributions(), canon.listUtteranceExpressions(), canon.listPerceptionObservations()]);
-          const existing = new Set([...claims.map(item => `claim:${item.id}`), ...propositions.map(item => `proposition:${item.id}`), ...attributions.map(item => `attribution:${item.id}`), ...expressions.map(item => `utterance-expression:${item.id}`), ...perceptions.map(item => `perception-observation:${item.id}`)]);
+          const [claims, propositions, attributions, expressions, perceptions, acquisitions] = await Promise.all([canon.listClaims(), canon.listPropositions(), canon.listAttributions(), canon.listUtteranceExpressions(), canon.listPerceptionObservations(), canon.listAcquisitions()]);
+          const existing = new Set([...claims.map(item => `claim:${item.id}`), ...propositions.map(item => `proposition:${item.id}`), ...attributions.map(item => `attribution:${item.id}`), ...expressions.map(item => `utterance-expression:${item.id}`), ...perceptions.map(item => `perception-observation:${item.id}`), ...acquisitions.map(item => `acquisition:${item.id}`)]);
           issues.push(...knowledgeRepairScopeIssues(knowledgePlan, proposals, existing, new Map(attributions.map(a => [a.id, a]))));
         }
         for (const review of input.target_reviews ?? []) {

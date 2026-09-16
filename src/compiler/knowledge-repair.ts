@@ -1,3 +1,4 @@
+import { acquisitionDependencies, acquisitionSchema } from "../world/acquisition.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -17,7 +18,7 @@ const planSchema = z.object({
   reviewRef: z.string().min(1), events: z.array(canonicalEventSchema).min(1).max(4),
   quotationIds: z.array(idSchema).min(1).max(16).optional(),
   requireDirectObservation: z.boolean().optional(),
-  dependencyKinds: z.array(z.enum(["claim", "proposition", "attribution", "utterance-expression", "perception-observation"])).min(1).max(5).optional(),
+  dependencyKinds: z.array(z.enum(["claim", "proposition", "attribution", "utterance-expression", "perception-observation", "acquisition"])).min(1).max(6).optional(),
 }).strict().superRefine((value, ctx) => {
   if (value.version === 1 && value.dependencyKinds) ctx.addIssue({ code: "custom", path: ["dependencyKinds"], message: "Legacy repair authority cannot be expanded in place" });
   if (value.version === 2 && (!value.dependencyKinds || new Set(value.dependencyKinds).size !== value.dependencyKinds.length)) ctx.addIssue({ code: "custom", path: ["dependencyKinds"], message: "Version 2 requires an explicit unique dependency authority" });
@@ -88,6 +89,7 @@ export function knowledgeRepairScopeIssues(plan: KnowledgeRepairPlan, proposals:
           if (!(before?.operations ?? []).some(old => contentHash(old) === contentHash(op)) && (!op.propositionId || !op.acquisitionMode)) issues.push(`${id}: knowledge repair requires propositionId and explicit acquisitionMode.`);
           reachable.add(`claim:${op.claimId}`);
           if (op.propositionId) reachable.add(`proposition:${op.propositionId}`);
+          if (op.acquisitionId) reachable.add(`acquisition:${op.acquisitionId}`);
           if (op.perceptionId) reachable.add(`perception-observation:${op.perceptionId}`);
           if (op.expressionId) reachable.add(`utterance-expression:${op.expressionId}`);
           if (op.attributionId) reachable.add(`attribution:${op.attributionId}`);
@@ -99,6 +101,14 @@ export function knowledgeRepairScopeIssues(plan: KnowledgeRepairPlan, proposals:
   // Traverse only typed semantic references, never arbitrary strings in model payloads.
   for (const key of reachable) {
     const record = records.get(key);
+    if (record?.kind === "acquisition") {
+      const parsed = acquisitionSchema.safeParse(record.payload);
+      if (!parsed.success) issues.push(`${key}: invalid typed acquisition dependency.`);
+      else {
+        if (!plan.events.some(event => event.id === parsed.data.canonicalEventId)) issues.push(`${key}: acquisition occurrence is outside the reviewed knowledge target scope.`);
+        for (const ref of acquisitionDependencies(parsed.data)) reachable.add(`${ref.kind}:${ref.id}`);
+      }
+    }
     if (record?.kind === "attribution") {
       reachable.add(`proposition:${String(record.payload.propositionId)}`);
       for (const id of Array.isArray(record.payload.expressionIds) ? record.payload.expressionIds : []) reachable.add(`utterance-expression:${String(id)}`);
@@ -154,7 +164,7 @@ Use the typed tool input schema: omit raw EvidenceRef fields and supply evidence
 This scope permits only dependency kinds declared by its version: v1 allows claim/proposition/attribution; v2 uses the explicit dependencyKinds allowlist. Discover existing dependencies first and reuse exact IDs. Only dependencies transitively referenced by observedKnowledge are allowed; existing dependencies, entities, annotations, scenes and all other event fields are read-only. No new character, scene, rule, goal, state effect or checkpoint. Preserve every established event field and knowledge operation. A missing trace/entity requires a precise capability-gap report, never fabrication or widening authority.
 A claim describes base-world semantic content, never 'X knows Y'. A proposition is content, not world truth. Hearing a report does not prove its content. Each new learn operation requires claimId, propositionId and acquisitionMode. told additionally requires sourceActorId and attributionId; use source-grounded attribution quotationIds, actual speaker/addressee and the exact content covered by the quotation anchor. Do not extend a short quotation anchor to uncited neighboring statements. Choose knowledge status/confidence justified by the text, not the audit percentage. Do not propagate narrator knowledge or information to absent actors. All normal evidence, semantic, quotation trace and commit validation still apply.
 When plan.quotationIds is present, only those host-reviewed quotations belong to the target event's acquisition. Other quotations in the segment are read-only context; do not import earlier dialogue as a new outcome. Receiving a translation is not gaining fluency or an ability to understand the original language.
-When plan.requireDirectObservation is true, new acquisitions must use observed with a validated perceptionId and without attributionId or sourceActorId. Deleting a report source is not a perception proof. A legacy v1 plan cannot authorize new perception/expression artifacts; reuse existing verified proof or preserve drafts for a v2 host-reviewed successor with explicit dependencyKinds. Read the target event's own sensory evidence; neighboring dialogue and later reports are not that event's direct observation. If no supported observation exists, report the precise gap and stop for host source review.
+When plan.requireDirectObservation is true, new acquisitions must use observed with a validated perceptionId and without attributionId or sourceActorId. Deleting a report source is not a perception proof. A legacy v1 plan cannot authorize new perception/expression/acquisition artifacts; reuse existing verified proof or preserve drafts for a v2 host-reviewed successor with explicit dependencyKinds. Read the target event's own sensory evidence; neighboring dialogue and later reports are not that event's direct observation. If no supported observation exists, report the precise gap and stop for host source review.
 Every proposal_id must end with -${batch}. Keep the logical event ID. A never-staged failed call permits one concrete correction using the SAME proposal_id. Successful draft IDs are immutable; do not overwrite or revive them. For a defective successful draft, validate its justified successor and withdraw only the exact predecessor, preserving unrelated drafts. If host review is required or the corrected call fails again, stop without changing IDs, batch, plan or namespace.
 Finish through finish_compiler_batch with reviewed_segments=[], all active proposal IDs, and target_reviews exactly once for each event:<event-id>. Use disposition=proposed when the event has a proposal, otherwise unsupported or capability-gap with exact evidence_segment_ids and a source-grounded summary. Use outcome=complete only with proposals, otherwise no-artifacts. Dependencies do not require separate target reports. Deferrals remain awaiting host review; a finish receipt does not certify semantic readiness. Do not remove valid proposals or effects to make finish pass.
 <knowledge-repair-context>

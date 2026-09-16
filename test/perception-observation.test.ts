@@ -137,3 +137,25 @@ it.each(scenes)("retains unsupported sensory meaning without granting observed k
   expect(observation.lowering.status).toBe("unmapped");
   expect(validatePerceptionAcquisition(operation, { observations: new Map([[observation.id, observation]]), propositions: new Map((await canon.listPropositions()).map(item => [item.id, item])) }).some(item => item.code === "PERCEPTION_UNMAPPED")).toBe(true);
 });
+it.each(scenes)("consumes independently evidenced observed acquisition at its actual cut: $actor", async original => {
+  const scene = { ...original, sentence: `${original.sentence} ${original.actor} understands the closure and believes the observation.` };
+  const { root, source, canon, event, input, operation, initial } = await setup(scene);
+  const tools = createCompilerProposalToolset(root); await tools.beginBatch([], "observed-acquisition", source.source.id);
+  const invoke = (name: string, payload: unknown) => tools.tools.find(tool => tool.name === name)!.execute(name, payload as never, undefined, undefined, {} as never);
+  await invoke("propose_perception_observation", input);
+  const payload = { ontologyVersion: "acquisition-v1", id: "saw-closure", actorId: "observer", canonicalEventId: event.id, cut: "event-end", claimId: "closed-claim", propositionId: "closed", basis: { mode: "observed", perceptionId: "perception" }, reception: { received: true, understood: true, belief: "accepted" } };
+  const paths = ["/actorId", "/canonicalEventId", "/cut", "/claimId", "/propositionId", "/basis/mode", "/basis/perceptionId", "/reception/received", "/reception/understood", "/reception/belief"];
+  await invoke("propose_acquisition", { proposal_id: "saw-closure", payload, evidence_segment_ids: [source.segmentId], evidence_selectors: paths.map(target_path => ({ segment_id: source.segmentId, exact: scene.sentence, target_path, relation: "supports", strength: "explicit" })) });
+  await invoke("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Direct observation with separate reception" });
+  expect((await convergeWorldProposals(root, source.source.id)).canonical.blocked).toEqual([]);
+  const context = await new WorldContextStore(root).captureCurrent(source.source.id), engine = new WorldEngine(root, context);
+  const head = await engine.createBranch("main", "Before closure", initial, undefined, undefined, undefined, [], {}, { realizesCanonicalEventIds: [] });
+  const learn = { ...operation, acquisitionId: payload.id, status: "believes" };
+  const proposal = { proposalId: "see", branchId: "main", expectedParentCommit: head, source: "canon-candidate", title: "Observe the closure", participants: event.participants, participantPresence: event.participantPresence, possibilityId: "canon-close", preconditions: [], proposedTime: { kind: "unknown" }, proposedDelta: event.observedOutcome, proposedKnowledge: { version: 1, operations: [learn] }, causalParents: [], evidence: [] };
+  const wrong = await engine.commitProposal({ ...proposal, possibilityId: undefined } as never);
+  expect(wrong.report.errors.some(issue => issue.code === "ACQUISITION_CUT_NOT_CURRENT")).toBe(true);
+  const committed = await engine.commitProposal(proposal as never); expect(committed.report.errors).toEqual([]);
+  const replay = await engine.projections.project(committed.newHead, { fresh: true, useCheckpoints: false });
+  expect(replay.knowledge.acquisitions?.[payload.id]?.reception).toEqual(payload.reception);
+  expect(replay.knowledge.actors.observer?.["closed-claim"]).toMatchObject({ acquisitionId: payload.id, perceptionId: "perception", status: "believes" });
+});

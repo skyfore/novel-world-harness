@@ -464,6 +464,7 @@ export async function invalidatePreparationArtifacts(
   for (const item of sceneOccurrences) if (shouldInvalidate(item, "scene", item.id)) await invalidate("scene-occurrence", item.id, () => canon.removeCurrent("scene-occurrences", item.id));
   for (const item of await canon.listSemanticEffects()) if (shouldInvalidate(item, "semantic-effect", item.id)) await invalidate("semantic-effect", item.id, () => canon.removeCurrent("semantic-effects", item.id));
   for (const item of await canon.listPerceptionObservations()) if (shouldInvalidate(item, "perception-observation", item.id)) await invalidate("perception-observation", item.id, () => canon.removeCurrent("perception-observations", item.id));
+  for (const item of await canon.listAcquisitions()) if (shouldInvalidate(item, "acquisition", item.id)) await invalidate("acquisition", item.id, () => canon.removeCurrent("acquisitions", item.id));
   for (const item of await canon.listUtteranceExpressions()) if (shouldInvalidate(item, "utterance-expression", item.id)) await invalidate("utterance-expression", item.id, () => canon.removeCurrent("utterance-expressions", item.id));
   for (const item of eventFrames) if (shouldInvalidate(item, "frame", item.id)) await invalidate("event-frame", item.id, () => canon.removeCurrent("event-frames", item.id));
   for (const item of eventExecutions) if (shouldInvalidate(item, "event-execution", item.id)) await invalidate("event-execution", item.id, () => canon.removeCurrent("event-executions", item.id));

@@ -819,3 +819,23 @@ P3c 已提交为 `fc904b8`。
 pipeline 升为 38、engine 升为 0.16.0。旧 pipeline 37 保留原文 observation/structure 检查点，语义/执行检查点重新验证；旧历史不原地重解释。未运行外部模型与人工体验评价，P1–P7 总目标继续开放。
 
 最终验证：99 项定向检查通过；补充冻结修订与等值 Genesis 反例后的 6 项感知纵向检查通过。全仓 204 文件、1233 tests 全部通过（104.15 秒）；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。清理 import 时曾误删名称并被测试即时发现，修正后才执行最终全仓验证。
+
+P3d 已提交为 `bc3f1da`。
+
+## P3e：Acquisition 模式联合、获知 cut 与分支经历
+
+新增独立 acquisition-v1：observed 指向 perception；told/read 指向具体表达及 attribution，read 另保留文档和读取事件；inferred 指向本角色的前提获知记录与独立源推断依据；remembered 指向既有经历；deceived-misattributed 同时保存实际和误认来源。received、understood、belief 分开取证。模型仅提交逻辑 ID，宿主从获知事件取得原文范围，并冻结事件、claim/proposition、表达/感知/attribution/既有 acquisition 的真实修订。每字段需要本获知 occurrence 的证明，不借用表达本身的证据充当理解或相信的证明。
+
+同一纵向阶段接入提案与工具、受限依赖图、validator/evidence、finish/converge、canonical/revision/catalog/retrieval、audit、prepared archive/rebuild、closure/certification、WorldContext、entry/scene 消费者和运行时。acquisitionId 保留到知识事实；已有显式 contract 不能删引用退回旧格式。旧无此 contract 的知识仍保持旧读兼容，不凭迁移自动生成已验证 acquisition。本段未将所有 legacy 或分支临时获知迁成新类型。
+
+运行时在实际当前事件 cut 核对 acquisition，表达也必须已在本分支发生。记忆/推断只能使用同一角色此前的已提交经历；推断还要求前提仍在该角色当前接受的知识中。同 cut 操作不能制造自己的先验前提。经历收据从历史归约，遗忘当前事实不删除经历，允许另一个有依据的回忆事件恢复该内容。循环、32 层深度与 128 记录展开上限均停止，不猜补前提。
+
+未理解内容不进入角色知识视图或行动知识门禁；相信不改变命题世界真值，也不自动赋予语言能力。deceived 记录真实来源，但角色视图采用误认来源并移除 attribution 的来源证明。源中明确记载的推断可以产生角色 belief，不宣称实现通用逻辑证明或自动验证自然语言蕴含。获知状态采用 heard/believes/disbelieves，不能仅从 received 或源置信度升级 knows。
+
+两个原创中英文场景实际走提案→finish→converge→archive→新 workspace rebuild→话语获知→推断→遗忘→回忆→无 checkpoint replay，并验证静默 fork 无经历、旧 head 不变、遗忘前提不能推断、缺字段证明与删 acquisitionId 被拒、删 binding 不能重建新候选、旧冻结 context 不受可变 store 影响。另两组场景验证 read、deceived、未理解话语，以及直接感知绑定 Acquisition 的提案/提交/重放。错误知道状态被拒，知识获知不创建世界状态事实。测试中的重复原句需显式 occurrence selector，不能消歧猜测；初始多角色场景必须有既有可行动依据，未绕过原门禁。
+
+获知事件修订与执行投影分离：WorldContext 从冻结原始事件计算 sourceEventRevisions，action/participation 投影不冒充新的原文修订。场景要求依赖 hash 纳入 expression/perception/acquisition，旧评估需要重新评估。pipeline 39、engine 0.17.0；旧 pipeline 38 仅复用原文 observation/structure 检查点，不重写旧 branch 历史。P3 的全范围退出审计、旧获知迁移和 P4–P7 继续保留；本段没有真实 provider 或独立人工体验证据。
+
+首轮全仓 205 文件、1240 tests 通过（106.83 秒）后，复查补齐新模型 learn 的强制 acquisitionId 门禁；旧兼容仅允许当前 event/initial-world/event-execution 中完全相同的既有操作，不允许新增旧格式获知。既有 quotation/addressee 工具测试改为明确的 legacy 修复夹具；新原创场景验证缺 Acquisition 的新事件被拒，并实际同批提出获知事件与其冻结 Acquisition，避免只测试运行时手工拼接知识。该补充要求再次执行最终全仓检查。
+
+最终验证：强制新获知门禁及同批事件冻结后，58 项编译工具/Acquisition 定向检查通过；此前完整模式、感知、要求账本与恢复协议定向检查通过。最终全仓 205 文件、1240 tests 全部通过（106.76 秒）；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。该工程结果不替代真实模型语义质量或独立人工体验验收。

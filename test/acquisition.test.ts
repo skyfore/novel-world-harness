@@ -1,0 +1,184 @@
+import { acquisitionCatalog, acquisitionSchema, validateAcquisition, validateAcquisitionOperation, hydrateAcquisition } from "../src/world/acquisition.js";
+import { KnowledgeProjector, applyKnowledgeDelta, emptyKnowledgeState } from "../src/world/knowledge.js";
+import { emptyBranchSemanticState } from "../src/world/semantic-effects.js";
+import { WorldRuntime } from "../src/world/runtime.js";
+import { buildNwhToolRecoveryAdvice } from "../src/agent/tool-recovery.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, expect, it } from "vitest";
+import { createEvidenceFixture } from "./helpers/evidence.js";
+import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { canonicalEventSchema, propositionSchema, type EvidenceAssertion } from "../src/world/model.js";
+import { contentHash } from "../src/world/canonical.js";
+import { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, validateExpressionAcquisition } from "../src/world/utterance-expression.js";
+import { SourceAnnotationStore, quotationSchema, entityMentionSchema } from "../src/compiler/annotations.js";
+import { EntityResolutionStore, identityResolutionSchema } from "../src/compiler/entity-resolution.js";
+import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
+import { createCompilerProposalToolset, compilerToolAllowedInSemanticStage } from "../src/compiler/proposal-tools.js";
+import { convergeWorldProposals } from "../src/compiler/converge.js";
+import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
+import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
+import { InitialWorldStore } from "../src/world/initial.js";
+import { buildPreparedClosure } from "../src/compiler/closure.js";
+import { WorldContextStore } from "../src/world/context.js";
+import { WorldEngine } from "../src/world/engine.js";
+import { loadCompilerArtifactRecords } from "../src/compiler/artifact-retrieval.js";
+import { validateUtteranceExpressionTrace } from "../src/compiler/utterance-expression-trace.js";
+const roots: string[] = [];
+afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
+const scenes = [
+  { speaker: "Ada", listener: "Bo", subject: "gate", quote: "the gate is shut", receipt: 'Ada tells Bo: "the gate is shut". Bo understands and believes her.', memory: "Later Bo recalls her warning and still believes the gate is shut.", inference: "From the warning, Bo infers that passage is unavailable.", text: 'Ada tells Bo: "the gate is shut". Bo understands and believes her. Later Bo recalls her warning and still believes the gate is shut. From the warning, Bo infers that passage is unavailable.' },
+  { speaker: "宁", listener: "维", subject: "码头", quote: "码头已经关闭", receipt: "宁对维说：“码头已经关闭”。维听懂并相信了她。", memory: "后来维回想起她的话，仍相信码头已经关闭。", inference: "维据此推断无法通行。", text: "宁对维说：“码头已经关闭”。维听懂并相信了她。后来维回想起她的话，仍相信码头已经关闭。维据此推断无法通行。" },
+];
+async function setup(scene: typeof scenes[number]) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-acquisition-")); roots.push(root);
+  const source = await createEvidenceFixture(root, scene.text), canon = new CanonicalModelStore(root);
+  const bytes = Buffer.from(scene.text);
+  const anchor = (text: string) => { const start = bytes.indexOf(Buffer.from(text)); return textAnchorForByteRange(source.source.id, bytes, start, start + Buffer.byteLength(text)); };
+  for (const [id, canonicalName, kind] of [["speaker", scene.speaker, "character"], ["listener", scene.listener, "character"], ["place", scene.subject, "location"]] as const) await canon.putEntity({ id, kind, canonicalName, aliases: [], evidence: source.evidence(canonicalName) });
+  const derivation = { runId: "test", worker: "test", ontologyVersion: "observation-v1" } as const;
+  const mentions = [["speaker", scene.speaker], ["listener", scene.listener]].map(([id, text]) => entityMentionSchema.parse({ version: 1, id: `mention-${id}`, sourceId: source.source.id, derivation, annotationType: "entity-mention", anchor: anchor(text!), surface: text, form: "proper", kindCandidates: ["character"], confidence: 1 }));
+  const quotation = quotationSchema.parse({ version: 1, id: "quotation", sourceId: source.source.id, derivation, annotationType: "quotation", anchor: anchor(scene.quote), mode: "direct", speakerMentionId: "mention-speaker", addresseeMentionIds: ["mention-listener"], attributionConfidence: 1 });
+  await new SourceAnnotationStore(root).replaceCurrent(source.source.id, [...mentions, quotation]);
+  await new EntityResolutionStore(root).replaceCurrent(source.source.id, mentions.map(mention => identityResolutionSchema.parse({ version: 1, id: `resolution-${mention.id}`, sourceId: source.source.id, mentionId: mention.id, status: "resolved", entityId: mention.id.slice(8), candidates: [{ entityId: mention.id.slice(8), confidence: 1, basisMentionIds: [mention.id], evidenceAssertionIds: [], rationale: "Explicit named speaker/addressee" }], rationale: "Explicit named speaker/addressee", derivation: { runId: "test", worker: "test", ontologyVersion: "entity-resolution-v1" } })));
+  const proposition = propositionSchema.parse({ id: "content", subjectEntityId: "place", relationId: "is-shut", object: { kind: "literal", value: true }, polarity: "positive", modality: "asserted", evidence: source.evidence(scene.quote) });
+  await canon.putProposition(proposition);
+  const event = canonicalEventSchema.parse({ id: "utterance", title: "A warning", participants: ["speaker", "listener"], participantPresence: [{ entityId: "speaker", mode: "physical" }, { entityId: "listener", mode: "physical" }], storyTime: { kind: "unknown" }, preconditions: [], observedOutcome: { version: 1, operations: [{ op: "set", entityId: "speaker", field: "character.plan", value: "warned" }] }, causalParents: [], confidence: 1, evidence: source.evidence(scene.text) });
+  await canon.putEvent(event);
+  await canon.putClaim({ id: "claim", subject: "place", predicate: "is-shut", object: true, epistemicType: "character-claim", evidence: source.evidence(scene.quote) });
+  await canon.putAttribution({ id: "report", propositionId: "content", holderKind: "character", holderEntityId: "speaker", attitude: "asserts", certainty: 1, quotationIds: [quotation.id], evidence: source.evidence(scene.text) });
+  const expression = utteranceExpressionSchema.parse({ ontologyVersion: "utterance-expression-v1", id: "expression", canonicalEventId: event.id, speakerId: "speaker", addresseeIds: ["listener"], modality: "speech", quotation: { quotationId: quotation.id, revisionHash: contentHash(quotation), anchor: quotation.anchor }, fragments: [{ anchor: quotation.anchor, text: scene.quote }], propositionId: proposition.id, propositions: [{ propositionId: proposition.id, revisionHash: contentHash(proposition), snapshot: proposition }], evidence: source.evidence(scene.text) });
+  const paths = ["/canonicalEventId", "/speakerId", "/addresseeIds/0", "/modality", "/quotation/quotationId", "/propositionId", ...["subjectEntityId", "relationId", "polarity", "modality", "object/value"].map(key => `/propositions/0/snapshot/${key}`)];
+  const operation = { op: "learn", actorId: "listener", claimId: "claim", propositionId: "content", attributionId: "report", expressionId: "expression", acquisitionMode: "told", sourceActorId: "speaker", status: "heard", confidence: 1 } as const;
+  return { root, source, canon, anchor, mentions, quotation, proposition, event, expression, paths, operation };
+}
+
+it.each(scenes)("freezes recipient experience through compile, rebuild, memory, inference and replay: $speaker", async scene => {
+  const { root, source, canon, event, expression, quotation, proposition, paths, operation } = await setup(scene);
+  const toolset = createCompilerProposalToolset(root); await toolset.beginBatch([], "acquisitions", source.source.id);
+  const invoke = (name: string, input: unknown) => toolset.tools.find(tool => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
+  const { evidence: _canonicalEvidence, ...canonicalPayload } = event;
+  await invoke("propose_canonical_event", { proposal_id: "acquiring-event", payload: { ...canonicalPayload, observedKnowledge: { version: 1, operations: [{ ...operation, acquisitionId: "heard-warning", status: "believes" }] } }, evidence_segment_ids: [source.segmentId] });
+  const { evidence: _expressionEvidence, ...expressionPayload } = expression;
+  await invoke("propose_utterance_expression", { proposal_id: "expression", payload: { ...expressionPayload, quotation: { quotationId: quotation.id }, propositions: [{ propositionId: proposition.id }], fragments: [{ segment_id: source.segmentId, exact: scene.quote, occurrence: 1 }] }, evidence_segment_ids: [source.segmentId], evidence_selectors: paths.map(target_path => ({ segment_id: source.segmentId, exact: scene.quote, occurrence: 1, target_path, relation: "supports", strength: "explicit" })) });
+  const { evidence: _report, ...report } = await canon.getAttribution("report");
+  await invoke("propose_attribution", { proposal_id: "bind-report", payload: { ...report, expressionIds: [expression.id] }, evidence_segment_ids: [source.segmentId] });
+  for (const [id, text] of [["remember", scene.memory], ["infer", scene.inference]]) await canon.putEvent({ ...event, id: id!, title: text!, evidence: source.evidence(text!), observedOutcome: { version: 1, operations: [] }, storyTime: { kind: "relative", relation: "after", anchorEventId: event.id } });
+  await canon.putProposition({ ...proposition, id: "conclusion", relationId: "passage-unavailable", evidence: source.evidence(scene.inference) });
+  await canon.putClaim({ id: "conclusion-claim", subject: "place", predicate: "passage-unavailable", object: true, epistemicType: "inference", evidence: source.evidence(scene.inference) });
+  const reception = { received: true, understood: true, belief: "accepted" };
+  const payload = { ontologyVersion: "acquisition-v1", id: "heard-warning", actorId: "listener", canonicalEventId: event.id, cut: "event-end", claimId: "claim", propositionId: "content", basis: { mode: "told", expressionId: "expression", attributionId: "report" }, reception };
+  const acquire = async (value: typeof payload | Record<string, unknown>, exact: string, missing = false) => {
+    const basis = value.basis as Record<string, unknown>;
+    const fields = ["/actorId", "/canonicalEventId", "/cut", "/claimId", "/propositionId", "/reception/received", "/reception/understood", "/reception/belief", ...Object.keys(basis).map(key => `/basis/${key}`)];
+    return invoke("propose_acquisition", { proposal_id: value.id, payload: value, evidence_segment_ids: [source.segmentId], evidence_selectors: fields.slice(missing ? 1 : 0).map(target_path => ({ segment_id: source.segmentId, exact, target_path, relation: "supports", strength: "explicit" })) });
+  };
+  await expect(acquire(payload, scene.receipt, true)).rejects.toThrow("ACQUISITION_EVIDENCE_MISSING");
+  await acquire(payload, scene.receipt);
+  await acquire({ ...payload, id: "remember-warning", canonicalEventId: "remember", basis: { mode: "remembered", priorAcquisitionId: payload.id } }, scene.memory);
+  await acquire({ ...payload, id: "infer-passage", canonicalEventId: "infer", claimId: "conclusion-claim", propositionId: "conclusion", basis: { mode: "inferred", premiseAcquisitionIds: [payload.id], rationale: scene.inference } }, scene.inference);
+  await invoke("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent receipt, recollection and inference evidence" });
+  expect((await convergeWorldProposals(root, source.source.id)).canonical.blocked).toEqual([]);
+  expect(await canon.listAcquisitions()).toHaveLength(3);
+  const initial = { version: 1 as const, operations: [{ op: "set" as const, entityId: "speaker", field: "character.plan", value: "warn" }, { op: "set" as const, entityId: "speaker", field: "character.alive", value: true }, { op: "set" as const, entityId: "listener", field: "character.alive", value: true }] };
+  await new InitialWorldStore(root).put({ version: 1, evidence: source.evidence(scene.receipt), delta: initial, participantPresence: event.participantPresence });
+  await new CompilerBatchStore(root).replaceCompleted(source.source.id, (await prepareCompilerBatches(root, source.source)).map(item => item.id));
+  const cacheRoot = path.join(root, "cache"), cache = new PreparedNovelCache(root, cacheRoot), bundle = await cache.candidateSnapshot(source.source), archived = await cache.archiveCandidate(source.source);
+  expect(buildPreparedClosure(bundle).issues).toEqual([]);
+  const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-acquisition-clone-")); roots.push(cloneRoot);
+  const cloneSource = await createEvidenceFixture(cloneRoot, scene.text);
+  await new PreparedNovelCache(cloneRoot, cacheRoot).restoreCompilerCheckpoint(cloneSource.source, archived.bundleHash!);
+  const contexts = new WorldContextStore(cloneRoot), context = await contexts.captureCurrent(cloneSource.source.id), engine = new WorldEngine(cloneRoot, context);
+  const head = await engine.createBranch("main", "Before receipt", initial, undefined, undefined, undefined, [], {}, { realizesCanonicalEventIds: [] });
+  await new WorldRuntime(engine, () => []).forkBranch("main", head, "silent", "No acquired experience");
+  const received = { ...operation, acquisitionId: payload.id, status: "believes" };
+  const proposal = { proposalId: "receive", branchId: "main", expectedParentCommit: head, source: "canon-candidate", title: "Receive warning", participants: event.participants, participantPresence: event.participantPresence, preconditions: [], proposedTime: { kind: "unknown" }, proposedDelta: event.observedOutcome, proposedKnowledge: { version: 1, operations: [received] }, possibilityId: "canon-utterance", causalParents: [], evidence: [] };
+  const receipt = await engine.commitProposal(proposal as never); expect(receipt.report.errors).toEqual([]);
+  const learned = await engine.projections.project(receipt.newHead, { fresh: true, useCheckpoints: false });
+  expect(learned.knowledge.acquisitions?.[payload.id]).toMatchObject({ actorId: "listener", reception });
+  const remembered = { op: "learn", actorId: "listener", claimId: "claim", propositionId: "content", acquisitionId: "remember-warning", acquisitionMode: "remembered", status: "believes", confidence: 1 };
+  const recallProposal = { ...proposal, proposalId: "remember", expectedParentCommit: receipt.newHead, proposedDelta: { version: 1, operations: [] }, proposedKnowledge: { version: 1, operations: [remembered] }, possibilityId: "canon-remember" };
+  const absent = await engine.commitProposal({ ...recallProposal, branchId: "silent", expectedParentCommit: head } as never);
+  expect(absent.report.errors.some(item => item.code === "ACQUISITION_PRIOR_NOT_REALIZED" || item.message.includes("ACQUISITION_PRIOR_NOT_REALIZED"))).toBe(true);
+  const inference = { ...remembered, claimId: "conclusion-claim", propositionId: "conclusion", acquisitionId: "infer-passage", acquisitionMode: "inferred" };
+  const inferred = await engine.commitProposal({ ...recallProposal, proposalId: "infer", proposedKnowledge: { version: 1, operations: [inference] }, possibilityId: "canon-infer" } as never);
+  expect(inferred.report.errors).toEqual([]);
+  const forgotten = await engine.commitProposal({ ...recallProposal, proposalId: "forget", source: "actor", actorId: "listener", expectedParentCommit: inferred.newHead, possibilityId: undefined, proposedKnowledge: { version: 1, operations: [{ op: "forget", actorId: "listener", claimId: "claim", propositionId: "content" }] } } as never);
+  expect(forgotten.report.errors).toEqual([]);
+  const missingPremise = await engine.commitProposal({ ...recallProposal, proposalId: "infer-forgotten", expectedParentCommit: forgotten.newHead, proposedKnowledge: { version: 1, operations: [inference] }, possibilityId: "canon-infer" } as never);
+  expect(missingPremise.report.errors.some(item => item.code === "ACQUISITION_PREMISE_UNAVAILABLE" || item.message.includes("ACQUISITION_PREMISE_UNAVAILABLE"))).toBe(true);
+  const recalled = await engine.commitProposal({ ...recallProposal, expectedParentCommit: forgotten.newHead } as never); expect(recalled.report.errors).toEqual([]);
+  expect((await engine.projections.project(recalled.newHead, { fresh: true, useCheckpoints: false })).knowledge.acquisitions?.["remember-warning"]).toMatchObject({ actorId: "listener", propositionId: "content" });
+  expect((await engine.projections.project(head, { fresh: true, useCheckpoints: false })).knowledge.acquisitions).toBeUndefined();
+  expect((await new KnowledgeProjector(engine).view("listener", recalled.newHead)).knowledge.map(entry => entry.fact.claimId)).toContain("conclusion-claim");
+  const { acquisitionId: _removed, ...stripped } = received;
+  expect((await engine.commitProposal({ ...proposal, branchId: "silent", proposedKnowledge: { version: 1, operations: [stripped] } } as never)).report.errors.some(item => item.code === "ACQUISITION_REQUIRED" || item.message.includes("ACQUISITION_REQUIRED"))).toBe(true);
+  const stored = (await canon.listAcquisitions()).find(item => item.id === payload.id)!;
+  const frozenCatalog = acquisitionCatalog(context);
+  const revisedPropositions = new Map(context.propositions); revisedPropositions.set(proposition.id, { ...proposition, object: { kind: "literal", value: false } });
+  expect(validateAcquisition(stored, { ...frozenCatalog, propositions: revisedPropositions }).some(issue => issue.code === "ACQUISITION_REVISION_MISMATCH")).toBe(true);
+  expect(validateAcquisition({ ...stored, basis: { mode: "remembered", priorAcquisitionId: stored.id } }, frozenCatalog).some(issue => issue.code === "ACQUISITION_DEPENDENCY_CYCLE")).toBe(true);
+  const rememberedRecord = context.acquisitions!.get("remember-warning")!;
+  expect(validateAcquisition({ ...rememberedRecord, actorId: "speaker" }, frozenCatalog).some(issue => issue.code === "ACQUISITION_PRIOR_MISMATCH")).toBe(true);
+  const projectedEvents = new Map(context.events); projectedEvents.set(event.id, { ...context.events!.get(event.id)!, title: "Derived execution display" });
+  expect(validateAcquisition(stored, { ...frozenCatalog, events: projectedEvents })).toEqual([]);
+  const staleBundle = structuredClone(bundle); staleBundle.canonical.acquisitions.find(item => item.id === stored.id)!.revisions[0]!.hash = "0".repeat(64);
+  expect(buildPreparedClosure(staleBundle).issues.some(issue => issue.code === "CLOSURE_REVISION_MISMATCH")).toBe(true);
+  await new EvidenceAssertionStore(root).replaceForArtifact("acquisition", stored.id, contentHash(stored), []);
+  await expect(cache.candidateSnapshot(source.source)).rejects.toThrow("Acquisition evidence");
+  expect((await contexts.load(context.canonicalSnapshotHash!)).acquisitions?.get(stored.id)).toEqual(stored);
+  const unverified = createCompilerProposalToolset(root); await unverified.beginBatch([], "unverified-new", source.source.id);
+  const { evidence: _eventEvidence, ...eventPayload } = event;
+  await expect(unverified.tools.find(tool => tool.name === "propose_canonical_event")!.execute("new-legacy", { proposal_id: "new-unverified", payload: { ...eventPayload, id: "new-unverified", observedKnowledge: { version: 1, operations: [operation] } }, evidence_segment_ids: [source.segmentId] } as never, undefined, undefined, {} as never)).rejects.toThrow("ACQUISITION_REQUIRED");
+  await expect(canon.getEvent("new-unverified")).rejects.toMatchObject({ code: "ENOENT" });
+});
+it.each(scenes)("separates reading, uncomprehended receipt and mistaken sources: $speaker", async original => {
+  for (const mode of ["read", "deceived-misattributed", "ununderstood"] as const) {
+    const text = mode === "read" ? `${original.speaker} writes a notice for ${original.listener}: "${original.quote}". ${original.listener} reads, understands and believes it.`
+      : mode === "deceived-misattributed" ? `${original.speaker}, impersonating Ivo, tells ${original.listener}: "${original.quote}". ${original.listener} understands, believes it, and mistakes the speaker for Ivo.`
+      : `${original.speaker} tells ${original.listener} in an unfamiliar language: "${original.quote}". ${original.listener} hears the sounds but does not understand or form a belief.`;
+    const scene = { ...original, text, receipt: text };
+    const { root, source, canon, event, expression, quotation, proposition, paths } = await setup(scene);
+    const toolset = createCompilerProposalToolset(root); await toolset.beginBatch([], mode, source.source.id);
+    const invoke = (name: string, input: unknown) => toolset.tools.find(tool => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
+    if (mode === "read") {
+      await canon.putEntity({ id: "notice", kind: "artifact", canonicalName: "notice", aliases: [], evidence: source.evidence("notice") });
+      await canon.putEvent({ ...event, participants: [...event.participants, "notice"] });
+    }
+    if (mode === "deceived-misattributed") await canon.putEntity({ id: "ivo", kind: "character", canonicalName: "Ivo", aliases: [], evidence: source.evidence("Ivo") });
+    const { evidence: _source, ...base } = expression;
+    await invoke("propose_utterance_expression", { proposal_id: "expression", payload: { ...base, ...(mode === "read" ? { modality: "writing", documentId: "notice" } : {}), quotation: { quotationId: quotation.id }, propositions: [{ propositionId: proposition.id }], fragments: [{ segment_id: source.segmentId, exact: scene.quote }] }, evidence_segment_ids: [source.segmentId], evidence_selectors: [...paths, ...(mode === "read" ? ["/documentId"] : [])].map(target_path => ({ segment_id: source.segmentId, exact: target_path === "/documentId" ? "notice" : scene.quote, target_path, relation: "supports", strength: "explicit" })) });
+    const { evidence: _report, ...report } = await canon.getAttribution("report");
+    await invoke("propose_attribution", { proposal_id: "report", payload: { ...report, expressionIds: [expression.id], ...(mode === "read" ? { holderKind: "document", holderEntityId: "notice" } : {}) }, evidence_segment_ids: [source.segmentId] });
+    const basis = mode === "read" ? { mode, expressionId: expression.id, attributionId: "report", documentId: "notice" }
+      : mode === "deceived-misattributed" ? { mode, expressionId: expression.id, attributionId: "report", actualSourceActorId: "speaker", believedSourceActorId: "ivo" }
+      : { mode: "told", expressionId: expression.id, attributionId: "report" };
+    const reception = { received: true, understood: mode !== "ununderstood", belief: mode === "ununderstood" ? "undecided" : "accepted" };
+    const payload = { ontologyVersion: "acquisition-v1", id: "received", actorId: "listener", canonicalEventId: event.id, cut: "event-end", claimId: "claim", propositionId: "content", basis, reception };
+    const fields = ["/actorId", "/canonicalEventId", "/cut", "/claimId", "/propositionId", "/reception/received", "/reception/understood", "/reception/belief", ...Object.keys(basis).map(key => `/basis/${key}`)];
+    await invoke("propose_acquisition", { proposal_id: "received", payload, evidence_segment_ids: [source.segmentId], evidence_selectors: fields.map(target_path => ({ segment_id: source.segmentId, exact: text, target_path, relation: "supports", strength: "explicit" })) });
+    await invoke("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent reception without truth promotion" });
+    expect((await convergeWorldProposals(root, source.source.id)).canonical.blocked).toEqual([]);
+    const context = await new WorldContextStore(root).captureCurrent(source.source.id), engine = new WorldEngine(root, context);
+    const initial = { version: 1 as const, operations: [{ op: "set" as const, entityId: "speaker", field: "character.alive", value: true }, { op: "set" as const, entityId: "listener", field: "character.alive", value: true }] };
+    const head = await engine.createBranch("main", "Before receipt", initial, undefined, undefined, undefined, [], {}, { realizesCanonicalEventIds: [] });
+    const operation = { op: "learn", actorId: "listener", claimId: "claim", propositionId: "content", acquisitionId: payload.id, expressionId: expression.id, attributionId: "report", acquisitionMode: basis.mode, status: mode === "ununderstood" ? "heard" : "believes", confidence: 1, ...(mode === "read" ? {} : { sourceActorId: "speaker" }) };
+    const proposal = { proposalId: "receive", branchId: "main", expectedParentCommit: head, source: "canon-candidate", title: "Receive content", participants: (await canon.getEvent(event.id)).participants, participantPresence: event.participantPresence, preconditions: [], proposedTime: { kind: "unknown" }, proposedDelta: event.observedOutcome, proposedKnowledge: { version: 1, operations: [operation] }, possibilityId: "canon-utterance", causalParents: [], evidence: [] };
+    const wrongProposal = { ...proposal, proposedKnowledge: { version: 1, operations: [{ ...operation, status: "knows" }] } };
+    if (mode === "deceived-misattributed") await expect(engine.commitProposal(wrongProposal as never)).rejects.toThrow("knows");
+    else expect((await engine.commitProposal(wrongProposal as never)).report.errors.some(item => item.code === "ACQUISITION_RECEPTION_MISMATCH")).toBe(true);
+    const committed = await engine.commitProposal(proposal as never); expect(committed.report.errors).toEqual([]);
+    const projection = await engine.projections.project(committed.newHead, { fresh: true, useCheckpoints: false });
+    expect(projection.knowledge.actors.listener?.claim?.reception).toEqual(reception);
+    const view = await new KnowledgeProjector(engine).view("listener", committed.newHead);
+    if (mode === "ununderstood") expect(view.knowledge).toEqual([]);
+    if (mode === "deceived-misattributed") {
+      expect(projection.knowledge.actors.listener?.claim?.sourceActorId).toBe("speaker");
+      expect(view.knowledge[0]?.fact.sourceActorId).toBe("ivo");
+      expect(view.knowledge[0]?.attribution?.holderEntityId).toBe("ivo");
+    }
+    expect(projection.state.values.place).toBeUndefined();
+  }
+});

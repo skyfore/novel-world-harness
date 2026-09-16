@@ -89,7 +89,7 @@ export function validateAttributionExpressions(attribution: Attribution, express
 /** No expression is inferred for legacy records. Canonical existence is not occurrence. */
 export function validateExpressionAcquisition(operation: KnowledgeOperation, expressions: ReadonlyMap<string, UtteranceExpression>,
   realizedCanonicalEventIds?: ReadonlySet<string>, attributions?: ReadonlyMap<string, Attribution>): ValidationIssue[] {
-  if (operation.op !== "learn") return [];
+  if (operation.op !== "learn" || operation.acquisitionId) return [];
   const fail = (code: string, message: string): ValidationIssue[] => [{ code, message, path: "expressionId" }];
   const bound = operation.attributionId ? attributions?.get(operation.attributionId)?.expressionIds : undefined;
   if (bound?.length && (!operation.expressionId || !bound.includes(operation.expressionId))) return fail("ACQUISITION_EXPRESSION_REQUIRED", "This attribution requires its explicit expression proof. Preserve attribution, proposition and acquisition mode; discover the named expression in the same scope and make at most one corrected retry. Stop if unavailable; do not remove the reference to fall back to legacy acquisition.");

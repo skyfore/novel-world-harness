@@ -1,3 +1,4 @@
+import { acquisitionCatalog, validateAcquisitionOperation, type Acquisition, type AcquisitionReceipt } from "./acquisition.js";
 import { validatePerceptionAcquisition, type PerceptionObservation } from "./perception-observation.js";
 import { validateExpressionAcquisition, type UtteranceExpression } from "./utterance-expression.js";
 import type {
@@ -21,6 +22,7 @@ import type { BranchSemanticState } from "./semantic-effects.js";
 export type KnowledgeState = {
   atCommit: CommitId;
   actors: Record<EntityId, Record<string, KnowledgeFact>>;
+  acquisitions?: Record<string, AcquisitionReceipt>;
 };
 
 export type ActorWorldView = {
@@ -50,6 +52,8 @@ export type KnowledgeReducerContext = {
   propositions?: ReadonlyMap<string, Proposition>;
   attributions?: ReadonlyMap<string, Attribution>;
   utteranceExpressions?: ReadonlyMap<string, UtteranceExpression>;
+  acquisitions?: ReadonlyMap<string, Acquisition>;
+  currentCanonicalEventIds?: ReadonlySet<string>;
   perceptionObservations?: ReadonlyMap<string, PerceptionObservation>;
   perceptionOccurrence?: Parameters<typeof validatePerceptionAcquisition>[2];
   realizedCanonicalEventIds?: ReadonlySet<string>;
@@ -72,11 +76,15 @@ export function applyKnowledgeDelta(
   context: KnowledgeReducerContext,
 ): KnowledgeState {
   const actors = structuredClone(input.actors);
+  const receipts = structuredClone(input.acquisitions ?? {});
   const hasClaim = (id: string) => Boolean(context.branchSemantics.claims[id]) || Boolean(context.claims?.has(id));
   const hasProposition = (id: string) => Boolean(context.branchSemantics.propositions[id]) || Boolean(context.propositions?.has(id));
   const hasAttribution = (id: string) => Boolean(context.branchSemantics.attributions[id]) || Boolean(context.attributions?.has(id));
 
   for (const operation of delta.operations) {
+    const acquisitionIssues = validateAcquisitionOperation(operation, acquisitionCatalog(context), { knowledge: input, currentEventIds: context.currentCanonicalEventIds, realizedEventIds: context.realizedCanonicalEventIds });
+    if (acquisitionIssues.length) throw new Error(acquisitionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
+
     const perceptionIssues = validatePerceptionAcquisition(operation, { observations: context.perceptionObservations ?? new Map(), propositions: context.propositions ?? new Map() }, context.perceptionOccurrence);
     if (perceptionIssues.length) throw new Error(perceptionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     const expressionIssues = validateExpressionAcquisition(operation, context.utteranceExpressions ?? new Map(), context.realizedCanonicalEventIds, context.attributions);
@@ -115,6 +123,8 @@ export function applyKnowledgeDelta(
         throw new Error(`Knowledge source ${operation.sourceActorId} is not a character or communication system`);
       }
     }
+    const acquisition = operation.acquisitionId ? context.acquisitions?.get(operation.acquisitionId) : undefined;
+    if (acquisition) receipts[acquisition.id] = { acquisitionId: acquisition.id, revisionHash: contentHash(acquisition), actorId: acquisition.actorId, propositionId: acquisition.propositionId, acquiredAtCommit: commitId, reception: acquisition.reception };
     actor[operation.claimId] = {
       actorId: operation.actorId,
       claimId: operation.claimId,
@@ -122,6 +132,7 @@ export function applyKnowledgeDelta(
       ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
       ...(operation.expressionId ? { expressionId: operation.expressionId } : {}),
       ...(operation.perceptionId ? { perceptionId: operation.perceptionId } : {}),
+      ...(acquisition ? { acquisitionId: acquisition.id, reception: acquisition.reception } : {}),
       ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
       status: operation.status,
       confidence: operation.confidence,
@@ -129,11 +140,11 @@ export function applyKnowledgeDelta(
       ...(operation.sourceActorId ? { sourceActorId: operation.sourceActorId } : {}),
     };
   }
-  return { atCommit: commitId, actors };
+  return { atCommit: commitId, actors, ...(Object.keys(receipts).length ? { acquisitions: receipts } : {}) };
 }
 
 export function isActionableKnowledge(fact: KnowledgeFact): boolean {
-  return fact.status !== "disbelieves";
+  return fact.status !== "disbelieves" && fact.reception?.understood !== false;
 }
 
 export function actionableKnowledgeEntries(
@@ -167,6 +178,7 @@ export class KnowledgeProjector {
     const knowledge = projection.knowledge;
     const sourceId = await resolveCommitSourceId(this.engine, context, commitId);
     const facts = Object.values(knowledge.actors[actorId] ?? {})
+      .filter(fact => fact.reception?.understood !== false)
       .sort((left, right) => left.claimId.localeCompare(right.claimId))
       .map((fact) => {
         const branchClaim = projection.semantics.claims[fact.claimId];
@@ -193,6 +205,14 @@ export class KnowledgeProjector {
               evidence: [],
             }
           : undefined);
+        const basis = fact.acquisitionId ? context.acquisitions?.get(fact.acquisitionId)?.basis : undefined;
+        if (basis?.mode === "deceived-misattributed") return {
+          fact: { ...fact, sourceActorId: basis.believedSourceActorId },
+          claim: claim ? { ...claim, ...(claim.speaker ? { speaker: basis.believedSourceActorId } : {}) } : undefined,
+          proposition,
+          attribution: attribution ? { ...attribution, holderEntityId: basis.believedSourceActorId, evidence: [] } : undefined,
+          branchGrounded: Boolean(branchClaim),
+        };
         return { fact, claim, proposition, attribution, branchGrounded: Boolean(branchClaim) };
       })
       .map(({ fact, claim, proposition, attribution, branchGrounded }) => ({

@@ -540,3 +540,10 @@ it("bounds perception recovery and stops stale or unrealized sensory proof", () 
   expect(advice.steps.join(" ")).toContain("results[].ref");
   expect(advice.retryCondition).toContain("one corrected retry");
 });
+it("stops unavailable acquisition history and discovers typed dependencies within source scope", () => {
+  for (const code of ["ACQUISITION_REVISION_MISMATCH", "ACQUISITION_DEPENDENCY_CYCLE", "ACQUISITION_PRIOR_NOT_REALIZED", "ACQUISITION_PREMISE_UNAVAILABLE", "ACQUISITION_CUT_NOT_CURRENT"]) expect(buildNwhToolRecoveryAdvice("propose_acquisition", code).retryable).toBe(false);
+  const missing = buildNwhToolRecoveryAdvice("propose_acquisition", "ACQUISITION_DEPENDENCY_MISSING: acquisition/prior");
+  expect(missing.retryable).toBe(true);
+  expect(missing.steps.join(" ")).toContain("results[].readArguments.ref");
+  expect(missing.retryCondition).toContain("one materially corrected retry");
+});

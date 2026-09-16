@@ -563,6 +563,7 @@ export type StateOperation = z.infer<typeof stateOperationSchema>;
 export const stateDeltaSchema = z.object({ version: z.literal(1), operations: z.array(stateOperationSchema) }).strict();
 export type StateDelta = z.infer<typeof stateDeltaSchema>;
 
+export const knowledgeReceptionSchema = z.object({ received: z.literal(true), understood: z.boolean(), belief: z.enum(["accepted", "rejected", "undecided"]) }).strict();
 export const knowledgeStatusSchema = z.enum(["knows", "believes", "suspects", "heard", "disbelieves"]);
 export const knowledgeAcquisitionModeSchema = z.enum([
   "observed",
@@ -582,6 +583,7 @@ export const knowledgeOperationSchema = z.discriminatedUnion("op", [
     attributionId: idSchema.optional(),
     expressionId: idSchema.optional(),
     perceptionId: idSchema.optional(),
+    acquisitionId: idSchema.optional(),
     acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
     status: knowledgeStatusSchema,
     confidence: z.number().min(0).max(1),
@@ -590,7 +592,7 @@ export const knowledgeOperationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("forget"), actorId: idSchema, claimId: idSchema, propositionId: idSchema.optional() }).strict(),
 ]).superRefine((value, ctx) => {
   if (value.op !== "learn") return;
-  const semantic = Boolean(value.propositionId || value.attributionId || value.acquisitionMode || value.expressionId || value.perceptionId);
+  const semantic = Boolean(value.propositionId || value.attributionId || value.acquisitionMode || value.expressionId || value.perceptionId || value.acquisitionId);
   if (semantic && !value.propositionId) {
     ctx.addIssue({ code: "custom", path: ["propositionId"], message: "Semantic knowledge acquisition requires propositionId" });
   }
@@ -1840,10 +1842,12 @@ export const knowledgeFactSchema = z.object({
   attributionId: idSchema.optional(),
   expressionId: idSchema.optional(),
   perceptionId: idSchema.optional(),
+  acquisitionId: idSchema.optional(),
   acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
   status: knowledgeStatusSchema,
   confidence: z.number().min(0).max(1),
   acquiredAtCommit: idSchema,
+  reception: knowledgeReceptionSchema.optional(),
   sourceActorId: idSchema.optional(),
 }).strict();
 export type KnowledgeFact = z.infer<typeof knowledgeFactSchema>;
@@ -1859,4 +1863,4 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
 export const WORLD_SCHEMA_VERSION = 3;
-export const WORLD_ENGINE_VERSION = "0.16.0";
+export const WORLD_ENGINE_VERSION = "0.17.0";

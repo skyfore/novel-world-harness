@@ -292,6 +292,8 @@ export class ProjectionService {
               attributions: context.attributions,
               utteranceExpressions: context.utteranceExpressions,
               perceptionObservations: context.perceptionObservations,
+              acquisitions: context.acquisitions,
+              currentCanonicalEventIds: new Set(event.realizesCanonicalEventIds ?? []),
               perceptionOccurrence: { eventIds: new Set(event.realizesCanonicalEventIds ?? []), before: entry.commit.parentCommitId ? stateBeforeEffects : state, after: state, schema: context.stateSchema },
               realizedCanonicalEventIds: new Set([...history.flatMap(item => item.event.realizesCanonicalEventIds ?? []), ...(event.realizesCanonicalEventIds ?? [])]),
               branchSemantics: semantics,

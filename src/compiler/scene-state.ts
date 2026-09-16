@@ -25,6 +25,8 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     sourceId: bundle.source.id, entities: new Map(c.entities.map((item) => [item.id, item])), rules: new Map(c.rules.map((item) => [item.id, item])),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS), events: new Map(events.map((item) => [item.id, item])),
     claims: new Map(c.claims.map((item) => [item.id, item])), propositions: new Map(c.propositions.map((item) => [item.id, item])), attributions: new Map(c.attributions.map((item) => [item.id, item])),
+    sourceEventRevisions: new Map(c.events.map(event => [event.id, contentHash(event)])),
+    acquisitions: new Map((c.acquisitions ?? []).map(item => [item.id, item])), utteranceExpressions: new Map((c.utteranceExpressions ?? []).map(item => [item.id, item])), perceptionObservations: new Map((c.perceptionObservations ?? []).map(item => [item.id, item])),
     actionSchemas: new Map(c.actionSchemas.map((item) => [item.id, item])), actionConstraints: new Map(c.actionConstraints.map((item) => [item.id, item])),
     processTemplates: new Map(c.processTemplates.map((item) => [item.id, item])), normTemplates: new Map(c.normTemplates.map((item) => [item.id, item])),
     spatialOntologyVersion: "spatial-v1", spatialRelations: c.spatialRelations, eventRelations: c.eventRelations,
@@ -46,10 +48,10 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     applyNormDelta(emptyNormState(state.atCommit), seed.norms, { entities: context.entities, templates: context.normTemplates!, postState: state,
       normativeRuleIds: new Set(c.rules.filter(isNormativeWorldRule).map((rule) => rule.id)) }, provenance);
   }
-  const knowledgeContext = { entities: context.entities, claims: context.claims, propositions: context.propositions, attributions: context.attributions, branchSemantics: semantics };
+  const knowledgeContext = { acquisitions: context.acquisitions, utteranceExpressions: context.utteranceExpressions, perceptionObservations: context.perceptionObservations, entities: context.entities, claims: context.claims, propositions: context.propositions, attributions: context.attributions, branchSemantics: semantics };
   let knowledge = emptyKnowledgeState(state.atCommit);
   const initialKnowledge = checkpoint?.knowledge ?? (!checkpoint ? opening.knowledge : undefined);
-  if (initialKnowledge) knowledge = applyKnowledgeDelta(knowledge, initialKnowledge, state.atCommit, knowledgeContext);
+  if (initialKnowledge) knowledge = applyKnowledgeDelta(knowledge, initialKnowledge, state.atCommit, { ...knowledgeContext, currentCanonicalEventIds: new Set<string>(), realizedCanonicalEventIds: new Set<string>() });
   const aliases = new Map(events.map((occurrence) => [occurrence.id, new Set([occurrence.id])]));
   for (const relation of c.eventRelations.filter((item) => item.type === "coreference" && item.status !== "contested")) {
     const group = new Set([...(aliases.get(relation.fromEventId) ?? []), ...(aliases.get(relation.toEventId) ?? [])]);
@@ -63,13 +65,13 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     const initiator = occurrence.action?.lane === "schema-bound" ? occurrence.action.roleBindings.find((role) => role.roleId === schema?.initiatorRoleId)?.entityIds[0]
       : c.eventParticipations.find((participation) => participation.eventId === occurrence.id && participation.role === "agent")?.entityId;
     const result = validateEventProposal({ proposalId: `scene-${occurrence.id}`, branchId: "scene-validation", expectedParentCommit: before.atCommit,
-      source: initiator ? "actor" : "background", ...(initiator ? { actorId: initiator } : {}), title: occurrence.title, participants: occurrence.participants,
+      source: initiator ? "actor" : "canon-candidate", possibilityId: `canon-${occurrence.id}`, ...(initiator ? { actorId: initiator } : {}), title: occurrence.title, participants: occurrence.participants,
       proposedTime: occurrence.storyTime, preconditions: occurrence.preconditions, proposedDelta: occurrence.observedOutcome,
       ...(occurrence.observedKnowledge ? { proposedKnowledge: occurrence.observedKnowledge } : {}), ...(occurrence.action ? { action: occurrence.action } : {}),
       ...(occurrence.timeAdvance ? { timeAdvance: occurrence.timeAdvance } : {}), causalParents: occurrence.causalParents, evidence: occurrence.evidence,
-    }, before.atCommit, before, context, { branchSemantics: semantics, realizedCanonicalEventIds: realized, deferMateriality: true });
+    }, before.atCommit, before, context, { knowledge, branchSemantics: semantics, realizedCanonicalEventIds: realized, deferMateriality: true });
     if (!result.report.accepted || !result.postState) throw new Error(result.report.errors.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
-    if (occurrence.observedKnowledge) knowledge = applyKnowledgeDelta(knowledge, occurrence.observedKnowledge, before.atCommit, knowledgeContext);
+    if (occurrence.observedKnowledge) knowledge = applyKnowledgeDelta(knowledge, occurrence.observedKnowledge, before.atCommit, { ...knowledgeContext, currentCanonicalEventIds: new Set([occurrence.id]), realizedCanonicalEventIds: new Set([...realized, occurrence.id]), perceptionOccurrence: { eventIds: new Set([occurrence.id]), before, after: result.postState, schema: context.stateSchema } });
     return result.postState;
   };
   for (const id of cut.replayEventIds) { state = execute(context.events!.get(id)!, state); for (const alias of aliases.get(id) ?? [id]) realized.add(alias); }

@@ -1,3 +1,4 @@
+import { acquisitionSchema, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
 import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
 import { perceptionObservationSchema, validatePerceptionObservationEvidence } from "../world/perception-observation.js";
 import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.js";
@@ -133,6 +134,7 @@ const preparedCanonicalSchema = z.object({
   eventFrames: z.array(eventFrameSchema),
   semanticEffects: z.array(semanticEffectSchema).default([]),
   perceptionObservations: z.array(perceptionObservationSchema).default([]),
+  acquisitions: z.array(acquisitionSchema).default([]),
   utteranceExpressions: z.array(utteranceExpressionSchema).default([]),
   actionSchemas: z.array(actionSchemaSchema),
   eventExecutions: z.array(eventExecutionSchema).default([]),
@@ -267,6 +269,7 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     bundle.canonical.eventFrames,
     bundle.canonical.semanticEffects ?? [],
     bundle.canonical.perceptionObservations ?? [],
+    bundle.canonical.acquisitions ?? [],
     bundle.canonical.utteranceExpressions ?? [],
     bundle.canonical.eventExecutions,
     bundle.canonical.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
@@ -855,6 +858,7 @@ export class PreparedNovelCache {
       eventFrames: fromSource(eventFrames),
       semanticEffects: fromSource(await canonical.listSemanticEffects()),
       perceptionObservations: fromSource(await canonical.listPerceptionObservations()),
+      acquisitions: fromSource(await canonical.listAcquisitions()),
       utteranceExpressions: fromSource(await canonical.listUtteranceExpressions()),
       eventExecutions: fromSource(eventExecutions),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module")
@@ -985,6 +989,7 @@ export class PreparedNovelCache {
       ["event frame", current.eventFrames, expected.eventFrames, (item: { id: string }) => item.id],
       ["semantic effect", current.semanticEffects, expected.semanticEffects, (item: { id: string }) => item.id],
       ["perception observation", current.perceptionObservations, expected.perceptionObservations, (item: { id: string }) => item.id],
+      ["acquisition", current.acquisitions, expected.acquisitions, (item: { id: string }) => item.id],
       ["utterance expression", current.utteranceExpressions, expected.utteranceExpressions, (item: { id: string }) => item.id],
       ["action schema", current.actionSchemas, expected.actionSchemas, (item: { id: string }) => item.id],
       ["event execution", current.eventExecutions, expected.eventExecutions, (item: { id: string }) => item.id],
@@ -1054,6 +1059,7 @@ export class PreparedNovelCache {
       ["event frames", fromSource(current.eventFrames), bundle.canonical.eventFrames, (item: { id: string }) => item.id],
       ["semantic effects", fromSource(current.semanticEffects), bundle.canonical.semanticEffects ?? [], (item: { id: string }) => item.id],
       ["perception observations", fromSource(current.perceptionObservations), bundle.canonical.perceptionObservations ?? [], (item: { id: string }) => item.id],
+      ["acquisitions", fromSource(current.acquisitions), bundle.canonical.acquisitions ?? [], (item: { id: string }) => item.id],
       ["utterance expressions", fromSource(current.utteranceExpressions), bundle.canonical.utteranceExpressions ?? [], (item: { id: string }) => item.id],
       ["event executions", current.eventExecutions.filter((binding) => binding.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.eventExecutions, (item: { id: string }) => item.id],
       ["action schemas", current.actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || schema.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionSchemas, (item: { id: string }) => item.id],
@@ -1217,6 +1223,7 @@ export class PreparedNovelCache {
       await removeMissing(current.eventFrames, new Set(bundle.canonical.eventFrames.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-frames", id));
       await removeMissing(current.semanticEffects, new Set((bundle.canonical.semanticEffects ?? []).map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("semantic-effects", id));
       await removeMissing(current.perceptionObservations, new Set((bundle.canonical.perceptionObservations ?? []).map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("perception-observations", id));
+      await removeMissing(current.acquisitions, new Set((bundle.canonical.acquisitions ?? []).map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("acquisitions", id));
       await removeMissing(current.utteranceExpressions, new Set((bundle.canonical.utteranceExpressions ?? []).map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("utterance-expressions", id));
       await removeMissing(current.eventExecutions, new Set(bundle.canonical.eventExecutions.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-executions", id));
       await removeMissing(current.actionSchemas, new Set(bundle.canonical.actionSchemas.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-schemas", id));
@@ -1241,6 +1248,7 @@ export class PreparedNovelCache {
     for (const frame of bundle.canonical.eventFrames) await canonical.putEventFrame(frame);
     for (const frame of bundle.canonical.semanticEffects ?? []) await canonical.putSemanticEffect(frame);
     for (const frame of bundle.canonical.perceptionObservations ?? []) await canonical.putPerceptionObservation(frame);
+    for (const frame of bundle.canonical.acquisitions ?? []) await canonical.putAcquisition(frame);
     for (const frame of bundle.canonical.utteranceExpressions ?? []) await canonical.putUtteranceExpression(frame);
     for (const binding of bundle.canonical.eventExecutions) await canonical.putEventExecution(binding);
     for (const schema of bundle.canonical.actionSchemas) await canonical.putActionSchema(schema);
@@ -1440,6 +1448,7 @@ function preparedArtifactDescriptors(canonical: {
   eventFrames: PreparedCanonical["eventFrames"];
   semanticEffects: PreparedCanonical["semanticEffects"];
   perceptionObservations: PreparedCanonical["perceptionObservations"];
+  acquisitions: PreparedCanonical["acquisitions"];
   utteranceExpressions: PreparedCanonical["utteranceExpressions"];
   actionSchemas: PreparedCanonical["actionSchemas"];
   eventExecutions: PreparedCanonical["eventExecutions"];
@@ -1465,6 +1474,7 @@ function preparedArtifactDescriptors(canonical: {
     ...canonical.eventFrames.map((payload) => ({ kind: "event-frame", id: payload.id, payload })),
     ...(canonical.semanticEffects ?? []).map((payload) => ({ kind: "semantic-effect", id: payload.id, payload })),
     ...(canonical.perceptionObservations ?? []).map((payload) => ({ kind: "perception-observation", id: payload.id, payload })),
+    ...(canonical.acquisitions ?? []).map((payload) => ({ kind: "acquisition", id: payload.id, payload })),
     ...(canonical.utteranceExpressions ?? []).map((payload) => ({ kind: "utterance-expression", id: payload.id, payload })),
     ...canonical.eventExecutions.map((payload) => ({ kind: "event-execution", id: payload.id, payload })),
     ...canonical.actionSchemas.map((payload) => ({ kind: "action-schema", id: payload.id, payload })),
@@ -1515,6 +1525,7 @@ async function currentCanonical(workspaceRoot: string) {
     eventFrames: await canonical.listEventFrames(),
     semanticEffects: await canonical.listSemanticEffects(),
     perceptionObservations: await canonical.listPerceptionObservations(),
+    acquisitions: await canonical.listAcquisitions(),
     utteranceExpressions: await canonical.listUtteranceExpressions(),
     actionSchemas: await canonical.listActionSchemas(),
     eventExecutions: await canonical.listEventExecutions(),
@@ -1639,6 +1650,11 @@ async function assertPreparedCompilerSnapshotEvidence(
       })];
     if (!binding || binding.artifactHash !== contentHash(expression) || issues.length) throw new Error(`Utterance expression exact evidence is incomplete or stale: ${expression.id}: ${issues.map(item => item.message).join("; ")}`);
   }
+  for (const acquisition of bundle.canonical.acquisitions ?? []) {
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "acquisition" && item.artifactId === acquisition.id);
+    const issues = validateAcquisitionEvidence(acquisition, binding?.assertions ?? []);
+    if (!binding || binding.artifactHash !== contentHash(acquisition) || issues.length) throw new Error(`Acquisition evidence is incomplete or stale: ${acquisition.id}: ${issues.map(item => item.message).join("; ")}`);
+  }
   for (const observation of bundle.canonical.perceptionObservations ?? []) {
     const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "perception-observation" && item.artifactId === observation.id);
     const issues = [...validatePerceptionObservationEvidence(observation, binding?.assertions ?? []), ...await validatePerceptionObservationTrace(workspaceRoot, observation, {
@@ -1739,6 +1755,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     eventFrames: new Map(bundle.canonical.eventFrames.map((item) => [item.id, item])),
     semanticEffects: new Map((bundle.canonical.semanticEffects ?? []).map(item => [item.id, item])),
     perceptionObservations: new Map((bundle.canonical.perceptionObservations ?? []).map(item => [item.id, item])),
+    acquisitions: new Map((bundle.canonical.acquisitions ?? []).map(item => [item.id, item])),
     utteranceExpressions: new Map((bundle.canonical.utteranceExpressions ?? []).map(item => [item.id, item])),
     actionSchemas: new Map(bundle.canonical.actionSchemas.map((item) => [item.id, item])),
     eventExecutions: new Map(bundle.canonical.eventExecutions.map((item) => [item.id, item])),
@@ -1762,6 +1779,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     ...bundle.canonical.eventFrames.map((payload) => ({ kind: "event-frame" as const, label: payload.id, payload })),
     ...(bundle.canonical.semanticEffects ?? []).map((payload) => ({ kind: "semantic-effect" as const, label: payload.id, payload })),
     ...(bundle.canonical.perceptionObservations ?? []).map((payload) => ({ kind: "perception-observation" as const, label: payload.id, payload })),
+    ...(bundle.canonical.acquisitions ?? []).map((payload) => ({ kind: "acquisition" as const, label: payload.id, payload })),
     ...(bundle.canonical.utteranceExpressions ?? []).map((payload) => ({ kind: "utterance-expression" as const, label: payload.id, payload })),
     ...bundle.canonical.eventExecutions.map((payload) => ({ kind: "event-execution" as const, label: payload.id, payload })),
     ...bundle.canonical.actionSchemas.map((payload) => ({ kind: "action-schema" as const, label: payload.id, payload })),

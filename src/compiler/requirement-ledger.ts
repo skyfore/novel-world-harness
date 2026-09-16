@@ -72,7 +72,7 @@ export function sceneCatalogHash(catalog: SceneReviewCatalog): string {
   return contentHash(Object.fromEntries(sceneCatalogKeys.map(key =>
     [key, [...(catalog[key]?.values() ?? [])].sort((a, b) => a.id.localeCompare(b.id))])));
 }
-export const sceneCatalogKeys = ["entities", "events", "eventParticipations", "actionSchemas", "eventExecutions", "normTemplates", "rules", "claims", "propositions", "attributions"] as const;
+export const sceneCatalogKeys = ["entities", "events", "eventParticipations", "actionSchemas", "eventExecutions", "normTemplates", "rules", "claims", "propositions", "attributions", "utteranceExpressions", "perceptionObservations", "acquisitions"] as const;
 
 export function evaluateRequirementSet(setInput: RequirementSet, bytes: Uint8Array, catalog: SceneReviewCatalog): RequirementResult {
   const set = requirementSetSchema.parse(setInput);

@@ -1,3 +1,5 @@
+import { contentHash } from "./canonical.js";
+import { capacityUseIssues, incapacityOnsets, validateIncapacityChanges } from "./process-capacity.js";
 import { semanticEffectRealizationIssues } from "./semantic-effect.js";
 import { deepFreeze } from "../util/immutable.js";
 import type { ResolvedWorldModelContext } from "./engine.js";
@@ -234,6 +236,7 @@ export class ProjectionService {
           throw new Error(`Non-monotonic world time at commit ${entry.id}: ${messageOf(error)}`);
         }
       }
+      const stateBeforeCommit = state;
       state = advanceTemporalState(state, entry.commit.logicalTime, context.stateSchema, context.entities);
       const eventHashes = new Set<string>();
       const commitTimeAdvanced = previousTime !== undefined && (
@@ -284,6 +287,13 @@ export class ProjectionService {
               knownCommittedEventIds,
             }, provenance);
           }
+          const processContext = { entities: context.entities, templates: context.processTemplates ?? new Map() };
+          const onsets = incapacityOnsets(context.semanticEffects?.values() ?? [], new Set(event.realizesCanonicalEventIds ?? []), processContext.templates);
+          for (const onset of onsets) if (onset.op === "start-process" && !effects.processDelta?.operations.some(operation => operation.op === "start-process" && operation.process.templateId === onset.process.templateId && contentHash(operation.process.ownerBindings) === contentHash(onset.process.ownerBindings))) throw new Error("INCAPACITY_ONSET_MISSING: Committed realization lacks its capacity process; stop for history review.");
+          if (entry.commit.parentCommitId && effects.processDelta) validateIncapacityChanges(event, effects.processDelta, processes, processContext, eventIndex === 0 ? stateBeforeCommit : stateBeforeEffects, state, provenance, onsets);
+          const processesAfter = effects.processDelta ? applyProcessDelta(processes, effects.processDelta, processContext, provenance, entry.commit.logicalTime.elapsedDays ?? 0) : processes;
+          const capacityIssues = capacityUseIssues({ ...(entry.commit.parentCommitId ? { actorId: event.actorId, spokenUtterances: event.spokenUtterances } : {}), knowledge: effects.knowledgeDelta }, processes, processesAfter, processContext.templates, context.perceptionObservations);
+          if (capacityIssues.length) throw new Error(capacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
           if (effects.knowledgeDelta) {
             knowledge = applyKnowledgeDelta(knowledge, effects.knowledgeDelta, entry.id, {
               entities: context.entities,
@@ -299,15 +309,7 @@ export class ProjectionService {
               branchSemantics: semantics,
             });
           }
-          if (effects.processDelta) {
-            processes = applyProcessDelta(
-              processes,
-              effects.processDelta,
-              { entities: context.entities, templates: context.processTemplates ?? new Map() },
-              provenance,
-              entry.commit.logicalTime.elapsedDays ?? 0,
-            );
-          }
+          processes = processesAfter;
           if (effects.normDelta) {
             norms = applyNormDelta(norms, effects.normDelta, {
               entities: context.entities,

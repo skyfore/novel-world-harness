@@ -1,3 +1,4 @@
+import { validateIncapacityEvidence } from "../world/process-capacity.js";
 import { validateAcquisition, validateAcquisitionEvidence, acquisitionSchema } from "../world/acquisition.js";
 import { validatePerceptionObservation, validatePerceptionObservationEvidence, perceptionObservationSchema } from "../world/perception-observation.js";
 import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
@@ -77,7 +78,7 @@ import {
   validateActionConstraintCatalog,
 } from "../world/action-constraint.js";
 import { NORM_ONTOLOGY_VERSION, validateNormTemplateCatalog } from "../world/norm-ontology.js";
-import { PROCESS_ONTOLOGY_VERSION, validateProcessTemplateCatalog } from "../world/process-ontology.js";
+import { PROCESS_ONTOLOGY_VERSION, processTemplateSchema, validateProcessTemplateCatalog } from "../world/process-ontology.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 export { NOVEL_SCALE_EVENT_THRESHOLD } from "./scale.js";
@@ -682,6 +683,7 @@ export async function auditCompiler(
     for (const issue of result.issues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
     const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
     if (!binding?.assertions.length) {
+      if (artifact.kind === "process-template" && processTemplateSchema.parse(artifact.payload).incapacity) { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "INCAPACITY_EVIDENCE_MISSING", message: "Incapacity process requires exact field evidence" }); }
       if (artifact.kind === "acquisition") { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "ACQUISITION_EVIDENCE_MISSING", message: "Acquisition has no exact evidence binding; it is unverified." }); }
       if (artifact.kind === "perception-observation") { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "PERCEPTION_EVIDENCE_MISSING", message: "Perception has no exact evidence binding; it is unverified." }); }
       if (artifact.kind === "utterance-expression") { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "EXPRESSION_EVIDENCE_MISSING", message: "Expression has no exact evidence binding; it is unverified." }); }
@@ -728,6 +730,7 @@ export async function auditCompiler(
     artifactsWithExactEvidence += 1;
     assertionsChecked += binding.assertions.length;
     const exactIssues = [
+      ...(artifact.kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(artifact.payload), binding.assertions) : []),
@@ -905,7 +908,7 @@ export async function auditCompiler(
   ]))).flat();
   const perceptionValidation = (await Promise.all(perceptionObservations.map(async observation => [...validatePerceptionObservation(observation, { entities: entityCatalog, events: eventCatalog }), ...await validatePerceptionObservationTrace(workspaceRoot, observation)]))).flat();
   const acquisitionValidation = acquisitions.flatMap(value => validateAcquisition(value, { entities: entityCatalog, events: eventCatalog, claims: new Map(claims.map(item => [item.id, item])), propositions: new Map(propositions.map(item => [item.id, item])), attributions: new Map(attributions.map(item => [item.id, item])), utteranceExpressions: new Map(utteranceExpressions.map(item => [item.id, item])), perceptionObservations: new Map(perceptionObservations.map(item => [item.id, item])), acquisitions: new Map(acquisitions.map(item => [item.id, item])) }));
-  const executableSemanticValidation = [...acquisitionValidation, ...perceptionValidation, ...expressionValidation, ...sceneValidation, ...frameValidation, ...actionValidation, ...semanticEffects.flatMap(effect => validateSemanticEffect(effect, { entities: entityCatalog, events: eventCatalog, actionSchemas: actionSchemaCatalog, eventParticipations: new Map(eventParticipations.map(item => [item.id, item])), eventExecutions: new Map(eventExecutions.map(item => [item.id, item])) }))];
+  const executableSemanticValidation = [...acquisitionValidation, ...perceptionValidation, ...expressionValidation, ...sceneValidation, ...frameValidation, ...actionValidation, ...semanticEffects.flatMap(effect => validateSemanticEffect(effect, { entities: entityCatalog, events: eventCatalog, actionSchemas: actionSchemaCatalog, processTemplates: new Map(processTemplates.map(item => [item.id, item])), eventParticipations: new Map(eventParticipations.map(item => [item.id, item])), eventExecutions: new Map(eventExecutions.map(item => [item.id, item])) }))];
   const executablePolicyValidation = [
     ...validateActionConstraintCatalog(actionConstraints, {
       entities: entityCatalog,

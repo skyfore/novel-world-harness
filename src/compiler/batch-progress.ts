@@ -4,7 +4,7 @@ import path from "node:path";
 import { worldStorageRoot } from "../world/paths.js";
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 39;
+export const COMPILER_PIPELINE_VERSION = 40;
 const SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION = 30;
 
 export type BatchProgress = {
@@ -36,8 +36,8 @@ export class CompilerBatchStore {
     if (!parsed) {
       return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };
     }
-    if (typeof parsed.pipelineVersion === "number" && [SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION, 33, 34, 35, 36, 37, 38].includes(parsed.pipelineVersion)) {
-      // Pipeline 39 adds source-grounded acquisition and reception contracts. Preserve immutable byte
+    if (typeof parsed.pipelineVersion === "number" && [SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION, 33, 34, 35, 36, 37, 38, 39].includes(parsed.pipelineVersion)) {
+      // Pipeline 40 adds source-grounded incapacity process contracts. Preserve immutable byte
       // observations only; earlier semantic/executable checkpoints cannot
       // prove the new contract. The original persisted history is untouched.
       return { ...parsed, pipelineVersion: COMPILER_PIPELINE_VERSION,

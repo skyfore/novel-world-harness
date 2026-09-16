@@ -1,3 +1,4 @@
+import type { ProcessTemplate } from "./process-ontology.js";
 import { z } from "zod";
 import { contentHash } from "./canonical.js";
 import { evidenceRefSchema, idSchema, stateValueSchema, storyTimeSchema, type CanonicalEvent, type Entity, type EventParticipation, type EvidenceAssertion, type ValidationIssue } from "./model.js";
@@ -15,12 +16,13 @@ export const semanticEffectSchema = z.discriminatedUnion("kind", [
   z.object({ ...common, kind: z.literal("state-change"), args: z.object({ field: z.string().trim().min(1), value: stateValueSchema }).strict(),
     lowering: z.discriminatedUnion("status", [unmapped, z.object({ status: z.literal("mapped"), executionId: idSchema }).strict()]) }).strict(),
   z.object({ ...common, kind: z.literal("temporary-incapacity"), args: z.object({ capacity: z.enum(["action", "speech", "perception"]),
-    duration: z.discriminatedUnion("kind", [z.object({ kind: z.literal("unknown") }).strict(), z.object({ kind: z.literal("days"), days: z.number().finite().positive() }).strict()]) }).strict(), lowering: unmapped }).strict(),
+    duration: z.discriminatedUnion("kind", [z.object({ kind: z.literal("unknown") }).strict(), z.object({ kind: z.literal("days"), days: z.number().finite().positive() }).strict()]) }).strict(), lowering: z.discriminatedUnion("status", [unmapped, z.object({ status: z.literal("mapped"), processTemplateId: idSchema }).strict()]) }).strict(),
 ]);
 export type SemanticEffect = z.infer<typeof semanticEffectSchema>;
 
 /** Meaning is source data. Only an independently validated execution can lower it. */
 export function validateSemanticEffect(effect: SemanticEffect, catalog: {
+  processTemplates?: ReadonlyMap<string, ProcessTemplate>;
   entities: ReadonlyMap<string, Entity>; events: ReadonlyMap<string, CanonicalEvent>; eventExecutions?: ReadonlyMap<string, EventExecution>; actionSchemas?: ReadonlyMap<string, ActionSchema>; eventParticipations?: ReadonlyMap<string, EventParticipation>;
 }): ValidationIssue[] {
   const issues: ValidationIssue[] = [], event = catalog.events.get(effect.canonicalEventId);
@@ -30,7 +32,13 @@ export function validateSemanticEffect(effect: SemanticEffect, catalog: {
   if (event && !event.participants.includes(effect.subjectEntityId)) fail("SEMANTIC_EFFECT_SUBJECT_OUTSIDE_EVENT", "Effect subject must participate in its occurrence", "subjectEntityId");
   if (event && contentHash(event.storyTime) !== contentHash(effect.validTime)) fail("SEMANTIC_EFFECT_TIME_MISMATCH", "Effect onset must retain its occurrence time, including unknown time", "validTime");
   if (effect.kind === "temporary-incapacity" && catalog.entities.get(effect.subjectEntityId)?.kind !== "character") fail("SEMANTIC_EFFECT_SUBJECT_KIND", "Incapacity requires a character subject", "subjectEntityId");
-  if (effect.lowering.status === "mapped") {
+  if (effect.kind === "temporary-incapacity" && effect.lowering.status === "mapped") {
+    const template = catalog.processTemplates?.get(effect.lowering.processTemplateId);
+    if (!event?.participantPresence?.some(item => item.entityId === effect.subjectEntityId && item.mode === "physical")) fail("SEMANTIC_EFFECT_PRESENCE_UNPROVEN", "Executable bodily incapacity requires the actual physical subject, not a picture or represented identity", "subjectEntityId");
+    if (!template?.incapacity || template.incapacity.capacity !== effect.args.capacity || contentHash(template.incapacity.duration) !== contentHash(effect.args.duration)
+      || template.induction.kind !== "source-pattern" || !template.induction.supportingEventIds.includes(effect.canonicalEventId)) fail("SEMANTIC_EFFECT_PROCESS_MISMATCH", "Mapped incapacity requires its source-backed capacity and exact known/unknown duration in an onset-supported process template", "lowering.processTemplateId");
+  }
+  if (effect.kind === "state-change" && effect.lowering.status === "mapped") {
     const execution = catalog.eventExecutions?.get(effect.lowering.executionId);
     if (!execution?.action || execution.canonicalEventId !== effect.canonicalEventId) fail("SEMANTIC_EFFECT_EXECUTION_MISSING", "Mapped effect requires an action execution of the same occurrence", "lowering.executionId");
     if (execution) issues.push(...validateEventExecutions([execution], { entities: catalog.entities, events: catalog.events, actionSchemas: catalog.actionSchemas ?? new Map(), participations: [...(catalog.eventParticipations?.values() ?? [])] }));
@@ -42,7 +50,7 @@ export function validateSemanticEffect(effect: SemanticEffect, catalog: {
 /** Every semantic field needs this artifact's own exact source support. */
 export function validateSemanticEffectEvidence(effect: SemanticEffect, assertions: readonly EvidenceAssertion[]): ValidationIssue[] {
   const paths = ["/canonicalEventId", "/subjectEntityId", "/kind", "/validTime", ...(effect.kind === "state-change" ? ["/args/field", "/args/value"] : ["/args/capacity", "/args/duration"])];
-  return paths.filter(pointer => !assertions.some(a => a.target.artifactKind === "semantic-effect" && a.target.artifactId === effect.id && a.target.jsonPointer === pointer && a.relation === "supports" && a.anchors.length > 0))
+  return paths.filter(pointer => !assertions.some(a => a.target.artifactKind === "semantic-effect" && a.target.artifactId === effect.id && a.target.jsonPointer === pointer && a.relation === "supports" && a.strength !== "weak-inference" && a.anchors.length > 0))
     .map(pointer => ({ code: "SEMANTIC_EFFECT_EVIDENCE_MISSING", message: `Semantic effect ${effect.id} requires exact support at ${pointer}`, path: pointer }));
 }
 

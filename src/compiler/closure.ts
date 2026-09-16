@@ -24,6 +24,7 @@ const key = (value: { kind: string; id: string }) => `${value.kind}/${value.id}`
 /** An explicit reference vocabulary, not an ID-suffix heuristic or a free-text scan. */
 const referenceFields: Readonly<Record<string, ClosureKind>> = {
   acquisitionId: "acquisition", priorAcquisitionId: "acquisition", premiseAcquisitionIds: "acquisition", actualSourceActorId: "entity", believedSourceActorId: "entity",
+  processTemplateId: "process",
   perceptionId: "perception-observation", observerId: "entity", observerMentionId: "annotation", eventMentionId: "annotation", observerResolutionId: "entity-resolution", eventResolutionId: "event-resolution",
   documentId: "entity", speakerId: "entity", addresseeIds: "entity", expressionId: "utterance-expression", expressionIds: "utterance-expression", quotationId: "annotation",
   entityId: "entity", actorId: "entity", subjectEntityId: "entity", holderEntityId: "entity", fromActorId: "entity", toActorId: "entity", debtorActorId: "entity", creditorActorId: "entity", beneficiaryActorId: "entity", sourceActorId: "entity", authorityEntityId: "entity", focalActorId: "entity", viewpointActorId: "entity", fromLocationId: "entity", toLocationId: "entity", containerLocationId: "entity", containedLocationId: "entity", locationId: "entity",

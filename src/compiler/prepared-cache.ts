@@ -1,3 +1,4 @@
+import { validateIncapacityEvidence } from "../world/process-capacity.js";
 import { acquisitionSchema, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
 import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
 import { perceptionObservationSchema, validatePerceptionObservationEvidence } from "../world/perception-observation.js";
@@ -1649,6 +1650,12 @@ async function assertPreparedCompilerSnapshotEvidence(
         resolutions: new Map(bundle.compilerSnapshot.entityResolutions.map(item => [item.mentionId, item])),
       })];
     if (!binding || binding.artifactHash !== contentHash(expression) || issues.length) throw new Error(`Utterance expression exact evidence is incomplete or stale: ${expression.id}: ${issues.map(item => item.message).join("; ")}`);
+  }
+  for (const template of bundle.canonical.processTemplates) {
+    if (!template.incapacity) continue;
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "process-template" && item.artifactId === template.id);
+    const issues = validateIncapacityEvidence(template, binding?.assertions ?? []);
+    if (!binding || binding.artifactHash !== contentHash(template) || issues.length) throw new Error(`Incapacity process evidence is incomplete or stale: ${template.id}`);
   }
   for (const acquisition of bundle.canonical.acquisitions ?? []) {
     const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "acquisition" && item.artifactId === acquisition.id);

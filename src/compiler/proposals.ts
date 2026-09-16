@@ -1,3 +1,4 @@
+import { validateIncapacityEvidence } from "../world/process-capacity.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { acquisitionSchema, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
 import { contentHash } from "../world/canonical.js";
@@ -301,7 +302,7 @@ export class CompilerProposalService {
       );
     }
     const artifactId = compilerProposalArtifactId(kind, payload, input.proposalId);
-    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : []), ...(kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions) : []), ...(kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : []), ...(kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions) : [])];
+    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : []), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : []), ...(kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions) : []), ...(kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : []), ...(kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions) : [])];
     const characterEvidenceIssues = kind === "character-model"
       ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
       : [];
@@ -979,6 +980,7 @@ function collectProposalClosureIssues(
     missing("events", effect.canonicalEventId, "canonicalEventId");
     missing("entities", effect.subjectEntityId, "subjectEntityId");
     collectStoryTimeIssues(effect.validTime, "validTime", missing);
+    if (effect.kind === "temporary-incapacity" && effect.lowering.status === "mapped") missing("processes", effect.lowering.processTemplateId, "lowering.processTemplateId");
     return;
   }
   if (proposal.kind === "event-frame") return;

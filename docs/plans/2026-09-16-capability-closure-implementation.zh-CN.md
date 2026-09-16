@@ -839,3 +839,18 @@ P3d 已提交为 `bc3f1da`。
 首轮全仓 205 文件、1240 tests 通过（106.83 秒）后，复查补齐新模型 learn 的强制 acquisitionId 门禁；旧兼容仅允许当前 event/initial-world/event-execution 中完全相同的既有操作，不允许新增旧格式获知。既有 quotation/addressee 工具测试改为明确的 legacy 修复夹具；新原创场景验证缺 Acquisition 的新事件被拒，并实际同批提出获知事件与其冻结 Acquisition，避免只测试运行时手工拼接知识。该补充要求再次执行最终全仓检查。
 
 最终验证：强制新获知门禁及同批事件冻结后，58 项编译工具/Acquisition 定向检查通过；此前完整模式、感知、要求账本与恢复协议定向检查通过。最终全仓 205 文件、1240 tests 全部通过（106.76 秒）；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。该工程结果不替代真实模型语义质量或独立人工体验验收。
+
+
+P3e 已提交为 `91fc24e`。
+
+## P4e：临时失能的过程降级与受控恢复
+
+在既有 ProcessTemplate/ProcessState 上增加 incapacity-process-v1，分别约束行动、发言和感知。源中的 temporary-incapacity 可以映射到具有相同能力和持续时间的过程；实际 canonical occurrence 被尝试时由宿主生成起始操作，未来 canon 不创建活动限制。未知持续时间没有 cadence 或 due transition；已知天数必须与模板到期恢复一致。能力由已提交过程 phase 投影，不由文案、status 暂停或时间流逝直接恢复。
+
+原文证据必须逐字段支持 owner/capacity/recovery/duration，接入 proposal、validation、finish/converge、audit、prepared archive/rebuild、closure 和冻结 WorldContext。运行时与历史 replay 同时拒绝非法行动、发言、感知和恢复；Genesis 在写入前检查 seed 感知限制。恢复仅接受模板声明且绑定同一患者的 schema action，或实际到期的声明 transition。拒绝重复起始、改截止时间、暂停解除限制、删 actorId 发言以及 background 标签绕过。治疗他人的窄权限仍须经过完整 action/process 校验，不扩展通用角色写权限。
+
+两个原创中英文场景各覆盖已知/未知时长，实际走编译工具、归档重建、起始、拒绝违规动作、时间推进、到期/解药恢复、fresh replay 和 fork。未知时长经过一百天仍不自动恢复。过程缺字段证据及冻结 binding 缺失均阻止发布。pipeline 40、engine 0.18.0；39 及更早语义检查点不自动视作满足新契约。
+
+范围仍有边界：action 当前限制所有 actor 发起事件，没有细分身体/心理行动；晚入口携带已开始失能过程的原始起始时间，以及 scene/entry 独立认证执行器的完整接线，仍需后续阶段补齐，不能把本段作为 P4 完整退出证明。新分支的正常起始和同分支继续/重放已有工程验证，不替代晚入口验证。未调用真实 provider，也没有新增独立人工体验评分；P1–P7 总体尚未完成。
+
+最终验证：15 项定向测试通过；全仓 206 文件、1244 tests 全部通过（107.82 秒），服务端、Web、E2E TypeScript 和 diff whitespace 检查通过。新增重复起始反例首轮使用了不合法 localRef，被 schema 正确拒绝；改为合法 local- 前缀后验证了预期的重复起始门禁。类型检查发现闭包中的 union narrowing 丢失，固定局部 action 引用后重新检查通过。

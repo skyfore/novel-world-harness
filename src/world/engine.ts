@@ -1,3 +1,4 @@
+import { capacityUseIssues, incapacityOnsets, validateIncapacityChanges } from "./process-capacity.js";
 import { acquisitionCatalog, validateAcquisitionOperation, validateAcquisition, type Acquisition } from "./acquisition.js";
 import { validatePerceptionAcquisition, validatePerceptionObservation, type PerceptionObservation } from "./perception-observation.js";
 import { validateExpressionAcquisition, validateUtteranceExpression, validateAttributionExpressions } from "./utterance-expression.js";
@@ -571,7 +572,9 @@ export class WorldEngine {
       attributions: this.context.attributions, acquisitions: this.context.acquisitions, utteranceExpressions: this.context.utteranceExpressions, perceptionObservations: this.context.perceptionObservations, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
     });
     if (completeSeed) {
-      applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map() }, seedProvenance, logicalTime.elapsedDays ?? 0);
+      const seedProcesses = applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map() }, seedProvenance, logicalTime.elapsedDays ?? 0);
+      const seedCapacityIssues = capacityUseIssues({ knowledge }, seedProcesses, seedProcesses, this.context.processTemplates ?? new Map(), this.context.perceptionObservations);
+      if (seedCapacityIssues.length) throw new Error(seedCapacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
       applyNormDelta(emptyNormState("genesis"), completeSeed.norms, { entities: this.context.entities, templates: this.context.normTemplates ?? new Map(), postState: initialState,
         normativeRuleIds: new Set([...this.context.rules.values()].filter(isNormativeWorldRule).map((rule) => rule.id)) }, seedProvenance);
       if (JSON.stringify([...initialState.activeRuleIds].sort()) !== JSON.stringify([...new Set(completeSeed.activeRuleIds)].sort())) throw new Error("Entry seed active rule set disagrees with its state delta");
@@ -616,6 +619,7 @@ export class WorldEngine {
     const expressionOccurrences = new Set([...(this.context.utteranceExpressions?.values() ?? [])].map(item => item.canonicalEventId));
     for (const observation of this.context.perceptionObservations?.values() ?? []) expressionOccurrences.add(observation.canonicalEventId);
     for (const acquisition of this.context.acquisitions?.values() ?? []) expressionOccurrences.add(acquisition.canonicalEventId);
+    for (const effect of this.context.semanticEffects?.values() ?? []) if (effect.kind === "temporary-incapacity") expressionOccurrences.add(effect.canonicalEventId);
     const inferredRealizations = [...(this.context.events?.values() ?? [])]
       .filter((event) => !expressionOccurrences.has(event.id) && !semanticEffectRealizationIssues(this.context.semanticEffects?.values() ?? [], new Set([event.id])).length && canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
       .map((event) => event.id);
@@ -623,6 +627,8 @@ export class WorldEngine {
       ...(genesisOptions.realizesCanonicalEventIds === undefined ? inferredRealizations : []),
       ...(genesisOptions.realizesCanonicalEventIds ?? []),
     ])].sort();
+    const genesisOnsets = incapacityOnsets(this.context.semanticEffects?.values() ?? [], new Set(realizesCanonicalEventIds), this.context.processTemplates ?? new Map());
+    for (const onset of genesisOnsets) if (onset.op === "start-process" && !completeSeed?.processes.operations.some(operation => operation.op === "start-process" && operation.process.templateId === onset.process.templateId && contentHash(operation.process.ownerBindings) === contentHash(onset.process.ownerBindings))) throw new Error("INCAPACITY_ONSET_MISSING: Genesis realization requires its reviewed process seed; equal state or prose does not establish incapacity. Stop for host entry review.");
     const semanticIssues = semanticEffectRealizationIssues(this.context.semanticEffects?.values() ?? [], new Set(realizesCanonicalEventIds));
     if (semanticIssues.length) throw new Error(semanticIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     for (const eventId of realizesCanonicalEventIds) {
@@ -716,6 +722,9 @@ export class WorldEngine {
     }
     const projection = await this.projections.project(head);
     const state = projection.state;
+    const realizedForCapacity = new Set(!parsed.canonicalAdaptation && parsed.possibilityId?.startsWith("canon-") ? [parsed.possibilityId.slice(6)] : []);
+    const onsets = incapacityOnsets(context.semanticEffects?.values() ?? [], realizedForCapacity, context.processTemplates ?? new Map());
+    if (onsets.length) parsed = eventProposalSchema.parse({ ...parsed, proposedProcesses: { version: 1, operations: [...(parsed.proposedProcesses?.operations ?? []), ...onsets.filter(onset => onset.op !== "start-process" || !(parsed.proposedProcesses?.operations ?? []).some(operation => operation.op === "start-process" && operation.process.templateId === onset.process.templateId && contentHash(operation.process.ownerBindings) === contentHash(onset.process.ownerBindings)))] } });
     const causalRelationProposals = normalizedCausalRelationProposals(parsed, projection);
     const causalRelationErrors = validateBranchCausalRelationProposals(
       causalRelationProposals,
@@ -725,7 +734,7 @@ export class WorldEngine {
     );
     let semanticDelta: import("./model.js").BranchSemanticDelta | undefined;
     let stagedSemantics = projection.semantics;
-    const semanticErrors: ValidationIssue[] = validateActorOutcomeOwnership(parsed, projection, context.normTemplates);
+    const semanticErrors: ValidationIssue[] = [...validateActorOutcomeOwnership(parsed, projection, context.normTemplates, context.processTemplates), ...capacityUseIssues(parsed, projection.processes, projection.processes, context.processTemplates ?? new Map())];
     if ((parsed.source === "player" || parsed.source === "actor") && parsed.actorId) {
       const knownClaimIds = new Set(Object.values(projection.knowledge.actors[parsed.actorId] ?? {}).filter(isActionableKnowledge).map((fact) => fact.claimId));
       const check = (mechanism: Parameters<typeof mechanismIsDisclosed>[0] | undefined, path: string) => {
@@ -812,6 +821,7 @@ export class WorldEngine {
         eventId: "pending-event",
         eventHash: "0".repeat(64),
       };
+      let capacityAfter = projection.processes;
       try {
         if (parsed.proposedProcesses) {
           processDelta = materializeProcessProposal(parsed.proposedProcesses, {
@@ -828,7 +838,8 @@ export class WorldEngine {
           }).delta;
           validateActorProcessDelta(parsed, processDelta, projection.processes,
             { entities: context.entities, templates: context.processTemplates ?? new Map() }, state, postState, provisionalProvenance);
-          applyProcessDelta(
+          validateIncapacityChanges(parsed, processDelta, projection.processes, { entities: context.entities, templates: context.processTemplates ?? new Map() }, state, postState, provisionalProvenance, onsets);
+          capacityAfter = applyProcessDelta(
             projection.processes,
             processDelta,
             { entities: context.entities, templates: context.processTemplates ?? new Map() },
@@ -843,6 +854,7 @@ export class WorldEngine {
           path: "proposedProcesses",
         });
       }
+      effectErrors.push(...capacityUseIssues({ knowledge: parsed.proposedKnowledge }, projection.processes, capacityAfter, context.processTemplates ?? new Map(), context.perceptionObservations));
       try {
         const stateBeforeDelta = advanceTemporalState(state, postState.logicalTime, context.stateSchema, context.entities);
         let stagedNorms = projection.norms;

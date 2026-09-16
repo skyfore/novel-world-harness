@@ -1377,3 +1377,26 @@ Revision mismatch, dependency cycle/depth or expansion limit, absent prior exper
 Receiving content is not understanding, accepting it is not world truth, and a source-grounded inference is an evidenced character belief rather than a general logical theorem. Forgetting current knowledge retains committed experience for a separately grounded recollection; it does not leave the forgotten premise available for inference. Deception retains actual and believed sources separately; actor views expose only the latter.
 
 New model-side compiler learn operations require `acquisitionId`, including newly introduced told/read/inferred/remembered operations. Existing byte-identical operations in the current event, initial world or event-execution checkpoint may be retained for legacy repair; this never verifies their missing acquisition proof. A model cannot create a new legacy occurrence or change its knowledge status/confidence under that exception. Stage the acquiring event with its intended typed acquisition ID before freezing that event revision in the Acquisition proposal, then finish the connected dependency group together.
+
+### Incapacity process recovery
+
+`CHARACTER_ACTION_INCAPACITATED`, `CHARACTER_SPEECH_INCAPACITATED` and
+`CHARACTER_PERCEPTION_INCAPACITATED` preserve the committed restriction. Stop
+this attempted use; only a separately validated recovery event can change the
+phase. Removing actorId, changing acquisition mode or rendering recovery is not
+permitted. `INCAPACITY_RECOVERY_UNAUTHORIZED`, `INCAPACITY_DURATION_MISMATCH`,
+`INCAPACITY_ONSET_DUPLICATE` and `INCAPACITY_ONSET_MISSING` require host review of
+the actual onset/recovery/entry seed. Preserve drafts and branch head; no unchanged
+retry, guessed deadline, duplicate local ID or background-source bypass.
+
+`INCAPACITY_EVIDENCE_MISSING`, `INCAPACITY_CONTROL_OWNER_MISMATCH` and
+`SEMANTIC_EFFECT_PROCESS_MISMATCH` require source-supported mechanism correction.
+Within the authorized source and repair scope, call `find_compiler_artifacts`
+for kind `process-template` (or `action-schema` for its recovery control), copy
+`results[].readArguments.ref` verbatim into `read_compiler_artifact.ref`, and copy
+its `payload.id` into the relevant template/schema reference. Read the original
+occurrence before correcting exact incapacity field evidence. Permit at most
+one corrected retry when the returned artifact and original source support it;
+otherwise stop for host review. Never guess IDs, manufacture duration or widen
+repair scope. An unknown duration is valid with no deadline or due transition;
+it does not authorize immediate recovery.

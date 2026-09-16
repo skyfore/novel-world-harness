@@ -118,7 +118,7 @@ export function validateActorOutcomeScope(value: ActorOutcome, scope: {
 }
 
 /** Final authority check also covers direct actor proposals, outside model adapters. */
-export function validateActorOutcomeOwnership(proposal: EventProposal, projection: WorldProjectionBundle, normTemplates?: ReadonlyMap<string, import("./norm-ontology.js").NormTemplate>): ValidationIssue[] {
+export function validateActorOutcomeOwnership(proposal: EventProposal, projection: WorldProjectionBundle, normTemplates?: ReadonlyMap<string, import("./norm-ontology.js").NormTemplate>, processTemplates?: ReadonlyMap<string, import("./process-ontology.js").ProcessTemplate>): ValidationIssue[] {
   if (!proposal.actorId || (proposal.source !== "player" && proposal.source !== "actor")) return [];
   const actor = proposal.actorId;
   const errors: ValidationIssue[] = [];
@@ -154,11 +154,20 @@ export function validateActorOutcomeOwnership(proposal: EventProposal, projectio
     .filter((item) => item.ownerBindings.some((binding) => binding.entityIds.includes(actor))).map((item) => item.id));
   for (const [index, op] of (proposal.proposedProcesses?.operations ?? []).entries()) {
     const path = `proposedProcesses.operations.${index}`;
+    const instance = op.op === "start-process" ? op.process : projection.processes.instances[op.processRef];
+    const template = instance ? processTemplates?.get(instance.templateId) : undefined;
+    const condition = template?.incapacity;
+    // A typed treatment may affect its bound patient; this only admits the
+    // proposal to the full action/time/state process-control checks below.
+    const action = proposal.action;
+    const controlledCapacity = Boolean(condition && action?.lane === "schema-bound"
+      && template?.actorControls?.some(control => control.op === op.op && control.actionPattern.kind === "schema" && control.actionPattern.schemaId === action.schemaId)
+      && JSON.stringify(action.roleBindings.find(role => role.roleId === condition.ownerRoleId)?.entityIds ?? []) === JSON.stringify(instance?.ownerBindings.find(role => role.roleId === condition.ownerRoleId)?.entityIds ?? []));
     if (op.op === "start-process") {
-      owned(op.process.ownerBindings.some((binding) => binding.entityIds.includes(actor))
+      owned(controlledCapacity || op.process.ownerBindings.some((binding) => binding.entityIds.includes(actor))
         && op.process.ownerBindings.every((binding) => binding.entityIds.every((id) => id === actor || projection.state.values[id]?.["artifact.owner"] === actor)), path);
       processes.add(op.localRef);
-    } else owned(processes.has(op.processRef), path);
+    } else owned(controlledCapacity || processes.has(op.processRef), path);
   }
   const norms = new Map(Object.values(projection.norms.instances).map((item) => [item.id, { subject: item.subjectActorId, beneficiary: item.beneficiaryActorId, templateId: item.templateId }]));
   for (const [index, op] of (proposal.proposedNorms?.operations ?? []).entries()) {

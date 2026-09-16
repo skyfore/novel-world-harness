@@ -352,7 +352,7 @@ export class WorldContextStore {
     const perceptionObservations = await Promise.all((snapshot.perceptionObservations ?? []).map(ref => this.canon.getPerceptionObservationRevision(ref.id, ref.hash)));
     const acquisitions = await Promise.all((snapshot.acquisitions ?? []).map(ref => this.canon.getAcquisitionRevision(ref.id, ref.hash)));
     const utteranceExpressions = await Promise.all((snapshot.utteranceExpressions ?? []).map(ref => this.canon.getUtteranceExpressionRevision(ref.id, ref.hash)));
-    assertSemanticEffectProjection({ entities, events, eventExecutions, semanticEffects, actionSchemas, eventParticipations });
+    assertSemanticEffectProjection({ entities, events, eventExecutions, semanticEffects, actionSchemas, eventParticipations, processTemplates });
     assertPerceptionObservationProjection({ entities, events, perceptionObservations });
     assertAcquisitionProjection({ entities, events, claims, propositions, attributions, utteranceExpressions, perceptionObservations, acquisitions });
     assertUtteranceExpressionProjection({ entities, events, propositions, attributions, utteranceExpressions });
@@ -575,8 +575,8 @@ export async function loadWorldContext(
   return { canon, contexts, context };
 }
 
-function assertSemanticEffectProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "eventExecutions" | "semanticEffects" | "actionSchemas" | "eventParticipations">): void {
-  const catalog = { entities: new Map(artifacts.entities.map(item => [item.id, item])), events: new Map(artifacts.events.map(item => [item.id, item])),
+function assertSemanticEffectProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "eventExecutions" | "semanticEffects" | "actionSchemas" | "eventParticipations" | "processTemplates">): void {
+  const catalog = { processTemplates: new Map((artifacts.processTemplates ?? []).map(item => [item.id, item])), entities: new Map(artifacts.entities.map(item => [item.id, item])), events: new Map(artifacts.events.map(item => [item.id, item])),
     eventExecutions: new Map((artifacts.eventExecutions ?? []).map(item => [item.id, item])), actionSchemas: new Map(artifacts.actionSchemas.map(item => [item.id, item])), eventParticipations: new Map(artifacts.eventParticipations.map(item => [item.id, item])) };
   const issues = (artifacts.semanticEffects ?? []).flatMap(effect => validateSemanticEffect(effect, catalog));
   if (issues.length) throw new Error(`Invalid semantic effect projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);

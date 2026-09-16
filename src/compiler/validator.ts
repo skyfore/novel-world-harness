@@ -1,3 +1,4 @@
+import { validateIncapacityEvidence } from "../world/process-capacity.js";
 import { acquisitionSchema, validateAcquisitionOperation, validateAcquisition, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
 import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
 import { validatePerceptionAcquisition } from "../world/perception-observation.js";
@@ -1607,7 +1608,7 @@ export class CompilerCommitService {
       ? validateEntityNameEvidence(entitySchema.parse(payload), inspected.excerpts)
       : [];
     const artifactId = compilerProposalArtifactId(kind, payload, proposalId);
-    const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
+    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : [])];
     const characterEvidenceIssues = kind === "character-model"
       ? [
           ...validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),

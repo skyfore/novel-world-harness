@@ -318,7 +318,19 @@ export class WorldRuntime {
       const candidates: ActorProposalCandidate[] = [];
       for (const candidate of parsedCandidates) {
         if (actorProposalHasMaterialEffect(candidate.proposal)) {
-          candidates.push(candidate);
+          // An invalid high-priority proposal must not eliminate a legal alternative.
+          // This is read-only; selected proposals are validated again at their actual commit head.
+          const proposal = { ...candidate.proposal, branchId: input.branchId, expectedParentCommit: currentHead };
+          const preview = await this.engine.previewProposal(proposal);
+          if (preview.report.accepted) {
+            candidates.push(candidate);
+          } else {
+            rejectedProposals.push(proposal.proposalId);
+            candidateTraces.push(await committedMoveCandidateTrace(this.engine, {
+              proposal, lane: "actor", candidateSource: candidate.candidateSource ?? "injected",
+              beforeHead: currentHead, result: preview, coordination: candidate.coordination, preflight: true,
+            }));
+          }
           continue;
         }
         rejectedProposals.push(candidate.proposal.proposalId);
@@ -1253,6 +1265,7 @@ async function committedMoveCandidateTrace(
     result: { report: ValidationReport; newHead: CommitId; eventHash?: string };
     coordination?: ActorProposalCandidate["coordination"];
     scheduler?: SchedulerTrace;
+    preflight?: boolean;
   },
 ): Promise<MoveCandidateTrace> {
   const accepted = input.result.report.accepted;
@@ -1281,7 +1294,10 @@ async function committedMoveCandidateTrace(
     code: "VALIDATION_REJECTED",
     detail: "Deterministic proposal validation rejected the candidate.",
   });
-  gates.push({
+  gates.push(input.preflight ? {
+    gate: "commit", outcome: "info", code: "COMMIT_NOT_ATTEMPTED",
+    detail: "Read-only preflight rejected the candidate before conflict arbitration; no commit was attempted.",
+  } : {
     gate: "commit",
     outcome: accepted && input.result.newHead !== input.beforeHead ? "pass" : "fail",
     code: accepted && input.result.newHead !== input.beforeHead ? "COMMIT_ADVANCED_HEAD" : "COMMIT_DID_NOT_ADVANCE_HEAD",

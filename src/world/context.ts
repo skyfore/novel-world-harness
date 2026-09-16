@@ -36,7 +36,7 @@ const validatePreparedSnapshotScope = (
 };
 export const canonicalSnapshotSchema = z.object({
   version: z.literal(9),
-  schedulingPolicyVersion: z.literal(SCHEDULING_POLICY_VERSION).optional(),
+  schedulingPolicyVersion: z.enum(["world-pressure-v2", SCHEDULING_POLICY_VERSION]).optional(),
   sourceId: idSchema.optional(),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   entities: z.array(revisionRefSchema),

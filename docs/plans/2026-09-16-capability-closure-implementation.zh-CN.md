@@ -639,3 +639,17 @@ P5a 已提交为 `5894614`。
 本段未宣称 P6 全部完成：当前 goal/norm/process/hazard 压力的统一来源验证、非 canonical 自定义模板的 pressure 权限、entry pre-event 真正无动作驱动，以及完整分歧体验矩阵仍待完成。现有已满足 motivational causal link 的独立压力仍沿用既有算法，尚未升级为活动 goal 验证。P3/P4/P5 余项与 P7 仍在原范围；没有真实模型或独立人工体验证据。
 
 验证：全仓 195 文件、1188 tests 通过（96.64 秒）；此前 14 项压力/因果/runtime/projection 定向及 5 项策略冻结/缓存/context 定向通过；最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P6a 已提交为 `f7b2534`。
+
+## P6b：actor 冲突裁决前的真实引擎门禁
+
+核对发现 WorldRuntime.move 的 actor lane 原先先按优先级裁决冲突，再调用 engine.commitProposal。高优先级的非法候选可以挤掉同主体/资源上的合法方案，而最终自己也提交失败。本段把正常 engine.previewProposal 放到 actor arbitration 之前：保留材料性检查，对本次有界返回候选逐一只读验证，只有通过者参与优先级和冲突裁决；被选者仍在实际提交 head 再验证，预检不替代 commit。
+
+预检拒绝保留真实 ValidationReport，trace 明示 COMMIT_NOT_ATTEMPTED、原 head 未移动；不把它记成冲突落选或成功执行。两个独立原创场景以存活角色的可行计划与不适用条件为独立预期：高优先级 false、次高 unknown 候选均不得压掉低优先级合法计划。测试通过实际 WorldRuntime/WorldEngine 提交合法结果，旧 head 状态不变，全部非法时零事件、head 不变，没有输入玩家动作。
+
+调度策略升为 legality-first-v3，engine 0.7.0，沿既有 snapshot/fallback/frontier/trace/prepared compatibility 冻结路径生效。world-pressure-v2 和无策略字段的旧 canonical snapshots 可读；旧 0.6.0 history 拒绝不兼容解释，不原地改写。置信度与压力分离保持不变。
+
+本段完善已返回 actor 候选的门禁，不宣称所有 entry driver 发现已完成。deterministicActorProposalSource 仍按主体预选单条候选，完整替代 action/goal 枚举和预算诊断待补；selectOpeningDriverActor 在物理角色为空时仍有全书频率回退，及其 reconciliation 义务处理需一起修正，不能仅换选择函数造成义务消失。已有 entry-driver probe 使用隔离 fork/真实 commit，不能把 audit 中 active-goal 数量当作该证明。P3/P4/P5/P6 余项及 P7 继续在原目标内；未调用真实 provider 或独立人工体验评价。
+
+验证：最终全仓 196 文件、1190 tests 通过（94.65 秒）；此前 20 项 actor/runtime/entry-driver/策略定向通过；最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。最初新测试把 accepted trace 状态误写为 committed，并要求仅一个 gate，已按既有 trace schema 修正；实现另明确区分预检拒绝与真实 commit 尝试。

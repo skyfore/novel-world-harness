@@ -74,11 +74,15 @@ it("freezes the policy in new snapshots and rejects old-engine histories without
   const legacyHash = contentHash(legacy), legacyBytes = JSON.stringify(legacy);
   await fs.writeFile(path.join(contexts.root, `${legacyHash}.json`), legacyBytes);
   expect((await contexts.load(legacyHash)).canonicalSnapshotHash).toBe(legacyHash);
+  const previousPolicy = { ...snapshot, schedulingPolicyVersion: "world-pressure-v2" };
+  const previousHash = contentHash(previousPolicy);
+  await fs.writeFile(path.join(contexts.root, `${previousHash}.json`), JSON.stringify(previousPolicy));
+  expect((await contexts.load(previousHash)).canonicalSnapshotHash).toBe(previousHash);
   const engine = new WorldEngine(root, context);
   const head = await engine.createBranch("main", "Current", { version: 1, operations: [] });
   const commit = await engine.objects.getCommit(head);
-  const oldHead = await engine.objects.putCommit({ ...commit, engineVersion: "0.5.0" });
-  await expect(engine.projector.project(oldHead)).rejects.toThrow("Unsupported engine version 0.5.0");
+  const oldHead = await engine.objects.putCommit({ ...commit, engineVersion: "0.6.0" });
+  await expect(engine.projector.project(oldHead)).rejects.toThrow("Unsupported engine version 0.6.0");
   expect(await engine.objects.getCommit(head)).toEqual(commit);
   expect(await fs.readFile(path.join(contexts.root, `${legacyHash}.json`), "utf8")).toBe(legacyBytes);
 });

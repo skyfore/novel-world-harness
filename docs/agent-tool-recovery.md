@@ -1174,3 +1174,14 @@ An unsupported engine version stops the branch operation: do not retry, relabel
 commits, change confidence to force selection, or overwrite snapshots. Preserve
 history and use its matching engine or an explicit host migration to a new
 branch. A new session is not a migration.
+
+### Actor legality before arbitration
+
+`legality-first-v3` runs the normal read-only engine preview before actor
+priority/conflict arbitration. `COMMIT_NOT_ATTEMPTED` means validation rejected
+the candidate before any commit; preserve its validation errors. Raising its
+priority, deleting preconditions, or changing actor IDs is not a repair. Correct
+only an evidence-supported proposal once under the existing actor tool protocol;
+unknown prerequisites remain blocked until world evidence changes. Legal selected
+proposals are validated again at the actual commit head. Preview acceptance is
+not a commit receipt and grants no world-state or character-knowledge change.

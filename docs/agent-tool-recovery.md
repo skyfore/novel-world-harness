@@ -1283,3 +1283,27 @@ at the action cut. Do not change the reason/ID to bypass it or repeat unchanged;
 establish time through normal committed events before reevaluation. Engine 0.11.0
 freezes the reducer change, including full replay and initial projection validation;
 keep incompatible histories intact and follow the existing version stop protocol.
+
+### Unknown world-rule conditions
+
+`unknown-world-rule-v8` retains rules with unknown applicability, supported
+exceptions, or higher-priority overrides in `resolution.uncertain`, with explicit
+`unknown-applicability`, `unknown-exception`, or `unknown-override` diagnostics.
+They are not exposed as effective actor rules or treated as proven absent. Known
+false applicability and known true exceptions still establish non-applicability;
+contested semantics keep the existing non-execution policy.
+
+`STATE_RULE_SCOPE_UNKNOWN` means a possibly applicable hard rule prevents proving
+this action legal. Stop unchanged retries. Establish scope facts through authorized
+evidence/committed events; do not guess an exception, substitute rule IDs, or erase
+the rule. An outcome proven safe under the possible rule remains permitted, so a
+safe fact-establishing event can resolve the uncertainty. `STATE_RULE_CONDITION_UNKNOWN`
+rejects a hard rule's unknown forbidden postcondition, including attempts to erase
+the field. Resolve required facts before reevaluation; do not convert unknown to
+false or repeat unchanged. These messages do not disclose hidden rule references.
+
+For normative world rules, an unknown required fact no longer proves violation.
+Only known false requirements or known true forbidden conditions can generate a
+violation event. Absence of a violation is not a compliance certificate. Engine
+0.12.0 and the policy fingerprint freeze this interpretation; preserve incompatible
+history and use the existing version stop/migration protocol.

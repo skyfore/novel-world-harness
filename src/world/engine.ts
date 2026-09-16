@@ -340,13 +340,21 @@ export function validateEventProposal(
   }
 
   const applicableRules: EffectiveWorldRule[] = [];
+  const uncertainRules: EffectiveWorldRule[] = [];
   for (const ruleId of evaluationState.activeRuleIds) {
     if (!context.rules.has(ruleId)) {
       errors.push({ code: "UNKNOWN_ACTIVE_RULE", message: `Active rule ${ruleId} is not in the model` });
     }
   }
   if (!errors.some((error) => error.code === "UNKNOWN_ACTIVE_RULE")) {
-    applicableRules.push(...resolveEffectiveWorldRules(context.rules, evaluationState).effective);
+    const resolution = resolveEffectiveWorldRules(context.rules, evaluationState);
+    applicableRules.push(...resolution.effective);
+    uncertainRules.push(...resolution.uncertain.filter(candidate => isHardStateRule(candidate.rule)));
+    for (const rule of uncertainRules) {
+      if (rule.requires.some(predicate => evaluatePredicateTruth(evaluationState, predicate, context.stateSchema) !== "true")) {
+        errors.push({ code: "STATE_RULE_SCOPE_UNKNOWN", message: "An unresolved hard-rule scope may require an unmet condition. Stop unchanged retries; establish authorized scope facts before reevaluation, never guess an exception or erase the rule." });
+      }
+    }
     for (const rule of applicableRules.filter((candidate) => isHardStateRule(candidate.rule))) {
       if (rule.requires.some((predicate) => !evaluatePredicate(evaluationState, predicate, context.stateSchema))) {
         errors.push({ code: "STATE_RULE_REQUIREMENT_FAILED", message: `State rule ${rule.id} requirement is not satisfied` });
@@ -363,7 +371,14 @@ export function validateEventProposal(
       errors.push(...validateEffectObligations({ proposal, before: state, after: postState, effectBaseline: evaluationState, context,
         realizedCanonicalEventIds: options.realizedCanonicalEventIds }));
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
+      for (const rule of uncertainRules) {
+        if (rule.forbids.some(predicate => evaluatePredicateTruth(postState!, predicate, context.stateSchema) !== "false")) {
+          errors.push({ code: "STATE_RULE_SCOPE_UNKNOWN", message: "An unresolved hard-rule scope may forbid this outcome. Stop unchanged retries; establish authorized scope facts before reevaluation, never guess an exception or erase the rule." });
+        }
+      }
       for (const rule of applicableRules.filter((candidate) => isHardStateRule(candidate.rule))) {
+        const unknown = rule.forbids.some(predicate => evaluatePredicateTruth(postState!, predicate, context.stateSchema) === "unknown");
+        if (unknown) errors.push({ code: "STATE_RULE_CONDITION_UNKNOWN", message: "A hard-rule forbidden condition is unknown. Stop unchanged retries; resolve the required facts through authorized evidence or committed events before reevaluation." });
         const forbidden = rule.forbids.some((predicate) => evaluatePredicate(postState!, predicate));
         if (forbidden) {
           errors.push({ code: "STATE_RULE_FORBIDS", message: `State rule ${rule.id} forbids the proposed post-state` });

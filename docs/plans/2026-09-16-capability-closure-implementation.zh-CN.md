@@ -737,3 +737,17 @@ commit 与 projection reducer 同时传递时间已推进、行动效果尚未�
 初轮新测试的 localRef 未使用 local- 前缀，被 schema 正确拒绝；随后离场 ad-hoc 行动因缺少绑定机制被 ACTOR_EFFECT_REQUIRES_MECHANISM 拒绝。按既有引用与动作契约补齐夹具，不放宽引擎边界，13 项定向通过。
 
 最终验证：全仓 199 文件、1205 tests 通过（98.88 秒），包含最终同事件绕过与 false/unknown 合取补充；此前 13 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P4a 已提交为 `302c044`。
+
+## P4b：world-rule 未知范围与违约事实的区分
+
+继续核对发现 world-rule resolver 把未知适用条件归为 not-applicable、未知例外当成未发生；规范型规则的 requires 缺值又通过布尔取反生成 required-state-missing 违约。本段用三值合取识别适用/例外，将未决规则放入派生 uncertain 集合，保留明确 unknown 原因；未知高优先级覆盖者也使下层规则保持未决。contested 语义沿既有不执行政策，未新增世界真值枚举或持久事件类型。
+
+引擎对可能适用的硬规则检查是否仍能证明行动合法：不能证明时返回 STATE_RULE_SCOPE_UNKNOWN；若行动在所有可能范围下都安全，可正常提交事实以消除不确定性。已确定有效的硬规则，其 forbidden postcondition 为 unknown 时返回 STATE_RULE_CONDITION_UNKNOWN，不能通过 unset 字段逃避检查。未决规则不作为有效规则进入 actor prompt；新增错误不泄漏具体隐藏规则引用。
+
+规范型 world-rule 仅在 required 条件明确 false 或 forbidden 条件明确 true 时派生违约。unknown 不写违约历史，也不等于证明合规。两段原创场景分别使用门口/港口的释放钥匙机制和 Ada/Neri 的登记要求，验证未知例外阻断开门、已知无例外硬拒绝、已知有例外允许，以及缺失登记事实不写违约、明确未登记产生违约、已登记不产生违约。包含 fork 隔离、旧状态不变、禁用 checkpoint 的重放一致性、未知覆盖传播和 unset 后置条件拒绝。
+
+策略升为 unknown-world-rule-v8，engine 0.12.0；旧 effective-norm-scope-v7 snapshot 可读，旧 history 仍拒绝不兼容执行。validStoryTime 的统一相对锚点/未决时间语义仍沿既有 policy-time，属于 P4 后续工作；本段没有把全部时间边界宣称解决。P3 表达/感知/获知纵向链、P4 其余执行扩展、P5 工作集与 P7 外部验收继续保持原范围。
+
+最终验证：全仓 200 文件、1207 tests 通过（97.93 秒），包含最终 unset 反例；此前 15 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

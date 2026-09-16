@@ -259,7 +259,7 @@ export function deriveAutomaticNormDelta(input: {
 
   if (input.actorId) {
     for (const effective of [...input.normativeRules].sort((left, right) => left.id.localeCompare(right.id))) {
-      const violatedRequires = effective.requires.some((predicate) => !evaluatePredicate(input.after, predicate));
+      const violatedRequires = effective.requires.some((predicate) => evaluatePredicateTruth(input.after, predicate) === "false");
       const violatedForbids = effective.forbids.some((predicate) => evaluatePredicate(input.after, predicate));
       if (!violatedRequires && !violatedForbids) continue;
       const normId = `branch-norm-${contentHash({

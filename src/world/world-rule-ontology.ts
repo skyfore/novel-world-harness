@@ -10,7 +10,7 @@ import {
   type WorldState,
 } from "./model.js";
 import { policyStoryScopeActive } from "./policy-time.js";
-import { evaluatePredicate } from "./state.js";
+import { evaluatePredicateTruth } from "./state.js";
 
 export const WORLD_RULE_ONTOLOGY_VERSION = "world-rule-v2" as const;
 
@@ -32,9 +32,10 @@ export type EffectiveWorldRule = {
 
 export type WorldRuleResolution = {
   effective: EffectiveWorldRule[];
+  uncertain: EffectiveWorldRule[];
   inactive: Array<{
     ruleId: string;
-    reason: "contested" | "outside-time" | "not-applicable" | "exception" | "overridden";
+    reason: "contested" | "outside-time" | "not-applicable" | "exception" | "overridden" | "unknown-applicability" | "unknown-exception" | "unknown-override";
     exceptionId?: string;
     overridingRuleId?: string;
   }>;
@@ -236,6 +237,11 @@ export function resolveEffectiveWorldRules(
 ): WorldRuleResolution {
   const inactive: WorldRuleResolution["inactive"] = [];
   const candidates: WorldRule[] = [];
+  const uncertain = new Set<string>();
+  const conjunction = (predicates: readonly Predicate[]) => {
+    const truths = predicates.map(predicate => evaluatePredicateTruth(state, predicate));
+    return truths.includes("false") ? "false" : truths.includes("unknown") ? "unknown" : "true";
+  };
   for (const ruleId of [...state.activeRuleIds].sort()) {
     const rule = rules.get(ruleId);
     if (!rule) continue;
@@ -247,16 +253,20 @@ export function resolveEffectiveWorldRules(
       inactive.push({ ruleId, reason: "outside-time" });
       continue;
     }
-    if (!rule.appliesWhen.every((predicate) => evaluatePredicate(state, predicate))) {
+    const applicability = conjunction(rule.appliesWhen);
+    if (applicability === "false") {
       inactive.push({ ruleId, reason: "not-applicable" });
       continue;
     }
-    const matchedException = rule.exceptions
-      .filter((exception) => exception.status === "supported")
-      .find((exception) => exception.appliesWhen.every((predicate) => evaluatePredicate(state, predicate)));
+    const exceptions = rule.exceptions.filter(exception => exception.status === "supported");
+    const matchedException = exceptions.find(exception => conjunction(exception.appliesWhen) === "true");
     if (matchedException) {
       inactive.push({ ruleId, reason: "exception", exceptionId: matchedException.id });
       continue;
+    }
+    if (applicability === "unknown" || exceptions.some(exception => conjunction(exception.appliesWhen) === "unknown")) {
+      uncertain.add(rule.id);
+      inactive.push({ ruleId: rule.id, reason: applicability === "unknown" ? "unknown-applicability" : "unknown-exception" });
     }
     candidates.push(rule);
   }
@@ -265,15 +275,27 @@ export function resolveEffectiveWorldRules(
     return right.priority - left.priority || left.id.localeCompare(right.id);
   });
   const effectiveRules: WorldRule[] = [];
+  const uncertainRules: WorldRule[] = [];
   for (const candidate of candidates) {
     const overriding = effectiveRules.find((rule) => rule.overridesRuleIds.includes(candidate.id));
     if (overriding) {
+      const prior = inactive.findIndex(item => item.ruleId === candidate.id);
+      if (prior >= 0) inactive.splice(prior, 1);
       inactive.push({ ruleId: candidate.id, reason: "overridden", overridingRuleId: overriding.id });
       continue;
     }
-    effectiveRules.push(candidate);
+    const possibleOverride = uncertainRules.find(rule => rule.overridesRuleIds.includes(candidate.id));
+    if (possibleOverride && !uncertain.has(candidate.id)) {
+      uncertain.add(candidate.id);
+      inactive.push({ ruleId: candidate.id, reason: "unknown-override", overridingRuleId: possibleOverride.id });
+    }
+    if (uncertain.has(candidate.id)) uncertainRules.push(candidate);
+    else effectiveRules.push(candidate);
   }
+  const executable = (rule: WorldRule): EffectiveWorldRule => ({ id: rule.id, name: rule.name, rule,
+    enforcement: isHardStateRule(rule) ? "hard-state" : "normative", requires: worldRuleRequires(rule), forbids: worldRuleForbids(rule) });
   return {
+    uncertain: uncertainRules.map(executable).sort((a, b) => a.id.localeCompare(b.id)),
     effective: effectiveRules
       .map((rule) => ({
         id: rule.id,

@@ -493,3 +493,5 @@ export { committedUtteranceId, narrationBlocksSchema, renderNarrationBlocks, typ
 export { SCHEDULING_POLICY_VERSION } from "./world/scheduling-policy.js";
 
 export { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, UTTERANCE_EXPRESSION_VERSION, type UtteranceExpression } from "./world/utterance-expression.js";
+
+export { perceptionObservationSchema, validatePerceptionObservation, validatePerceptionObservationEvidence, PERCEPTION_OBSERVATION_VERSION, type PerceptionObservation } from "./world/perception-observation.js";

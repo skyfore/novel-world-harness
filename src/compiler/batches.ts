@@ -1,3 +1,4 @@
+import type { PerceptionObservation } from "../world/perception-observation.js";
 import type { UtteranceExpression } from "../world/utterance-expression.js";
 import type { SemanticEffect } from "../world/semantic-effect.js";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
@@ -145,6 +146,7 @@ type CompilerSceneIdentity = Pick<SceneOccurrence, "id" | "locationId"> & {
   status: "canonical" | "pending";
 };
 type CompilerUtteranceExpressionIdentity = Pick<UtteranceExpression, "id" | "canonicalEventId" | "speakerId" | "addresseeIds" | "modality" | "propositionId" | "quotation"> & { status: "canonical" | "pending" };
+type CompilerPerceptionObservationIdentity = Pick<PerceptionObservation, "id" | "canonicalEventId" | "observerId" | "cut" | "channel" | "phenomenon" | "lowering"> & { status: "canonical" | "pending" };
 type CompilerSemanticEffectIdentity = Pick<SemanticEffect, "id" | "canonicalEventId" | "subjectEntityId" | "kind" | "args" | "lowering" | "validTime"> & { status: "canonical" | "pending" };
 type CompilerEventFrameIdentity = Pick<EventFrame, "id" | "name" | "temporalShape"> & {
   roleIds: string[];
@@ -226,6 +228,7 @@ type CompilerArtifactCatalog = {
   sceneOccurrences: CompilerSceneIdentity[];
   eventFrames: CompilerEventFrameIdentity[];
   semanticEffects: CompilerSemanticEffectIdentity[];
+  perceptionObservations: CompilerPerceptionObservationIdentity[];
   utteranceExpressions: CompilerUtteranceExpressionIdentity[];
   actionSchemas: CompilerActionSchemaIdentity[];
   actionConstraints: CompilerExecutableTemplateIdentity[];
@@ -773,6 +776,7 @@ async function loadCompilerArtifactCatalog(
   const sceneOccurrences = new Map<string, CompilerSceneIdentity>();
   const eventFrames = new Map<string, CompilerEventFrameIdentity>();
   const semanticEffects = new Map<string, CompilerSemanticEffectIdentity>();
+  const perceptionObservations = new Map<string, CompilerPerceptionObservationIdentity>();
   const utteranceExpressions = new Map<string, CompilerUtteranceExpressionIdentity>();
   const actionSchemas = new Map<string, CompilerActionSchemaIdentity>();
   const actionConstraints = new Map<string, CompilerExecutableTemplateIdentity>();
@@ -823,6 +827,7 @@ async function loadCompilerArtifactCatalog(
   for (const relation of canonicalSpatialRelations.filter((item) => hasSourceEvidence(item, sourceId))) spatialRelations.set(relation.id, prioritize(spatialRelationIdentity(relation, "canonical"), relation));
   for (const scene of canonicalScenes.filter((item) => hasSourceEvidence(item, sourceId))) sceneOccurrences.set(scene.id, prioritize(sceneOccurrenceIdentity(scene, "canonical"), scene));
   for (const effect of (await canon.listSemanticEffects()).filter(item => hasSourceEvidence(item, sourceId))) semanticEffects.set(effect.id, prioritize(semanticEffectIdentity(effect, "canonical"), effect));
+  for (const effect of (await canon.listPerceptionObservations()).filter(item => hasSourceEvidence(item, sourceId))) perceptionObservations.set(effect.id, prioritize(perceptionObservationIdentity(effect, "canonical"), effect));
   for (const effect of (await canon.listUtteranceExpressions()).filter(item => hasSourceEvidence(item, sourceId))) utteranceExpressions.set(effect.id, prioritize(utteranceExpressionIdentity(effect, "canonical"), effect));
   for (const frame of canonicalFrames.filter((item) => hasSourceEvidence(item, sourceId))) eventFrames.set(frame.id, prioritize(eventFrameIdentity(frame, "canonical"), frame));
   for (const schema of canonicalActions.filter((item) => item.induction.kind === "domain-module" || hasSourceEvidence(item, sourceId))) actionSchemas.set(schema.id, prioritize(actionSchemaIdentity(schema, "canonical"), schema));
@@ -871,6 +876,9 @@ async function loadCompilerArtifactCatalog(
     } else if (summary.kind === "utterance-expression") {
       const proposal = await proposals.read("pending", summary.id, compilerProposalSchemas["utterance-expression"]);
       if (!utteranceExpressions.has(proposal.payload.id)) utteranceExpressions.set(proposal.payload.id, prioritize(utteranceExpressionIdentity(proposal.payload, "pending"), proposal.payload));
+    } else if (summary.kind === "perception-observation") {
+      const proposal = await proposals.read("pending", summary.id, compilerProposalSchemas["perception-observation"]);
+      if (!perceptionObservations.has(proposal.payload.id)) perceptionObservations.set(proposal.payload.id, prioritize(perceptionObservationIdentity(proposal.payload, "pending"), proposal.payload));
     } else if (summary.kind === "semantic-effect") {
       const proposal = await proposals.read("pending", summary.id, compilerProposalSchemas["semantic-effect"]);
       if (!semanticEffects.has(proposal.payload.id)) semanticEffects.set(proposal.payload.id, prioritize(semanticEffectIdentity(proposal.payload, "pending"), proposal.payload));
@@ -924,6 +932,7 @@ async function loadCompilerArtifactCatalog(
     sceneOccurrences: byId(sceneOccurrences.values()),
     eventFrames: byId(eventFrames.values()),
     semanticEffects: byId(semanticEffects.values()),
+    perceptionObservations: byId(perceptionObservations.values()),
     utteranceExpressions: byId(utteranceExpressions.values()),
     actionSchemas: byId(actionSchemas.values()),
     actionConstraints: byId(actionConstraints.values()),
@@ -1232,6 +1241,7 @@ function emptyCompilerArtifactCatalog(): CompilerArtifactCatalog {
     sceneOccurrences: [],
     eventFrames: [],
     semanticEffects: [],
+    perceptionObservations: [],
     utteranceExpressions: [],
     actionSchemas: [],
     actionConstraints: [],
@@ -1258,6 +1268,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     sceneOccurrences: 160,
     eventFrames: 120,
     semanticEffects: 120,
+    perceptionObservations: 120,
     utteranceExpressions: 120,
     actionSchemas: 120,
     actionConstraints: 120,
@@ -1281,6 +1292,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     sceneOccurrences: sampleCatalog(catalog.sceneOccurrences, limits.sceneOccurrences),
     eventFrames: sampleCatalog(catalog.eventFrames, limits.eventFrames),
     semanticEffects: sampleCatalog(catalog.semanticEffects, limits.semanticEffects),
+    perceptionObservations: sampleCatalog(catalog.perceptionObservations, limits.perceptionObservations),
     utteranceExpressions: sampleCatalog(catalog.utteranceExpressions, limits.utteranceExpressions),
     actionSchemas: sampleCatalog(catalog.actionSchemas, limits.actionSchemas),
     actionConstraints: sampleCatalog(catalog.actionConstraints, limits.actionConstraints),
@@ -1297,7 +1309,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     const omitted = catalog[key].length - compact[key].length;
     if (omitted > 0) compact.omitted[key] = omitted;
   }
-  const removable = ["possibilities", "eventRelations", "eventParticipations", "sceneOccurrences", "eventFrames", "semanticEffects", "utteranceExpressions", "actionSchemas", "actionConstraints", "normTemplates", "processTemplates", "spatialRelations", "events", "claims", "characterGoals", "characterModels", "rules", "entities"] as const;
+  const removable = ["possibilities", "eventRelations", "eventParticipations", "sceneOccurrences", "eventFrames", "semanticEffects", "perceptionObservations", "utteranceExpressions", "actionSchemas", "actionConstraints", "normTemplates", "processTemplates", "spatialRelations", "events", "claims", "characterGoals", "characterModels", "rules", "entities"] as const;
   while (promptJson(compact).length > MAX_CATALOG_JSON_CHARS) {
     const key = removable.find((candidate) => compact[candidate].length > 1);
     if (!key) break;
@@ -1438,4 +1450,9 @@ function semanticEffectIdentity(effect: SemanticEffect, status: "canonical" | "p
 function utteranceExpressionIdentity(expression: UtteranceExpression, status: "canonical" | "pending"): CompilerUtteranceExpressionIdentity {
   const { id, canonicalEventId, speakerId, addresseeIds, modality, propositionId, quotation } = expression;
   return { id, canonicalEventId, speakerId, addresseeIds, modality, propositionId, quotation, status };
+}
+
+function perceptionObservationIdentity(observation: PerceptionObservation, status: "canonical" | "pending"): CompilerPerceptionObservationIdentity {
+  const { id, canonicalEventId, observerId, cut, channel, phenomenon, lowering } = observation;
+  return { id, canonicalEventId, observerId, cut, channel, phenomenon, lowering, status };
 }

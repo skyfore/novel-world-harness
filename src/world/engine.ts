@@ -1,3 +1,4 @@
+import { validatePerceptionAcquisition, validatePerceptionObservation, type PerceptionObservation } from "./perception-observation.js";
 import { validateExpressionAcquisition, validateUtteranceExpression, validateAttributionExpressions } from "./utterance-expression.js";
 import type { UtteranceExpression } from "./utterance-expression.js";
 import { SCHEDULING_POLICY_VERSION } from "./scheduling-policy.js";
@@ -121,6 +122,7 @@ export type WorldModelContext = {
   sceneOccurrences?: readonly SceneOccurrence[];
   eventFrames?: ReadonlyMap<string, EventFrame>;
   semanticEffects?: ReadonlyMap<string, SemanticEffect>;
+  perceptionObservations?: ReadonlyMap<string, PerceptionObservation>;
   utteranceExpressions?: ReadonlyMap<string, UtteranceExpression>;
   actionSchemas?: ReadonlyMap<string, ActionSchema>;
   actionConstraints?: ReadonlyMap<string, ActionConstraint>;
@@ -372,6 +374,7 @@ export function validateEventProposal(
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
       postState = applyStateDelta(evaluationState, delta, context.stateSchema, context.entities, context.rules);
+      for (const operation of proposal.proposedKnowledge?.operations ?? []) errors.push(...validatePerceptionAcquisition(operation, { observations: context.perceptionObservations ?? new Map(), propositions: context.propositions ?? new Map() }, { eventIds: realized, before: evaluationState, after: postState, schema: context.stateSchema }));
       errors.push(...validateEffectObligations({ proposal, before: state, after: postState, effectBaseline: evaluationState, context,
         realizedCanonicalEventIds: options.realizedCanonicalEventIds }));
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
@@ -561,7 +564,7 @@ export class WorldEngine {
     }, seedProvenance) : undefined;
     if (knowledge) applyKnowledgeDelta(emptyKnowledgeState("genesis"), knowledge, "genesis", {
       entities: this.context.entities, claims: this.context.claims, propositions: this.context.propositions,
-      attributions: this.context.attributions, utteranceExpressions: this.context.utteranceExpressions, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
+      attributions: this.context.attributions, utteranceExpressions: this.context.utteranceExpressions, perceptionObservations: this.context.perceptionObservations, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
     });
     if (completeSeed) {
       applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map() }, seedProvenance, logicalTime.elapsedDays ?? 0);
@@ -607,6 +610,7 @@ export class WorldEngine {
     });
     // Equal state outcomes do not prove that a particular expression occurred.
     const expressionOccurrences = new Set([...(this.context.utteranceExpressions?.values() ?? [])].map(item => item.canonicalEventId));
+    for (const observation of this.context.perceptionObservations?.values() ?? []) expressionOccurrences.add(observation.canonicalEventId);
     const inferredRealizations = [...(this.context.events?.values() ?? [])]
       .filter((event) => !expressionOccurrences.has(event.id) && !semanticEffectRealizationIssues(this.context.semanticEffects?.values() ?? [], new Set([event.id])).length && canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
       .map((event) => event.id);
@@ -619,6 +623,8 @@ export class WorldEngine {
     for (const eventId of realizesCanonicalEventIds) {
       if (!this.context.events?.has(eventId)) throw new Error(`Genesis realizes unknown canonical event: ${eventId}`);
     }
+    const perceptionIssues = (knowledge?.operations ?? []).flatMap(operation => validatePerceptionAcquisition(operation, { observations: this.context.perceptionObservations ?? new Map(), propositions: this.context.propositions ?? new Map() }, { eventIds: new Set(realizesCanonicalEventIds), before: initialState, after: initialState, schema: this.context.stateSchema }));
+    if (perceptionIssues.length) throw new Error(perceptionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     const expressionIssues = (knowledge?.operations ?? []).flatMap(operation => validateExpressionAcquisition(operation, this.context.utteranceExpressions ?? new Map(), new Set(realizesCanonicalEventIds), this.context.attributions));
     if (expressionIssues.length) throw new Error(expressionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     const evidence: EvidenceRef[] = structuredClone([...initialEvidence]);
@@ -762,6 +768,7 @@ export class WorldEngine {
             propositions: context.propositions,
             attributions: context.attributions,
             utteranceExpressions: context.utteranceExpressions,
+            perceptionObservations: context.perceptionObservations,
             branchSemantics: stagedSemantics,
           });
         }
@@ -1328,6 +1335,7 @@ function effectiveKnowledgeOperationIndexes(input: KnowledgeState, delta: Knowle
       ...(operation.propositionId ? { propositionId: operation.propositionId } : {}),
       ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
       ...(operation.expressionId ? { expressionId: operation.expressionId } : {}),
+      ...(operation.perceptionId ? { perceptionId: operation.perceptionId } : {}),
       ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
       status: operation.status,
       confidence: operation.confidence,
@@ -1356,6 +1364,7 @@ function withoutAcquisitionCommit<T extends { acquiredAtCommit?: string }>(fact:
 
 function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
   const ontologyIssues = [
+    ...[...(context.perceptionObservations?.values() ?? [])].flatMap(observation => validatePerceptionObservation(observation, { entities: context.entities, events: context.events ?? new Map() })),
     ...[...(context.utteranceExpressions?.values() ?? [])].flatMap(expression => validateUtteranceExpression(expression, { entities: context.entities, events: context.events ?? new Map(), propositions: context.propositions ?? new Map() })),
     ...[...(context.attributions?.values() ?? [])].flatMap(attribution => validateAttributionExpressions(attribution, context.utteranceExpressions ?? new Map())),
     ...validateActionConstraintCatalog(context.actionConstraints?.values() ?? [], {
@@ -1391,6 +1400,7 @@ function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
     claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     semanticEffects: [...(context.semanticEffects?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    perceptionObservations: [...(context.perceptionObservations?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     utteranceExpressions: [...(context.utteranceExpressions?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     spatialOntologyVersion: context.spatialOntologyVersion,
     spatialRelations: [...(context.spatialRelations ?? [])].sort((left, right) => left.id.localeCompare(right.id)),

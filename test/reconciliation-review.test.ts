@@ -102,9 +102,9 @@ it("requires every planned target at real finish, freezes deferrals in the recei
   expect((await new CompilerFinishReceipts(root, fixture.source.id, batch).read())?.fingerprint).toBe(receipt!.fingerprint);
   await invoke("propose_proposition", { proposal_id: "arrival-content", payload: { id: "arrival-content", subjectEntityId: "hero", relationId: "arrives", object: { kind: "literal", value: true }, polarity: "positive", modality: "asserted" }, evidence_segment_ids: [fixture.segmentId] });
   const { evidence: _eventEvidence, ...eventPayload } = plan.events[0]!;
-  await invoke("propose_canonical_event", { proposal_id: "arrival-knowledge", evidence_segment_ids: [fixture.segmentId], payload: { ...eventPayload, observedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "orphan", propositionId: "arrival-content", acquisitionMode: "observed", status: "knows", confidence: 1 }] } } });
-  await expect(invoke("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Source-backed acquisition with reachable dependencies", target_reviews: [{ ...review, evidence_segment_ids: [fixture.segmentId] }] })).resolves.toBeDefined();
-  expect((await new CompilerFinishReceipts(root, fixture.source.id, supplement).read())?.state).toBe("completed");
+  await expect(invoke("propose_canonical_event", { proposal_id: "arrival-knowledge", evidence_segment_ids: [fixture.segmentId], payload: { ...eventPayload, observedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "orphan", propositionId: "arrival-content", acquisitionMode: "observed", status: "knows", confidence: 1 }] } } })).rejects.toThrow("PERCEPTION_REQUIRED");
+  await expect(invoke("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Source-backed acquisition with reachable dependencies", target_reviews: [{ ...review, evidence_segment_ids: [fixture.segmentId] }] })).rejects.toThrow("PERCEPTION_REQUIRED");
+  expect(await new CompilerFinishReceipts(root, fixture.source.id, supplement).read()).toBeUndefined();
   await expect(assertReconciliationDeferralsReviewed(root, fixture.source.id)).rejects.toThrow("host source review");
   const focused = await buildWorldReconciliationPrompt(root, fixture.source.id, { ...audit, coverage: { ...audit.coverage, autonomousDriverCoverage: 0 } }, 1, { proposalIdSuffixTail: "opening-only", focus: "opening-driver" });
   const focusedContext = JSON.parse(focused.match(/<reconciliation-context>\n([\s\S]+)\n<\/reconciliation-context>/u)![1]!);

@@ -20,7 +20,8 @@ it("rejects reuse of a later report in a direct observation repair, including re
   // The base event schema also rejects an observed operation retaining a speaker.
   expect(knowledgeRepairScopeIssues(scoped, attempt({ ...report, acquisitionMode: "observed" }), existing).length).toBeGreaterThan(0);
   const { attributionId, sourceActorId, ...sensory } = report;
-  expect(knowledgeRepairScopeIssues(scoped, attempt({ ...sensory, acquisitionMode: "observed" }), existing)).toEqual([]);
+  expect(knowledgeRepairScopeIssues(scoped, attempt({ ...sensory, acquisitionMode: "observed" }), existing).join()).toContain("perceptionId");
+  expect(knowledgeRepairScopeIssues(scoped, attempt({ ...sensory, acquisitionMode: "observed", perceptionId: "verified-sense" }), new Set([...existing, "perception-observation:verified-sense"]))).toEqual([]);
   expect(knowledgeRepairScopeIssues(plan, attempt(report), existing)).toEqual([]);
 });
 it("allows a typed knowledge dependency closure and rejects orphan artifacts, existing rewrites and unrelated event fields", () => {
@@ -49,4 +50,19 @@ it("follows nested typed attribution/proposition dependencies but rejects droppi
   expect(knowledgeRepairScopeIssues({ ...plan, events: [baseline] }, drop, new Set()).join()).toContain("preserve all established knowledge");
   const noop = new Map([["event", { kind: "canonical-event", payload: event }]]);
   expect(knowledgeRepairScopeIssues(plan, noop, new Set()).join()).toContain("not a no-op");
+});
+
+it("requires explicit version-two authority for new occurrence dependencies and rejects orphans", () => {
+  const drafts = bundle();
+  drafts.get("attr-draft")!.payload.expressionIds = ["speech"];
+  drafts.set("speech", { kind: "utterance-expression", payload: { id: "speech", propositionId: "p", propositions: [] } });
+  expect(knowledgeRepairScopeIssues(plan, drafts, new Set()).join()).toContain("outside the reviewed dependency authority");
+  const authorized: KnowledgeRepairPlan = { ...plan, version: 2, dependencyKinds: ["claim", "proposition", "attribution", "utterance-expression", "perception-observation"] };
+  expect(knowledgeRepairScopeIssues(authorized, drafts, new Set())).toEqual([]);
+  drafts.set("sense", { kind: "perception-observation", payload: { id: "sense" } });
+  expect(knowledgeRepairScopeIssues(authorized, drafts, new Set()).join()).toContain("not reachable");
+  drafts.get("event-draft")!.payload = { ...event, observedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "bob", claimId: "c", propositionId: "p", perceptionId: "sense", acquisitionMode: "observed", status: "knows", confidence: 1 }] } };
+  drafts.delete("speech"); drafts.delete("attr-draft");
+  expect(knowledgeRepairScopeIssues(authorized, drafts, new Set())).toEqual([]);
+  expect(knowledgeRepairScopeIssues(authorized, drafts, new Set(["perception-observation:sense"])).join()).toContain("read-only");
 });

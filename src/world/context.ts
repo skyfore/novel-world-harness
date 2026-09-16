@@ -1,3 +1,4 @@
+import { validatePerceptionObservation, type PerceptionObservation } from "./perception-observation.js";
 import { validateAttributionExpressions, validateUtteranceExpression, type UtteranceExpression } from "./utterance-expression.js";
 import { SCHEDULING_POLICY_VERSION } from "./scheduling-policy.js";
 import { type SemanticEffect, validateSemanticEffect } from "./semantic-effect.js";
@@ -51,6 +52,7 @@ export const canonicalSnapshotSchema = z.object({
   sceneOccurrences: z.array(revisionRefSchema),
   eventFrames: z.array(revisionRefSchema),
   semanticEffects: z.array(revisionRefSchema).optional(),
+  perceptionObservations: z.array(revisionRefSchema).optional(),
   utteranceExpressions: z.array(revisionRefSchema).optional(),
   actionSchemas: z.array(revisionRefSchema),
   eventExecutions: z.array(revisionRefSchema),
@@ -77,6 +79,7 @@ export type ScopedWorldArtifacts = {
   sceneOccurrences: readonly SceneOccurrence[];
   eventFrames: readonly EventFrame[];
   semanticEffects?: readonly SemanticEffect[];
+  perceptionObservations?: readonly PerceptionObservation[];
   utteranceExpressions?: readonly UtteranceExpression[];
   actionSchemas: readonly ActionSchema[];
   eventExecutions?: readonly EventExecution[];
@@ -135,6 +138,7 @@ export class WorldContextStore {
       sceneOccurrences: sceneOccurrences.filter(belongsToSource),
       eventFrames: eventFrames.filter(belongsToSource),
       semanticEffects: (await this.canon.listSemanticEffects()).filter(belongsToSource),
+      perceptionObservations: (await this.canon.listPerceptionObservations()).filter(belongsToSource),
       utteranceExpressions: (await this.canon.listUtteranceExpressions()).filter(belongsToSource),
       eventExecutions: eventExecutions.filter(belongsToSource),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || belongsToSource(schema)),
@@ -156,6 +160,7 @@ export class WorldContextStore {
   ): Promise<WorldModelContext> {
     if (!/^[a-f0-9]{64}$/.test(preparedRevisionHash)) throw new Error(`Invalid prepared revision hash: ${preparedRevisionHash}`);
     assertSemanticEffectProjection(artifacts);
+    assertPerceptionObservationProjection(artifacts);
     assertUtteranceExpressionProjection(artifacts);
     assertEventParticipationProjection(artifacts);
     assertEventRelationProjection(artifacts);
@@ -174,6 +179,7 @@ export class WorldContextStore {
       ...artifacts.sceneOccurrences.map((item) => this.canon.ensureSceneOccurrenceRevision(item)),
       ...artifacts.eventFrames.map((item) => this.canon.ensureEventFrameRevision(item)),
       ...(artifacts.semanticEffects ?? []).map(item => this.canon.ensureSemanticEffectRevision(item)),
+      ...(artifacts.perceptionObservations ?? []).map(item => this.canon.ensurePerceptionObservationRevision(item)),
       ...(artifacts.utteranceExpressions ?? []).map(item => this.canon.ensureUtteranceExpressionRevision(item)),
       ...artifacts.actionSchemas.map((item) => this.canon.ensureActionSchemaRevision(item)),
       ...(artifacts.eventExecutions ?? []).map((item) => this.canon.ensureEventExecutionRevision(item)),
@@ -195,6 +201,7 @@ export class WorldContextStore {
     refsFromContent = false,
   ): Promise<WorldModelContext> {
     assertSemanticEffectProjection(artifacts);
+    assertPerceptionObservationProjection(artifacts);
     assertUtteranceExpressionProjection(artifacts);
     assertEventParticipationProjection(artifacts);
     assertEventRelationProjection(artifacts);
@@ -217,6 +224,7 @@ export class WorldContextStore {
         artifacts.sceneOccurrences,
         artifacts.eventFrames,
         artifacts.semanticEffects ?? [],
+        artifacts.perceptionObservations ?? [],
         artifacts.utteranceExpressions ?? [],
         artifacts.eventExecutions ?? [],
         artifacts.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
@@ -257,6 +265,7 @@ export class WorldContextStore {
       sceneOccurrences: await canonicalRefs("scene-occurrences", artifacts.sceneOccurrences),
       eventFrames: await canonicalRefs("event-frames", artifacts.eventFrames),
       semanticEffects: await canonicalRefs("semantic-effects", artifacts.semanticEffects ?? []),
+      perceptionObservations: await canonicalRefs("perception-observations", artifacts.perceptionObservations ?? []),
       utteranceExpressions: await canonicalRefs("utterance-expressions", artifacts.utteranceExpressions ?? []),
       actionSchemas: await canonicalRefs("action-schemas", artifacts.actionSchemas),
       eventExecutions: await canonicalRefs("event-executions", artifacts.eventExecutions ?? []),
@@ -331,8 +340,10 @@ export class WorldContextStore {
       Promise.all(snapshot.possibilities.map((ref) => this.possibilities.getRevision(ref.id, ref.hash))),
     ]);
     const semanticEffects = await Promise.all((snapshot.semanticEffects ?? []).map(ref => this.canon.getSemanticEffectRevision(ref.id, ref.hash)));
+    const perceptionObservations = await Promise.all((snapshot.perceptionObservations ?? []).map(ref => this.canon.getPerceptionObservationRevision(ref.id, ref.hash)));
     const utteranceExpressions = await Promise.all((snapshot.utteranceExpressions ?? []).map(ref => this.canon.getUtteranceExpressionRevision(ref.id, ref.hash)));
     assertSemanticEffectProjection({ entities, events, eventExecutions, semanticEffects, actionSchemas, eventParticipations });
+    assertPerceptionObservationProjection({ entities, events, perceptionObservations });
     assertUtteranceExpressionProjection({ entities, events, propositions, attributions, utteranceExpressions });
     if (snapshot.sourceId) {
       assertArtifactCollectionsExclusiveToSource(snapshot.sourceId, [
@@ -347,6 +358,7 @@ export class WorldContextStore {
         sceneOccurrences,
         eventFrames,
         semanticEffects,
+        perceptionObservations,
         utteranceExpressions,
         eventExecutions,
         actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
@@ -393,6 +405,7 @@ export class WorldContextStore {
       sceneOccurrences,
       eventFrames: new Map(eventFrames.map((frame) => [frame.id, frame])),
       semanticEffects: new Map(semanticEffects.map(item => [item.id, item])),
+      perceptionObservations: new Map(perceptionObservations.map(item => [item.id, item])),
       utteranceExpressions: new Map(utteranceExpressions.map(item => [item.id, item])),
       actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])),
       actionConstraints: new Map(actionConstraints.map((constraint) => [constraint.id, constraint])),
@@ -560,4 +573,10 @@ function assertUtteranceExpressionProjection(artifacts: Pick<ScopedWorldArtifact
   const issues = (artifacts.utteranceExpressions ?? []).flatMap(expression => validateUtteranceExpression(expression, catalog));
   issues.push(...artifacts.attributions.flatMap(item => validateAttributionExpressions(item, new Map((artifacts.utteranceExpressions ?? []).map(expression => [expression.id, expression])))));
   if (issues.length) throw new Error(`Invalid utterance expression projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);
+}
+
+function assertPerceptionObservationProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "perceptionObservations">): void {
+  const catalog = { entities: new Map(artifacts.entities.map(item => [item.id, item])), events: new Map(artifacts.events.map(item => [item.id, item])) };
+  const issues = (artifacts.perceptionObservations ?? []).flatMap(observation => validatePerceptionObservation(observation, catalog));
+  if (issues.length) throw new Error(`Invalid perception observation projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);
 }

@@ -1,3 +1,5 @@
+import { contentHash } from "../world/canonical.js";
+import { perceptionObservationSchema, validatePerceptionObservationEvidence, type PerceptionObservation } from "../world/perception-observation.js";
 import { utteranceExpressionSchema, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
 import { semanticEffectSchema, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
@@ -177,7 +179,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "utterance-expression" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "perception-observation" | "utterance-expression" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -196,6 +198,7 @@ export const compilerProposalSchemas = {
   "scene-occurrence": sceneOccurrenceSchema,
   "event-frame": compilerEventFrameSchema,
   "semantic-effect": semanticEffectSchema,
+  "perception-observation": perceptionObservationSchema,
   "utterance-expression": utteranceExpressionSchema,
   "action-schema": compilerActionSchema,
   "event-execution": eventExecutionSchema,
@@ -259,10 +262,17 @@ export function compilerPayloadEvidence(payload: unknown): EvidenceRef[] {
 
 export class CompilerProposalService {
   readonly store: ProposalStore;
-  constructor(workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
+  constructor(private readonly workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
   async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; evidenceAssertions?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string } }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
     const schema = compilerProposalSchemas[kind];
     const payload = schema.parse(input.payload);
+    if (input.generatedBy.compilerBatchId) {
+      const current = kind === "canonical-event" ? await new CanonicalModelStore(this.workspaceRoot).getEvent((payload as CanonicalEvent).id).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; }) : undefined;
+      const established = new Set(findKnowledgeDeltas(current).flatMap(item => item.delta.operations.map(operation => contentHash(operation))));
+      for (const located of findKnowledgeDeltas(payload)) for (const operation of located.delta.operations) {
+        if (operation.op === "learn" && operation.acquisitionMode === "observed" && !operation.perceptionId && !established.has(contentHash(operation))) throw new Error("PERCEPTION_REQUIRED: New observed acquisition requires a source-grounded perceptionId. Use same-source find_compiler_artifacts with kind perception-observation; copy results[].readArguments.ref into read_compiler_artifact.ref and payload.id into perceptionId. At most one corrected retry if proof exists within scope; otherwise preserve drafts and stop for host source review. Deleting sourceActorId or attributionId from a report is not perception; never guess or retry unchanged.");
+      }
+    }
     if (kind !== "entity" && kind !== "claim" && kind !== "character-model") assertCompilerStateFields(payload);
     const evidence = input.evidence === undefined ? [] : evidenceRefSchema.array().parse(input.evidence);
     const evidenceAssertions = input.evidenceAssertions === undefined
@@ -283,7 +293,7 @@ export class CompilerProposalService {
       );
     }
     const artifactId = compilerProposalArtifactId(kind, payload, input.proposalId);
-    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : []), ...(kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions) : [])];
+    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : []), ...(kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions) : []), ...(kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions) : [])];
     const characterEvidenceIssues = kind === "character-model"
       ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
       : [];
@@ -429,6 +439,7 @@ type ProposalClosureCatalog = {
   entityKinds: Map<string, string>;
   propositions: Set<string>;
   expressions: Set<string>;
+  perceptions: Set<string>;
   attributions: Set<string>;
   claims: Set<string>;
   events: Set<string>;
@@ -497,6 +508,7 @@ export async function validateCompilerProposalClosure(
   };
   const canonicalExpressions = (await canon.listUtteranceExpressions()).filter(fromActiveSource);
   const catalog: ProposalClosureCatalog = {
+    perceptions: new Set((await canon.listPerceptionObservations()).filter(fromActiveSource).map(item => item.id)),
     expressions: new Set(canonicalExpressions.map(item => item.id)),
     entities: new Set(canonicalEntities.filter(fromActiveSource).map((item) => item.id)),
     entityKinds: new Map(canonicalEntities.filter(fromActiveSource).map((item) => [item.id, item.kind])),
@@ -537,6 +549,7 @@ export async function validateCompilerProposalClosure(
       catalog.entities.add(entity.id);
       catalog.entityKinds.set(entity.id, entity.kind);
     }
+    if (summary.kind === "perception-observation") catalog.perceptions.add((payload as { id: string }).id);
     if (summary.kind === "utterance-expression") catalog.expressions.add((payload as { id: string }).id);
     if (summary.kind === "proposition") catalog.propositions.add((payload as { id: string }).id);
     if (summary.kind === "attribution") catalog.attributions.add((payload as { id: string }).id);
@@ -931,6 +944,15 @@ function collectProposalClosureIssues(
     expression.propositions.forEach((item, index) => missing("propositions", item.propositionId, `propositions.${index}.propositionId`));
     return;
   }
+  if (proposal.kind === "perception-observation") {
+    const observation = payload as PerceptionObservation;
+    missing("events", observation.canonicalEventId, "canonicalEventId");
+    missing("entities", observation.observerId, "observerId");
+    missing("entities", observation.access.locationId, "access.locationId");
+    if (observation.phenomenon.entityId) missing("entities", observation.phenomenon.entityId, "phenomenon.entityId");
+    observation.access.conditions.forEach((condition, index) => collectPredicateIssues(condition, `access.conditions.${index}`, missing, fieldReference));
+    return;
+  }
   if (proposal.kind === "semantic-effect") {
     const effect = payload as SemanticEffect;
     missing("events", effect.canonicalEventId, "canonicalEventId");
@@ -1214,6 +1236,7 @@ function collectKnowledgeDeltaIssues(delta: KnowledgeDelta, path: string, missin
     const operationPath = `${path}.operations.${index}`;
     missing("entities", operation.actorId, `${operationPath}.actorId`);
     missing("claims", operation.claimId, `${operationPath}.claimId`);
+    if (operation.op === "learn" && operation.perceptionId) missing("perceptions", operation.perceptionId, `${operationPath}.perceptionId`);
     if (operation.op === "learn" && operation.expressionId) missing("expressions", operation.expressionId, `${operationPath}.expressionId`);
     if (operation.propositionId) missing("propositions", operation.propositionId, `${operationPath}.propositionId`);
     if (operation.op === "learn" && operation.attributionId) {

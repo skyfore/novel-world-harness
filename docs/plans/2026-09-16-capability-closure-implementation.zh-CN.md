@@ -801,3 +801,21 @@ pipeline 升为 37、engine 升为 0.15.0；旧 pipeline 36 仅保留原文 obse
 定向验证包含 65 项编译工具/表达链检查及最终原创反例；服务端、Web、E2E TypeScript 通过。全仓检查待本段最终验证记录。
 
 最终验证：全仓 203 文件、1225 tests 全部通过（99.50 秒），包含最终时间依赖连通组、循环拒绝和 Genesis 等值状态反例；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P3c 已提交为 `fc904b8`。
+
+## P3d：PerceptionObservation 持久化链与实际事件 cut 获知
+
+新增 perception-observation-v1，分离 observer、实际 occurrence、event-start/end cut、channel、phenomenon、可达位置/条件与 mapped/unmapped lowering。宿主从本次 entity/event mention 和 identity/event resolution 冻结修订与原文字节 anchors；模型不能输入权威 hash。所有语义字段必须有本 occurrence 自己的精确证据，感知 mention 必须解析到本事件本身，不能借用晚期报告或 subevent。引语报告不能作为直接状态感知证明。
+
+同一提交贯通模型提案、逐字段与源修订校验、finish overlay、关联事件组 converge、canonical/revision/catalog/retrieval、audit、prepared archive/restore、closure 冻结修订依赖、reparse、WorldContext、Genesis/普通提交/fork/无 checkpoint replay。新模型 observed acquisition 必须带 perceptionId；运行时保留该引用，核对实际观察者、命题内容、当前事件发生及相应 before/after 状态，不能从未来 canon、过去事件或相同初始状态推断本次感知。知识变化仍不写世界真值。
+
+执行 lowering 有意限定为 direct-vision-v1：同地物理观察者看见 location.open，或同地物理人物的位置；access 仅支持类型化 fact-equals。其他渠道、感觉及未决可达关系保留 represented-unmapped，不产生获知。public 字段可见性不等于感官可达性。本段没有宣称完成失能/远程渠道/照片/记忆/推断及完整 Acquisition 模式和旧获知迁移。
+
+知识修复新增 v2 显式 dependencyKinds 授权，v1 不得原地扩权；既有依赖只读，新依赖必须可从受限事件 knowledge effect 到达，原事件其他字段、已存在获知、前驱 receipt 和 baseline 不可变。恢复 SOP 对 ID miss 允许同源发现后的单次纠正；冻结失效、引语冒充、未映射、错误 cut 和当前状态不证明可达性均停止重试。
+
+两段原创中英文场景实际走 propose→finish→converge→archive→新 workspace rebuild→runtime commit→fresh replay。反例覆盖缺字段证明、改上游修订、closure 修订不匹配、观察者 represented、听觉伪装视觉、晚期报告、引语重标、删 perceptionId、未知位置分支、旧 head/未来事件、同状态 Genesis、删证据 binding、unmapped 保留且不获知，以及 v1/v2 修复权限与孤立依赖。旧 reconciliation 测试中无感知证明的 observed 提案现被正确拒绝，测试改为验证拒绝和不生成 finish receipt。
+
+pipeline 升为 38、engine 升为 0.16.0。旧 pipeline 37 保留原文 observation/structure 检查点，语义/执行检查点重新验证；旧历史不原地重解释。未运行外部模型与人工体验评价，P1–P7 总目标继续开放。
+
+最终验证：99 项定向检查通过；补充冻结修订与等值 Genesis 反例后的 6 项感知纵向检查通过。全仓 204 文件、1233 tests 全部通过（104.15 秒）；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。清理 import 时曾误删名称并被测试即时发现，修正后才执行最终全仓验证。

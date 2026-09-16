@@ -1,3 +1,6 @@
+import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
+import { validatePerceptionAcquisition } from "../world/perception-observation.js";
+import { perceptionObservationSchema, validatePerceptionObservation, validatePerceptionObservationEvidence, type PerceptionObservation } from "../world/perception-observation.js";
 import { validateAttributionExpressions, validateExpressionAcquisition } from "../world/utterance-expression.js";
 import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.js";
 import { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
@@ -116,7 +119,7 @@ import {
   type ProcessTemplate,
 } from "../world/process-ontology.js";
 
-export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "utterance-expression" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
+export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "perception-observation" | "utterance-expression" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type CompilerCatalogValidationScope = "catalog" | "record";
 export type CompilerValidationCatalog = {
@@ -131,6 +134,7 @@ export type CompilerValidationCatalog = {
   sceneOccurrences: Map<string, SceneOccurrence>;
   eventFrames: Map<string, EventFrame>;
   semanticEffects?: Map<string, SemanticEffect>;
+  perceptionObservations?: Map<string, PerceptionObservation>;
   utteranceExpressions?: Map<string, UtteranceExpression>;
   actionSchemas: Map<string, ActionSchema>;
   eventExecutions?: Map<string, EventExecution>;
@@ -197,6 +201,7 @@ export class CompilerValidator {
       sceneOccurrences: new Map(sceneOccurrenceList.map((item) => [item.id, item])),
       eventFrames: new Map(eventFrameList.map((item) => [item.id, item])),
       semanticEffects: new Map((await this.canon.listSemanticEffects()).map(item => [item.id, item])),
+      perceptionObservations: new Map((await this.canon.listPerceptionObservations()).map(item => [item.id, item])),
       utteranceExpressions: new Map((await this.canon.listUtteranceExpressions()).map(item => [item.id, item])),
       actionSchemas: new Map(actionSchemaList.map((item) => [item.id, item])),
       eventExecutions: new Map(eventExecutionList.map((item) => [item.id, item])),
@@ -220,7 +225,9 @@ export class CompilerValidator {
 
     if (kind === "attribution") errors.push(...validateAttributionExpressions(attributionSchema.parse(payload), catalog.utteranceExpressions ?? new Map()));
     for (const located of findKnowledgeDeltas(payload)) for (const operation of located.delta.operations) errors.push(...validateExpressionAcquisition(operation, catalog.utteranceExpressions ?? new Map(), undefined, catalog.attributions));
+    for (const located of findKnowledgeDeltas(payload)) for (const operation of located.delta.operations) errors.push(...validatePerceptionAcquisition(operation, { observations: catalog.perceptionObservations ?? new Map(), propositions: catalog.propositions }, undefined, kind === "canonical-event" ? canonicalEventSchema.parse(payload).id : undefined));
     if (kind === "semantic-effect") errors.push(...validateSemanticEffect(semanticEffectSchema.parse(payload), catalog));
+    if (kind === "perception-observation") errors.push(...validatePerceptionObservation(perceptionObservationSchema.parse(payload), catalog));
     if (kind === "utterance-expression") errors.push(...validateUtteranceExpression(utteranceExpressionSchema.parse(payload), catalog));
     if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors);
     if (kind === "proposition") this.validateProposition(propositionSchema.parse(payload), entities, propositions, events, errors);
@@ -1602,6 +1609,7 @@ export class CompilerCommitService {
           ...validateRelationshipOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
         ]
       : [];
+    const perceptionEvidenceIssues = kind === "perception-observation" ? [...validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions), ...await validatePerceptionObservationTrace(this.workspaceRoot, perceptionObservationSchema.parse(payload))] : [];
     const expressionEvidenceIssues = kind === "utterance-expression" ? [...validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions), ...await validateUtteranceExpressionTrace(this.workspaceRoot, utteranceExpressionSchema.parse(payload))] : [];
     const semanticEvidenceIssues = kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : [];
     const spatialEvidenceIssues = kind === "spatial-relation"
@@ -1660,7 +1668,7 @@ export class CompilerCommitService {
       ...groundingIssues,
       ...targetIssues,
       ...characterEvidenceIssues,
-      ...spatialEvidenceIssues, ...semanticEvidenceIssues, ...expressionEvidenceIssues,
+      ...spatialEvidenceIssues, ...semanticEvidenceIssues, ...expressionEvidenceIssues, ...perceptionEvidenceIssues,
       ...worldRuleEvidenceIssues,
       ...initialWorldEvidenceIssues,
       ...exactInspection.issues,
@@ -1684,6 +1692,7 @@ export class CompilerCommitService {
     else if (kind === "event-relation") await this.canon.putEventRelation(eventRelationSchema.parse(payload));
     else if (kind === "scene-occurrence") await this.canon.putSceneOccurrence(sceneOccurrenceSchema.parse(payload));
     else if (kind === "semantic-effect") await this.canon.putSemanticEffect(semanticEffectSchema.parse(payload));
+    else if (kind === "perception-observation") await this.canon.putPerceptionObservation(perceptionObservationSchema.parse(payload));
     else if (kind === "utterance-expression") await this.canon.putUtteranceExpression(utteranceExpressionSchema.parse(payload));
     else if (kind === "event-frame") await this.canon.putEventFrame(eventFrameSchema.parse(payload));
     else if (kind === "event-execution") await this.canon.putEventExecution(eventExecutionSchema.parse(payload));
@@ -1824,6 +1833,7 @@ function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposa
   if (kind === "event-relation") { const value = eventRelationSchema.parse(payload); catalog.eventRelations.set(value.id, value); }
   if (kind === "scene-occurrence") { const value = sceneOccurrenceSchema.parse(payload); catalog.sceneOccurrences.set(value.id, value); }
   if (kind === "semantic-effect") { const value = semanticEffectSchema.parse(payload); (catalog.semanticEffects ??= new Map()).set(value.id, value); }
+  if (kind === "perception-observation") { const value = perceptionObservationSchema.parse(payload); (catalog.perceptionObservations ??= new Map()).set(value.id, value); }
   if (kind === "utterance-expression") { const value = utteranceExpressionSchema.parse(payload); (catalog.utteranceExpressions ??= new Map()).set(value.id, value); }
   if (kind === "event-frame") { const value = eventFrameSchema.parse(payload); catalog.eventFrames.set(value.id, value); }
   if (kind === "event-execution") { const value = eventExecutionSchema.parse(payload); (catalog.eventExecutions ??= new Map()).set(value.id, value); }
@@ -1849,6 +1859,7 @@ function cloneValidationCatalog(catalog: CompilerValidationCatalog): CompilerVal
     sceneOccurrences: new Map(catalog.sceneOccurrences),
     eventFrames: new Map(catalog.eventFrames),
     semanticEffects: new Map(catalog.semanticEffects ?? []),
+    perceptionObservations: new Map(catalog.perceptionObservations ?? []),
     utteranceExpressions: new Map(catalog.utteranceExpressions ?? []),
     actionSchemas: new Map(catalog.actionSchemas),
     eventExecutions: new Map(catalog.eventExecutions ?? []),
@@ -1947,7 +1958,7 @@ function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
-  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "semantic-effect" || kind === "utterance-expression" || kind === "action-schema" || kind === "event-execution" || kind === "action-constraint" || kind === "norm-template" || kind === "process-template" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "semantic-effect" || kind === "perception-observation" || kind === "utterance-expression" || kind === "action-schema" || kind === "event-execution" || kind === "action-constraint" || kind === "norm-template" || kind === "process-template" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
 }
 function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "entity") return entitySchema;
@@ -1959,6 +1970,7 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "event-relation") return eventRelationSchema;
   if (kind === "scene-occurrence") return sceneOccurrenceSchema;
   if (kind === "semantic-effect") return semanticEffectSchema;
+  if (kind === "perception-observation") return perceptionObservationSchema;
   if (kind === "utterance-expression") return utteranceExpressionSchema;
   if (kind === "event-frame") return eventFrameSchema;
   if (kind === "event-execution") return eventExecutionSchema;
@@ -2009,13 +2021,16 @@ function expressionGroupDependencyIssues(catalog: CompilerValidationCatalog): Va
 
 /** Keep connected occurrence/attribution drafts together, including earlier/later event anchors. */
 function expressionDependencyGroup(eligible: readonly PendingCanonicalProposal[]): PendingCanonicalProposal[] {
-  const relevant = eligible.filter(candidate => ["utterance-expression", "canonical-event", "attribution"].includes(candidate.kind));
+  const relevant = eligible.filter(candidate => ["utterance-expression", "perception-observation", "canonical-event", "attribution"].includes(candidate.kind));
   const byIdentity = new Map(relevant.map(candidate => [`${candidate.kind}:${(candidate.payload as { id: string }).id}`, candidate]));
   const adjacency = new Map(relevant.map(candidate => [candidate.id, new Set<string>()]));
   const selected = new Set<string>();
   for (const candidate of relevant) {
     const dependencies: string[] = [];
-    if (candidate.kind === "utterance-expression") {
+    if (candidate.kind === "perception-observation") {
+      selected.add(candidate.id);
+      dependencies.push(`canonical-event:${perceptionObservationSchema.parse(candidate.payload).canonicalEventId}`);
+    } else if (candidate.kind === "utterance-expression") {
       selected.add(candidate.id);
       dependencies.push(`canonical-event:${utteranceExpressionSchema.parse(candidate.payload).canonicalEventId}`);
     } else if (candidate.kind === "attribution") {
@@ -2027,6 +2042,7 @@ function expressionDependencyGroup(eligible: readonly PendingCanonicalProposal[]
       dependencies.push(...eventDependencies(canonicalEventSchema.parse(candidate.payload)).map(id => `canonical-event:${id}`));
       for (const located of findKnowledgeDeltas(candidate.payload)) for (const operation of located.delta.operations) if (operation.op === "learn") {
         if (operation.attributionId) dependencies.push(`attribution:${operation.attributionId}`);
+        if (operation.perceptionId) { selected.add(candidate.id); dependencies.push(`perception-observation:${operation.perceptionId}`); }
         if (operation.expressionId) { selected.add(candidate.id); dependencies.push(`utterance-expression:${operation.expressionId}`); }
       }
     }

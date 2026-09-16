@@ -367,6 +367,18 @@ export function buildNwhToolRecoveryAdvice(
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
 
+  if (/(?:^|\W)(?:perception_|acquisition_perception_)/u.test(lower)
+    && !/(budget|circuit.breaker|consumed|outside.*scope)/u.test(lower)) {
+    const stopped = /(revision_mismatch|quoted_report|unmapped|cut_not_current|access_not_proven)/u.test(lower);
+    const trace = /trace|observer_missing/u.test(lower);
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: stopped ? "host-repair-required" : "invalid-arguments", retryable: !stopped,
+      retryCondition: stopped ? "Stop for host source or mechanism review; no model retry." : "At most one corrected retry within the same source and existing authority; otherwise stop.",
+      steps: stopped ? ["Preserve frozen perception revisions, drafts and branch head. Do not relabel reports, remove perceptionId, overwrite hashes, or retry unchanged."] : [
+        trace ? "Use same-source find_source_annotations; copy results[].readArguments.ref into read_source_annotation.ref and payload.id into the mention field. For identity/event resolution use find_identity_resolutions/find_event_resolutions and copy results[].ref into read_identity_resolution.ref/read_event_resolution.ref."
+          : "Use same-source find_compiler_artifacts with the required kind (perception-observation, canonical-event, entity or proposition); copy results[].readArguments.ref into read_compiler_artifact.ref and payload.id into the corresponding logical ID field.",
+        "Preserve proposal_id and inspect the original occurrence and exact field evidence. The host owns hashes. Correct once only if supported; never guess, relabel a report or delete provenance.",
+        "If evidence or authority is absent, stop for host review. At runtime preserve head and stop for host compilation; do not discover compiler-only evidence through actor tools."] };
+  }
   if (/(acquisition_expression_not_realized|expression_quotation_revision_mismatch|expression_group_scene_blocked)/u.test(lower)) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
       retryCondition: "Stop until the host resolves the source revision, occurrence or scene boundary.",

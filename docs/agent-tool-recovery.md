@@ -1359,3 +1359,11 @@ existing version protocol.
 - `ACQUISITION_EXPRESSION_NOT_REALIZED`：表达尚未在分支历史发生，保留 head 并停止，不能把未来 canon 当获知证据、改 observed 或无变化重试。Genesis、正常提交和无 checkpoint 重放使用相同约束。
 
 旧无 expression 的记录保持可读且不补造证明。新的表达证明须有独立精确证据、修订一致性和身份 trace；完整模式判别 Acquisition/PerceptionObservation 迁移尚未由本段实现。
+
+### PerceptionObservation and bounded acquisition recovery
+
+`propose_perception_observation` accepts logical observer/event mention IDs and exact field selectors. The host freezes the annotation/resolution hashes and occurrence anchors. Discover same-source annotations with `find_source_annotations`, copy `results[].readArguments.ref` into `read_source_annotation.ref`, then use `payload.id`. Discover identity/event resolutions with `find_identity_resolutions` / `find_event_resolutions`; copy `results[].ref` into the corresponding reader's `ref`. Canonical IDs come from `find_compiler_artifacts` → `results[].readArguments.ref` → `read_compiler_artifact` → `payload.id`. Permit at most one corrected retry inside existing authority; never invent hashes or logical IDs.
+
+`PERCEPTION_TRACE_REVISION_MISMATCH`, `PERCEPTION_QUOTED_REPORT`, `PERCEPTION_UNMAPPED`, `PERCEPTION_CUT_NOT_CURRENT` and `PERCEPTION_ACCESS_NOT_PROVEN` stop model retries. Preserve drafts, immutable evidence and branch head for host review. A later report, equal state outcome or previous occurrence does not prove direct observation at the current event cut. Never remove `perceptionId`, delete a report source, or change acquisition mode to bypass proof. Runtime actor tools must not discover compiler-only evidence. Unsupported channels/phenomena remain represented-unmapped and cannot grant knowledge.
+
+New model-side observed acquisitions require `perceptionId`. Unchanged legacy operations remain readable without acquiring verified status. A v1 knowledge repair plan cannot authorize new expression/perception dependencies; a host-reviewed v2 successor must explicitly enumerate `dependencyKinds`, preserve predecessor receipt and event baseline, and include only dependencies reachable from its target knowledge effects. Missing authority, frozen revisions and exhausted budgets require stopping, not plan mutation or namespace reset.

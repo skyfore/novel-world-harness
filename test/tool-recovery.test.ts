@@ -529,3 +529,14 @@ it('directs a bare quotation-ID miss to exact-ID discovery rather than neighbori
   expect(advice.steps.join(' ')).toContain('results[].ref');
   expect(advice.steps.join(' ')).toContain('at most once');
 });
+
+it("bounds perception recovery and stops stale or unrealized sensory proof", () => {
+  for (const code of ["PERCEPTION_TRACE_REVISION_MISMATCH", "PERCEPTION_QUOTED_REPORT", "PERCEPTION_UNMAPPED", "PERCEPTION_CUT_NOT_CURRENT", "PERCEPTION_ACCESS_NOT_PROVEN"]) {
+    expect(buildNwhToolRecoveryAdvice("propose_perception_observation", code).retryable).toBe(false);
+  }
+  const advice = buildNwhToolRecoveryAdvice("propose_perception_observation", "PERCEPTION_TRACE_MISSING");
+  expect(advice.retryable).toBe(true);
+  expect(advice.steps.join(" ")).toContain("results[].readArguments.ref");
+  expect(advice.steps.join(" ")).toContain("results[].ref");
+  expect(advice.retryCondition).toContain("one corrected retry");
+});

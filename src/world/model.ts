@@ -581,6 +581,7 @@ export const knowledgeOperationSchema = z.discriminatedUnion("op", [
     propositionId: idSchema.optional(),
     attributionId: idSchema.optional(),
     expressionId: idSchema.optional(),
+    perceptionId: idSchema.optional(),
     acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
     status: knowledgeStatusSchema,
     confidence: z.number().min(0).max(1),
@@ -589,7 +590,7 @@ export const knowledgeOperationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("forget"), actorId: idSchema, claimId: idSchema, propositionId: idSchema.optional() }).strict(),
 ]).superRefine((value, ctx) => {
   if (value.op !== "learn") return;
-  const semantic = Boolean(value.propositionId || value.attributionId || value.acquisitionMode || value.expressionId);
+  const semantic = Boolean(value.propositionId || value.attributionId || value.acquisitionMode || value.expressionId || value.perceptionId);
   if (semantic && !value.propositionId) {
     ctx.addIssue({ code: "custom", path: ["propositionId"], message: "Semantic knowledge acquisition requires propositionId" });
   }
@@ -1838,6 +1839,7 @@ export const knowledgeFactSchema = z.object({
   propositionId: idSchema.optional(),
   attributionId: idSchema.optional(),
   expressionId: idSchema.optional(),
+  perceptionId: idSchema.optional(),
   acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
   status: knowledgeStatusSchema,
   confidence: z.number().min(0).max(1),
@@ -1857,4 +1859,4 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
 export const WORLD_SCHEMA_VERSION = 3;
-export const WORLD_ENGINE_VERSION = "0.15.0";
+export const WORLD_ENGINE_VERSION = "0.16.0";

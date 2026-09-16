@@ -8,7 +8,7 @@ import { annotationAnchors } from "./annotations.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { applyEventExecutions } from "../world/event-execution.js";
 
-export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "semantic-effect", "utterance-expression", "action", "event-execution", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry", "requirement-set", "core-role-requirements"]);
+export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "semantic-effect", "perception-observation", "utterance-expression", "action", "event-execution", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry", "requirement-set", "core-role-requirements"]);
 export type ClosureKind = z.infer<typeof closureKindSchema>;
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const dependencyUseSchema = z.object({ pointer: z.string(), purpose: z.enum(["identity", "evidence-support", "temporal-order", "causal-precondition", "state-effect", "knowledge-acquisition", "entry-seed", "capability", "certificate"]) }).strict();
@@ -23,6 +23,7 @@ const key = (value: { kind: string; id: string }) => `${value.kind}/${value.id}`
 
 /** An explicit reference vocabulary, not an ID-suffix heuristic or a free-text scan. */
 const referenceFields: Readonly<Record<string, ClosureKind>> = {
+  perceptionId: "perception-observation", observerId: "entity", observerMentionId: "annotation", eventMentionId: "annotation", observerResolutionId: "entity-resolution", eventResolutionId: "event-resolution",
   documentId: "entity", speakerId: "entity", addresseeIds: "entity", expressionId: "utterance-expression", expressionIds: "utterance-expression", quotationId: "annotation",
   entityId: "entity", actorId: "entity", subjectEntityId: "entity", holderEntityId: "entity", fromActorId: "entity", toActorId: "entity", debtorActorId: "entity", creditorActorId: "entity", beneficiaryActorId: "entity", sourceActorId: "entity", authorityEntityId: "entity", focalActorId: "entity", viewpointActorId: "entity", fromLocationId: "entity", toLocationId: "entity", containerLocationId: "entity", containedLocationId: "entity", locationId: "entity",
   entityIds: "entity", participants: "entity", targetEntityIds: "entity", targetIds: "entity", presentActorIds: "entity", viewpointActorIds: "entity", jurisdictionEntityIds: "entity", locationIds: "entity",
@@ -46,7 +47,7 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
   add("source", bundle.source.id, bundle.source);
   const canonical = bundle.canonical;
   const collections: Array<[ClosureKind, readonly { id: string }[]]> = [
-    ["entity", canonical.entities], ["proposition", canonical.propositions], ["attribution", canonical.attributions], ["claim", canonical.claims], ["event", canonical.events], ["participation", canonical.eventParticipations], ["event-relation", canonical.eventRelations], ["spatial", canonical.spatialRelations], ["scene", canonical.sceneOccurrences], ["frame", canonical.eventFrames], ["semantic-effect", canonical.semanticEffects ?? []], ["utterance-expression", canonical.utteranceExpressions ?? []], ["action", canonical.actionSchemas], ["event-execution", canonical.eventExecutions ?? []], ["constraint", canonical.actionConstraints], ["norm", canonical.normTemplates], ["process", canonical.processTemplates], ["rule", canonical.rules], ["goal", canonical.goals], ["possibility", canonical.possibilities],
+    ["entity", canonical.entities], ["proposition", canonical.propositions], ["attribution", canonical.attributions], ["claim", canonical.claims], ["event", canonical.events], ["participation", canonical.eventParticipations], ["event-relation", canonical.eventRelations], ["spatial", canonical.spatialRelations], ["scene", canonical.sceneOccurrences], ["frame", canonical.eventFrames], ["semantic-effect", canonical.semanticEffects ?? []], ["perception-observation", canonical.perceptionObservations ?? []], ["utterance-expression", canonical.utteranceExpressions ?? []], ["action", canonical.actionSchemas], ["event-execution", canonical.eventExecutions ?? []], ["constraint", canonical.actionConstraints], ["norm", canonical.normTemplates], ["process", canonical.processTemplates], ["rule", canonical.rules], ["goal", canonical.goals], ["possibility", canonical.possibilities],
   ];
   for (const [kind, records] of collections) for (const record of records) add(kind, record.id, record);
   for (const model of canonical.models) add("model", model.actorId, model);
@@ -77,6 +78,15 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
       ...expression.propositions.map(item => ({ kind: "proposition", id: item.propositionId, hash: item.revisionHash }))]) {
       if (nodes.get(`${ref.kind}/${ref.id}`)?.revisionHash !== ref.hash) issues.push({ code: "CLOSURE_REVISION_MISMATCH", message: `Expression ${expression.id} requires frozen ${ref.kind}/${ref.id}@${ref.hash}`, path: `utterance-expression/${expression.id}` });
     }
+  }
+  for (const observation of canonical.perceptionObservations ?? []) {
+    const trace = observation.trace;
+    for (const ref of [
+      { kind: "annotation", id: trace.observerMentionId, hash: trace.observerMentionHash },
+      { kind: "annotation", id: trace.eventMentionId, hash: trace.eventMentionHash },
+      { kind: "entity-resolution", id: trace.observerResolutionId, hash: trace.observerResolutionHash },
+      { kind: "event-resolution", id: trace.eventResolutionId, hash: trace.eventResolutionHash },
+    ]) if (nodes.get(`${ref.kind}/${ref.id}`)?.revisionHash !== ref.hash) issues.push({ code: "CLOSURE_REVISION_MISMATCH", message: `Perception ${observation.id} requires frozen ${ref.kind}/${ref.id}@${ref.hash}`, path: `perception-observation/${observation.id}` });
   }
   const link = (node: Node, kind: ClosureKind, id: string, pointer = "") => {
     if (node.kind === kind && node.id === id) return;
@@ -167,7 +177,7 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
       if (anchor.startByte < unit.anchor.endByte && anchor.endByte > unit.anchor.startByte) link(node, "unit", unit.id);
     }
   }
-  const artifactKinds: Readonly<Record<string, ClosureKind>> = { entity: "entity", proposition: "proposition", attribution: "attribution", claim: "claim", event: "event", "canonical-event": "event", "event-participation": "participation", "event-relation": "event-relation", "spatial-relation": "spatial", "scene-occurrence": "scene", "event-frame": "frame", "semantic-effect": "semantic-effect", "utterance-expression": "utterance-expression", "action-schema": "action", "event-execution": "event-execution", "action-constraint": "constraint", "norm-template": "norm", "process-template": "process", rule: "rule", "world-rule": "rule", goal: "goal", "character-goal": "goal", model: "model", "character-model": "model", possibility: "possibility", "initial-world": "initial" };
+  const artifactKinds: Readonly<Record<string, ClosureKind>> = { entity: "entity", proposition: "proposition", attribution: "attribution", claim: "claim", event: "event", "canonical-event": "event", "event-participation": "participation", "event-relation": "event-relation", "spatial-relation": "spatial", "scene-occurrence": "scene", "event-frame": "frame", "semantic-effect": "semantic-effect", "perception-observation": "perception-observation", "utterance-expression": "utterance-expression", "action-schema": "action", "event-execution": "event-execution", "action-constraint": "constraint", "norm-template": "norm", "process-template": "process", rule: "rule", "world-rule": "rule", goal: "goal", "character-goal": "goal", model: "model", "character-model": "model", possibility: "possibility", "initial-world": "initial" };
   for (const binding of snapshot.evidenceBindings) {
     const evidenceId = `${binding.artifactKind}/${binding.artifactId}`, node = nodes.get(`evidence/${evidenceId}`)!;
     const kind = artifactKinds[binding.artifactKind];

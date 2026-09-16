@@ -1,3 +1,4 @@
+import { validatePerceptionAcquisition, type PerceptionObservation } from "./perception-observation.js";
 import { validateExpressionAcquisition, type UtteranceExpression } from "./utterance-expression.js";
 import type {
   Attribution,
@@ -49,6 +50,8 @@ export type KnowledgeReducerContext = {
   propositions?: ReadonlyMap<string, Proposition>;
   attributions?: ReadonlyMap<string, Attribution>;
   utteranceExpressions?: ReadonlyMap<string, UtteranceExpression>;
+  perceptionObservations?: ReadonlyMap<string, PerceptionObservation>;
+  perceptionOccurrence?: Parameters<typeof validatePerceptionAcquisition>[2];
   realizedCanonicalEventIds?: ReadonlySet<string>;
   branchSemantics: BranchSemanticState;
 };
@@ -74,6 +77,8 @@ export function applyKnowledgeDelta(
   const hasAttribution = (id: string) => Boolean(context.branchSemantics.attributions[id]) || Boolean(context.attributions?.has(id));
 
   for (const operation of delta.operations) {
+    const perceptionIssues = validatePerceptionAcquisition(operation, { observations: context.perceptionObservations ?? new Map(), propositions: context.propositions ?? new Map() }, context.perceptionOccurrence);
+    if (perceptionIssues.length) throw new Error(perceptionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     const expressionIssues = validateExpressionAcquisition(operation, context.utteranceExpressions ?? new Map(), context.realizedCanonicalEventIds, context.attributions);
     if (expressionIssues.length) throw new Error(expressionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     const actorEntity = context.entities.get(operation.actorId);
@@ -116,6 +121,7 @@ export function applyKnowledgeDelta(
       ...(operation.propositionId ? { propositionId: operation.propositionId } : {}),
       ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
       ...(operation.expressionId ? { expressionId: operation.expressionId } : {}),
+      ...(operation.perceptionId ? { perceptionId: operation.perceptionId } : {}),
       ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
       status: operation.status,
       confidence: operation.confidence,

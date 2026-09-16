@@ -59,6 +59,7 @@ export async function createWorldBranch(
     sceneOccurrences: prepared.bundle.canonical.sceneOccurrences,
     eventFrames: prepared.bundle.canonical.eventFrames,
     semanticEffects: prepared.bundle.canonical.semanticEffects,
+    perceptionObservations: prepared.bundle.canonical.perceptionObservations,
     utteranceExpressions: prepared.bundle.canonical.utteranceExpressions,
     actionSchemas: prepared.bundle.canonical.actionSchemas,
     eventExecutions: prepared.bundle.canonical.eventExecutions ?? [],

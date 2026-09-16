@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { COMPILER_PIPELINE_VERSION } from "../src/compiler/batch-progress.js";
 import { inspectCompilerStatus } from "../src/compiler/status.js";
 import { prepareCompilerBatches, CompilerBatchStore } from "../src/compiler/batches.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
@@ -21,12 +22,13 @@ async function snapshot(root: string) {
   }));
 }
 
-it.each([33, 34, 35])("reports effective checkpoint sets for pipeline %s without inventing sequential progress or mutating the run", async (pipelineVersion) => {
+it.each([33, 34, 35, COMPILER_PIPELINE_VERSION])("reports effective checkpoint sets for pipeline %s without inventing sequential progress or mutating the run", async (pipelineVersion) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-status-progress-")); roots.push(root);
   const { source } = await createEvidenceFixture(root, "Chapter 1\nHero waits.\n\nChapter 2\nHero leaves.\n");
   const plan = await prepareCompilerBatches(root, source);
   const executable = plan.filter((batch) => batch.semanticStage === "executable");
   const observed = plan.filter((batch) => batch.semanticStage === "observation" || batch.semanticStage === "semantic");
+  const preserved = plan.filter(batch => batch.semanticStage === "observation");
   const oldId = `batch-${source.id}-99999-observation-obsolete`;
   const store = new CompilerBatchStore(root);
   await store.replaceCompleted(source.id, [...observed.map((batch) => batch.id), executable[1]!.id, oldId]);
@@ -41,10 +43,10 @@ it.each([33, 34, 35])("reports effective checkpoint sets for pipeline %s without
   const before = await snapshot(workspaceStateDir(root));
   const result = (await inspectCompilerStatus(root, source.id)).sources[0]!;
   expect(result.plan.batches.map((batch) => batch.id)).toEqual(plan.map((batch) => batch.id));
-  expect(result.completedBatches).toBe(pipelineVersion === 33 ? observed.length : observed.length + 1);
+  expect(result.completedBatches).toBe(pipelineVersion !== COMPILER_PIPELINE_VERSION ? preserved.length : observed.length + 1);
   expect(result.ignoredCheckpointIds).toContain(oldId);
-  expect(result.nextUncheckpointedBatch).toBe(executable[0]!.id);
-  expect(result.stages.executable).toMatchObject({ total: 2, completed: pipelineVersion === 33 ? 0 : 1 });
+  expect(result.nextUncheckpointedBatch).toBe(pipelineVersion === COMPILER_PIPELINE_VERSION ? executable[0]!.id : plan.find(batch => batch.semanticStage === "semantic")!.id);
+  expect(result.stages.executable).toMatchObject({ total: 2, completed: pipelineVersion !== COMPILER_PIPELINE_VERSION ? 0 : 1 });
   expect(result.obligations).toMatchObject([{ batchId: executable[0]!.id, proposalId: "p07", requiresHostReview: true }]);
   expect(result.latestRun).toMatchObject({ id: run.id, status: "running" });
   expect(result.candidates).toEqual({ inspection: "verified", archived: false, revisions: [] });

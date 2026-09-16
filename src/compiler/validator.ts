@@ -1,3 +1,4 @@
+import { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { applyEventExecutions, eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import type { z } from "zod";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
@@ -112,7 +113,7 @@ import {
   type ProcessTemplate,
 } from "../world/process-ontology.js";
 
-export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
+export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type CompilerCatalogValidationScope = "catalog" | "record";
 export type CompilerValidationCatalog = {
@@ -126,6 +127,7 @@ export type CompilerValidationCatalog = {
   spatialRelations: Map<string, SpatialRelation>;
   sceneOccurrences: Map<string, SceneOccurrence>;
   eventFrames: Map<string, EventFrame>;
+  semanticEffects?: Map<string, SemanticEffect>;
   actionSchemas: Map<string, ActionSchema>;
   eventExecutions?: Map<string, EventExecution>;
   actionConstraints: Map<string, ActionConstraint>;
@@ -190,6 +192,7 @@ export class CompilerValidator {
       spatialRelations: new Map(spatialRelationList.map((item) => [item.id, item])),
       sceneOccurrences: new Map(sceneOccurrenceList.map((item) => [item.id, item])),
       eventFrames: new Map(eventFrameList.map((item) => [item.id, item])),
+      semanticEffects: new Map((await this.canon.listSemanticEffects()).map(item => [item.id, item])),
       actionSchemas: new Map(actionSchemaList.map((item) => [item.id, item])),
       eventExecutions: new Map(eventExecutionList.map((item) => [item.id, item])),
       actionConstraints: new Map(actionConstraintList.map((item) => [item.id, item])),
@@ -210,6 +213,7 @@ export class CompilerValidator {
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
+    if (kind === "semantic-effect") errors.push(...validateSemanticEffect(semanticEffectSchema.parse(payload), catalog));
     if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors);
     if (kind === "proposition") this.validateProposition(propositionSchema.parse(payload), entities, propositions, events, errors);
     if (kind === "attribution") this.validateAttribution(attributionSchema.parse(payload), entities, propositions, attributions, errors);
@@ -1248,6 +1252,7 @@ export class CompilerCommitService {
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
     for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "semantic-effect")) await processCandidate(candidate);
     const sceneCandidates = eligible.filter((item) =>
       item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
     if (sceneCandidates.length) {
@@ -1454,6 +1459,7 @@ export class CompilerCommitService {
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
     for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "semantic-effect")) await processCandidate(candidate);
     const sceneCandidates = eligible.filter((item) =>
       item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
     if (sceneCandidates.length) {
@@ -1557,6 +1563,7 @@ export class CompilerCommitService {
           ...validateRelationshipOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
         ]
       : [];
+    const semanticEvidenceIssues = kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : [];
     const spatialEvidenceIssues = kind === "spatial-relation"
       ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)
       : [];
@@ -1612,7 +1619,7 @@ export class CompilerCommitService {
       ...groundingIssues,
       ...targetIssues,
       ...characterEvidenceIssues,
-      ...spatialEvidenceIssues,
+      ...spatialEvidenceIssues, ...semanticEvidenceIssues,
       ...worldRuleEvidenceIssues,
       ...initialWorldEvidenceIssues,
       ...exactInspection.issues,
@@ -1635,6 +1642,7 @@ export class CompilerCommitService {
     else if (kind === "event-participation") await this.canon.putEventParticipation(eventParticipationSchema.parse(payload));
     else if (kind === "event-relation") await this.canon.putEventRelation(eventRelationSchema.parse(payload));
     else if (kind === "scene-occurrence") await this.canon.putSceneOccurrence(sceneOccurrenceSchema.parse(payload));
+    else if (kind === "semantic-effect") await this.canon.putSemanticEffect(semanticEffectSchema.parse(payload));
     else if (kind === "event-frame") await this.canon.putEventFrame(eventFrameSchema.parse(payload));
     else if (kind === "event-execution") await this.canon.putEventExecution(eventExecutionSchema.parse(payload));
     else if (kind === "action-schema") await this.canon.putActionSchema(actionSchemaSchema.parse(payload));
@@ -1773,6 +1781,7 @@ function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposa
   if (kind === "event-participation") { const value = eventParticipationSchema.parse(payload); catalog.eventParticipations.set(value.id, value); }
   if (kind === "event-relation") { const value = eventRelationSchema.parse(payload); catalog.eventRelations.set(value.id, value); }
   if (kind === "scene-occurrence") { const value = sceneOccurrenceSchema.parse(payload); catalog.sceneOccurrences.set(value.id, value); }
+  if (kind === "semantic-effect") { const value = semanticEffectSchema.parse(payload); (catalog.semanticEffects ??= new Map()).set(value.id, value); }
   if (kind === "event-frame") { const value = eventFrameSchema.parse(payload); catalog.eventFrames.set(value.id, value); }
   if (kind === "event-execution") { const value = eventExecutionSchema.parse(payload); (catalog.eventExecutions ??= new Map()).set(value.id, value); }
   if (kind === "action-schema") { const value = actionSchemaSchema.parse(payload); catalog.actionSchemas.set(value.id, value); }
@@ -1796,6 +1805,7 @@ function cloneValidationCatalog(catalog: CompilerValidationCatalog): CompilerVal
     spatialRelations: new Map(catalog.spatialRelations),
     sceneOccurrences: new Map(catalog.sceneOccurrences),
     eventFrames: new Map(catalog.eventFrames),
+    semanticEffects: new Map(catalog.semanticEffects ?? []),
     actionSchemas: new Map(catalog.actionSchemas),
     eventExecutions: new Map(catalog.eventExecutions ?? []),
     actionConstraints: new Map(catalog.actionConstraints),
@@ -1893,7 +1903,7 @@ function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
-  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "action-schema" || kind === "event-execution" || kind === "action-constraint" || kind === "norm-template" || kind === "process-template" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "semantic-effect" || kind === "action-schema" || kind === "event-execution" || kind === "action-constraint" || kind === "norm-template" || kind === "process-template" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
 }
 function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "entity") return entitySchema;
@@ -1904,6 +1914,7 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "event-participation") return eventParticipationSchema;
   if (kind === "event-relation") return eventRelationSchema;
   if (kind === "scene-occurrence") return sceneOccurrenceSchema;
+  if (kind === "semantic-effect") return semanticEffectSchema;
   if (kind === "event-frame") return eventFrameSchema;
   if (kind === "event-execution") return eventExecutionSchema;
   if (kind === "action-schema") return actionSchemaSchema;

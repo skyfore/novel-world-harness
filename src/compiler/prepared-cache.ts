@@ -1,3 +1,4 @@
+import { semanticEffectSchema, validateSemanticEffectEvidence } from "../world/semantic-effect.js";
 import { upstreamRepairCheckpointSchema, captureUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointState, assertUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointRestorable, restoreUpstreamRepairCheckpoint, type UpstreamRepairCheckpoint } from "./upstream-repair-checkpoint.js";
 import { UpstreamRepairLedger, upstreamRepairJournalSchema, type UpstreamRepairRecord } from "./upstream-repair-ledger.js";
 import { upstreamRepairSnapshotIssues } from "./upstream-repair-snapshot.js";
@@ -126,6 +127,7 @@ const preparedCanonicalSchema = z.object({
   spatialRelations: z.array(spatialRelationSchema),
   sceneOccurrences: z.array(sceneOccurrenceSchema),
   eventFrames: z.array(eventFrameSchema),
+  semanticEffects: z.array(semanticEffectSchema).default([]),
   actionSchemas: z.array(actionSchemaSchema),
   eventExecutions: z.array(eventExecutionSchema).default([]),
   actionConstraints: z.array(actionConstraintSchema).default([]),
@@ -257,6 +259,7 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     bundle.canonical.spatialRelations,
     bundle.canonical.sceneOccurrences,
     bundle.canonical.eventFrames,
+    bundle.canonical.semanticEffects ?? [],
     bundle.canonical.eventExecutions,
     bundle.canonical.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
     bundle.canonical.actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
@@ -842,6 +845,7 @@ export class PreparedNovelCache {
       spatialRelations: fromSource(spatialRelations),
       sceneOccurrences: fromSource(sceneOccurrences),
       eventFrames: fromSource(eventFrames),
+      semanticEffects: fromSource(await canonical.listSemanticEffects()),
       eventExecutions: fromSource(eventExecutions),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module")
         .concat(fromSource(actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"))),
@@ -969,6 +973,7 @@ export class PreparedNovelCache {
       ["spatial relation", current.spatialRelations, expected.spatialRelations, (item: { id: string }) => item.id],
       ["scene occurrence", current.sceneOccurrences, expected.sceneOccurrences, (item: { id: string }) => item.id],
       ["event frame", current.eventFrames, expected.eventFrames, (item: { id: string }) => item.id],
+      ["semantic effect", current.semanticEffects, expected.semanticEffects, (item: { id: string }) => item.id],
       ["action schema", current.actionSchemas, expected.actionSchemas, (item: { id: string }) => item.id],
       ["event execution", current.eventExecutions, expected.eventExecutions, (item: { id: string }) => item.id],
       ["rule", current.rules, expected.rules, (item: { id: string }) => item.id],
@@ -1035,6 +1040,7 @@ export class PreparedNovelCache {
       ["spatial relations", fromSource(current.spatialRelations), bundle.canonical.spatialRelations, (item: { id: string }) => item.id],
       ["scene occurrences", fromSource(current.sceneOccurrences), bundle.canonical.sceneOccurrences, (item: { id: string }) => item.id],
       ["event frames", fromSource(current.eventFrames), bundle.canonical.eventFrames, (item: { id: string }) => item.id],
+      ["semantic effects", fromSource(current.semanticEffects), bundle.canonical.semanticEffects ?? [], (item: { id: string }) => item.id],
       ["event executions", current.eventExecutions.filter((binding) => binding.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.eventExecutions, (item: { id: string }) => item.id],
       ["action schemas", current.actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || schema.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionSchemas, (item: { id: string }) => item.id],
       ["action constraints", current.actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module" || constraint.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionConstraints, (item: { id: string }) => item.id],
@@ -1195,6 +1201,7 @@ export class PreparedNovelCache {
       await removeMissing(current.spatialRelations, new Set(bundle.canonical.spatialRelations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("spatial-relations", id));
       await removeMissing(current.sceneOccurrences, new Set(bundle.canonical.sceneOccurrences.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("scene-occurrences", id));
       await removeMissing(current.eventFrames, new Set(bundle.canonical.eventFrames.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-frames", id));
+      await removeMissing(current.semanticEffects, new Set((bundle.canonical.semanticEffects ?? []).map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("semantic-effects", id));
       await removeMissing(current.eventExecutions, new Set(bundle.canonical.eventExecutions.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-executions", id));
       await removeMissing(current.actionSchemas, new Set(bundle.canonical.actionSchemas.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-schemas", id));
       await removeMissing(current.actionConstraints, new Set(bundle.canonical.actionConstraints.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-constraints", id));
@@ -1216,6 +1223,7 @@ export class PreparedNovelCache {
     for (const relation of bundle.canonical.spatialRelations) await canonical.putSpatialRelation(relation);
     for (const scene of bundle.canonical.sceneOccurrences) await canonical.putSceneOccurrence(scene);
     for (const frame of bundle.canonical.eventFrames) await canonical.putEventFrame(frame);
+    for (const frame of bundle.canonical.semanticEffects ?? []) await canonical.putSemanticEffect(frame);
     for (const binding of bundle.canonical.eventExecutions) await canonical.putEventExecution(binding);
     for (const schema of bundle.canonical.actionSchemas) await canonical.putActionSchema(schema);
     for (const constraint of bundle.canonical.actionConstraints) await canonical.putActionConstraint(constraint);
@@ -1412,6 +1420,7 @@ function preparedArtifactDescriptors(canonical: {
   spatialRelations: PreparedCanonical["spatialRelations"];
   sceneOccurrences: PreparedCanonical["sceneOccurrences"];
   eventFrames: PreparedCanonical["eventFrames"];
+  semanticEffects: PreparedCanonical["semanticEffects"];
   actionSchemas: PreparedCanonical["actionSchemas"];
   eventExecutions: PreparedCanonical["eventExecutions"];
   actionConstraints: PreparedCanonical["actionConstraints"];
@@ -1434,6 +1443,7 @@ function preparedArtifactDescriptors(canonical: {
     ...canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation", id: payload.id, payload })),
     ...canonical.sceneOccurrences.map((payload) => ({ kind: "scene-occurrence", id: payload.id, payload })),
     ...canonical.eventFrames.map((payload) => ({ kind: "event-frame", id: payload.id, payload })),
+    ...(canonical.semanticEffects ?? []).map((payload) => ({ kind: "semantic-effect", id: payload.id, payload })),
     ...canonical.eventExecutions.map((payload) => ({ kind: "event-execution", id: payload.id, payload })),
     ...canonical.actionSchemas.map((payload) => ({ kind: "action-schema", id: payload.id, payload })),
     ...canonical.actionConstraints.map((payload) => ({ kind: "action-constraint", id: payload.id, payload })),
@@ -1481,6 +1491,7 @@ async function currentCanonical(workspaceRoot: string) {
     spatialRelations: await canonical.listSpatialRelations(),
     sceneOccurrences: await canonical.listSceneOccurrences(),
     eventFrames: await canonical.listEventFrames(),
+    semanticEffects: await canonical.listSemanticEffects(),
     actionSchemas: await canonical.listActionSchemas(),
     eventExecutions: await canonical.listEventExecutions(),
     actionConstraints: await canonical.listActionConstraints(),
@@ -1595,6 +1606,11 @@ async function assertPreparedCompilerSnapshotEvidence(
     for (const binding of snapshot.evidenceBindings) for (const assertion of binding.assertions) payloads.set(`evidence-assertion:${assertion.id}`, assertion);
     await assertUpstreamRepairCheckpointState(snapshot.upstreamRepairCheckpoint!, snapshot.upstreamRepairJournal ?? [], source.id, source.contentSha256, bytes, payloads);
   }
+  for (const effect of bundle.canonical.semanticEffects ?? []) {
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "semantic-effect" && item.artifactId === effect.id);
+    const issues = validateSemanticEffectEvidence(effect, binding?.assertions ?? []);
+    if (issues.length) throw new Error(`Semantic effect exact evidence is incomplete: ${issues.map(item => item.message).join("; ")}`);
+  }
   for (const binding of bundle.compilerSnapshot.evidenceBindings) {
     const artifact = artifacts.get(`${binding.artifactKind}/${binding.artifactId}`);
     if (!artifact) {
@@ -1681,6 +1697,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     spatialRelations: new Map(bundle.canonical.spatialRelations.map((item) => [item.id, item])),
     sceneOccurrences: new Map(bundle.canonical.sceneOccurrences.map((item) => [item.id, item])),
     eventFrames: new Map(bundle.canonical.eventFrames.map((item) => [item.id, item])),
+    semanticEffects: new Map((bundle.canonical.semanticEffects ?? []).map(item => [item.id, item])),
     actionSchemas: new Map(bundle.canonical.actionSchemas.map((item) => [item.id, item])),
     eventExecutions: new Map(bundle.canonical.eventExecutions.map((item) => [item.id, item])),
     actionConstraints: new Map(bundle.canonical.actionConstraints.map((item) => [item.id, item])),
@@ -1701,6 +1718,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     ...bundle.canonical.eventRelations.map((payload) => ({ kind: "event-relation" as const, label: payload.id, payload })),
     ...bundle.canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation" as const, label: payload.id, payload })),
     ...bundle.canonical.eventFrames.map((payload) => ({ kind: "event-frame" as const, label: payload.id, payload })),
+    ...(bundle.canonical.semanticEffects ?? []).map((payload) => ({ kind: "semantic-effect" as const, label: payload.id, payload })),
     ...bundle.canonical.eventExecutions.map((payload) => ({ kind: "event-execution" as const, label: payload.id, payload })),
     ...bundle.canonical.actionSchemas.map((payload) => ({ kind: "action-schema" as const, label: payload.id, payload })),
     ...bundle.canonical.actionConstraints.map((payload) => ({ kind: "action-constraint" as const, label: payload.id, payload })),

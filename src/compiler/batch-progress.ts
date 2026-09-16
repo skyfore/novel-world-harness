@@ -4,7 +4,7 @@ import path from "node:path";
 import { worldStorageRoot } from "../world/paths.js";
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 35;
+export const COMPILER_PIPELINE_VERSION = 36;
 const SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION = 30;
 
 export type BatchProgress = {
@@ -36,33 +36,13 @@ export class CompilerBatchStore {
     if (!parsed) {
       return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };
     }
-    if (parsed.pipelineVersion === SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION) {
-      // Pipelines 31/32 move scene construction beside canonical events and
-      // bind their executable mechanisms. Structure discovery and the
-      // source-observation inventory are byte-identical in pipeline 30, so
-      // preserve only those checkpoints instead of paying to recreate them.
-      return {
-        ...parsed,
-        pipelineVersion: COMPILER_PIPELINE_VERSION,
-        completedBatchIds: parsed.completedBatchIds.filter((batchId) =>
-          batchId.startsWith(`structure-${sourceId}-`)
-          || (batchId.startsWith(`batch-${sourceId}-`) && batchId.includes("-observation-"))),
-      };
-    }
-    if (parsed.pipelineVersion === 33) {
-      // Cross-stage source coverage changes executable accounting, not the
-      // immutable observation/semantic work. Re-review executable slices with
-      // their exact retained accounting drafts; never re-extract the book.
+    if (typeof parsed.pipelineVersion === "number" && [SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION, 33, 34, 35].includes(parsed.pipelineVersion)) {
+      // Pipeline 36 adds source semantic effects. Preserve immutable byte
+      // observations only; earlier semantic/executable checkpoints cannot
+      // prove the new contract. The original persisted history is untouched.
       return { ...parsed, pipelineVersion: COMPILER_PIPELINE_VERSION,
-        completedBatchIds: parsed.completedBatchIds.filter((id) =>
-          id.startsWith(`structure-${sourceId}-`) || (id.startsWith(`batch-${sourceId}-`)
-            && /-(observation|semantic)-/.test(id))) };
-    }
-    if (parsed.pipelineVersion === 34) {
-      // Version 35 changes independent role-review requirements only. Keep
-      // source compilation; dedicated role reviews must use the new protocol.
-      return { ...parsed, pipelineVersion: COMPILER_PIPELINE_VERSION,
-        completedBatchIds: parsed.completedBatchIds.filter(id => !id.startsWith(`role-roster-${sourceId}-`)) };
+        completedBatchIds: parsed.completedBatchIds.filter(id =>
+          id.startsWith(`structure-${sourceId}-`) || (id.startsWith(`batch-${sourceId}-`) && id.includes("-observation-"))) };
     }
     if (parsed.pipelineVersion !== COMPILER_PIPELINE_VERSION) {
       return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };

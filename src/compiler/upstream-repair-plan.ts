@@ -18,7 +18,7 @@ const fields: Record<UpstreamRepairKind, readonly string[]> = {
   "event-resolution": ["eventMentionIds", "status", "canonicalEventId", "relation", "candidates", "supersedesResolutionIds", "rationale"],
 };
 const refSchema = z.object({ kind: upstreamRepairKindSchema, id: idSchema }).strict();
-export const upstreamRepairReadableRefSchema = z.object({ kind: z.enum([...upstreamRepairKindSchema.options, "entity", "canonical-event", "proposition", "attribution", "claim", "event-participation", "event-relation", "scene-occurrence", "event-frame", "spatial-relation", "action-schema", "event-execution", "action-constraint", "norm-template", "process-template", "world-rule", "character-goal", "character-model", "possibility", "source-segment", "evidence-assertion", "structural-discourse"]), id: idSchema }).strict();
+export const upstreamRepairReadableRefSchema = z.object({ kind: z.enum([...upstreamRepairKindSchema.options, "entity", "canonical-event", "proposition", "attribution", "claim", "event-participation", "event-relation", "scene-occurrence", "event-frame", "spatial-relation", "action-schema", "event-execution", "action-constraint", "norm-template", "process-template", "world-rule", "character-goal", "character-model", "possibility", "source-segment", "evidence-assertion", "structural-discourse", "semantic-effect"]), id: idSchema }).strict();
 const key = (ref: { kind: string; id: string }) => `${ref.kind}:${ref.id}`;
 const unique = <T>(values: T[]) => new Set(values).size === values.length;
 

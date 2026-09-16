@@ -1,3 +1,4 @@
+import { validateSemanticEffect } from "../world/semantic-effect.js";
 import { selectOpeningDriverActor } from "./opening-driver.js";
 import { ActorModelStore, characterGoalHasDevelopmentBoundary, characterModelSchema, evaluateCharacterGoal } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
@@ -169,6 +170,7 @@ export type CompilerAuditReport = {
     relationErrors: Array<{ code: string; message: string; path?: string }>;
     sceneOccurrences: number;
     eventFrames: number;
+    semanticEffects: number;
     framedEvents: number;
     actionSchemas: number;
     schemaBoundEvents: number;
@@ -287,6 +289,7 @@ export type CompilerAuditReport = {
     eventRelations: number;
     sceneOccurrences: number;
     eventFrames: number;
+    semanticEffects: number;
     actionSchemas: number;
     actionConstraints: number;
     normTemplates: number;
@@ -605,6 +608,7 @@ export async function auditCompiler(
   const eventRelations = allEventRelations.filter(belongsToSelectedSource);
   const sceneOccurrences = allSceneOccurrences.filter(belongsToSelectedSource);
   const eventFrames = allEventFrames.filter(belongsToSelectedSource);
+  const semanticEffects = (await canon.listSemanticEffects()).filter(belongsToSelectedSource);
   const eventExecutions = allEventExecutions.filter(belongsToSelectedSource);
   const actionSchemas = allActionSchemas.filter((item) => item.induction.kind === "domain-module" || belongsToSelectedSource(item));
   const actionConstraints = allActionConstraints.filter((item) => item.induction.kind === "domain-module" || belongsToSelectedSource(item));
@@ -632,6 +636,7 @@ export async function auditCompiler(
     ...eventRelations.map((item) => ({ name: `event-relation:${item.id}`, kind: "event-relation", id: item.id, payload: item, evidence: artifactEvidence(item) })),
     ...sceneOccurrences.map((item) => ({ name: `scene-occurrence:${item.id}`, kind: "scene-occurrence", id: item.id, payload: item, evidence: item.evidence })),
     ...eventFrames.map((item) => ({ name: `event-frame:${item.id}`, kind: "event-frame", id: item.id, payload: item, evidence: item.evidence })),
+    ...semanticEffects.map((item) => ({ name: `semantic-effect:${item.id}`, kind: "semantic-effect", id: item.id, payload: item, evidence: item.evidence })),
     ...eventExecutions.map((item) => ({ name: `event-execution:${item.id}`, kind: "event-execution", id: item.id, payload: item, evidence: item.evidence })),
     ...actionSchemas.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `action-schema:${item.id}`, kind: "action-schema", id: item.id, payload: item, evidence: item.evidence })),
     ...actionConstraints.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `action-constraint:${item.id}`, kind: "action-constraint", id: item.id, payload: item, evidence: item.evidence })),
@@ -871,7 +876,7 @@ export async function auditCompiler(
         }).issues
       : []),
   ];
-  const executableSemanticValidation = [...sceneValidation, ...frameValidation, ...actionValidation];
+  const executableSemanticValidation = [...sceneValidation, ...frameValidation, ...actionValidation, ...semanticEffects.flatMap(effect => validateSemanticEffect(effect, { entities: entityCatalog, events: eventCatalog, actionSchemas: actionSchemaCatalog, eventParticipations: new Map(eventParticipations.map(item => [item.id, item])), eventExecutions: new Map(eventExecutions.map(item => [item.id, item])) }))];
   const executablePolicyValidation = [
     ...validateActionConstraintCatalog(actionConstraints, {
       entities: entityCatalog,
@@ -1540,6 +1545,7 @@ export async function auditCompiler(
       relationErrors: relationValidation,
       sceneOccurrences: sceneOccurrences.length,
       eventFrames: eventFrames.length,
+      semanticEffects: semanticEffects.length,
       framedEvents: events.filter((event) => event.frameInstance !== undefined).length,
       actionSchemas: actionSchemas.length,
       schemaBoundEvents: events.filter((event) => event.action?.lane === "schema-bound").length,
@@ -1658,6 +1664,7 @@ export async function auditCompiler(
       eventRelations: eventRelations.length,
       sceneOccurrences: sceneOccurrences.length,
       eventFrames: eventFrames.length,
+      semanticEffects: semanticEffects.length,
       actionSchemas: actionSchemas.length,
       actionConstraints: actionConstraints.length,
       normTemplates: normTemplates.length,

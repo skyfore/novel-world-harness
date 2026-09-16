@@ -1,3 +1,4 @@
+import { semanticEffectSchema, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import { z } from "zod";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
@@ -175,7 +176,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -193,6 +194,7 @@ export const compilerProposalSchemas = {
   "event-relation": compilerEventRelationSchema,
   "scene-occurrence": sceneOccurrenceSchema,
   "event-frame": compilerEventFrameSchema,
+  "semantic-effect": semanticEffectSchema,
   "action-schema": compilerActionSchema,
   "event-execution": eventExecutionSchema,
   "action-constraint": compilerActionConstraintSchema,
@@ -279,7 +281,7 @@ export class CompilerProposalService {
       );
     }
     const artifactId = compilerProposalArtifactId(kind, payload, input.proposalId);
-    const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
+    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : [])];
     const characterEvidenceIssues = kind === "character-model"
       ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
       : [];
@@ -911,6 +913,13 @@ function collectProposalClosureIssues(
       collectStoryTimeIssues(scene.storyInterval.start, "storyInterval.start", missing);
       if (scene.storyInterval.end) collectStoryTimeIssues(scene.storyInterval.end, "storyInterval.end", missing);
     }
+    return;
+  }
+  if (proposal.kind === "semantic-effect") {
+    const effect = payload as SemanticEffect;
+    missing("events", effect.canonicalEventId, "canonicalEventId");
+    missing("entities", effect.subjectEntityId, "subjectEntityId");
+    collectStoryTimeIssues(effect.validTime, "validTime", missing);
     return;
   }
   if (proposal.kind === "event-frame") return;

@@ -144,7 +144,7 @@ describe("compiler batches", () => {
     });
   });
 
-  it("preserves pipeline-33 observations and semantics while requiring executable accounting review", async () => {
+  it("preserves pipeline-33 observations but reopens semantic and executable work for semantic effects", async () => {
     const { root, source } = await fixture();
     const store = new CompilerBatchStore(root);
     const observation = `batch-${source.id}-00001-observation-fixture`;
@@ -154,7 +154,7 @@ describe("compiler batches", () => {
       version: 1, pipelineVersion: 33, sourceId: source.id,
       completedBatchIds: [observation, semantic, `batch-${source.id}-00001-executable-fixture`], updatedAt: new Date(0).toISOString(),
     }));
-    expect((await store.read(source.id)).completedBatchIds).toEqual([observation, semantic]);
+    expect((await store.read(source.id)).completedBatchIds).toEqual([observation]);
     expect((await store.readPersisted(source.id))!.completedBatchIds).toHaveLength(3);
   });
 

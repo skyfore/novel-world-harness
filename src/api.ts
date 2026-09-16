@@ -483,3 +483,5 @@ export { OperationManager, type OperationRunContext, type StartOperationInput } 
 export { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
 
 export { RuntimeHooks, runtimeHooks, currentRuntimeHooks, withRuntimeHooks, type RuntimeHook, type RuntimeHookEvent, type RuntimeHookType, type RuntimeHookStatus, type RuntimeHookMetadata, type RuntimeHookFailure } from "./runtime/hooks.js";
+
+export { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, semanticEffectRealizationIssues, SEMANTIC_EFFECT_VERSION, type SemanticEffect } from "./world/semantic-effect.js";

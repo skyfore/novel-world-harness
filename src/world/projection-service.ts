@@ -1,3 +1,4 @@
+import { semanticEffectRealizationIssues } from "./semantic-effect.js";
 import { deepFreeze } from "../util/immutable.js";
 import type { ResolvedWorldModelContext } from "./engine.js";
 import {
@@ -245,6 +246,8 @@ export class ProjectionService {
         if (eventHashes.has(eventHash)) throw new Error(`Commit ${entry.id} repeats event hash ${eventHash}`);
         eventHashes.add(eventHash);
         const event = await this.objects.getEvent(eventHash);
+        const semanticIssues = semanticEffectRealizationIssues(context.semanticEffects?.values() ?? [], new Set(event.realizesCanonicalEventIds ?? []));
+        if (semanticIssues.length) throw new Error(semanticIssues.map(item => `${item.code}: ${item.message}`).join("; "));
         if (event.branchId !== entry.commit.branchId) {
           throw new Error(`Event ${eventHash} branch ${event.branchId} differs from commit branch ${entry.commit.branchId}`);
         }

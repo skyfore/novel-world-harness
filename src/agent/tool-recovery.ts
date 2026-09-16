@@ -367,6 +367,30 @@ export function buildNwhToolRecoveryAdvice(
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
 
+  if (/semantic_effect_(event_missing|subject_missing|execution_missing)/u.test(lower)
+    && !/(budget|circuit.breaker|frozen|consumed)/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
+      retryCondition: "One corrected retry only after discovering the exact dependency in this active source.",
+      steps: [
+        "Call find_compiler_artifacts in this source with kind canonical-event, entity, or event-execution matching the missing field.",
+        "Copy results[].readArguments.ref into read_compiler_artifact.ref; copy the returned payload.id into canonicalEventId, subjectEntityId, or lowering.executionId respectively. Do not guess an ID or mix kinds.",
+        "Preserve all staged drafts and the original failed proposal_id. Make at most one materially corrected submission under the normal successor protocol if a successful draft already exists; never retry unchanged or reset the batch.",
+        "If the required source-supported occurrence, subject, or mechanism does not exist, stop for host dependency repair. Do not fabricate an execution or change the source meaning to fit a different one.",
+      ],
+      suggestedCall: { tool: "find_compiler_artifacts", arguments: { kind: lower.includes("semantic_effect_event_missing") ? "canonical-event" : lower.includes("semantic_effect_subject_missing") ? "entity" : "event-execution", query: "*", max_results: 20 } },
+    };
+  }
+  if (/semantic_effect_(unmapped|lowering_mismatch|time_mismatch)/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop this task until the original source meaning and supported mechanism are reconciled by the host.",
+      steps: ["Preserve the semantic effect, exact evidence, original occurrence and all drafts.",
+        "Do not invent duration, rewrite the occurrence outcome, remove the effect, or change canonical realization into a false success.",
+        "No unchanged model retry or namespace reset is permitted. A reviewed source revision or newly supported mechanism requires the normal host proposal and validation path."],
+    };
+  }
+
   if (toolName === "account_source_units" && lower.startsWith("source accounting coverage changed:")) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "coverage-changed", retryable: true,

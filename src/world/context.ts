@@ -1,3 +1,4 @@
+import { type SemanticEffect, validateSemanticEffect } from "./semantic-effect.js";
 import { applyEventExecutions, validateEventExecutions, type EventExecution } from "./event-execution.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -46,6 +47,7 @@ export const canonicalSnapshotSchema = z.object({
   spatialRelations: z.array(revisionRefSchema),
   sceneOccurrences: z.array(revisionRefSchema),
   eventFrames: z.array(revisionRefSchema),
+  semanticEffects: z.array(revisionRefSchema).optional(),
   actionSchemas: z.array(revisionRefSchema),
   eventExecutions: z.array(revisionRefSchema),
   actionConstraints: z.array(revisionRefSchema),
@@ -70,6 +72,7 @@ export type ScopedWorldArtifacts = {
   spatialRelations: readonly SpatialRelation[];
   sceneOccurrences: readonly SceneOccurrence[];
   eventFrames: readonly EventFrame[];
+  semanticEffects?: readonly SemanticEffect[];
   actionSchemas: readonly ActionSchema[];
   eventExecutions?: readonly EventExecution[];
   actionConstraints?: readonly ActionConstraint[];
@@ -126,6 +129,7 @@ export class WorldContextStore {
       spatialRelations: spatialRelations.filter(belongsToSource),
       sceneOccurrences: sceneOccurrences.filter(belongsToSource),
       eventFrames: eventFrames.filter(belongsToSource),
+      semanticEffects: (await this.canon.listSemanticEffects()).filter(belongsToSource),
       eventExecutions: eventExecutions.filter(belongsToSource),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || belongsToSource(schema)),
       actionConstraints: actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module" || belongsToSource(constraint)),
@@ -145,6 +149,7 @@ export class WorldContextStore {
     artifacts: ScopedWorldArtifacts,
   ): Promise<WorldModelContext> {
     if (!/^[a-f0-9]{64}$/.test(preparedRevisionHash)) throw new Error(`Invalid prepared revision hash: ${preparedRevisionHash}`);
+    assertSemanticEffectProjection(artifacts);
     assertEventParticipationProjection(artifacts);
     assertEventRelationProjection(artifacts);
     assertSpatialProjection(artifacts);
@@ -161,6 +166,7 @@ export class WorldContextStore {
       ...artifacts.spatialRelations.map((item) => this.canon.ensureSpatialRelationRevision(item)),
       ...artifacts.sceneOccurrences.map((item) => this.canon.ensureSceneOccurrenceRevision(item)),
       ...artifacts.eventFrames.map((item) => this.canon.ensureEventFrameRevision(item)),
+      ...(artifacts.semanticEffects ?? []).map(item => this.canon.ensureSemanticEffectRevision(item)),
       ...artifacts.actionSchemas.map((item) => this.canon.ensureActionSchemaRevision(item)),
       ...(artifacts.eventExecutions ?? []).map((item) => this.canon.ensureEventExecutionRevision(item)),
       ...(artifacts.actionConstraints ?? []).map((item) => this.canon.ensureActionConstraintRevision(item)),
@@ -180,6 +186,7 @@ export class WorldContextStore {
     preparedRevisionHash?: string,
     refsFromContent = false,
   ): Promise<WorldModelContext> {
+    assertSemanticEffectProjection(artifacts);
     assertEventParticipationProjection(artifacts);
     assertEventRelationProjection(artifacts);
     assertSpatialProjection(artifacts);
@@ -200,6 +207,7 @@ export class WorldContextStore {
         artifacts.spatialRelations,
         artifacts.sceneOccurrences,
         artifacts.eventFrames,
+        artifacts.semanticEffects ?? [],
         artifacts.eventExecutions ?? [],
         artifacts.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
         actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
@@ -237,6 +245,7 @@ export class WorldContextStore {
       spatialRelations: await canonicalRefs("spatial-relations", artifacts.spatialRelations),
       sceneOccurrences: await canonicalRefs("scene-occurrences", artifacts.sceneOccurrences),
       eventFrames: await canonicalRefs("event-frames", artifacts.eventFrames),
+      semanticEffects: await canonicalRefs("semantic-effects", artifacts.semanticEffects ?? []),
       actionSchemas: await canonicalRefs("action-schemas", artifacts.actionSchemas),
       eventExecutions: await canonicalRefs("event-executions", artifacts.eventExecutions ?? []),
       actionConstraints: await canonicalRefs("action-constraints", actionConstraints),
@@ -309,6 +318,8 @@ export class WorldContextStore {
       Promise.all(snapshot.actorModels.map((ref) => this.actors.getModelRevision(ref.id, ref.hash))),
       Promise.all(snapshot.possibilities.map((ref) => this.possibilities.getRevision(ref.id, ref.hash))),
     ]);
+    const semanticEffects = await Promise.all((snapshot.semanticEffects ?? []).map(ref => this.canon.getSemanticEffectRevision(ref.id, ref.hash)));
+    assertSemanticEffectProjection({ entities, events, eventExecutions, semanticEffects, actionSchemas, eventParticipations });
     if (snapshot.sourceId) {
       assertArtifactCollectionsExclusiveToSource(snapshot.sourceId, [
         entities,
@@ -321,6 +332,7 @@ export class WorldContextStore {
         spatialRelations,
         sceneOccurrences,
         eventFrames,
+        semanticEffects,
         eventExecutions,
         actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
         actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
@@ -365,6 +377,7 @@ export class WorldContextStore {
       spatialRelations,
       sceneOccurrences,
       eventFrames: new Map(eventFrames.map((frame) => [frame.id, frame])),
+      semanticEffects: new Map(semanticEffects.map(item => [item.id, item])),
       actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])),
       actionConstraints: new Map(actionConstraints.map((constraint) => [constraint.id, constraint])),
       normTemplates: new Map(normTemplates.map((template) => [template.id, template])),
@@ -517,4 +530,11 @@ export async function loadWorldContext(
     ? await contexts.capturePrepared(options.sourceId, options.preparedRevisionHash, options.artifacts)
     : await contexts.captureCurrent(options.sourceId);
   return { canon, contexts, context };
+}
+
+function assertSemanticEffectProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "eventExecutions" | "semanticEffects" | "actionSchemas" | "eventParticipations">): void {
+  const catalog = { entities: new Map(artifacts.entities.map(item => [item.id, item])), events: new Map(artifacts.events.map(item => [item.id, item])),
+    eventExecutions: new Map((artifacts.eventExecutions ?? []).map(item => [item.id, item])), actionSchemas: new Map(artifacts.actionSchemas.map(item => [item.id, item])), eventParticipations: new Map(artifacts.eventParticipations.map(item => [item.id, item])) };
+  const issues = (artifacts.semanticEffects ?? []).flatMap(effect => validateSemanticEffect(effect, catalog));
+  if (issues.length) throw new Error(`Invalid semantic effect projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);
 }

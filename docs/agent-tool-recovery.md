@@ -1090,3 +1090,40 @@ the host dependency and regenerate `bind-upstream-repairs`; copy its current
 corrected host request. Do not remove the structural baseline, substitute the
 annotation revision, or retry the old plan unchanged. Portable checkpoints retain
 and validate the same structural payload before restoring repair authority.
+
+### Semantic effect proposals and execution boundaries
+
+`propose_semantic_effect` is a semantic-stage narrow compiler proposal tool.
+Normal Pi session/extension registration wraps it with `withNwhToolRecovery`.
+Use source-scoped evidence handles and an exact support selector for each of
+`/canonicalEventId`, `/subjectEntityId`, `/kind`, `/validTime` and the typed args
+(`/args/field` plus `/args/value`, or `/args/capacity` plus `/args/duration`).
+`validTime` currently records the occurrence onset, preserving unknown time;
+incapacity duration is separate and is never inferred as a number.
+
+A state-change can be mapped only to an existing action-bearing event-execution
+of the same occurrence, validated against its schema, semantic agency and exact
+state outcome. Temporary incapacity remains unmapped in this initial registry.
+Staging and finish do not imply lowering success or capability certification.
+Convergence retains the source meaning without writing a second state delta.
+
+For SEMANTIC_EFFECT_EVENT_MISSING, SUBJECT_MISSING or EXECUTION_MISSING, call
+same-source `find_compiler_artifacts` with the matching kind. Copy
+`results[].readArguments.ref` into `read_compiler_artifact.ref`, then copy its
+`payload.id` into the indicated dependency field. Permit at most one materially
+corrected retry; preserve the original failed proposal ID, or use the normal
+successor path for an already successful draft. If no supported dependency
+exists, stop for host repair. Never guess an ID or fabricate an execution.
+
+SEMANTIC_EFFECT_UNMAPPED, LOWERING_MISMATCH and TIME_MISMATCH require host review
+of the original meaning/mechanism. Do not retry unchanged, invent a duration,
+change the occurrence outcome, delete the effect or reset a namespace to bypass
+validation. Runtime realization and replay reject unmapped canonical effects;
+independent branch actions do not activate future canonical meaning.
+
+Pipeline 36 retains only compatible structure/observation checkpoints from the
+supported legacy versions and reopens semantic/executable work. Engine 0.5.0
+explicitly rejects old-engine branch history. Old canonical snapshots without
+semantic-effect refs remain readable as having no such records; no meanings or
+knowledge are fabricated during migration. New candidates and snapshots retain
+new effect revisions; old publications are not rewritten.

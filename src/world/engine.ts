@@ -1,3 +1,4 @@
+import { semanticEffectRealizationIssues, type SemanticEffect } from "./semantic-effect.js";
 import { entryProjectionSeedSchema, type EntryProjectionSeed } from "./model.js";
 import { emptyBranchSemanticState } from "./semantic-effects.js";
 import { emptyProcessState } from "./process-effects.js";
@@ -116,6 +117,7 @@ export type WorldModelContext = {
   spatialRelations?: readonly SpatialRelation[];
   sceneOccurrences?: readonly SceneOccurrence[];
   eventFrames?: ReadonlyMap<string, EventFrame>;
+  semanticEffects?: ReadonlyMap<string, SemanticEffect>;
   actionSchemas?: ReadonlyMap<string, ActionSchema>;
   actionConstraints?: ReadonlyMap<string, ActionConstraint>;
   normTemplates?: ReadonlyMap<string, NormTemplate>;
@@ -275,6 +277,8 @@ export function validateEventProposal(
     if (!context.events?.has(eventId)) errors.push({ code: "UNKNOWN_SUPERSEDED_CANONICAL_EVENT", message: `Unknown superseded canonical event ${eventId}`, path: `supersedesCanonicalEventIds.${index}` });
   }
   errors.push(...validateCanonicalAdaptationContract(proposal, context));
+  const realized = new Set(!proposal.canonicalAdaptation && proposal.possibilityId?.startsWith("canon-") ? [proposal.possibilityId.slice(6)] : []);
+  errors.push(...semanticEffectRealizationIssues(context.semanticEffects?.values() ?? [], realized));
   for (let index = 0; index < proposal.preconditions.length; index += 1) {
     const result = evaluatePredicateTruth(evaluationState, proposal.preconditions[index]!, context.stateSchema);
     if (result !== "true") errors.push({ code: result === "unknown" ? "PRECONDITION_UNKNOWN" : "PRECONDITION_FAILED", message: `Precondition ${index} is ${result}`, path: `preconditions.${index}` });
@@ -582,12 +586,14 @@ export class WorldEngine {
       timeAdvanced: false,
     });
     const inferredRealizations = [...(this.context.events?.values() ?? [])]
-      .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
+      .filter((event) => !semanticEffectRealizationIssues(this.context.semanticEffects?.values() ?? [], new Set([event.id])).length && canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
       .map((event) => event.id);
     const realizesCanonicalEventIds = [...new Set([
       ...(genesisOptions.realizesCanonicalEventIds === undefined ? inferredRealizations : []),
       ...(genesisOptions.realizesCanonicalEventIds ?? []),
     ])].sort();
+    const semanticIssues = semanticEffectRealizationIssues(this.context.semanticEffects?.values() ?? [], new Set(realizesCanonicalEventIds));
+    if (semanticIssues.length) throw new Error(semanticIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     for (const eventId of realizesCanonicalEventIds) {
       if (!this.context.events?.has(eventId)) throw new Error(`Genesis realizes unknown canonical event: ${eventId}`);
     }
@@ -1352,6 +1358,7 @@ function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
     entities: [...context.entities.entries()].sort(([left], [right]) => left.localeCompare(right)),
     claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    semanticEffects: [...(context.semanticEffects?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     spatialOntologyVersion: context.spatialOntologyVersion,
     spatialRelations: [...(context.spatialRelations ?? [])].sort((left, right) => left.id.localeCompare(right.id)),
     actionConstraints: [...(context.actionConstraints?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),

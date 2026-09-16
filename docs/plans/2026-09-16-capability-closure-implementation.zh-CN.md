@@ -577,3 +577,19 @@ P2v 已提交为 `819222e`。
 本段补齐 P2 缺 mention 的确定性串联证据。新根因的完整调度/策略、核心角色绑定和全部退出审计仍未完成，P3–P7 保持原目标范围。背景 canonical 为工程夹具，不是 fresh model compile；没有真实 provider 或独立人工体验证据。
 
 验证：最终全仓 191 文件、1167 tests 通过（93.08 秒）；8 项串联定向测试通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P2w 已提交为 `80e1d34`。
+
+## P3a：SemanticEffect 首条持久纵向链
+
+新增独立 semantic-effect-v1 工件，区别于分支已提交 semantic delta。首个宿主注册表包含 state-change（field/value）和 temporary-incapacity（action/speech/perception、独立 duration），绑定原 occurrence、subject 和 validTime onset。lowering 独立记录；state-change 只有同 occurrence 的 action-bearing event-execution、原 agency/schema 验证和精确 set outcome 全部通过才可 mapped；失能暂保留 unmapped，包括未知时长，不伪造数值或执行能力。
+
+同一实现覆盖 compiler proposal schema/semantic-stage 窄工具、逐语义字段精确 evidence、finish graph/converge、canonical revision store、artifact discovery、编译工作集、audit、prepared candidate/restore、closure、reparse、冻结 runtime context、API 和运行时消费。新类型只作为 P2 的只读 baseline，不扩展上游六类写权限。compiler pipeline 升至 36：兼容旧版只保留 structure/observation checkpoints，semantic/executable 必须重验；engine 0.5.0 对旧 branch history 明确拒绝解释，旧无新类型的 canonical snapshot 可读但不补造效果。
+
+运行时只通过原 action/reducer 执行 mapped 效果，不追加另一份 state delta。canonical realization、genesis realization 和 projection replay 均拒绝 unmapped 效果；未来 canon 不因此成为当前事实，也不阻止没有声称实现该 canon 的独立行为。快照冻结 effect revision，原 source/背景事件不被效果工件反向改写。新模型工具沿正常 Pi withNwhToolRecovery 注册；缺 ref 提供同 source 的 finder/readArguments.ref/payload.id 和一次纠正约束，未映射/时间或 lowering 冲突明确停止原任务。
+
+两段原创失能场景验证精确字段证据缺失拒绝、finish→converge 持久化、完整 closure refs、跨工作区 checkpoint 恢复、冻结 context 重载、unmapped 实现与 genesis 拒绝、丢失字段证据后 candidate 拒绝且旧快照保留。另两段改名/句序扰动的赠物场景验证真实 action execution lowering、错误 outcome/缺 execution 拒绝、实际 branch commit 和无 checkpoint 重放、原状态/事件不变，以及坏 finish 不写 canonical。恢复协议测试检查精确字段和有界重试。
+
+这是一条新持久类型的纵向实现，不代表 P3 完成：Expression/Perception/Acquisition 及其复用命题/嵌套/晚期报告/legacy 验收仍待完成；失能执行扩展属于 P4，P5–P7 仍在原目标范围。P1/P2 余下完整退出审计仍保留。未调用真实 provider 或独立人工体验评价。
+
+验证：最终全仓 192 文件、1173 tests 通过（95.73 秒）；此前 111 项编译/重建定向、65 项类型/状态定向和 33 项语义/恢复定向通过；最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。首轮全仓发现工具固定数量及 pipeline-35 进度预期已过时；迁移按新语义边界调整为保留 observation 并重开 semantic/executable，未将旧检查点当作新能力证据。

@@ -1,3 +1,4 @@
+import type { SemanticEffect } from "../world/semantic-effect.js";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
 import { recoverCompilerFinish } from "./finish-recovery.js";
@@ -142,6 +143,7 @@ type CompilerSceneIdentity = Pick<SceneOccurrence, "id" | "locationId"> & {
   presentActorIds: string[];
   status: "canonical" | "pending";
 };
+type CompilerSemanticEffectIdentity = Pick<SemanticEffect, "id" | "canonicalEventId" | "subjectEntityId" | "kind" | "args" | "lowering" | "validTime"> & { status: "canonical" | "pending" };
 type CompilerEventFrameIdentity = Pick<EventFrame, "id" | "name" | "temporalShape"> & {
   roleIds: string[];
   status: "canonical" | "pending";
@@ -221,6 +223,7 @@ type CompilerArtifactCatalog = {
   spatialRelations: CompilerSpatialRelationIdentity[];
   sceneOccurrences: CompilerSceneIdentity[];
   eventFrames: CompilerEventFrameIdentity[];
+  semanticEffects: CompilerSemanticEffectIdentity[];
   actionSchemas: CompilerActionSchemaIdentity[];
   actionConstraints: CompilerExecutableTemplateIdentity[];
   normTemplates: CompilerExecutableTemplateIdentity[];
@@ -734,7 +737,7 @@ function buildBatchPrompt(
     `<initial-world-policy>Ordinary source-review batches must not propose an initial-world; the host runs a separate opening-world pass after source compilation and validation.</initial-world-policy> ` +
     `State operations may use only these registered fields: ${COMPILER_STATE_FIELDS.join(", ")}. Match effects to field meaning exactly: illness changes character.health, closure changes location.open, employment changes character.title or institution membership, ownership changes artifact.owner, and movement changes character.location. Never force an unsupported fact into the nearest-looking field; preserve it as a claim until a typed state representation exists. character.plan is a current actionable intention and character.momentum is finite narrative pressure. character.relationships stores relationship entity IDs, never counterpart character IDs; every new directed relationship must pair that reference with grounded relationship.from/to/type/active state. relationship.type accepts only ${RELATIONSHIP_TYPE_IDS.join(", ")}. relationship.kind, relationship.strength, and relationship.obligations are legacy compatibility fields: do not write them for new semantics, because stance dimensions and typed policy obligations live in the evidence-validated relationship ontology. Every entity-reference value, including set members, must be an ASCII logical entity ID rather than a display name. ` +
     `New world rules must use ontologyVersion=${WORLD_RULE_ONTOLOGY_VERSION}. Classify kind as physical, social, legal, magical, or institutional; keep engine invariants out of world data. State global versus entity/location/faction/institution scope explicitly. A bounded scope must name typed jurisdictionEntityIds and bind at least one jurisdiction in appliesWhen; legal and institutional rules require a character/faction/institution authorityEntityId, while physical laws cannot claim an authority. Decompose consequences into independently evidenced clauses with modality=require or forbid. Every rule, clause, and exception needs its own exact supporting evidence selector; contested semantics additionally need exact contradicting evidence and never execute. Use exceptions for source-grounded defeating conditions. Priority alone never wins: add overridesRuleIds only when evidence supports explicit superiority, give the overriding rule strictly higher priority, and target only a defeasible controlled rule. Set visibility as public, locally observable, knowledge-gated through knownByClaimIds, or engine-hidden. Rule validity may use a concrete calendar/range/ordinal validStoryTime; event-driven enactment/repeal belongs in committed activate-rule/deactivate-rule event effects. World-rule predicates are conditions, not outcomes. Use elapsed-days-* and concrete story-time-* predicates for temporal laws; never use a chapter number, bell count, date, age, or story ordinal as an engine step, and never use unresolved relative rule time or after-step/before-step compiler predicates. Keep one-off happenings as canonical events, and preserve non-executable social interpretation as claims rather than inventing an always-on law. ` +
-    `Compile scene, frame, and action semantics at different abstraction levels. A scene-occurrence is a source-grounded discourse occurrence: link its discourse-segment annotation IDs and canonical event IDs bidirectionally, state location/viewpoint/physical presence explicitly, and never copy a future canonical scene into active branch truth. An event-frame classifies occurrences with typed semantic roles, role kind/cardinality, presence, and temporal shape; bind a canonical event through frameInstance without replacing its concrete participants or effects. An action-schema is executable and reusable: induce a source-pattern only from at least two explicit supporting canonical events, use role/parameter templates for predicates and effects, and declare a strict effect envelope. A single event, a vague similarity, or a desired dramatic result must remain an ad-hoc occurrence rather than becoming a general ability or law. ` +
+    `Retain source-supported semantic-effect records separately from executable deltas. Use typed state-change or temporary-incapacity meaning, exact per-field evidence, occurrence/subject/time refs, and explicit unmapped lowering when a mechanism or duration is unknown. A mapped state-change must reference a validated event-execution; never turn unmapped meaning into an empty executable success. Compile scene, frame, and action semantics at different abstraction levels. A scene-occurrence is a source-grounded discourse occurrence: link its discourse-segment annotation IDs and canonical event IDs bidirectionally, state location/viewpoint/physical presence explicitly, and never copy a future canonical scene into active branch truth. An event-frame classifies occurrences with typed semantic roles, role kind/cardinality, presence, and temporal shape; bind a canonical event through frameInstance without replacing its concrete participants or effects. An action-schema is executable and reusable: induce a source-pattern only from at least two explicit supporting canonical events, use role/parameter templates for predicates and effects, and declare a strict effect envelope. A single event, a vague similarity, or a desired dramatic result must remain an ad-hoc occurrence rather than becoming a general ability or law. ` +
     `Mechanism linking is an executable-stage responsibility: read_compiler_artifact returns full semantic event and action-schema payloads. Use find_compiler_artifacts with kind=event-execution to discover existing links before creating one. propose_event_execution names canonicalEventId and actorId, and supplies a schema-bound action, a complete entryCheckpoint, or both. Action binding requires source evidence of agency; entry-only binding requires embodied presence and grants no action authority. After compiling norm/process templates and rules, supply a full pre-event entryCheckpoint with projectionSeed to complete late-character state without revising the semantic event. Multiple characters may have separate entry-only bindings for the same occurrence; only one action mechanism may be bound. Never repeat the event outcome in the entry checkpoint. Provide exact evidence selectors for all executable fields, including guards, effects, exceptions and entry projections. Preserve unknown causes as unresolved closure issues instead of relabeling them ad hoc. Every major-character scene needs source-supported entry and exit predicates, participants and knowledge acquisition paths; a scene name and event list alone are not an execution contract. ` +
     `Compile source-specific action constraints, norms, and processes only when the supplied text explicitly supports a reusable mechanism. An action-constraint states what a matching action requires or forbids before or after execution; keep exceptions, defeasibility, visibility, and evidence-backed priority overrides explicit. A norm-template is an obligation, prohibition, or permission grounded in an authority or social/legal practice; deadlines and reparations belong there, but the template does not instantiate a branch duty. A process-template models a genuinely staged development with owner roles, legal phase transitions, cadence, and declared outcomes; ordinary event sequence is not automatically a process. Every source-induced template must cite its supporting canonical events. Supporting events are induction provenance, not a prerequisite that an actor has experienced those future events. Explicitly classify actions and templates as public, observable, knowledge or engine; knowledge visibility requires exact knownByClaimIds. Process ownership is distinct from execution authority: compile evidence-backed actorControls with actionPattern, from/to phases, outcome, maximumAdvance per turn, minimumElapsedDays, requiresBefore and requiresAfter using actor or owner-role references. A template without actor controls permits only zero-progress acceptance; elapsed onDue transitions remain host-managed. Do not infer unrestricted progress from ownership. Manual norm satisfaction is an independent beneficiary/authority acknowledgement; subject reparations need executable action or state conditions. Domain-wide movement, conservation, and generic mechanics are host modules and must never be disguised as novel evidence. ` +
     `Use kind=canon-analogue only for a possibility linked to an existing canonicalEventId. The runtime already derives an exact, fixed-participant analogue for every canonical event. Propose a separate non-reserved canon-analogue possibility with canonicalScaffold only when an important event has a genuinely functional participant role that can survive branch divergence (for example courier, witness, guard, or institutional agent). Such a scaffold must copy the canonical event's participants, participantPresence, candidateWindow, timeAdvance, preconditions, typed outcome, knowledge outcome, and causalParents exactly. A merely sequential/narrative anchor must be fixed in the canonical event graph rather than silently dropped from a scaffold. Declare at most four substitutable roles. Each role must name its canonical participant, describe the causal function rather than a personality, list admissible entity kinds, choose anywhere or active-scene presence, and provide executable requiredState/requiresKnowledge gates. Never mark an identity-essential victim, heir, spouse, secret-holder, prophesied person, or other person-specific role substitutable merely to preserve plot. Do not propose participant remapping when an opaque string in a locked predicate, effect, or knowledge claim still embeds that participant's ID, name, or alias; only typed entity references can be remapped safely. The model will only select host-validated bindings and add bounded observations/affect; it cannot rewrite the scaffold's core effects. Use player-choice for an explicitly described choice that only the player may take; the background scheduler never auto-commits player-choice or actor-plan. Do not submit actor-plan possibility templates because actor intent belongs in character-goal proposals. Use obligation, causal-consequence, background-pressure, or environmental for source-grounded mechanisms that can continue after divergence: deadlines, duties, pursuit, resource depletion, travel, institutional response, and environmental change. Give each autonomous template a concrete typed effect or knowledge transition plus executable preconditions, blockers, expiry, causal parents, and participant presence where applicable; do not encode a vague plot hint. A refusal or alternate choice must contain a concrete proposed state or knowledge effect that conflicts with the canonical transition; an empty proposedDelta is invalid because it cannot keep canon from immediately reasserting itself. ` +
@@ -766,6 +769,7 @@ async function loadCompilerArtifactCatalog(
   const spatialRelations = new Map<string, CompilerSpatialRelationIdentity>();
   const sceneOccurrences = new Map<string, CompilerSceneIdentity>();
   const eventFrames = new Map<string, CompilerEventFrameIdentity>();
+  const semanticEffects = new Map<string, CompilerSemanticEffectIdentity>();
   const actionSchemas = new Map<string, CompilerActionSchemaIdentity>();
   const actionConstraints = new Map<string, CompilerExecutableTemplateIdentity>();
   const normTemplates = new Map<string, CompilerExecutableTemplateIdentity>();
@@ -814,6 +818,7 @@ async function loadCompilerArtifactCatalog(
   for (const relation of canonicalEventRelations.filter((item) => hasSourceEvidence(item, sourceId))) eventRelations.set(relation.id, prioritize(eventRelationIdentity(relation, "canonical"), relation));
   for (const relation of canonicalSpatialRelations.filter((item) => hasSourceEvidence(item, sourceId))) spatialRelations.set(relation.id, prioritize(spatialRelationIdentity(relation, "canonical"), relation));
   for (const scene of canonicalScenes.filter((item) => hasSourceEvidence(item, sourceId))) sceneOccurrences.set(scene.id, prioritize(sceneOccurrenceIdentity(scene, "canonical"), scene));
+  for (const effect of (await canon.listSemanticEffects()).filter(item => hasSourceEvidence(item, sourceId))) semanticEffects.set(effect.id, prioritize(semanticEffectIdentity(effect, "canonical"), effect));
   for (const frame of canonicalFrames.filter((item) => hasSourceEvidence(item, sourceId))) eventFrames.set(frame.id, prioritize(eventFrameIdentity(frame, "canonical"), frame));
   for (const schema of canonicalActions.filter((item) => item.induction.kind === "domain-module" || hasSourceEvidence(item, sourceId))) actionSchemas.set(schema.id, prioritize(actionSchemaIdentity(schema, "canonical"), schema));
   for (const constraint of canonicalActionConstraints.filter((item) => item.induction.kind === "domain-module" || hasSourceEvidence(item, sourceId))) actionConstraints.set(constraint.id, prioritize(executableTemplateIdentity(constraint, "canonical"), constraint));
@@ -858,6 +863,9 @@ async function loadCompilerArtifactCatalog(
     } else if (summary.kind === "scene-occurrence") {
       const proposal = await proposals.read("pending", summary.id, compilerProposalSchemas["scene-occurrence"]);
       if (!sceneOccurrences.has(proposal.payload.id)) sceneOccurrences.set(proposal.payload.id, prioritize(sceneOccurrenceIdentity(proposal.payload, "pending"), proposal.payload));
+    } else if (summary.kind === "semantic-effect") {
+      const proposal = await proposals.read("pending", summary.id, compilerProposalSchemas["semantic-effect"]);
+      if (!semanticEffects.has(proposal.payload.id)) semanticEffects.set(proposal.payload.id, prioritize(semanticEffectIdentity(proposal.payload, "pending"), proposal.payload));
     } else if (summary.kind === "event-frame") {
       const proposal = await proposals.read("pending", summary.id, compilerProposalSchemas["event-frame"]);
       if (!eventFrames.has(proposal.payload.id)) eventFrames.set(proposal.payload.id, prioritize(eventFrameIdentity(proposal.payload, "pending"), proposal.payload));
@@ -907,6 +915,7 @@ async function loadCompilerArtifactCatalog(
     spatialRelations: byId(spatialRelations.values()),
     sceneOccurrences: byId(sceneOccurrences.values()),
     eventFrames: byId(eventFrames.values()),
+    semanticEffects: byId(semanticEffects.values()),
     actionSchemas: byId(actionSchemas.values()),
     actionConstraints: byId(actionConstraints.values()),
     normTemplates: byId(normTemplates.values()),
@@ -1213,6 +1222,7 @@ function emptyCompilerArtifactCatalog(): CompilerArtifactCatalog {
     spatialRelations: [],
     sceneOccurrences: [],
     eventFrames: [],
+    semanticEffects: [],
     actionSchemas: [],
     actionConstraints: [],
     normTemplates: [],
@@ -1237,6 +1247,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     spatialRelations: 160,
     sceneOccurrences: 160,
     eventFrames: 120,
+    semanticEffects: 120,
     actionSchemas: 120,
     actionConstraints: 120,
     normTemplates: 120,
@@ -1258,6 +1269,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     spatialRelations: sampleCatalog(catalog.spatialRelations, limits.spatialRelations),
     sceneOccurrences: sampleCatalog(catalog.sceneOccurrences, limits.sceneOccurrences),
     eventFrames: sampleCatalog(catalog.eventFrames, limits.eventFrames),
+    semanticEffects: sampleCatalog(catalog.semanticEffects, limits.semanticEffects),
     actionSchemas: sampleCatalog(catalog.actionSchemas, limits.actionSchemas),
     actionConstraints: sampleCatalog(catalog.actionConstraints, limits.actionConstraints),
     normTemplates: sampleCatalog(catalog.normTemplates, limits.normTemplates),
@@ -1273,7 +1285,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     const omitted = catalog[key].length - compact[key].length;
     if (omitted > 0) compact.omitted[key] = omitted;
   }
-  const removable = ["possibilities", "eventRelations", "eventParticipations", "sceneOccurrences", "eventFrames", "actionSchemas", "actionConstraints", "normTemplates", "processTemplates", "spatialRelations", "events", "claims", "characterGoals", "characterModels", "rules", "entities"] as const;
+  const removable = ["possibilities", "eventRelations", "eventParticipations", "sceneOccurrences", "eventFrames", "semanticEffects", "actionSchemas", "actionConstraints", "normTemplates", "processTemplates", "spatialRelations", "events", "claims", "characterGoals", "characterModels", "rules", "entities"] as const;
   while (promptJson(compact).length > MAX_CATALOG_JSON_CHARS) {
     const key = removable.find((candidate) => compact[candidate].length > 1);
     if (!key) break;
@@ -1404,4 +1416,9 @@ function replaceSemanticStagePolicy(prompt: string, policy: string): string {
 
 function hash(value: string): string {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function semanticEffectIdentity(effect: SemanticEffect, status: "canonical" | "pending"): CompilerSemanticEffectIdentity {
+  const { id, canonicalEventId, subjectEntityId, kind, args, lowering, validTime } = effect;
+  return { id, canonicalEventId, subjectEntityId, kind, args, lowering, validTime, status };
 }

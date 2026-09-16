@@ -195,3 +195,41 @@ it("charges argument validation failures before staging and permits just the cor
   expect(attempts).toHaveLength(2); expect(attempts[1]!.staged).toBe(true);
   expect(attempts[0]!.started.proposalId).toBe(attempts[1]!.started.proposalId);
 });
+
+it("consumes only declared same-plan staged mentions and freezes their exact revisions for resolution recovery", async () => {
+  const { stageUpstreamRepair, recoverUpstreamRepairStage } = await import("../src/compiler/upstream-repair-staging.js");
+  const { CanonicalModelStore } = await import("../src/world/canonical-model.js");
+  const { EntityResolutionStore } = await import("../src/compiler/entity-resolution.js");
+  const f = await fixture();
+  const entity = { id: "ada", kind: "character" as const, canonicalName: "Ada", aliases: [], evidence: f.source.evidence("Ada") };
+  await new CanonicalModelStore(f.root).putEntity(entity);
+  const requirement = f.identity.requirementIds[0]!;
+  const plan = freezeUpstreamRepairPlan({ ...f.identity, allowedWrites: [], baselineRefs: [{ kind: "entity", id: entity.id, revisionHash: contentHash(entity) }], readableRefs: [{ kind: "entity", id: entity.id }],
+    allowedCreations: [{ kind: "discourse-segment", id: "new-scene", maxCount: 1, dependencyOf: requirement }, { kind: "entity-mention", id: "new-mention", maxCount: 1, dependencyOf: requirement }, { kind: "entity-resolution", id: "new-resolution", maxCount: 1, dependencyOf: requirement }],
+    dependencyEdges: [{ from: `requirement:${requirement}`, to: "discourse-segment:new-scene", purpose: "source-evidence" }, { from: "entity-mention:new-mention", to: "discourse-segment:new-scene", purpose: "source-evidence" }, { from: `requirement:${requirement}`, to: "entity-mention:new-mention", purpose: "source-evidence" }, { from: `requirement:${requirement}`, to: "entity-resolution:new-resolution", purpose: "identity" }, { from: "entity-resolution:new-resolution", to: "entity-mention:new-mention", purpose: "identity" }],
+  });
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  const resolutionInput = { proposal_id: "resolution-proposal", resolution_id: "new-resolution", mention_id: "new-mention", status: "resolved", entity_id: "ada", candidates: [{ entity_id: "ada", confidence: 1, basis_mention_ids: ["new-mention"], evidence_assertion_ids: [], rationale: "Exact new mention" }], rationale: "Source-grounded identity" };
+  const resolve = () => stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "entity-resolution", id: "new-resolution" }, resolutionInput);
+  await expect(resolve()).rejects.toThrow("has no staged result");
+  expect((await f.ledger.inspect()).attempts).toHaveLength(0);
+  const scene = await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "discourse-segment", id: "new-scene" }, { proposal_id: "scene-proposal", annotation_id: "new-scene", kind: "scene", selectors: [{ segment_id: f.source.segmentId, exact: 'Ada said, "Wait." Nothing changes.' }], confidence: 1 });
+  const mention = await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "entity-mention", id: "new-mention" }, { proposal_id: "mention-proposal", annotation_id: "new-mention", selector: { segment_id: f.source.segmentId, exact: "Ada" }, surface: "Ada", form: "proper", kind_candidates: ["character"], scene_id: "new-scene", confidence: 1 });
+  const annotations = new SourceAnnotationStore(f.root), original = await annotations.readProposal(f.sourceId, "pending", mention.proposalId);
+  const tampered = vi.spyOn(SourceAnnotationStore.prototype, "readProposal").mockResolvedValueOnce({ ...original, createdAt: "2026-09-17T00:00:00Z" });
+  await expect(resolve()).rejects.toThrow("original envelope");
+  tampered.mockRestore();
+  expect((await f.ledger.inspect()).attempts).toHaveLength(2);
+  const resolved = await resolve();
+  const state = await f.ledger.inspect(), attempt = state.attempts.find(item => item.attemptRef === resolved.attemptRef)!;
+  expect(attempt.dependencies).toEqual([{ attemptRef: mention.attemptRef, proposalHash: mention.proposalHash }, { attemptRef: scene.attemptRef, proposalHash: scene.proposalHash }].sort((a, b) => a.attemptRef.localeCompare(b.attemptRef)));
+  expect(await new EntityResolutionStore(f.root).list(f.sourceId)).toEqual([]);
+  await expect(annotations.read(f.sourceId, "new-mention")).rejects.toThrow();
+  const corrupted = vi.spyOn(SourceAnnotationStore.prototype, "readProposal").mockResolvedValueOnce({ ...original, payload: { ...original.payload, id: "substituted" } });
+  await expect(recoverUpstreamRepairStage(f.root, f.sourceId, plan.planHash, resolved.attemptRef)).rejects.toThrow("original envelope");
+  corrupted.mockRestore();
+  const noReplay = vi.spyOn(EntityResolutionStore.prototype, "stage");
+  await recoverUpstreamRepairStage(f.root, f.sourceId, plan.planHash, resolved.attemptRef);
+  expect(noReplay).not.toHaveBeenCalled();
+  await expect(f.ledger.recordValidated(plan.planHash, resolved.attemptRef, attempt.validatedHash!, [])).rejects.toThrow("dependencies were rewritten");
+});

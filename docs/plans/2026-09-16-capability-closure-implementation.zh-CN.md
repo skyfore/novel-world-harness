@@ -281,3 +281,17 @@ P2b 已提交为 `c6e3c94`。
 P2 仍待实现同计划中新建依赖的有序消费、授权 finish 及恢复、候选快照中的计划/预算保留、converge 后基线复核和逐项评估，不能据当前 staging 测试宣称已完成缺 mention/quotation 的完整修复链。P1 整体验收映射及 P3–P7 仍待完成；没有调用真实 provider 或人工体验评价。
 
 验证：全量 188 文件、1110 tests 通过（79.83 秒）；随后加强 envelope provenance 及受管工具绕过检查，并禁止受管初始化清除原边界请求，24 项针对性回归通过。最终服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。
+
+P2c 已提交为 `72dbd91`。
+
+## P2d：声明的 pending 依赖链与精确修订绑定
+
+宿主 staging 现在按计划声明的 write/creation 依赖边消费同计划已成功记账的草案，递归验证每个先前 intent、envelope hash、payload hash、provenance、原文 anchor 与传递依赖。使用 DAG 节点缓存避免共享子图重复展开；不把任意 pending 数据覆盖进 canonical preflight。解析 resolution 的来源支持时，仅使用声明并已验证的 staged dependency。
+
+依赖尚未 staged 时，在工具参数准备和失败预算预留前停止消费者，由宿主先调度原依赖槽。已被替换、丢失或篡改的依赖不能成为消费者输入。每次 attempt-validated 冻结完整传递依赖闭包的 attemptRef/proposalHash；账本校验所有引用来自同计划更早的 staged 结果，并核对闭包与计划 DAG 一致。消费者恢复重新核验这些原引用，不重跑工具，不允许改写依赖集合。
+
+新增真实工具回归走通 pending discourse→pending entity mention→pending entity resolution 三层链，验证错误顺序不消耗模型失败预算、改变依赖 envelope 被拒、消费者冻结传递依赖、恢复无需再次 stage，以及当前 annotation/resolution 仍未提交。25 项针对性测试通过。
+
+P2 仍未完成：授权 finish 与恢复、计划/预算的候选快照保留、converge 后实际 revision 复核及逐项评估仍需接线；普通 finish 仍被禁止，尚无自主修复模型会话。P1 完整验收映射及 P3–P7 继续保留原范围，未调用真实 provider 或人工体验评价。
+
+验证：全量 188 文件、1111 tests 通过（80.33 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。

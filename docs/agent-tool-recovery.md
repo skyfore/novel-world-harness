@@ -619,3 +619,25 @@ tool execution. Even the host staging path currently rejects ordinary finish,
 world proposals, retrieval and unrelated metadata tools. There is no autonomous
 repair-session entrypoint yet. Authorization-aware finish, staged dependency
 consumption and snapshot recovery remain prerequisites for the full executor.
+
+### Consuming staged upstream dependencies
+
+The host staging service now follows only declared same-plan write/creation
+dependency edges. Every dependency must already have a validated intent and an
+`attempt-staged` result. Its pending envelope, payload and provenance must still
+match those records. Transitive dependencies undergo the same checks; no general
+pending overlay is treated as active world truth.
+
+If a declared dependency is not staged, stop the consumer before argument
+preparation or budget reservation and stage that original host slot first. Do
+not retry the consumer unchanged, invent a substitute ID or search another
+namespace. Missing or altered dependency envelopes require host review with
+the original plan and drafts preserved.
+
+`attempt-validated.dependencies` freezes the complete declared staged dependency
+closure as exact `attemptRef` and `proposalHash` pairs. The journal requires each
+reference to name an earlier same-plan staged result and rejects omitted or
+extraneous dependency slots. Consumer recovery checks the same closure without
+executing tools. These references provide staged compiler inputs only; ordinary
+finish and publication remain unavailable for managed repair batches until the
+authorization-aware finish protocol is implemented.

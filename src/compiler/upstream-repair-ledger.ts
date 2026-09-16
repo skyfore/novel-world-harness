@@ -9,12 +9,14 @@ import { upstreamRepairPlanSchema, upstreamRepairKindSchema, type UpstreamRepair
 import { upstreamRepairHostError, verifyUpstreamRepairPlan } from "./upstream-repair-preflight.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
+const stagedDependencySchema = z.object({ attemptRef: hash, proposalHash: hash }).strict();
+export type UpstreamStagedDependency = z.infer<typeof stagedDependencySchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("planned"), plan: upstreamRepairPlanSchema, predecessorPlanHash: hash.nullable() }).strict(),
   z.object({ kind: z.literal("authorized"), planHash: hash }).strict(),
   z.object({ kind: z.literal("attempt-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, inputHash: hash, toolInput: z.unknown().optional() }).strict(),
   z.object({ kind: z.literal("attempt-staged"), planHash: hash, attemptRef: hash, proposalHash: hash }).strict(),
-  z.object({ kind: z.literal("attempt-validated"), planHash: hash, attemptRef: hash, payloadHash: hash }).strict(),
+  z.object({ kind: z.literal("attempt-validated"), planHash: hash, attemptRef: hash, payloadHash: hash, dependencies: z.array(stagedDependencySchema).max(256).optional() }).strict(),
   z.object({ kind: z.literal("attempt-failed"), planHash: hash, attemptRef: hash, diagnostic: z.string().trim().min(1) }).strict(),
   z.object({ kind: z.literal("needs-host-review"), planHash: hash, reason: z.string().trim().min(1) }).strict(),
 ]);
@@ -24,7 +26,7 @@ type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
 type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "needs-host-review" };
 function project(records: Record[]) {
   const plans = new Map<string, PlanState>();
-  const attempts = new Map<string, { started: Started; failed: boolean; staged: boolean; validatedHash?: string }>();
+  const attempts = new Map<string, { started: Started; failed: boolean; staged: boolean; validatedHash?: string; dependencies?: UpstreamStagedDependency[] }>();
   for (const [index, record] of records.entries()) {
     const { hash: ownHash, ...identity } = record;
     if (contentHash(identity) !== ownHash || record.sequence !== index || record.predecessorHash !== (records[index - 1]?.hash ?? null)
@@ -52,7 +54,23 @@ function project(records: Record[]) {
     } else if (event.kind === "attempt-validated") {
       const attempt = attempts.get(event.attemptRef);
       if (!attempt || attempt.failed || attempt.staged || attempt.validatedHash || attempt.started.planHash !== event.planHash || current.state !== "staging") throw upstreamRepairHostError("Validated payload does not match the reserved attempt");
+      if (new Set(event.dependencies?.map(ref => ref.attemptRef)).size !== (event.dependencies?.length ?? 0)) throw upstreamRepairHostError("Duplicate staged dependency");
+      const slots = new Set([...current.plan.allowedWrites, ...current.plan.allowedCreations].map(ref => `${ref.kind}:${ref.id}`));
+      const required = new Set<string>(), queue = [`${attempt.started.artifactKind}:${attempt.started.artifactId}`];
+      while (queue.length) {
+        const node = queue.pop()!;
+        for (const edge of current.plan.dependencyEdges.filter(edge => edge.from === node && slots.has(edge.to))) if (!required.has(edge.to)) { required.add(edge.to); queue.push(edge.to); }
+      }
+      const represented = new Set<string>();
+      for (const ref of event.dependencies ?? []) {
+        const dependency = attempts.get(ref.attemptRef);
+        const staged = records.slice(0, index).find(item => item.payload.kind === "attempt-staged" && item.payload.attemptRef === ref.attemptRef);
+        if (!dependency?.staged || dependency.started.planHash !== event.planHash || staged?.payload.kind !== "attempt-staged" || staged.payload.proposalHash !== ref.proposalHash) throw upstreamRepairHostError("Validated dependency lacks its same-plan prior staged result");
+        represented.add(`${dependency.started.artifactKind}:${dependency.started.artifactId}`);
+      }
+      if (required.size !== represented.size || [...required].some(key => !represented.has(key))) throw upstreamRepairHostError("Validated dependency set differs from the declared repair DAG");
       attempt.validatedHash = event.payloadHash;
+      attempt.dependencies = event.dependencies;
     } else if (event.kind === "attempt-staged") {
       const attempt = attempts.get(event.attemptRef);
       if (!attempt || attempt.failed || attempt.staged || !attempt.validatedHash || attempt.started.planHash !== event.planHash || current.state !== "staging") throw upstreamRepairHostError("Staged result does not match the reserved attempt");
@@ -162,14 +180,14 @@ export class UpstreamRepairLedger {
     await this.append({ kind: "attempt-failed", planHash, attemptRef, diagnostic });
   }
   /** Freeze the host-validated normalized payload before any proposal write. */
-  async recordValidated(planHash: string, attemptRef: string, payloadHash: string): Promise<void> {
+  async recordValidated(planHash: string, attemptRef: string, payloadHash: string, dependencies: UpstreamStagedDependency[] = []): Promise<void> {
     const records = await this.history();
     const existing = records.find(record => record.payload.kind === "attempt-validated" && record.payload.attemptRef === attemptRef);
     if (existing?.payload.kind === "attempt-validated") {
-      if (existing.payload.planHash !== planHash || existing.payload.payloadHash !== payloadHash) throw upstreamRepairHostError("Original validated payload was rewritten");
+      if (existing.payload.planHash !== planHash || existing.payload.payloadHash !== payloadHash || contentHash(existing.payload.dependencies ?? []) !== contentHash(dependencies)) throw upstreamRepairHostError("Original validated payload or dependencies were rewritten");
       return;
     }
-    await this.append({ kind: "attempt-validated", planHash, attemptRef, payloadHash });
+    await this.append({ kind: "attempt-validated", planHash, attemptRef, payloadHash, dependencies });
   }
   /** Called only after the host has verified the exact pending envelope and mutation. */
   async recordStaged(planHash: string, attemptRef: string, proposalHash: string): Promise<void> {

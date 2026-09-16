@@ -95,6 +95,14 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
   });
+requirementsCommand.command("plan-upstream-repair").requiredOption("--review <path>", "typed host-reviewed diagnostic JSON")
+  .description("Derive a bounded frozen plan from actual source dependencies; never register or authorize it")
+  .action(async options => {
+    const { planUpstreamRepairCommand } = await import("./commands/upstream-repair.js");
+    const result = await planUpstreamRepairCommand(rootFor({}), options.review);
+    console.log(JSON.stringify(result, null, 2));
+    if (result.status === "needs-host-review") process.exitCode = 2;
+  });
 requirementsCommand.command("register-upstream-plan").requiredOption("--source <id>", "registered source ID")
   .requiredOption("--file <path>", "exact frozen host plan JSON, including planHash")
   .option("--predecessor <hash>", "exact predecessor plans[].plan.planHash when revising host dependencies")

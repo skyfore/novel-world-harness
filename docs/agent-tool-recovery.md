@@ -893,3 +893,38 @@ or definition change. For a missing plan, inspect this source and copy exactly
 `plans[].plan.planHash` for one corrected host selection; never guess IDs or edit
 frozen JSON hashes to bypass a mismatch. Storage and scope failures require host
 repair, not repeated model calls.
+
+### Typed upstream planning
+
+`requirements plan-upstream-repair --review <json>` reads a strict, versioned host
+review under the compiler lock. `upstreamRepairReviewSchema` defines the input:
+source and requirement revisions, stable plan/batch/budget identities, explicit
+read/citation segment scope, audit reference and typed diagnostics. The result
+remains `authority: diagnostic-only`. Save its `plan` member as the exact JSON
+input for `register-upstream-plan`; planning does not register or authorize it.
+
+Currently supported diagnostic policies are:
+
+- `QUOTATION_ANCHOR_INCOMPLETE`: an exact current quotation revision plus a
+  host-reviewed `expectedAnchor` that strictly extends its original-byte range.
+  The expected range must fit the explicit citable evidence. The generated policy
+  permits only `/anchor`; it grants no speaker, mode or confidence edits.
+- `QUOTATION_SPEAKER_MENTION_MISSING`: the current quotation must actually name
+  an absent speaker mention. Its existing typed reference fixes the creation ID;
+  one entity-mention slot and explicit dependency edges are generated. No absent
+  speaker ID is invented from prose, and collisions with any annotation kind fail.
+- `SEMANTIC_MODULE_REQUIRED`: returns `needs-host-review`, no plan and exit 2.
+  A mixed review containing unsupported semantics grants no partial authority.
+
+The host derives baseline hashes and readable refs from current typed objects,
+then runs the original plan/source/definition/receipt preflight. The review hash
+is bound into its authorization reference. It never parses error strings into
+write pointers or infers satisfaction from a successful plan. On missing/stale
+quotation data, use same-source `find_source_annotations`, copy `annotationId`
+and obtain a new exact host review; never guess IDs or change a revision hash to
+silence the conflict. An unchanged failed review must stop.
+
+This is a typed review-to-plan converter, not yet automatic discovery of all
+compiler diagnostic classes. Resolution, expression/perception and executable
+repair policies remain unsupported by this converter. Independent requirement
+evaluation and downstream closure checks still determine repair success.

@@ -445,3 +445,19 @@ observe-upstream-convergence 核对已提交的实际修订，不接受无关 pe
 P2 自动诊断到严格授权计划及完整退出证据仍未完成；P3–P7 保留原范围。
 
 验证：41 项相关测试通过；最终服务端、Web、E2E TypeScript、requirements 命令列表及 register/finish/convergence 帮助入口、diff whitespace 检查通过。本段未重复全仓测试，最近全仓证据仍是上一段 189 文件、1142 项通过。
+
+P2n 已提交为 `1df2d00`。
+
+## P2o：结构化复核诊断到固定权限计划
+
+新增 upstreamRepairReviewSchema、planUpstreamRepair 与 requirements plan-upstream-repair。输入明确绑定原 source/requirement revisions、计划与预算身份、可引用 segment 和宿主复核依据；不解析错误字符串，也不接受自由 pointer 或 mutation kind。输出仍是 diagnostic-only，不自动登记、授权或写入世界。
+
+先实现两类 annotation 根因。QUOTATION_ANCHOR_INCOMPLETE 核验当前 quotation hash 和宿主复核 expectedAnchor，要求严格扩展当前锚点且精确匹配原文字节、落在明确 citable segment；固定授权仅 /anchor。QUOTATION_SPEAKER_MENTION_MISSING 要求 quotation 的 typed speaker 引用确实缺失，使用该既有引用分配唯一 mention 创建槽，添加原要求和 quotation 的依赖边，不从自由文本猜新 ID。baseline 与 readable 集合由实际对象派生，再通过原完整 source/definition/receipt 预检。
+
+reviewHash 绑定 authorizationRef。SEMANTIC_MODULE_REQUIRED 返回 needs-host-review、无计划；混合存在不支持语义时也不扩大为部分写权限。真实 requirement 满足仍由下游独立 evaluation 判定，生成计划或修好引用不自动清空义务。
+
+回归覆盖严格权限生成、无隐式授权、相同输入稳定、缺 mention→quotation 依赖暂存→原 finish 的实际存储链、源修订后旧诊断拒绝、虚假缺失引用、未扩展锚点、注入额外 pointer、未知语义转宿主审阅，以及第二个原创短文本的较长引语范围。首轮测试错误读取不存在的 anchor.exact，已修正为完整字节锚点比较，保留实际失败记录，不修改产品契约迁就断言。
+
+本段是显式宿主复核输入的自动计划转换，尚未自动发现所有诊断。resolution 与后续 expression/perception/executable 根因的规划策略、P2 完整独立退出证据和 P3–P7 仍待实施。未调用真实 provider 或独立人工评审。
+
+验证：44 项最终定向回归通过；全仓 189 文件、1146 tests 通过（91.80 秒）；服务端、Web、E2E TypeScript、plan-upstream-repair CLI 帮助与 diff whitespace 检查通过。

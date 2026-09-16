@@ -89,3 +89,9 @@ export async function stopUpstreamRepairPlanCommand(root: string, sourceId: stri
     return (await ledger.inspect()).plans.find(item => item.plan.planHash === planHash)!;
   });
 }
+
+export async function planUpstreamRepairCommand(root: string, reviewFile: string) {
+  const { planUpstreamRepair } = await import("../compiler/upstream-repair-planner.js");
+  const review: unknown = JSON.parse(await fs.readFile(reviewFile, "utf8"));
+  return withWorkspaceOperationLock(root, "compiler", () => planUpstreamRepair(root, review));
+}

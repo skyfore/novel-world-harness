@@ -13,16 +13,16 @@ import { verifyUpstreamRepairPlan } from "../src/compiler/upstream-repair-prefli
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
-async function fixture() {
+async function fixture(text = 'Ada said, "Wait." Nothing changes.', quotedText = "Wait") {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-upstream-ledger-")); roots.push(root);
-  const text = 'Ada said, "Wait." Nothing changes.', bytes = Buffer.from(text);
+  const bytes = Buffer.from(text);
   const source = await createEvidenceFixture(root, text), sourceId = source.source.id;
   const definition = await registerSourceRequirements(root, { sourceId, id: "opening-checks", scopeDecisionRef: "independent-review", spec: {
     version: 1, sourceId, sourceSha256: source.source.contentSha256, review: { method: "independent-source-review", reviewer: "fixture-reviewer", reviewedAt: "2026-09-16T00:00:00Z", auditRef: "original-source-review" },
     cases: [{ id: "waiting", kind: "event-effects", scene: "Opening", rationale: "Nothing changes", evidence: [textAnchorForByteRange(sourceId, bytes, 0, bytes.length)], eventId: "waiting", requiresMechanism: false, expectation: { kind: "no-change", justification: "Source states no change" } }],
   } });
   const requirementIds = (await settleSourceRequirements(root, sourceId)).results[0]!.requirements.map(item => item.id);
-  const annotation = quotationSchema.parse({ version: 1, id: "quote-one", sourceId, annotationType: "quotation", anchor: textAnchorForByteRange(sourceId, bytes, text.indexOf("Wait"), text.indexOf("Wait") + 4), mode: "direct", addresseeMentionIds: [], attributionConfidence: 1, derivation: { runId: "original", worker: "propose_quotation", ontologyVersion: "observation-v1" } });
+  const annotation = quotationSchema.parse({ version: 1, id: "quote-one", sourceId, annotationType: "quotation", anchor: textAnchorForByteRange(sourceId, bytes, text.indexOf(quotedText), text.indexOf(quotedText) + quotedText.length), mode: "direct", addresseeMentionIds: [], attributionConfidence: 1, derivation: { runId: "original", worker: "propose_quotation", ontologyVersion: "observation-v1" } });
   const annotations = new SourceAnnotationStore(root);
   const write = async (payload = annotation, id = "original-proposal") => {
     await annotations.stage(sourceId, { version: 1, id, annotationType: "quotation", payload, generatedBy: { worker: "fixture" }, createdAt: "2026-09-16T00:00:00Z" });
@@ -838,4 +838,61 @@ it("runs frozen host registration, authorization and interrupted finish through 
   expect((await stopUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash, "Host reviewed a dependency revision")).state).toBe("needs-host-review");
   await expect(authorizeUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("stopped");
   await expect(finishUpstreamRepairPlanCommand(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("Original active frozen finish intent is missing");
+});
+
+it("derives only exact quotation and missing-speaker policy from reviewed typed diagnostics", async () => {
+  const { planUpstreamRepair } = await import("../src/compiler/upstream-repair-planner.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const f = await fixture(), requirementId = f.identity.requirementIds[0]!;
+  const quotation = { ...f.annotation, speakerMentionId: "absent-speaker" }; await f.write(quotation, "reviewed-quote");
+  const review = { version: 1, sourceId: f.sourceId, sourceSha256: f.source.source.contentSha256, planId: "derived-plan", batchId: "derived-batch", requirementSetHash: f.plan.requirementSetHash,
+    requirementIds: f.plan.requirementIds, predecessorReceiptRefs: [], segmentIds: [f.source.segmentId], citableEvidenceRefs: [f.source.segmentId], authorizationRef: "independent-quotation-review", retryBudgetRef: "original-budget",
+    diagnostics: [{ code: "QUOTATION_ANCHOR_INCOMPLETE", quotationId: quotation.id, revisionHash: contentHash(quotation), requirementId, expectedAnchor: textAnchorForByteRange(f.sourceId, Buffer.from('Ada said, "Wait." Nothing changes.'), 11, 16) },
+      { code: "QUOTATION_SPEAKER_MENTION_MISSING", quotationId: quotation.id, revisionHash: contentHash(quotation), requirementId }] };
+  const result = await planUpstreamRepair(f.root, review), plan = result.plan!;
+  expect(result.status).toBe("ready-for-host-authorization");
+  expect(result.authority).toBe("diagnostic-only");
+  expect(await f.ledger.history()).toEqual([]);
+  expect(plan.allowedWrites).toEqual([{ kind: "quotation", id: quotation.id, pointers: ["/anchor"] }]);
+  expect(plan.allowedCreations).toEqual([{ kind: "entity-mention", id: "absent-speaker", maxCount: 1, dependencyOf: requirementId }]);
+  expect(plan.readableRefs).toEqual([{ kind: "quotation", id: quotation.id }]);
+  expect((await planUpstreamRepair(f.root, review)).plan).toEqual(plan);
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "entity-mention", id: "absent-speaker" }, { proposal_id: "derived-speaker", annotation_id: "absent-speaker", selector: { segment_id: f.source.segmentId, exact: "Ada" }, surface: "Ada", form: "proper", kind_candidates: ["character"], confidence: 1 });
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "quotation", id: quotation.id }, { proposal_id: "derived-quotation", annotation_id: quotation.id, selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", speaker_mention_id: "absent-speaker", addressee_mention_ids: [], attribution_confidence: 1 });
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Independent source review" }], summary: "Repair source dependencies" });
+  await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
+  expect((await new SourceAnnotationStore(f.root).read(f.sourceId, "absent-speaker")).annotationType).toBe("entity-mention");
+  expect(quotationSchema.parse(await new SourceAnnotationStore(f.root).read(f.sourceId, quotation.id)).anchor).toEqual(review.diagnostics[0]!.expectedAnchor);
+  await expect(planUpstreamRepair(f.root, review)).rejects.toThrow("reviewed revision changed");
+});
+
+it("refuses false diagnostic claims and routes unsupported semantics to host review without authority", async () => {
+  const { planUpstreamRepair } = await import("../src/compiler/upstream-repair-planner.js");
+  const f = await fixture(), requirementId = f.plan.requirementIds[0]!;
+  const review = { version: 1, sourceId: f.sourceId, sourceSha256: f.source.source.contentSha256, planId: "review-plan", batchId: "review-batch", requirementSetHash: f.plan.requirementSetHash,
+    requirementIds: f.plan.requirementIds, predecessorReceiptRefs: [], segmentIds: [f.source.segmentId], citableEvidenceRefs: [f.source.segmentId], authorizationRef: "review", retryBudgetRef: "review-budget" };
+  await expect(planUpstreamRepair(f.root, { ...review, diagnostics: [{ code: "QUOTATION_SPEAKER_MENTION_MISSING", quotationId: f.annotation.id, revisionHash: contentHash(f.annotation), requirementId }] })).rejects.toThrow("genuinely absent typed annotation dependency");
+  await expect(planUpstreamRepair(f.root, { ...review, diagnostics: [{ code: "QUOTATION_ANCHOR_INCOMPLETE", quotationId: f.annotation.id, revisionHash: contentHash(f.annotation), requirementId, expectedAnchor: f.annotation.anchor }] })).rejects.toThrow("strict original-byte extension");
+  await expect(planUpstreamRepair(f.root, { ...review, diagnostics: [{ code: "QUOTATION_ANCHOR_INCOMPLETE", quotationId: f.annotation.id, revisionHash: contentHash(f.annotation), requirementId, expectedAnchor: f.annotation.anchor, pointers: ["/mode"] }] })).rejects.toThrow();
+  expect(await planUpstreamRepair(f.root, { ...review, diagnostics: [{ code: "SEMANTIC_MODULE_REQUIRED", semanticKind: "unknown-duration-incapacity", requirementId }] })).toMatchObject({ authority: "diagnostic-only", status: "needs-host-review", plan: null });
+  expect(await f.ledger.history()).toEqual([]);
+  expect(await new SourceAnnotationStore(f.root).read(f.sourceId, f.annotation.id)).toEqual(f.annotation);
+});
+
+
+it("plans a second source's longer quotation without widening identity or other fields", async () => {
+  const { planUpstreamRepair } = await import("../src/compiler/upstream-repair-planner.js");
+  const text = 'Behind a wall, Ren whispered, "Stay by the gate." Nothing changes.';
+  const f = await fixture(text, "Stay"), full = "Stay by the gate.", start = text.indexOf(full);
+  const review = { version: 1, sourceId: f.sourceId, sourceSha256: f.source.source.contentSha256, planId: "ren-plan", batchId: "ren-batch", requirementSetHash: f.plan.requirementSetHash,
+    requirementIds: f.plan.requirementIds, predecessorReceiptRefs: [], segmentIds: [f.source.segmentId], citableEvidenceRefs: [f.source.segmentId], authorizationRef: "ren-source-review", retryBudgetRef: "ren-budget",
+    diagnostics: [{ code: "QUOTATION_ANCHOR_INCOMPLETE", quotationId: f.annotation.id, revisionHash: contentHash(f.annotation), requirementId: f.plan.requirementIds[0]!, expectedAnchor: textAnchorForByteRange(f.sourceId, Buffer.from(text), start, start + full.length) }] };
+  const result = await planUpstreamRepair(f.root, review);
+  expect(result.plan!.allowedWrites).toEqual([{ kind: "quotation", id: f.annotation.id, pointers: ["/anchor"] }]);
+  expect(result.plan!.allowedCreations).toEqual([]);
+  expect(result.plan!.sourceScope.sourceId).toBe(f.sourceId);
+  await expect(planUpstreamRepair(f.root, { ...review, diagnostics: [{ ...review.diagnostics[0], revisionHash: "a".repeat(64) }] })).rejects.toThrow("reviewed revision changed");
+  expect(await f.ledger.history()).toEqual([]);
 });

@@ -9,7 +9,7 @@ import {
   type WorldRule,
   type WorldState,
 } from "./model.js";
-import { policyStoryScopeActive } from "./policy-time.js";
+import { worldRuleStoryScopeTruth } from "./policy-time.js";
 import { evaluatePredicateTruth } from "./state.js";
 
 export const WORLD_RULE_ONTOLOGY_VERSION = "world-rule-v2" as const;
@@ -35,7 +35,7 @@ export type WorldRuleResolution = {
   uncertain: EffectiveWorldRule[];
   inactive: Array<{
     ruleId: string;
-    reason: "contested" | "outside-time" | "not-applicable" | "exception" | "overridden" | "unknown-applicability" | "unknown-exception" | "unknown-override";
+    reason: "contested" | "outside-time" | "not-applicable" | "exception" | "overridden" | "unknown-time" | "unknown-applicability" | "unknown-exception" | "unknown-override";
     exceptionId?: string;
     overridingRuleId?: string;
   }>;
@@ -249,7 +249,8 @@ export function resolveEffectiveWorldRules(
       inactive.push({ ruleId, reason: "contested" });
       continue;
     }
-    if (!policyStoryScopeActive(state.logicalTime.storyTime, rule.validStoryTime, new Set())) {
+    const temporal = worldRuleStoryScopeTruth(state.logicalTime.storyTime, rule.validStoryTime);
+    if (temporal === "false") {
       inactive.push({ ruleId, reason: "outside-time" });
       continue;
     }
@@ -264,9 +265,9 @@ export function resolveEffectiveWorldRules(
       inactive.push({ ruleId, reason: "exception", exceptionId: matchedException.id });
       continue;
     }
-    if (applicability === "unknown" || exceptions.some(exception => conjunction(exception.appliesWhen) === "unknown")) {
+    if (temporal === "unknown" || applicability === "unknown" || exceptions.some(exception => conjunction(exception.appliesWhen) === "unknown")) {
       uncertain.add(rule.id);
-      inactive.push({ ruleId: rule.id, reason: applicability === "unknown" ? "unknown-applicability" : "unknown-exception" });
+      inactive.push({ ruleId: rule.id, reason: temporal === "unknown" ? "unknown-time" : applicability === "unknown" ? "unknown-applicability" : "unknown-exception" });
     }
     candidates.push(rule);
   }

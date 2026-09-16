@@ -751,3 +751,19 @@ P4a 已提交为 `302c044`。
 策略升为 unknown-world-rule-v8，engine 0.12.0；旧 effective-norm-scope-v7 snapshot 可读，旧 history 仍拒绝不兼容执行。validStoryTime 的统一相对锚点/未决时间语义仍沿既有 policy-time，属于 P4 后续工作；本段没有把全部时间边界宣称解决。P3 表达/感知/获知纵向链、P4 其余执行扩展、P5 工作集与 P7 外部验收继续保持原范围。
 
 最终验证：全仓 200 文件、1207 tests 通过（97.93 秒），包含最终 unset 反例；此前 15 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P4b 已提交为 `bb81fb7`。
+
+## P4c：world-rule 有效窗口与未决时间
+
+本段先核对相对时间调用，发现世界规则 schema 已明确拒绝 relative/unknown validStoryTime，事件驱动规则应通过已提交 activate-rule/deactivate-rule 改变。因此没有放宽 schema，也没有保留多余的事件锚点接线。这个验证改变了实现方向：修复真实存在的窗口判断问题——旧 policyStoryScopeActive 用区间重叠或相同无序标签认定有效，也把无法比较的当前时间直接当作规则不适用。
+
+world-rule 现在使用共享 comparableStoryTime 的日历/序数区间，再判断完整 cut 是否包含于有效窗口：完全包含为有效、确定相离为 inactive，部分覆盖、缺少可比较时间、量纲不符和无序标签均为 unknown-time，进入上一段的 uncertain 门禁。未提供有效期仍表示无时间限制；防御性遇到 schema 不允许的 relative/unknown 输入时不会赋予执行权。未改变其他 ontology 的旧 policy-time 行为，不能把本段当作所有时间消费者已统一。
+
+两个原创场景以 Ada 门口的 2000-03-04 和 Neri 港口的 2000-09-12 为明确有效日。初始 cut 只知道年份，不能根据部分重叠断言当天规则有效，也不能断言无效；有证据的 canonical 日期确认提交后，硬规则拒绝开门、规范规则可产生确定违约。未确认日期的 fork 不产生该违约，旧 history 不获得未来事件；禁用 checkpoint 的重放结果一致。补充同日/日包含于年/年部分覆盖日/不同年份/日历与序数不兼容/同名无序标签，以及 schema 拒绝相对规则有效期的反例。
+
+策略升为 bounded-rule-time-v9，engine 0.13.0；旧 unknown-world-rule-v8 snapshot 可读，旧 engine history 不原地重解释。P4 其他时间消费者、失能/渠道/身份等余项，P3 表达/感知/获知完整链、P5 工作集和 P7 外部验收继续保持目标范围。
+
+最初两条锚点夹具被 schema 正确拒绝；据此保留既有架构、重写为合法有界时间场景，17 项定向通过，没有为测试绕过规则类型约束。
+
+最终验证：全仓 201 文件、1210 tests 通过（96.64 秒）；17 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

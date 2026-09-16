@@ -1307,3 +1307,22 @@ Only known false requirements or known true forbidden conditions can generate a
 violation event. Absence of a violation is not a compliance certificate. Engine
 0.12.0 and the policy fingerprint freeze this interpretation; preserve incompatible
 history and use the existing version stop/migration protocol.
+
+### Bounded world-rule time
+
+`bounded-rule-time-v9` uses the same comparable calendar/ordinal interval model as
+world time, but requires the complete current cut to lie inside a rule's validity
+window before declaring it active. Disjoint comparable intervals are inactive;
+partial overlap, missing/unordered cuts, or incompatible time scales remain
+`unknown-time` in the rule resolver and use the existing uncertain-rule gate.
+Equal unnumbered labels do not prove a shared period. Do not guess a date, year,
+ordinal order, or offset to bypass the gate. Establish the cut through the normal
+source-supported compilation/committed-event path and reevaluate; stop unchanged
+retries. A missing rule bound still means unbounded applicability.
+
+World-rule schemas continue to reject `relative` and `unknown` validity bounds.
+Event-driven activation must use committed `activate-rule`/`deactivate-rule`
+operations; do not weaken the schema or attach future canonical anchors as active
+rule truth. The rule-time helper treats malformed/legacy relative or unknown bounds
+as unresolved defensively, never as a new authorization. Engine 0.13.0 freezes the
+change; preserve incompatible histories under the existing version protocol.

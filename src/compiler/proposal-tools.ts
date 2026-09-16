@@ -995,7 +995,7 @@ function safeTextSuffix(text: string, maxChars: number): string {
 export function createCompilerProposalToolset(
   workspaceRoot: string,
   generatedBy: { provider?: string; model?: string } = {},
-  hostOptions: { recoverPreparedFinish?: boolean } = {},
+  hostOptions: { recoverPreparedFinish?: boolean; upstreamRepair?: { planHash: string; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown) => Promise<void> } } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
@@ -1015,6 +1015,8 @@ export function createCompilerProposalToolset(
   let validatedSourceSegments: SourceSegment[] = [];
   let compilerBatchId: string | undefined;
   let activeSourceId: string | undefined;
+  let managedUpstream = false;
+  let batchReady = true;
   let activeBoundaryCalibration: BoundaryCalibrationRequest | undefined;
   let pendingChapterSplitPlan: ChapterSplitPlan | undefined;
   let pendingNovelTitleProposal: SourceTitleProposal | undefined;
@@ -1197,6 +1199,7 @@ export function createCompilerProposalToolset(
     assertSemanticStageAuthority(worker);
     if (!activeSourceId) throw new Error("Source annotations require an active source-scoped compiler batch.");
     assertAnnotationProposalSlot(proposalId);
+    await hostOptions.upstreamRepair?.beforeStage(annotation.annotationType, annotation.id, annotation);
     await annotationStore.stage(activeSourceId, {
       version: 1,
       id: proposalId,
@@ -2445,6 +2448,7 @@ export function createCompilerProposalToolset(
           ontologyVersion: ENTITY_RESOLUTION_ONTOLOGY_VERSION,
         },
       });
+      await hostOptions.upstreamRepair?.beforeStage("entity-resolution", resolution.id, resolution);
       await entityResolutionStore.stage(activeSourceId, {
         version: 1,
         id: input.proposal_id,
@@ -2530,6 +2534,7 @@ export function createCompilerProposalToolset(
           ontologyVersion: EVENT_RESOLUTION_ONTOLOGY_VERSION,
         },
       });
+      await hostOptions.upstreamRepair?.beforeStage("event-resolution", resolution.id, resolution);
       await eventResolutionStore.stage(activeSourceId, {
         version: 1,
         id: input.proposal_id,
@@ -3243,6 +3248,10 @@ export function createCompilerProposalToolset(
       replaceBoundaryTool,
       finishTool,
     ].map(trackProposal).map((tool) => ({ ...tool, async execute(id, input, signal, onUpdate, context) {
+      if (!batchReady) throw finishHostError("compiler batch initialization did not complete; stop tool calls and preserve the original scope for host review");
+      if (managedUpstream && !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution"].includes(tool.name)) {
+        throw finishHostError("managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
+      }
       if (tool.name !== "finish_compiler_batch" && /^(?:propose_|account_source_units$|withdraw_|configure_|defer_|replace_)/u.test(tool.name)
         && await finishReceipts()?.read()) throw finishHostError("a prepared finish freezes this batch's mutation set");
       try { return await tool.execute(id, input, signal, onUpdate, context); }
@@ -3252,6 +3261,7 @@ export function createCompilerProposalToolset(
       }
     } })),
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
+      batchReady = false;
       priorStageCoverage = undefined;
       roleRosterTools.reset();
       successfulProposalIds.clear();
@@ -3267,6 +3277,15 @@ export function createCompilerProposalToolset(
       validatedSourceSegments = [];
       compilerBatchId = nextCompilerBatchId;
       activeSourceId = sourceId;
+      managedUpstream = false;
+      if (activeSourceId && compilerBatchId) {
+        const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
+        const managed = (await new UpstreamRepairLedger(workspaceRoot, activeSourceId).inspect()).plans.find(item => item.plan.batchId === compilerBatchId);
+        if (managed) {
+          if (!hostOptions.upstreamRepair || hostOptions.upstreamRepair.planHash !== managed.plan.planHash || !["authorized", "staging"].includes(managed.state)) throw finishHostError("managed upstream batch requires its exact active host authorization; preserve its ledger and stop ordinary batch recovery");
+          managedUpstream = true;
+        } else if (hostOptions.upstreamRepair) throw finishHostError("upstream authorization has no retained source-local plan");
+      } else if (hostOptions.upstreamRepair) throw finishHostError("upstream staging requires its exact source and batch");
       const resumingFinish = await finishReceipts()?.read();
       finishFrozen = Boolean(resumingFinish);
       if (resumingFinish) await finishReceipts()!.verify(resumingFinish);
@@ -3330,14 +3349,14 @@ export function createCompilerProposalToolset(
             throw new Error(`Boundary calibration ${compilerBatchId} requires exactly: ${calibrationSegmentIds.join(", ")}.`);
           }
         }
-        if (!resumingFinish && !activeBoundaryCalibration && compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
+        if (!managedUpstream && !resumingFinish && !activeBoundaryCalibration && compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
           // A retry must not inherit a request made by an attempt that never
           // reached the finish/checkpoint handshake. The model decides again
           // from the frozen evidence slice in this fresh turn.
           await boundaryCalibrations.removeRequestedByBatch(activeSourceId, compilerBatchId);
         }
       }
-      if (!compilerBatchId) return;
+      if (!compilerBatchId) { batchReady = true; return; }
       const migratedSceneBatchId = legacyExecutableSceneBatchId(compilerBatchId, activeSourceId);
       for (const summary of await service.store.list("pending")) {
         const envelope = await service.store.readEnvelope("pending", summary.id);
@@ -3382,6 +3401,7 @@ export function createCompilerProposalToolset(
           successfulAccountingProposalIds.add(summary.id);
         }
       }
+      batchReady = true;
     },
   };
 }

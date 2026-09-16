@@ -12,7 +12,9 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("planned"), plan: upstreamRepairPlanSchema, predecessorPlanHash: hash.nullable() }).strict(),
   z.object({ kind: z.literal("authorized"), planHash: hash }).strict(),
-  z.object({ kind: z.literal("attempt-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, inputHash: hash }).strict(),
+  z.object({ kind: z.literal("attempt-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, inputHash: hash, toolInput: z.unknown().optional() }).strict(),
+  z.object({ kind: z.literal("attempt-staged"), planHash: hash, attemptRef: hash, proposalHash: hash }).strict(),
+  z.object({ kind: z.literal("attempt-validated"), planHash: hash, attemptRef: hash, payloadHash: hash }).strict(),
   z.object({ kind: z.literal("attempt-failed"), planHash: hash, attemptRef: hash, diagnostic: z.string().trim().min(1) }).strict(),
   z.object({ kind: z.literal("needs-host-review"), planHash: hash, reason: z.string().trim().min(1) }).strict(),
 ]);
@@ -22,7 +24,7 @@ type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
 type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "needs-host-review" };
 function project(records: Record[]) {
   const plans = new Map<string, PlanState>();
-  const attempts = new Map<string, { started: Started; failed: boolean }>();
+  const attempts = new Map<string, { started: Started; failed: boolean; staged: boolean; validatedHash?: string }>();
   for (const [index, record] of records.entries()) {
     const { hash: ownHash, ...identity } = record;
     if (contentHash(identity) !== ownHash || record.sequence !== index || record.predecessorHash !== (records[index - 1]?.hash ?? null)
@@ -44,11 +46,20 @@ function project(records: Record[]) {
       if (current.state !== "planned") throw upstreamRepairHostError("Repair authorization was consumed or stopped");
       current.state = "authorized";
     } else if (event.kind === "attempt-started") {
+      if (event.toolInput !== undefined && contentHash(event.toolInput) !== event.inputHash) throw upstreamRepairHostError("Reserved tool input hash mismatch");
       assertStart(current, event, plans, attempts);
-      attempts.set(record.hash, { started: event, failed: false }); current.state = "staging";
+      attempts.set(record.hash, { started: event, failed: false, staged: false }); current.state = "staging";
+    } else if (event.kind === "attempt-validated") {
+      const attempt = attempts.get(event.attemptRef);
+      if (!attempt || attempt.failed || attempt.staged || attempt.validatedHash || attempt.started.planHash !== event.planHash || current.state !== "staging") throw upstreamRepairHostError("Validated payload does not match the reserved attempt");
+      attempt.validatedHash = event.payloadHash;
+    } else if (event.kind === "attempt-staged") {
+      const attempt = attempts.get(event.attemptRef);
+      if (!attempt || attempt.failed || attempt.staged || !attempt.validatedHash || attempt.started.planHash !== event.planHash || current.state !== "staging") throw upstreamRepairHostError("Staged result does not match the reserved attempt");
+      attempt.staged = true;
     } else if (event.kind === "attempt-failed") {
       const attempt = attempts.get(event.attemptRef);
-      if (!attempt || attempt.failed || attempt.started.planHash !== event.planHash || !["staging", "needs-host-review"].includes(current.state)) throw upstreamRepairHostError("Failure does not match an active repair attempt");
+      if (!attempt || attempt.failed || attempt.staged || attempt.started.planHash !== event.planHash || !["staging", "needs-host-review"].includes(current.state)) throw upstreamRepairHostError("Failure does not match an active repair attempt");
       attempt.failed = true;
       if (current.plan.requirementIds.some(id => [...attempts.values()].filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(id)).length >= 2)) current.state = "needs-host-review";
     } else {
@@ -58,16 +69,17 @@ function project(records: Record[]) {
   }
   return { plans, attempts };
 }
-function assertStart(current: PlanState, input: Started, plans: Map<string, PlanState>, attempts: Map<string, { started: Started; failed: boolean }>) {
+function assertStart(current: PlanState, input: Started, plans: Map<string, PlanState>, attempts: Map<string, { started: Started; failed: boolean; staged: boolean }>) {
   const plan = current.plan;
   if (![...plan.allowedWrites, ...plan.allowedCreations].some(ref => ref.kind === input.artifactKind && ref.id === input.artifactId)) throw upstreamRepairHostError("Attempt escapes the exact allocated write slot");
   const related = [...attempts.values()].filter(item => plans.get(item.started.planHash)!.plan.requirementIds.some(id => plan.requirementIds.includes(id)));
-  if (related.some(item => !item.failed)) throw upstreamRepairHostError("A reserved attempt is unresolved; recover that original attempt without opening a new model call");
+  if (related.some(item => !item.failed && !item.staged)) throw upstreamRepairHostError("A reserved attempt is unresolved; recover that original attempt without opening a new model call");
   for (const requirementId of plan.requirementIds) {
     if (related.filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(requirementId)).length >= 2) throw upstreamRepairHostError(`Persistent failure budget exhausted for ${requirementId}`);
   }
   if (!["authorized", "staging"].includes(current.state)) throw upstreamRepairHostError("Repair is not authorized or has stopped");
   const previous = related.findLast(item => item.started.artifactKind === input.artifactKind && item.started.artifactId === input.artifactId);
+  if (previous?.staged) throw upstreamRepairHostError("This logical repair already has a successful draft; preserve it and require a validated host successor instead of another attempt");
   if (previous && (previous.started.proposalId !== input.proposalId || previous.started.inputHash === input.inputHash)) throw upstreamRepairHostError("Failed repair requires the same proposal identity and one materially corrected input");
 }
 
@@ -148,6 +160,26 @@ export class UpstreamRepairLedger {
       return;
     }
     await this.append({ kind: "attempt-failed", planHash, attemptRef, diagnostic });
+  }
+  /** Freeze the host-validated normalized payload before any proposal write. */
+  async recordValidated(planHash: string, attemptRef: string, payloadHash: string): Promise<void> {
+    const records = await this.history();
+    const existing = records.find(record => record.payload.kind === "attempt-validated" && record.payload.attemptRef === attemptRef);
+    if (existing?.payload.kind === "attempt-validated") {
+      if (existing.payload.planHash !== planHash || existing.payload.payloadHash !== payloadHash) throw upstreamRepairHostError("Original validated payload was rewritten");
+      return;
+    }
+    await this.append({ kind: "attempt-validated", planHash, attemptRef, payloadHash });
+  }
+  /** Called only after the host has verified the exact pending envelope and mutation. */
+  async recordStaged(planHash: string, attemptRef: string, proposalHash: string): Promise<void> {
+    const records = await this.history();
+    const existing = records.find(record => record.payload.kind === "attempt-staged" && record.payload.attemptRef === attemptRef);
+    if (existing?.payload.kind === "attempt-staged") {
+      if (existing.payload.planHash !== planHash || existing.payload.proposalHash !== proposalHash) throw upstreamRepairHostError("Original staged result was rewritten");
+      return;
+    }
+    await this.append({ kind: "attempt-staged", planHash, attemptRef, proposalHash });
   }
   async stop(planHash: string, reason: string): Promise<void> {
     const state = project(await this.history()).plans.get(planHash);

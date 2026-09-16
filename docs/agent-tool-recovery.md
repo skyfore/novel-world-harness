@@ -590,3 +590,32 @@ This stage does not expose model execution. Successful staging, typed proposal
 integration, finish authorization/recovery and candidate snapshot preservation
 must be implemented before these host records can authorize an executing model
 session. Existing tool recovery and evidence checks must remain in that path.
+
+### Host-guarded upstream staging and draft recovery
+
+`stageUpstreamRepair` reserves the exact original tool input before preparation,
+then invokes an existing narrow annotation/resolution tool through
+`withNwhToolRecovery`. The common staging boundary rechecks actual dependencies,
+source anchors, citable ranges, host provenance and authorized field differences.
+It appends `attempt-validated` with the normalized payload hash before writing
+the pending proposal. `attempt-staged` binds the exact resulting envelope hash;
+it grants neither world truth nor requirement satisfaction.
+
+Argument/selector failures retain their original bounded correction SOP and
+charge the persistent failure budget. Unauthorized mutations stop the plan.
+After a validated intent exists, a write may already have happened: do not count
+an uncertain storage failure as a model-correction opportunity. Preserve the
+reserved attempt and inspect `requirements inspect-upstream`; copy the exact
+`attempts[].attemptRef` for `recoverUpstreamRepairStage`. Host recovery verifies
+the original pending payload, source anchors, dependencies and provenance without
+executing the tool. A missing or changed draft requires host review, never model
+replay. Once successful, the same logical repair cannot be resubmitted with a new
+proposal ID to replace its draft.
+
+Managed upstream batch IDs reject ordinary toolset initialization without their
+exact active authorization. Failed initialization leaves that toolset unusable
+until the host establishes a valid batch; catching the error cannot permit later
+tool execution. Even the host staging path currently rejects ordinary finish,
+world proposals, retrieval and unrelated metadata tools. There is no autonomous
+repair-session entrypoint yet. Authorization-aware finish, staged dependency
+consumption and snapshot recovery remain prerequisites for the full executor.

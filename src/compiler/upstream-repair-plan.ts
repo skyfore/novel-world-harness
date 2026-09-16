@@ -93,7 +93,7 @@ function payloadFor(kind: UpstreamRepairKind, raw: unknown) {
   return parsed;
 }
 
-function referencedKeys(kind: UpstreamRepairKind, raw: unknown): string[] {
+export function upstreamRepairReferencedKeys(kind: UpstreamRepairKind, raw: unknown): string[] {
   const refs: string[] = [];
   const add = (type: string, ids: readonly (string | undefined)[]) => { for (const id of ids) if (id) refs.push(`${type}:${id}`); };
   if (kind === "entity-resolution") {
@@ -131,7 +131,7 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
   if (!input.citedSegmentIds.length || input.citedSegmentIds.some(id => !plan.citableEvidenceRefs.includes(id))) stop("Evidence is not citable under this plan");
   const next = payloadFor(input.kind, input.payload);
   if (next.id !== input.id || next.sourceId !== plan.sourceScope.sourceId) stop("Payload identity or source escapes plan");
-  for (const reference of referencedKeys(input.kind, next)) {
+  for (const reference of upstreamRepairReferencedKeys(input.kind, next)) {
     if (plan.allowedCreations.some(ref => key(ref) === reference)) {
       if (!plan.dependencyEdges.some(edge => edge.from === key(input) && edge.to === reference)) stop(`Undeclared creation dependency: ${reference}`);
       continue;

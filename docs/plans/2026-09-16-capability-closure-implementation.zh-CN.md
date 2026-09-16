@@ -263,3 +263,21 @@ P2a 已提交为 `70d78b6`。
 测试使用真实原文、来源定义与已提交 quotation，验证注册/授权、预留后重启、一次纠正、错误引用、身份轮换、两次失败停止、关联新计划不重置预算、真实依赖变化、损坏链和缺 head。当前仍无模型执行入口；成功 staging、窄工具接线、finish 授权、候选快照与恢复链尚未落地，不宣称 P2 完成。P1 完整验收映射及 P3–P7 保持待完成；未调用真实 provider 或人工体验评价。
 
 验证：全量 188 文件、1105 tests 通过（79.41 秒）；服务端、Web、E2E TypeScript 检查、diff whitespace 检查和 inspect-upstream CLI 帮助入口通过。
+
+P2b 已提交为 `c6e3c94`。
+
+## P2c：真实窄提案 staging 与原草案恢复
+
+新增宿主 stageUpstreamRepair，先预留原始工具输入及 hash，再调用既有 annotation/resolution 窄工具。参数准备也在预留之后，保留原 CompilerProposalObligations 和 withNwhToolRecovery 处理；参数错误计入失败预算，允许原 proposal ID 的一次实质纠正。
+
+在 annotation、entity-resolution、event-resolution 的共同落盘边界追加宿主 gate，读取实际当前依赖，校验规范化 payload 的差异、原文字节 anchor、可引用 segment 与宿主 provenance。先追加 attempt-validated payload hash，再写 pending 草案，最后用 attempt-staged 冻结 envelope hash。未授权字段在落盘前拒绝，不把待验证草案变成当前 annotation/resolution 或世界真相。
+
+若草案已写而成功记账中断，恢复依据预写入 intent 校验原 pending payload 和完整 envelope provenance，不重跑工具。缺失或篡改草案停止宿主复核；成功草案不可通过新 proposal ID 被覆盖。不确定是否已写入的宿主故障不会被记成可自动重试的模型错误。
+
+受管 batch ID 只能以原活动授权进入 staging，普通 begin/finish 无法绕过。初始化失败后继续调用工具也会被拒绝；即使带 staging 授权，普通 finish、世界提案、检索和无关 metadata 仍未开放。尚未新增自主模型会话入口，授权 finish 接线完成前只允许宿主受限 staging。
+
+新增真实工具回归覆盖截短 quotation 扩展、已冻结 mention/entity 的身份决议、参数纠正、越权字段、pending 草案成功记账中断与幂等恢复、篡改 intent 拒绝、普通及受管 finish 绕过拒绝；原 current annotation/resolution 在这些测试中保持未提交。针对性测试共 24 项通过。
+
+P2 仍待实现同计划中新建依赖的有序消费、授权 finish 及恢复、候选快照中的计划/预算保留、converge 后基线复核和逐项评估，不能据当前 staging 测试宣称已完成缺 mention/quotation 的完整修复链。P1 整体验收映射及 P3–P7 仍待完成；没有调用真实 provider 或人工体验评价。
+
+验证：全量 188 文件、1110 tests 通过（79.83 秒）；随后加强 envelope provenance 及受管工具绕过检查，并禁止受管初始化清除原边界请求，24 项针对性回归通过。最终服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。

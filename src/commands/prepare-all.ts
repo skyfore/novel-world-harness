@@ -1,4 +1,5 @@
 import { assertReconciliationDeferralsReviewed } from "../compiler/reconciliation-review-ledger.js";
+import { settleSourceRequirements } from "../compiler/requirement-service.js";
 import fs from "node:fs/promises";
 import { contentHash } from "../world/canonical.js";
 import { worldStorageRoot } from "../world/paths.js";
@@ -514,6 +515,8 @@ export async function prepareAllCommand(
   )) throw preparationFailure(inspection);
 
   await assertReconciliationDeferralsReviewed(root, sourceId);
+  const requirements = await settleSourceRequirements(root, sourceId);
+  if (requirements.issues.length) throw new Error(`Registered capability requirements block publication: ${requirements.issues.join("; ")}. Inspect nwh requirements inspect --source ${sourceId}; preserve unresolved requirements and stop for host source review. Do not rotate namespaces or retry unchanged.`);
 
   if (["create-branch", "ready"].includes(inspection.stage) && !cacheVerified) {
     report("Reviewing the independent major-character roster before candidate certification.");
@@ -674,6 +677,8 @@ async function convergeForPreparation(
     },
   });
   printConvergence(result, report);
+  const requirements = await settleSourceRequirements(root, sourceId);
+  for (const issue of requirements.issues) report(issue);
   const quarantined = await quarantineUncommittableProposals(root, result);
   for (const item of quarantined) {
     report(`Rejected uncommittable ${item.kind} proposal ${item.id}; preserved in rejected history.`);

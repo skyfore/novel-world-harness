@@ -1,4 +1,8 @@
 import fs from "node:fs/promises";
+import { activeRequirementSets, evaluateRequirementSet, requirementResultSchema, requirementResultIssues } from "./requirement-ledger.js";
+import { frozenSceneCatalog } from "./requirement-service.js";
+import { SourceMaterialStore } from "../storage/source-material-store.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
 import path from "node:path";
 import crypto from "node:crypto";
 import { z } from "zod";
@@ -24,6 +28,7 @@ export const novelClosureAssessmentSchema = z.object({
   entryReady: z.boolean(), fullNovelReady: z.boolean(),
   quality: novelPlayQualitySchema.nullable(),
   supportAssessments: z.array(supportAssessmentSchema), sceneContracts: z.array(sceneExecutionContractSchema),
+  requirementResults: z.array(requirementResultSchema).optional(),
   issues: z.array(validationIssueSchema),
 }).strict();
 export type NovelClosureAssessment = z.infer<typeof novelClosureAssessmentSchema>;
@@ -39,6 +44,21 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   const subjectSnapshotHash = preparedSubjectHash(bundle), closure = buildPreparedClosure(bundle);
   const issues = [...closure.issues, ...validateFrozenAccounting(bundle)];
   const snapshot = bundle.compilerSnapshot;
+  const requirementSets = activeRequirementSets(snapshot.requirementDefinitions ?? []);
+  const requirementResults: z.infer<typeof requirementResultSchema>[] = [];
+  if (requirementSets.length) {
+    try {
+      const source = await WorkspaceStore.openReadOnly(root).getSource(bundle.source.id);
+      if (!source || source.contentSha256 !== bundle.source.contentSha256) throw new Error("Frozen requirement source is not registered at the same revision");
+      const bytes = await new SourceMaterialStore().read(source);
+      if (!bytes) throw new Error("Immutable source bytes unavailable for requirement evaluation");
+      for (const set of requirementSets) {
+        if (set.spec.sourceId !== source.id || set.spec.sourceSha256 !== source.contentSha256) throw new Error("Frozen requirement source scope mismatch");
+        requirementResults.push(evaluateRequirementSet(set, bytes, frozenSceneCatalog(bundle)));
+      }
+    } catch (error) { issues.push({ code: "REQUIREMENT_EVALUATION_BLOCKED", message: String(error) }); }
+    issues.push(...requirementResultIssues(requirementSets, requirementResults, frozenSceneCatalog(bundle)).map(message => ({ code: "REQUIREMENT_NOT_CERTIFIED", message })));
+  }
   let roster: NovelClosureAssessment["roster"] = null, playability: NovelClosureAssessment["playability"] = null;
   try {
     const fresh = buildRoleRoster({ sourceId: bundle.source.id, sourceSha256: bundle.source.contentSha256, unitIds: snapshot.structure.baseUnitIds,
@@ -60,6 +80,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   // Entry probes establish deterministic operability, never semantic recall or 50-turn Pi behavior.
   const assessment = novelClosureAssessmentSchema.parse({ version: 1, sourceId: bundle.source.id, sourceSha256: bundle.source.contentSha256, subjectSnapshotHash,
     engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION, closure, roster, playability, entryReady, fullNovelReady: entryReady && qualityIssues.length === 0, quality, supportAssessments: support.assessments, sceneContracts: scenes.contracts,
+    ...(requirementSets.length ? { requirementResults } : {}),
     issues: [...new Map(issues.map((issue) => [`${issue.code}/${issue.path ?? ""}/${issue.message}`, issue])).values()] });
   await new NovelClosureStore(root).write(assessment);
   return assessment;
@@ -67,6 +88,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
 
 export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): string[] {
   const issues: string[] = [];
+  issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));
   if (preparedSubjectHash(bundle) !== assessment.subjectSnapshotHash) issues.push("ENTRY_CUT_STALE: prepared inputs changed after entry evaluation");
   if (assessment.sourceId !== bundle.source.id || assessment.sourceSha256 !== bundle.source.contentSha256) issues.push("WORLD_SOURCE_MISMATCH: certificate belongs to another source");
   if (assessment.engineVersion !== WORLD_ENGINE_VERSION || assessment.schemaVersion !== WORLD_SCHEMA_VERSION) issues.push("WORLD_VERSION_UNSUPPORTED: evaluator fingerprint changed");

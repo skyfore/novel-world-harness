@@ -1,4 +1,7 @@
 import fs from "node:fs/promises";
+import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { registerSourceRequirements, settleSourceRequirements } from "../compiler/requirement-service.js";
+import { RequirementLedger } from "../compiler/requirement-ledger.js";
 import { sceneCapabilitySpecSchema, evaluateSceneCapabilities, type SceneReviewCatalog } from "../eval/scene-capabilities.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
@@ -36,8 +39,23 @@ export async function reviewScenes(root: string, specInput: unknown) {
   return { ...evaluateSceneCapabilities(spec, bytes, catalog), catalogMode: "pending-overlay-on-canonical", pendingRevisions };
 }
 
-export async function reviewScenesCommand(root: string, specFile: string) {
-  const result = await reviewScenes(root, JSON.parse(await fs.readFile(specFile, "utf8")));
+export async function reviewScenesCommand(root: string, specFile: string, registration?: { id: string; predecessorRevision?: string }) {
+  const spec = sceneCapabilitySpecSchema.parse(JSON.parse(await fs.readFile(specFile, "utf8")));
+  if (registration) {
+    const result = await withWorkspaceOperationLock(root, "compiler", async () => {
+      await registerSourceRequirements(root, { ...registration, sourceId: spec.sourceId, spec, scopeDecisionRef: spec.review.auditRef });
+      return settleSourceRequirements(root, spec.sourceId);
+    });
+    console.log(JSON.stringify(result, null, 2));
+    if (result.issues.length) process.exitCode = 2;
+    return;
+  }
+  const result = await reviewScenes(root, spec);
   console.log(JSON.stringify(result, null, 2));
   if (!result.verified) process.exitCode = 2;
+}
+
+export async function inspectRequirementsCommand(root: string, sourceId: string) {
+  const ledger = new RequirementLedger(root, sourceId);
+  console.log(JSON.stringify({ definitions: await ledger.definitions(), history: await ledger.history() }, null, 2));
 }

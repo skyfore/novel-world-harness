@@ -10,7 +10,7 @@ import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
 import { reviewAccountingObligation } from "./compiler/accounting-review.js";
 import { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
-import { reviewScenesCommand } from "./commands/review-scenes.js";
+import { reviewScenesCommand, inspectRequirementsCommand } from "./commands/review-scenes.js";
 import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
 import { resumeCommand } from "./commands/resume.js";
 import { playCommand } from "./commands/play.js";
@@ -79,8 +79,16 @@ function rootFor(options: { root?: string }): string {
 
 const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and review exact accounting coverage on the host");
 program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")
+  .option("--register <set-id>", "register persistent mandatory requirements using the canonical catalog under the compiler lock")
+  .option("--predecessor <hash>", "exact definitions[].revisionHash from requirements inspect when revising a registered set")
   .description("check pending/canonical scene capabilities without writing world truth; exits 2 for unresolved checks")
-  .action(async (options) => reviewScenesCommand(rootFor({}), options.spec));
+  .action(async (options) => {
+    if (options.predecessor && !options.register) throw new Error("--predecessor requires --register; do not retry unchanged.");
+    await reviewScenesCommand(rootFor({}), options.spec, options.register ? { id: options.register, predecessorRevision: options.predecessor } : undefined);
+  });
+program.command("requirements").description("Inspect persistent capability definitions and evaluation history")
+  .command("inspect").requiredOption("--source <id>", "registered source ID")
+  .action(async options => inspectRequirementsCommand(rootFor({}), options.source));
 compilerObligations.command("inspect").requiredOption("--source <id>", "registered source ID").requiredOption("--batch <id>", "exact compiler batch ID")
   .action((options) => {
     const journal = new CompilerProposalObligations(rootFor({}), options.source, options.batch);

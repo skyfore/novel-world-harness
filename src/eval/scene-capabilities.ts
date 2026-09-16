@@ -55,6 +55,15 @@ export function evaluateSceneCapabilities(specInput: unknown, sourceBytes: Uint8
       throw new Error(`SCENE_REVIEW_EVIDENCE_INVALID: ${test.id} has an invalid exact source anchor.`);
     }
   }
+  return evaluateReviewedSceneCapabilities(spec, catalog);
+}
+
+/** Deterministic recheck of a previously source-verified frozen specification.
+ * Registration/certification must separately verify immutable bytes and anchors;
+ * this function does not grant a new specification evidence authority.
+ */
+export function evaluateReviewedSceneCapabilities(specInput: unknown, catalog: SceneReviewCatalog) {
+  const spec = sceneCapabilitySpecSchema.parse(specInput);
   const registry = new StateSchemaRegistry(DEFAULT_STATE_FIELDS);
   const makeState = (seed: z.infer<typeof seedSchema>) => {
     const state = emptyWorldState(contentHash(seed)); state.logicalTime.elapsedDays = seed.elapsedDays;

@@ -1,0 +1,40 @@
+# 能力闭环分段实施记录
+
+对应 [Review 落地设计](2026-09-16-review-to-capability-closure.zh-CN.md)。本文件区分每个已提交增量与整个 P1–P7 目标；未完成项不能由局部测试通过推导为完成。
+
+## 提交与进度
+
+| 阶段 | 交付 | 状态 |
+| --- | --- | --- |
+| 设计基线 | `7078f4c`，方案与前序核验记录 | 已提交 |
+| P1a 独立场景要求的持久约束 | requirement ledger、注册/查询命令、canonical 重评、冻结快照/恢复/closure/certification 接线 | 实现及全仓验证完成；本记录随该段代码提交 |
+| P1b 逐角色能力与批次尝试 | 独立要求发现、角色 ontology/development/driver 拆分、finish attempt 版本绑定及恢复 | 未完成 |
+| P2–P7 | 受限修复、语义获知、本体、文学/工作集、自主推进、完整体验验收 | 未完成 |
+
+## P1a 的实际行为
+
+`review-scenes --spec <file>` 保持只读、允许 pending overlay 的诊断行为。新增宿主入口：
+
+```sh
+nwh review-scenes --spec independent-scenes.json --register opening-scenes
+nwh requirements inspect --source SOURCE_ID
+nwh review-scenes --spec revised-scenes.json --register opening-scenes --predecessor EXACT_REVISION_HASH
+```
+
+注册在 compiler lock 内执行，先核对注册源的 hash 和每个 exact anchor，再持久化要求。注册入口只接收独立场景规格，不接收模型自报 satisfied。注册时可不满足要求：这种情况保留要求及 blocked/unknown/unmapped 结果，CLI 退出 2。
+
+要求保存于 `worldStorageRoot(root)/compiler/requirements/<sourceId>/`。每个 JSON 记录带 sequence、前驱 hash 和内容 hash，head 原子发布完整链；缓存不是结算依据。原定义和评估记录不删除。同 ID 修改必须显式提供前驱 revision 与审阅依据；换 repair namespace 不会创建新的要求身份。删除 head、缺失已发布记录、坏 hash 均失败并保留原状态，需要宿主检查，不能重置账本后续跑。首次发布在 record 写完而 head 未写完时中断也进入该宿主检查路径；本段没有提供自动重建缺失 head 的权限。
+
+`prepare-all` 在收敛后按 canonical catalog 重评，在发布前要求所有已注册 mandatory requirements 满足。没有 pending 提案参与结算。有效 catalog 或定义版本变化时，旧结果不能复用。只成功的 state-effect 不会清除同场景缺失的 agency/mechanism。
+
+快照保存完整定义修订链，评估作为派生 readiness 结果保存，避免 subject hash 自引用。认证重新读取不可变原文、运行独立场景探针；后续激活/恢复/Play 的同步检查还会重新执行确定性探针，拒绝伪造的 satisfied、遗漏子要求和旧 catalog 结果。当前其他 roster、source accounting、semantic support、quality 门仍保留。
+
+恢复时先验证要求历史，再进行任何世界材料化。新工作区可恢复完整定义链；旧快照不得清掉已有工作区的新增或修订要求，需使用隔离工作区。冻结的旧 bundle 本身不被新注册改变。
+
+这是**已注册独立场景要求**的完整消费链，还不是所有核心角色的要求发现器。未注册独立规格的旧 snapshot 保持原认证路径；下一段 P1b 必须补齐要求分母、逐角色义务与 finish 尝试绑定，不能将这个兼容分支解释为完整 P1。
+
+## 验证
+
+针对性测试 `test/requirement-ledger.test.ts` 的 8 项通过，覆盖部分成功、重启/幂等、前驱修订、真实坏 finish 不改 canonical、pending/finish 不结算、converge 后结算、缺 head/记录及篡改、冻结快照与恢复拒绝。测试使用原创短文本，未调用真实 provider 或修改用户小说运行数据。
+
+`pnpm test --maxWorkers=2`：180 文件、1038 tests 全部通过（70.68 秒）。`pnpm check`：服务端、Web 和 E2E TypeScript 检查全部通过。`git diff --check` 通过。P7 的真实模型和双人体验评价未执行。

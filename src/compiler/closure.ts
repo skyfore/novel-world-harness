@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { activeRequirementSets } from "./requirement-ledger.js";
 import { contentHash } from "../world/canonical.js";
 import { predicateSchema, stateOperationSchema, validationIssueSchema } from "../world/model.js";
 import { predicateReferences, stateOperationReferences } from "../world/state-references.js";
@@ -7,7 +8,7 @@ import { annotationAnchors } from "./annotations.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { applyEventExecutions } from "../world/event-execution.js";
 
-export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "action", "event-execution", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry"]);
+export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "action", "event-execution", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry", "requirement-set"]);
 export type ClosureKind = z.infer<typeof closureKindSchema>;
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const dependencyUseSchema = z.object({ pointer: z.string(), purpose: z.enum(["identity", "evidence-support", "temporal-order", "causal-precondition", "state-effect", "knowledge-acquisition", "entry-seed", "capability", "certificate"]) }).strict();
@@ -49,6 +50,10 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
   for (const model of canonical.models) add("model", model.actorId, model);
   add("initial", bundle.source.id, canonical.initialWorld);
   const snapshot = bundle.compilerSnapshot;
+  for (const set of activeRequirementSets(snapshot.requirementDefinitions ?? [])) {
+    add("requirement-set", set.id, set);
+    if (set.spec.sourceId !== bundle.source.id || set.spec.sourceSha256 !== bundle.source.contentSha256) issues.push({ code: "REQUIREMENT_SOURCE_MISMATCH", message: `Requirement set ${set.id} belongs to another source revision`, path: `requirement-set/${set.id}` });
+  }
   if (snapshot.roleRoster) add("roster", bundle.source.id, snapshot.roleRoster);
   for (const unit of snapshot.structure.units) add("unit", unit.id, unit);
   const baseUnits = snapshot.structure.units.filter((unit) => snapshot.structure.baseUnitIds?.includes(unit.id));

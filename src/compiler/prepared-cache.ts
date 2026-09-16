@@ -1,4 +1,5 @@
 import { currentRuntimeHooks } from "../runtime/hooks.js";
+import { RequirementLedger, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
 import { eventExecutionSchema } from "../world/event-execution.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
 import crypto from "node:crypto";
@@ -131,6 +132,7 @@ const preparedCanonicalSchema = z.object({
 }).strict();
 
 const preparedCompilerSnapshotSchema = z.object({
+  requirementDefinitions: requirementDefinitionHistorySchema.optional(),
   evidenceBindings: z.array(evidenceAssertionBindingSnapshotSchema),
   structure: sourceStructureManifestSchema,
   annotations: z.array(sourceAnnotationSchema),
@@ -850,6 +852,7 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(source.id),
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
+    const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).definitionHistory();
     const bundle = preparedNovelBundleSchema.parse({
       version: 4,
       source: {
@@ -871,6 +874,7 @@ export class PreparedNovelCache {
         .sort(),
       canonical: preparedCanonical,
       compilerSnapshot: {
+        ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
         evidenceBindings: evidenceBindings.sort((left, right) =>
           left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
         structure,
@@ -1048,6 +1052,7 @@ export class PreparedNovelCache {
     eventResolutions: Awaited<ReturnType<EventResolutionStore["list"]>>;
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
     roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
+    requirementDefinitions?: RequirementSet[];
   }> {
     const sourceId = bundle.source.id;
     const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
@@ -1069,7 +1074,9 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(sourceId),
       new SourceAccountingStore(this.workspaceRoot).read(sourceId),
     ]);
+    const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).definitionHistory();
     return {
+      ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
       evidenceBindings: evidenceBindings.sort((left, right) =>
         left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
       structure,
@@ -1083,6 +1090,7 @@ export class PreparedNovelCache {
 
   private async materialize(bundle: PreparedNovelBundle, exact: boolean): Promise<void> {
     const sourceId = bundle.source.id;
+    await new RequirementLedger(this.workspaceRoot, sourceId).assertRestorable(bundle.compilerSnapshot.requirementDefinitions ?? []);
     const workspace = await WorkspaceStore.create(this.workspaceRoot);
     await assertPreparedCompilerSnapshotEvidence(this.workspaceRoot, bundle);
     await assertPreparedInitialWorldEvidence(this.workspaceRoot, bundle);
@@ -1149,6 +1157,7 @@ export class PreparedNovelCache {
     for (const model of bundle.canonical.models) await actors.putModel(model);
     for (const possibility of bundle.canonical.possibilities) await possibilities.put(possibility);
     const snapshot = bundle.compilerSnapshot;
+    await new RequirementLedger(this.workspaceRoot, sourceId).restore(snapshot.requirementDefinitions ?? []);
     await new SourceStructureStore(this.workspaceRoot).write(snapshot.structure);
     await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.annotations);
     await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.entityResolutions);

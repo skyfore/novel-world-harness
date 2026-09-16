@@ -131,6 +131,23 @@ check. It preserves rejected history and still requires the normal finish gate.
 
 ## Development pattern
 
+### Persistent independent scene requirements (host CLI)
+
+`nwh review-scenes --spec FILE --register SET_ID` registers source-verified
+mandatory checks under the compiler lock and evaluates canonical artifacts only.
+The default command without `--register` remains read-only and its pending overlay
+cannot settle these obligations. For a definition predecessor miss, run
+`nwh requirements inspect --source SOURCE_ID`, copy the matching
+`definitions[].revisionHash` into `--predecessor`, and retry at most once with the
+reviewed corrected specification. Never guess hashes or rotate set IDs to escape
+an existing requirement. Changed scope needs its own source-review audit reference.
+
+Corrupt/missing published journal records, a missing head, source mismatch or a
+restore that would discard current requirements require host inspection. Stop;
+do not retry unchanged, delete the ledger or alter canonical data to bypass the
+failure. A completed compiler receipt and a model `proposed` report never settle
+an independent requirement. Reevaluate the actual active artifact revisions.
+
 Domain and storage code may throw precise errors. The model-facing registration boundary must add recovery guidance; do not convert failures into successful tool content because that breaks failure accounting.
 
 When adding a new tool or a future `SKILL.md` workflow:

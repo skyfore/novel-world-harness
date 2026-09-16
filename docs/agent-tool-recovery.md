@@ -991,3 +991,36 @@ changes; a path proves dependency, not that this repair will satisfy a capabilit
 Do not assign them by matching names or shared text, and do not treat a structural
 repair as a new requirement evaluation. An unfreezable candidate requires resolving
 its original pending host work; preserve diagnostics and do not replay models.
+
+### Planning from current scene bindings
+
+`requirements plan-bound-upstream-repair --request <json>` consumes a strict
+`boundUpstreamRepairRequestSchema`: source, current subject/closure hashes,
+original requirement-set hash, selected finding hashes, stable plan/batch/budget
+identities, host audit ref, citation scope and optional resolution candidate IDs.
+Copy these selectors from `bind-upstream-repairs`; do not construct finding IDs.
+The command recomputes the binding report under the compiler lock before use.
+
+Every selected finding must have a current typed path to an unresolved requirement
+in that original definition. The host retains **all** those matching requirement
+IDs; there is no caller-provided replacement requirement list. Candidate revisions
+are copied from the current discovery catalog for the exact entity/event kind.
+Quotation mention creation does not accept resolution candidate selections. The
+underlying diagnostic policy still decides the narrow mutation slots.
+
+The generated plan freezes all supported path nodes as exact baseline revisions,
+including readonly attribution, claim and other canonical dependencies. They add
+no new mutation kinds. This prevents a changed event/attribution path from keeping
+an old generated plan authorizable merely because the target annotation is unchanged.
+The binding and review hashes are retained in its authorization reference.
+
+Stale subject/closure hashes require one regenerated host request. Unbound
+findings, unknown candidates and nodes without a registered baseline representation
+stop for host review; never drop path guards or substitute guessed requirements.
+Evidence-binding nodes and structural discourse objects without matching readable
+artifacts are not silently flattened to their source text. Existing direct host
+review planning remains necessary for independently reviewed quotation extensions;
+discovery does not infer those expected anchors. Core-role binding is still a
+separate host-review scope. The output remains diagnostic-only: register and
+authorize the exact `plan` through the normal lifecycle, then independently evaluate
+actual capability results after finish/convergence.

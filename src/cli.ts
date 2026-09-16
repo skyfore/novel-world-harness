@@ -95,6 +95,12 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
   });
+requirementsCommand.command("plan-bound-upstream-repair").requiredOption("--request <path>", "current binding snapshot and selected findings JSON")
+  .description("Derive original scene requirement IDs and freeze every supported dependency path before host authorization")
+  .action(async options => {
+    const { planBoundUpstreamRepairCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await planBoundUpstreamRepairCommand(rootFor({}), options.request), null, 2));
+  });
 requirementsCommand.command("bind-upstream-repairs").requiredOption("--source <id>", "registered source ID")
   .description("Bind current structural findings to unresolved scene requirements through exact typed dependency paths")
   .action(async options => {

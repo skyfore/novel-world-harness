@@ -493,3 +493,17 @@ P2p 已提交为 `8d9e913`。
 P2 尚待自动消费这些已证实绑定、核心角色的精确绑定、修订类根因策略与完整退出验收；P3–P7 继续保留原范围。未调用真实 provider 或人工体验评价。
 
 验证：55 项相关回归通过；随后缓存每个目标的图遍历结果，最终全仓 190 文件、1152 tests 通过（91.67 秒）。最终服务端、Web、E2E TypeScript、bind-upstream-repairs CLI 帮助及 diff whitespace 检查通过。
+
+P2q 已提交为 `58203a5`。
+
+## P2r：消费当前场景绑定并冻结完整受支持路径
+
+新增 planBoundUpstreamRepair 与 requirements plan-bound-upstream-repair。请求只选择当前 source/subject/closure/definition/finding 和宿主 scope、预算身份；不能传入替换 requirement ID 列表。宿主重新生成绑定报告，每个 finding 都须在选定定义下有当前未满足要求的类型路径，自动保留其全部关联 requirement IDs。
+
+resolution 候选只选实际 discovery 目录的同类型 ID，revision 由宿主读取；mention 创建拒绝候选配置。沿用原结构化诊断策略产生精确槽，并把绑定路径上的工件修订合并到 baseline/readable refs。扩展的 attribution/claim 等 canonical 类型仅可读，annotation/resolution 六种写类型不扩大。bindingHash 与 reviewHash 留在原 authorizationRef。
+
+测试证明原 event→attribution→quotation 路径完整冻结、原要求集合由绑定派生、无隐式 ledger/授权写入、传入自造要求 ID 或 finding 被拒，以及路径变化后旧请求和旧计划登记均失败。首次追加断言放入了错误的旧测试作用域，定向回归捕获后已移至正确集成用例，未改产品约束掩盖失败。
+
+没有可注册 baseline 表示的路径节点明确停止，不省略 revision guard。当前 evidence-binding/无对应可读工件的结构 discourse 路径、核心角色自动绑定和独立复核 quotation extension 仍需原宿主审阅；本段未把文字重叠当作绑定替代品。P2 与正常编译流程的自动调度接线、修订类根因和完整退出验收仍待完成，P3–P7 保持原目标。未调用真实 provider 或人工体验评价。
+
+验证：63 项最终定向回归通过；全仓 190 文件、1152 tests 通过（90.26 秒）；服务端、Web、E2E TypeScript、plan-bound-upstream-repair CLI 帮助与 diff whitespace 检查通过。

@@ -992,10 +992,28 @@ it("binds regenerated findings to unresolved scene obligations through actual ca
   expect(result.bindings.some(item => item.requirementId === "waiting:state-effect" && item.path.map(node => node.id).join("/") === "waiting/spoken-content/quote-one")).toBe(true);
   expect(result.bindings.every(item => item.state !== "satisfied")).toBe(true);
   expect(await f.ledger.history()).toEqual([]);
+  const { planBoundUpstreamRepair } = await import("../src/compiler/upstream-repair-bound-plan.js");
+  const request = { version: 1, sourceId: f.sourceId, subjectSnapshotHash: result.subjectSnapshotHash, closureHash: result.closureHash,
+    requirementSetHash: f.plan.requirementSetHash, findingIds: result.discovery.findings.map(item => item.findingId),
+    planId: "bound-plan", batchId: "bound-batch", authorizationRef: "bound-host-review", retryBudgetRef: "bound-budget",
+    segmentIds: [f.source.segmentId], citableEvidenceRefs: [f.source.segmentId], predecessorReceiptRefs: [] };
+  const bound = await planBoundUpstreamRepair(f.root, request);
+  expect(bound.plan.requirementIds).toEqual([...new Set(result.bindings.map(item => item.requirementId))].sort());
+  expect(bound.plan.allowedWrites).toEqual([]);
+  expect(bound.plan.allowedCreations).toHaveLength(1);
+  expect(bound.plan.baselineRefs.map(item => `${item.kind}:${item.id}`)).toEqual(["attribution:spoken-content", "canonical-event:waiting", "quotation:quote-one"]);
+  expect(await f.ledger.history()).toEqual([]);
+  await expect(planBoundUpstreamRepair(f.root, { ...request, requirementIds: ["invented-success"] })).rejects.toThrow();
+  await expect(planBoundUpstreamRepair(f.root, { ...request, findingIds: ["a".repeat(64)] })).rejects.toThrow("lacks a current typed path");
+  await expect(planBoundUpstreamRepair(f.root, { ...request, subjectSnapshotHash: "b".repeat(64) })).rejects.toThrow("Bound repair inputs changed");
   // Removing the actual dependency must remove the link even though the source evidence still overlaps.
   await canonical.putEvent({ ...event, observedKnowledge: { version: 1, operations: [] } });
   const changed = await bindUpstreamRepairRequirements(f.root, f.sourceId);
   expect(changed.bindings).toEqual([]);
   expect(changed.unboundFindingIds).toHaveLength(1);
   expect(changed.subjectSnapshotHash).not.toBe(result.subjectSnapshotHash);
+  await expect(planBoundUpstreamRepair(f.root, request)).rejects.toThrow("Bound repair inputs changed");
+  await expect(verifyUpstreamRepairPlan(f.root, bound.plan)).rejects.toThrow("Active dependency changed: canonical-event:waiting");
+  await expect(f.ledger.register(bound.plan)).rejects.toThrow("Active dependency changed");
+  expect(await f.ledger.history()).toEqual([]);
 });

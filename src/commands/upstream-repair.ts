@@ -107,3 +107,9 @@ export async function bindUpstreamRepairCommand(root: string, sourceId: string) 
   const { bindUpstreamRepairRequirements } = await import("../compiler/upstream-repair-binding.js");
   return withWorkspaceOperationLock(root, "compiler", () => bindUpstreamRepairRequirements(root, sourceId));
 }
+
+export async function planBoundUpstreamRepairCommand(root: string, requestFile: string) {
+  const { planBoundUpstreamRepair } = await import("../compiler/upstream-repair-bound-plan.js");
+  const request: unknown = JSON.parse(await fs.readFile(requestFile, "utf8"));
+  return withWorkspaceOperationLock(root, "compiler", () => planBoundUpstreamRepair(root, request));
+}

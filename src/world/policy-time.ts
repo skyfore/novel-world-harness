@@ -1,25 +1,25 @@
 import type { StoryTime } from "./model.js";
-import { comparableStoryTime, storyTimeAtOrAfter, storyTimeBefore, storyTimesOverlap } from "./time.js";
+import { comparableStoryTime, storyTimeAtOrAfter, storyTimeBefore } from "./time.js";
 
-/** Deterministic validity for source-compiled policy at one branch head. */
+/** Scope truth is separate from the caller's decision to omit an unproven policy. */
+export function policyStoryScopeTruth(
+  current: StoryTime | undefined, candidate: StoryTime | undefined,
+  realizedCanonicalEventIds: ReadonlySet<string>,
+): "true" | "false" | "unknown" {
+  if (candidate?.kind === "relative") {
+    if (candidate.offset !== undefined || candidate.relation === "during"
+      || !realizedCanonicalEventIds.has(candidate.anchorEventId)) return "unknown";
+    return candidate.relation === "after" ? "true" : "false";
+  }
+  return worldRuleStoryScopeTruth(current, candidate);
+}
+
+/** Only proven scope can influence actor policy or authorize a spatial route. */
 export function policyStoryScopeActive(
-  current: StoryTime | undefined,
-  candidate: StoryTime | undefined,
+  current: StoryTime | undefined, candidate: StoryTime | undefined,
   realizedCanonicalEventIds: ReadonlySet<string>,
 ): boolean {
-  if (!candidate || candidate.kind === "unknown") return true;
-  if (candidate.kind === "relative") {
-    return candidate.relation === "after"
-      ? realizedCanonicalEventIds.has(candidate.anchorEventId)
-      : !realizedCanonicalEventIds.has(candidate.anchorEventId);
-  }
-  if (!current || current.kind === "unknown" || current.kind === "relative") return false;
-  if (storyTimesOverlap(current, candidate)) return true;
-  return current.kind === "ordinal"
-    && candidate.kind === "ordinal"
-    && current.orderHint === undefined
-    && candidate.orderHint === undefined
-    && normalized(current.label) === normalized(candidate.label);
+  return policyStoryScopeTruth(current, candidate, realizedCanonicalEventIds) === "true";
 }
 
 /** Deterministic active window for an event-gated policy change. */
@@ -29,6 +29,9 @@ export function policyEpisodeTimeActive(
   endsAt: StoryTime | undefined,
   realizedCanonicalEventIds: ReadonlySet<string>,
 ): boolean {
+  // Free-text offsets are not executable durations, even when their anchor occurred.
+  if ((startsAt.kind === "relative" && startsAt.offset !== undefined)
+    || (endsAt?.kind === "relative" && endsAt.offset !== undefined)) return false;
   const afterStart = startsAt.kind === "unknown"
     || (startsAt.kind === "relative"
       ? realizedCanonicalEventIds.has(startsAt.anchorEventId)
@@ -37,10 +40,6 @@ export function policyEpisodeTimeActive(
   if (!endsAt || endsAt.kind === "unknown") return true;
   if (endsAt.kind === "relative") return !realizedCanonicalEventIds.has(endsAt.anchorEventId);
   return storyTimeBefore(current, endsAt);
-}
-
-function normalized(value: string): string {
-  return value.normalize("NFKC").trim().toLocaleLowerCase();
 }
 
 /** A rule's bounded validity needs containment of the cut, not merely overlap. */

@@ -1326,3 +1326,24 @@ operations; do not weaken the schema or attach future canonical anchors as activ
 rule truth. The rule-time helper treats malformed/legacy relative or unknown bounds
 as unresolved defensively, never as a new authorization. Engine 0.13.0 freezes the
 change; preserve incompatible histories under the existing version protocol.
+
+### Shared policy scope and unresolved offsets
+
+`bounded-policy-time-v10` applies the bounded-cut truth check to character
+dispositions, relationship stances/activation windows, and spatial validity.
+Only `policyStoryScopeTruth === true` enables the policy. Partial overlap,
+incomparable/missing cuts, and explicit unknown validity stay unresolved. Missing
+validity is still unbounded; explicit unknown is not the same as omission.
+
+A relative `after` with no offset can be proven by the committed anchor. A missing
+anchor does not prove `before`; it remains unknown. `during` and free-text offsets
+remain unknown until represented by supported temporal mechanisms. Development
+and relationship-change start/end offsets likewise block application rather than
+being silently treated as zero. This does not remove the caller's separate
+committed/experienced trigger and retirement checks. Do not replace an unresolved
+bound with an omitted bound, guess an ordinal/date, or erase an offset to recover
+an action/route. Preserve the model and refs; stop unchanged retries for host
+source/time review, then reevaluate after authorized refinement. An inactive
+projection does not certify the policy false or retire the underlying artifact.
+Engine 0.14.0 freezes the change; preserve incompatible histories and follow the
+existing version protocol.

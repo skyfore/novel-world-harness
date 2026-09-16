@@ -767,3 +767,17 @@ world-rule 现在使用共享 comparableStoryTime 的日历/序数区间，再�
 最初两条锚点夹具被 schema 正确拒绝；据此保留既有架构、重写为合法有界时间场景，17 项定向通过，没有为测试绕过规则类型约束。
 
 最终验证：全仓 201 文件、1210 tests 通过（96.64 秒）；17 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P4c 已提交为 `00bbc81`。
+
+## P4d：人物、关系和空间共享有界时间判断
+
+上一段只更新 world-rule，其他 policyStoryScopeActive 消费者仍以部分重叠或相同无序标签启用策略，并忽略 relative.offset。本段让人物 disposition、关系 stance/activation window 和 spatial validity 使用相同的有界 cut 判断；只有明确 true 才进入有效投影。未提供范围仍是无界，显式 unknown 与遗漏分开。relative.after 仅在无偏移且锚点已提交时确定；缺少锚点不能证明 before，during/文本偏移继续保持未决。
+
+发展/关系变化 episode 的文本起止偏移也不再作为零偏移执行。既有独立 committed/experienced trigger、reversal/retirement 检查保留；episode 其他起止窗口的表达契约未在本段全部重构，不把一次共享 helper 修改宣称为完整时间关系 catalog。
+
+两段原创场景分别以 Ada/Bo 的三月四日和 Neri/Venn 的九月十二日为明确日期，冻结人物倾向、关系信任和当天步行路线。实际创建 branch、投影 CharacterDevelopment 与空间 route，年份 cut 下均不提前启用；提交日期确认后同步生效，未确认 fork 和旧 head 不变，重新投影得到相同结果。额外验证已发生锚点带文本偏移仍不能启用路线/episode、缺失锚点的 before 未决、已发生 after 有效及 before 失效、缺失/unknown 时间不误启用。
+
+策略升为 bounded-policy-time-v10，engine 0.14.0；旧 bounded-rule-time-v9 snapshot 可读，旧 engine history 明确拒绝不兼容解释。未创建新持久类型或自动改写旧模型。P3 表达/感知/获知链、P4 时间 catalog 与其他执行扩展、P5 工作集和 P7 外部验收继续在目标内。
+
+最终验证：全仓 202 文件、1212 tests 通过（99.36 秒）；21 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

@@ -489,3 +489,5 @@ export { RuntimeHooks, runtimeHooks, currentRuntimeHooks, withRuntimeHooks, type
 export { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, semanticEffectRealizationIssues, SEMANTIC_EFFECT_VERSION, type SemanticEffect } from "./world/semantic-effect.js";
 
 export { committedUtteranceId, narrationBlocksSchema, renderNarrationBlocks, type NarrationBlocks, type LockedUtterance } from "./world/utterance-rendering.js";
+
+export { SCHEDULING_POLICY_VERSION } from "./world/scheduling-policy.js";

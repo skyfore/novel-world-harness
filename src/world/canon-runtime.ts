@@ -1,3 +1,4 @@
+import { UNSPECIFIED_WORLD_PRESSURE } from "./scheduling-policy.js";
 import type { CanonicalEvent, CommitId, EventRelation, Possibility } from "./model.js";
 import type { CanonicalModelStore } from "./canonical-model.js";
 import type { PossibilitySource } from "./runtime.js";
@@ -34,7 +35,8 @@ export function canonicalEventToPossibility(
     causalLinks,
     causalParents: event.causalParents,
     canonicalEventId: event.id,
-    pressure: event.confidence,
+    pressure: UNSPECIFIED_WORLD_PRESSURE,
+    sourceConfidence: event.confidence,
     relevance: 1,
     proposedDelta: event.observedOutcome,
     ...(event.observedKnowledge ? { proposedKnowledge: event.observedKnowledge } : {}),

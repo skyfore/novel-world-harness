@@ -81,7 +81,7 @@ describe("typed causal frontier and scheduler v2", () => {
     const before = buildFrontier("main", "head", state, candidates);
     expect(before.evaluated.find((item) => item.possibility.id === "necessary")?.status).toBe("latent");
     expect(before.evaluated.find((item) => item.possibility.id === "contributory")?.status).toBe("eligible");
-    expect(before.evaluated.find((item) => item.possibility.id === "motivational")?.factors.pressure).toBe(0.25);
+    expect(before.evaluated.find((item) => item.possibility.id === "motivational")?.factors.pressure).toBe(0);
     expect(before.evaluated.find((item) => item.possibility.id === "explanatory")?.trace.causalLinks[0]).toMatchObject({ resolution: "ignored" });
 
     const after = buildFrontier("main", "head", state, candidates, {
@@ -94,7 +94,7 @@ describe("typed causal frontier and scheduler v2", () => {
     });
     expect(after.evaluated.find((item) => item.possibility.id === "contributory")?.status).toBe("eligible");
     expect(after.evaluated.find((item) => item.possibility.id === "blocking")?.status).toBe("invalidated");
-    expect(after.evaluated.find((item) => item.possibility.id === "motivational")?.factors.pressure).toBe(0.5);
+    expect(after.evaluated.find((item) => item.possibility.id === "motivational")?.factors.pressure).toBe(0.25);
     expect(after.evaluated.find((item) => item.possibility.id === "explanatory")?.status).toBe("eligible");
     expect(possibilityToProposal(after.evaluated.find((item) => item.possibility.id === "motivational")!))
       .toMatchObject({

@@ -1,3 +1,4 @@
+import { SCHEDULING_POLICY_VERSION } from "./scheduling-policy.js";
 import { semanticEffectRealizationIssues, type SemanticEffect } from "./semantic-effect.js";
 import { entryProjectionSeedSchema, type EntryProjectionSeed } from "./model.js";
 import { emptyBranchSemanticState } from "./semantic-effects.js";
@@ -1355,6 +1356,7 @@ function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
     ].join("; ")}`);
   }
   const canonicalSnapshotHash = context.canonicalSnapshotHash ?? contentHash({
+    schedulingPolicyVersion: SCHEDULING_POLICY_VERSION,
     entities: [...context.entities.entries()].sort(([left], [right]) => left.localeCompare(right)),
     claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),

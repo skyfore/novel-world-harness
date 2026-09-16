@@ -1,3 +1,4 @@
+import { SCHEDULING_POLICY_VERSION, UNSPECIFIED_WORLD_PRESSURE } from "./scheduling-policy.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentHash } from "./canonical.js";
@@ -63,6 +64,9 @@ export type SchedulerCausalTrace = {
   detail: string;
 };
 export type SchedulerTrace = {
+  policyVersion?: typeof SCHEDULING_POLICY_VERSION;
+  pressureBasis?: "unspecified" | "declared-candidate" | "due-mechanism" | "fulfilled-motivation";
+  sourceConfidence?: number;
   candidateSource: PossibilityKind;
   gates: SchedulerGateTrace[];
   causalLinks: SchedulerCausalTrace[];
@@ -80,6 +84,7 @@ export type EvaluatedPossibility = {
 export type FrontierTemporalMode = "current-window" | "advance";
 export type Frontier = {
   version: 2;
+  policyVersion?: typeof SCHEDULING_POLICY_VERSION;
   branchId: BranchId;
   commitId: CommitId;
   temporalMode: FrontierTemporalMode;
@@ -133,10 +138,12 @@ export function evaluatePossibility(
   const satisfiedPreconditions = possibility.preconditions.filter((predicate) => evaluatePredicate(state, predicate)).length;
   const conditionStrength = possibility.preconditions.length ? satisfiedPreconditions / possibility.preconditions.length : 1;
   const motivationalPressure = causalTrace.filter((item) => item.operationality === "motivational" && item.resolution === "fulfilled").length * 0.25;
+  const canonicalCandidate = Boolean(possibility.canonicalEventId) || possibility.kind === "canon-analogue";
+  const basePressure = canonicalCandidate ? UNSPECIFIED_WORLD_PRESSURE : possibility.pressure;
   const factors: SchedulerFactors = {
     tier: schedulerTier(possibility, causalTrace, state.logicalTime.elapsedDays ?? 0),
     dueTime: schedulerDueTime(possibility),
-    pressure: clampFactor(possibility.pressure + motivationalPressure),
+    pressure: clampFactor(basePressure + motivationalPressure),
     causalSupport,
     sceneRelevance: clampFactor(possibility.relevance),
     cooldownPenalty: clampFactor(options.cooldownPenalty ?? 0),
@@ -219,7 +226,12 @@ export function evaluatePossibility(
     reasons,
     factors,
     score,
-    trace: { candidateSource: possibility.kind, gates, causalLinks: causalTrace, tuple },
+    trace: {
+      policyVersion: SCHEDULING_POLICY_VERSION,
+      pressureBasis: motivationalPressure > 0 ? "fulfilled-motivation" : canonicalCandidate ? "unspecified" : possibility.kind === "due-process" ? "due-mechanism" : "declared-candidate",
+      ...(possibility.sourceConfidence === undefined ? {} : { sourceConfidence: possibility.sourceConfidence }),
+      candidateSource: possibility.kind, gates, causalLinks: causalTrace, tuple,
+    },
   };
 }
 
@@ -255,7 +267,7 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
   });
   propagateInvalidatedDescendants(evaluated);
   evaluated.sort(compareEvaluatedPossibilities);
-  return { version: 2, branchId, commitId, temporalMode: options.temporalMode ?? "current-window", evaluated };
+  return { version: 2, policyVersion: SCHEDULING_POLICY_VERSION, branchId, commitId, temporalMode: options.temporalMode ?? "current-window", evaluated };
 }
 
 export function deriveDuePossibilities(input: {
@@ -439,6 +451,7 @@ export class FrontierStore {
   async read(branchId: BranchId, commitId: CommitId, temporalMode: FrontierTemporalMode = "current-window"): Promise<Frontier | null> {
     try {
       const value = JSON.parse(await fs.readFile(this.filePath(branchId, commitId, temporalMode), "utf8")) as Frontier;
+      if (value.policyVersion !== SCHEDULING_POLICY_VERSION) return null;
       if (value.version !== 2 || value.branchId !== branchId || value.commitId !== commitId || value.temporalMode !== temporalMode) {
         throw new Error(`Invalid frontier cache for ${branchId}@${commitId}`);
       }

@@ -625,3 +625,17 @@ Pi 在完整输出解析、身份/顺序、叙述约束全部通过后才发布�
 P5 的 DecisionContextManifest、端到端预算和 LiteraryReferenceIndex 尚未实现；expression ref 绑定等待 P3 的真实持久工件。P1/P2 完整退出审计及 P3/P4/P6/P7 继续保持原范围。
 
 验证：冻结源码后的全仓 194 文件、1183 tests 通过（94.07 秒）；随后错误保留/停止路径的最终 10 项定向测试通过，包含新增双 malformed JSON 反例。此前终端/Web 等 86 项定向通过。最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。首轮全仓期间新增预检测试，已加载模块与新测试混用导致 1 项失败；停止源码修改后完整复跑通过。最初 4 项终端测试仍要求展示原生草稿，已按新发布契约改为验证草稿不可见、最终文本仅发布一次，未删除对应场景。
+
+P5a 已提交为 `5894614`。
+
+## P6a：来源置信度与 canonical 世界压力解耦
+
+移除 canonicalEventToPossibility 的 pressure=event.confidence。原 confidence 只进入独立 sourceConfidence 诊断；没有世界压力依据的 canonical 候选使用中性 0，frontier trace 明示 unspecified。评估器同时忽略旧/外部 canonical 候选携带的 pressure，避免旧派生值绕过转换器重新影响排序。必要因果、阻断、状态和时间门禁保持先于合法候选选择；canonAffinity 不授予合法性。
+
+新增 world-pressure-v2 调度版本，写入新 canonical snapshot、fallback context hash、frontier 与 scheduler trace；旧无策略标记的派生 frontier 不复用。engine 升至 0.6.0，prepared compatibility 随现有 engine fingerprint 改变；旧 branch history 明确拒绝不兼容解释并提供停止 SOP。旧无策略字段的 canonical snapshot 保持可读，不修改其原字节，也不将读取旧 snapshot 等同于迁移旧 history。
+
+两个原创短场景分别冻结桥梁关闭和信号灯熄灭的必要条件，验证 confidence 0.1→1 的压力/factors/排序元组不变，来源诊断独立变化；false/unknown 前提以及被 supersede 的必要原因均不可选，提高 canon 偏好不能使其合法。补充旧 frontier 失效、新快照策略冻结/重载、旧 engine history 拒绝且原 commit/snapshot 不变的持久化测试。已有 typed causal scheduler 的当前已满足 motivation、过程/规范到期与 canonical runtime 回归继续检验。
+
+本段未宣称 P6 全部完成：当前 goal/norm/process/hazard 压力的统一来源验证、非 canonical 自定义模板的 pressure 权限、entry pre-event 真正无动作驱动，以及完整分歧体验矩阵仍待完成。现有已满足 motivational causal link 的独立压力仍沿用既有算法，尚未升级为活动 goal 验证。P3/P4/P5 余项与 P7 仍在原范围；没有真实模型或独立人工体验证据。
+
+验证：全仓 195 文件、1188 tests 通过（96.64 秒）；此前 14 项压力/因果/runtime/projection 定向及 5 项策略冻结/缓存/context 定向通过；最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

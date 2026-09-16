@@ -135,7 +135,7 @@ export class SharedHistoryCursor {
         throw new Error(`Unsupported world schema version ${commit.schemaVersion} at ${cursor}`);
       }
       if (commit.engineVersion !== WORLD_ENGINE_VERSION) {
-        throw new Error(`Unsupported engine version ${commit.engineVersion} at ${cursor}`);
+        throw new Error(`Unsupported engine version ${commit.engineVersion} at ${cursor}. Stop this branch operation; do not retry, relabel commits, or overwrite snapshots. Preserve the history and use its matching engine, or perform an explicit host migration into a new branch before continuing.`);
       }
       reversed.push({ id: cursor, commit });
       cursor = commit.parentCommitId;

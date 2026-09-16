@@ -1,3 +1,4 @@
+import { SCHEDULING_POLICY_VERSION } from "./scheduling-policy.js";
 import { type SemanticEffect, validateSemanticEffect } from "./semantic-effect.js";
 import { applyEventExecutions, validateEventExecutions, type EventExecution } from "./event-execution.js";
 import fs from "node:fs/promises";
@@ -35,6 +36,7 @@ const validatePreparedSnapshotScope = (
 };
 export const canonicalSnapshotSchema = z.object({
   version: z.literal(9),
+  schedulingPolicyVersion: z.literal(SCHEDULING_POLICY_VERSION).optional(),
   sourceId: idSchema.optional(),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   entities: z.array(revisionRefSchema),
@@ -233,6 +235,7 @@ export class WorldContextStore {
         : this.possibilityRefs(items.map((item) => item.id));
     const snapshot = canonicalSnapshotSchema.parse({
       version: 9,
+      schedulingPolicyVersion: SCHEDULING_POLICY_VERSION,
       ...(sourceId ? { sourceId } : {}),
       ...(preparedRevisionHash ? { preparedRevisionHash } : {}),
       entities: await canonicalRefs("entities", artifacts.entities),

@@ -1161,3 +1161,16 @@ never resubmit the player action to repair presentation. Raw provider text and
 native assistant events are drafts, and only complete validated prose is
 published to terminal/Web consumers. Legacy frames without IDs remain readable
 via their prior text checks; they do not prove block-contract compliance.
+
+### Scheduling policy migration
+
+`world-pressure-v2` does not use canonical extraction confidence as world
+pressure. `sourceConfidence` is a diagnostic; `pressureBasis: unspecified`
+means no world-pressure evidence was supplied. It is not an instruction to
+invent a goal or deadline. Legality gates still apply before presentation
+preference, and higher confidence/affinity cannot repair a failed prerequisite.
+A cached frontier without the current policy version is recomputed by the host.
+An unsupported engine version stops the branch operation: do not retry, relabel
+commits, change confidence to force selection, or overwrite snapshots. Preserve
+history and use its matching engine or an explicit host migration to a new
+branch. A new session is not a migration.

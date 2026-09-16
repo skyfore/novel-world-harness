@@ -1,5 +1,5 @@
 import { validateSemanticEffect } from "../world/semantic-effect.js";
-import { capacityUseIssues, incapacityOnsets, validateIncapacityChanges } from "../world/process-capacity.js";
+import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateIncapacityChanges } from "../world/process-capacity.js";
 import { materializeProcessProposal } from "../world/process-ontology.js";
 import { contentHash } from "../world/canonical.js";
 import { deriveEntryCut } from "../world/entry-cut.js";
@@ -88,7 +88,8 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     }, before.atCommit, before, context, { knowledge, branchSemantics: semantics, realizedCanonicalEventIds: realized, deferMateriality: true });
     if (!result.report.accepted || !result.postState) throw new Error(result.report.errors.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
     const onsets = incapacityOnsets(context.semanticEffects?.values() ?? [], new Set([occurrence.id]), processContext.templates);
-    const processDelta = onsets.length ? materializeProcessProposal({ version: 1, operations: onsets }, {
+    const processOperations = [...onsets, ...incapacityRecoveries(c.eventExecutions ?? [], new Set([occurrence.id]), processes, processContext.templates, occurrence.action)];
+    const processDelta = processOperations.length ? materializeProcessProposal({ version: 1, operations: processOperations }, {
       branchId: "scene-validation", parentCommitId: before.atCommit, proposalHash: contentHash(occurrence),
       templates: processContext.templates, elapsedDays: result.postState.logicalTime.elapsedDays ?? 0,
     }).delta : { version: 1 as const, operations: [] };

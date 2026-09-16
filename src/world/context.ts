@@ -397,7 +397,7 @@ export class WorldContextStore {
       processTemplates,
     });
     const participationIndex = eventParticipationsByEvent(eventParticipations);
-    const executionIssues = validateEventExecutions(eventExecutions, { participations: eventParticipations, events: new Map(events.map((event) => [event.id, event])), entities: new Map(entities.map((entity) => [entity.id, entity])), actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])) });
+    const executionIssues = validateEventExecutions(eventExecutions, { participations: eventParticipations, events: new Map(events.map((event) => [event.id, event])), entities: new Map(entities.map((entity) => [entity.id, entity])), actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])), processTemplates: new Map(processTemplates.map(template => [template.id, template])) });
     if (executionIssues.length) throw new Error(executionIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
     const projectedEvents = applyEventExecutions(events, eventExecutions).map((event) =>
       projectEventParticipations(event, participationIndex.get(event.id) ?? []));
@@ -410,6 +410,7 @@ export class WorldContextStore {
       attributions: new Map(attributions.map((attribution) => [attribution.id, attribution])),
       claims: new Map(claims.map((claim) => [claim.id, claim])),
       events: new Map(projectedEvents.map((event) => [event.id, event])),
+      eventExecutions: new Map(eventExecutions.map(binding => [binding.id, binding])),
       sourceEventRevisions: new Map(events.map(event => [event.id, contentHash(event)])),
       eventParticipations,
       eventRelations,

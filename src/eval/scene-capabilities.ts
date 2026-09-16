@@ -43,7 +43,7 @@ export const sceneCapabilitySpecSchema = z.object({
   cases: z.array(sceneCapabilityCaseSchema).min(1).max(128).refine((cases) => new Set(cases.map((item) => item.id)).size === cases.length, "case IDs must be unique"),
 }).strict();
 export type SceneCapabilitySpec = z.infer<typeof sceneCapabilitySpecSchema>;
-export type SceneReviewCatalog = Pick<CompilerValidationCatalog, "entities" | "events" | "eventParticipations" | "actionSchemas" | "eventExecutions" | "normTemplates" | "rules" | "claims" | "propositions" | "attributions" | "acquisitions" | "utteranceExpressions" | "perceptionObservations">;
+export type SceneReviewCatalog = Pick<CompilerValidationCatalog, "entities" | "events" | "eventParticipations" | "actionSchemas" | "eventExecutions" | "normTemplates" | "processTemplates" | "rules" | "claims" | "propositions" | "attributions" | "acquisitions" | "utteranceExpressions" | "perceptionObservations">;
 export type SceneCapabilityIssue = { code: string; message: string; stage: "semantic" | "executable" | "source-review" | "ontology"; artifactIds: string[] };
 
 /** Expectations come from a separate source review file, never from the candidate schema under test. */
@@ -85,7 +85,7 @@ export function evaluateReviewedSceneCapabilities(specInput: unknown, catalog: S
           if (test.initiatorId && !agency.some((part) => part.role === "agent")) fail("SCENE_INITIATOR_ROLE_UNPROVEN", `${test.initiatorId} requires evidence-backed agent participation before an execution binding.`, "semantic", [event.id, ...agency.map((part) => part.id)]);
           const action = bindings[0]?.action ?? (event.action?.lane === "schema-bound" ? event.action : undefined);
           if (test.requiresMechanism && !action) fail("SCENE_MECHANISM_MISSING", "Create a supported mechanism/binding after repairing semantic dependencies.", "executable", [event.id]);
-          const formal = validateEventExecutions(bindings, { events: catalog.events, entities: catalog.entities, actionSchemas: catalog.actionSchemas, participations: [...catalog.eventParticipations.values()] });
+          const formal = validateEventExecutions(bindings, { events: catalog.events, entities: catalog.entities, actionSchemas: catalog.actionSchemas, processTemplates: catalog.processTemplates, participations: [...catalog.eventParticipations.values()] });
           observations.formalBindingIssues = formal;
           for (const issue of formal) fail(issue.code, issue.message, issue.code === "EVENT_EXECUTION_AGENCY_UNPROVEN" ? "semantic" : "executable", [event.id, ...bindings.map((binding) => binding.id)]);
           const resolved = action ? resolveActionInvocation(action, catalog.actionSchemas, catalog.entities, { actorId: test.initiatorId,

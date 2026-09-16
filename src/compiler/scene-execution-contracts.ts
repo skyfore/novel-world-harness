@@ -29,7 +29,7 @@ export function buildSceneExecutionContracts(bundle: PreparedNovelBundle, roster
   const schemas = new Map(canonical.actionSchemas.map((schema) => [schema.id, schema]));
   const issues = validateSceneOccurrenceCatalog({ entities, events, scenes: canonical.sceneOccurrences });
   const major = new Set(roster ? majorRoleCandidates(roster).flatMap((role) => role.entityId ? [role.entityId] : []) : []);
-  issues.push(...validateEventExecutions(canonical.eventExecutions ?? [], { events, entities, actionSchemas: schemas, participations: canonical.eventParticipations }));
+  issues.push(...validateEventExecutions(canonical.eventExecutions ?? [], { events, entities, actionSchemas: schemas, processTemplates: new Map(canonical.processTemplates.map(template => [template.id, template])), participations: canonical.eventParticipations }));
   const actual = applyEventExecutions(canonical.events, canonical.eventExecutions ?? []).filter((event) => event.narrativeContext?.mode !== "hypothetical");
   for (const event of actual) if (event.participants.some((id) => major.has(id)) && !event.sceneOccurrenceIds?.length) issues.push({ code: "SCENE_EXECUTION_COVERAGE_MISSING", message: `Major-character event ${event.id} has no accepted scene execution package`, path: `event/${event.id}` });
   const contracts = canonical.sceneOccurrences.map((scene): SceneExecutionContract => {
@@ -76,9 +76,10 @@ export function buildSceneExecutionContracts(bundle: PreparedNovelBundle, roster
       for (const knowledge of event.observedKnowledge?.operations ?? []) if (knowledge.op === "learn" && (!knowledge.propositionId || !knowledge.acquisitionMode)) fail("SCENE_KNOWLEDGE_PATH_MISSING", `Event ${event.id} has an acquisition without its proposition and epistemic path`);
     }
     const consumedEvents = new Set([...sceneEvents.map(event => event.id), ...executions.flatMap(execution => execution.cut.replayEventIds)]);
+    for (const binding of canonical.eventExecutions ?? []) if (consumedEvents.has(binding.canonicalEventId)) for (const recovery of binding.processRecoveries ?? []) mechanisms.add(`process/${recovery.processTemplateId}`);
     const consumedEffects = (canonical.semanticEffects ?? []).filter(effect => consumedEvents.has(effect.canonicalEventId));
     for (const effect of consumedEffects) if (effect.kind === "temporary-incapacity" && effect.lowering.status === "mapped") mechanisms.add(`process/${effect.lowering.processTemplateId}`);
-    const nodeKeys = new Set([`scene/${scene.id}`, ...sceneEvents.map((event) => `event/${event.id}`), ...consumedEffects.map(effect => `semantic-effect/${effect.id}`), ...[...mechanisms].map((id) => /^(spatial|process)\//.test(id) ? id : `action/${id}`)]);
+    const nodeKeys = new Set([`scene/${scene.id}`, ...[...consumedEvents].map(id => `event/${id}`), ...consumedEffects.map(effect => `semantic-effect/${effect.id}`), ...[...mechanisms].map((id) => /^(spatial|process)\//.test(id) ? id : `action/${id}`)]);
     const nodeIndex = new Map(graph.nodes.map((node) => [`${node.kind}/${node.id}`, node]));
     const pending = [...nodeKeys];
     while (pending.length) for (const ref of nodeIndex.get(pending.pop()!)?.dependsOn ?? []) {

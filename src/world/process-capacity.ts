@@ -1,3 +1,5 @@
+import type { ActionSchema } from "./action-ontology.js";
+import type { EventExecution } from "./event-execution.js";
 import { contentHash } from "./canonical.js";
 import type { EventProposal, EvidenceAssertion, KnowledgeDelta, ProcessDelta, ProcessProposalDelta, ValidationIssue, WorldState } from "./model.js";
 import { applyProcessDelta, type ProcessReducerContext, type ProcessState } from "./process-effects.js";
@@ -16,10 +18,15 @@ export function lacksCapacity(actorId: string, capacity: "action" | "speech" | "
       && instance.ownerBindings.some(binding => binding.roleId === condition.ownerRoleId && binding.entityIds.includes(actorId));
   });
 }
-export function capacityUseIssues(input: Pick<EventProposal, "actorId" | "spokenUtterances"> & { knowledge?: KnowledgeDelta }, before: ProcessState, after: ProcessState,
-  templates: ReadonlyMap<string, ProcessTemplate>, perceptions: ReadonlyMap<string, PerceptionObservation> = new Map()): ValidationIssue[] {
+export function capacityUseIssues(input: Pick<EventProposal, "actorId" | "spokenUtterances" | "action"> & { knowledge?: KnowledgeDelta }, before: ProcessState, after: ProcessState,
+  templates: ReadonlyMap<string, ProcessTemplate>, perceptions: ReadonlyMap<string, PerceptionObservation> = new Map(), actions: ReadonlyMap<string, ActionSchema> = new Map()): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (input.actorId && lacksCapacity(input.actorId, "action", before, templates)) issues.push({ code: "CHARACTER_ACTION_INCAPACITATED", message: "The actor lacks action capacity in the current committed process state. Preserve head and stop; a recovery must be committed through a declared mechanism.", path: "actorId" });
+  const actors = new Set(input.actorId ? [input.actorId] : []);
+  if (input.action?.lane === "schema-bound") {
+    const roleId = actions.get(input.action.schemaId)?.initiatorRoleId;
+    for (const actorId of input.action.roleBindings.find(role => role.roleId === roleId)?.entityIds ?? []) actors.add(actorId);
+  }
+  if ([...actors].some(actorId => lacksCapacity(actorId, "action", before, templates))) issues.push({ code: "CHARACTER_ACTION_INCAPACITATED", message: "The actor lacks action capacity in the current committed process state. Preserve head and stop; a recovery must be committed through a declared mechanism.", path: "actorId" });
   for (const utterance of input.spokenUtterances ?? []) if (lacksCapacity(utterance.speakerId, "speech", before, templates)) issues.push({ code: "CHARACTER_SPEECH_INCAPACITATED", message: "The speaker cannot speak at this event's start. Do not remove actorId or let rendering supply speech; stop until a permitted recovery is committed.", path: "spokenUtterances" });
   for (const operation of input.knowledge?.operations ?? []) {
     if (operation.op !== "learn" || !["observed", "told", "read", "deceived-misattributed"].includes(operation.acquisitionMode ?? "")) continue;
@@ -87,4 +94,20 @@ export function validateIncapacityEvidence(template: ProcessTemplate, assertions
   if (!template.incapacity || template.induction.kind !== "source-pattern") return [];
   return ["/incapacity/ownerRoleId", "/incapacity/capacity", "/incapacity/recoveryPhaseId", "/incapacity/duration"].filter(pointer => !assertions.some(item => item.target.artifactKind === "process-template" && item.target.artifactId === template.id && item.target.jsonPointer === pointer && item.relation === "supports" && item.strength !== "weak-inference" && item.anchors.length))
     .map(path => ({ code: "INCAPACITY_EVIDENCE_MISSING", message: `Incapacity ${template.id} needs exact source support at ${path}`, path }));
+}
+
+/** Resolve a source recovery against this branch only; no instance guessing. */
+export function incapacityRecoveries(bindings: Iterable<EventExecution>, eventIds: ReadonlySet<string>, processes: ProcessState, templates: ReadonlyMap<string, ProcessTemplate>, action?: EventProposal["action"]): ProcessProposalDelta["operations"] {
+  const operations: ProcessProposalDelta["operations"] = [];
+  for (const binding of bindings) if (eventIds.has(binding.canonicalEventId)) {
+    if (binding.processRecoveries?.length && binding.action && contentHash(binding.action) !== contentHash(action ?? null)) throw new Error("PROCESS_RECOVERY_ACTION_REQUIRED: Preserve the bound recovery action; do not remove it or relabel the proposal. Stop for mechanism review.");
+    for (const recovery of binding.processRecoveries ?? []) {
+      const template = templates.get(recovery.processTemplateId), condition = template?.incapacity;
+      const matches = condition ? Object.values(processes.instances).filter(instance => instance.templateId === recovery.processTemplateId && instance.status === "running" && instance.phaseId !== condition.recoveryPhaseId && instance.ownerBindings.some(role => role.roleId === condition.ownerRoleId && role.entityIds.length === 1 && role.entityIds[0] === recovery.subjectEntityId)) : [];
+      if (!condition || matches.length !== 1 || matches[0]!.progress >= 1) throw new Error("PROCESS_RECOVERY_TARGET_UNRESOLVED: Expected exactly one active incapacity for the declared template and patient. Preserve head; stop for host branch review, never guess an instance or retry unchanged.");
+      const instance = matches[0]!;
+      operations.push({ op: "advance-process", processRef: instance.id, amount: 1 - instance.progress, phaseId: condition.recoveryPhaseId }, { op: "finish-process", processRef: instance.id, outcomeId: recovery.outcomeId });
+    }
+  }
+  return operations;
 }

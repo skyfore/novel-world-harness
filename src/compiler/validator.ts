@@ -1,3 +1,4 @@
+import { validateProcessRecoveryEvidence } from "../world/event-execution.js";
 import { validateIncapacityEvidence } from "../world/process-capacity.js";
 import { acquisitionSchema, validateAcquisitionOperation, validateAcquisition, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
 import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
@@ -267,7 +268,7 @@ export class CompilerValidator {
     if (kind === "event-execution") {
       const binding = eventExecutionSchema.parse(payload);
       const bindings = new Map(catalog.eventExecutions ?? []).set(binding.id, binding);
-      errors.push(...validateEventExecutions([...bindings.values()], { entities, events, actionSchemas, participations: [...eventParticipations.values()] }));
+      errors.push(...validateEventExecutions([...bindings.values()], { entities, events, actionSchemas, processTemplates: catalog.processTemplates, participations: [...eventParticipations.values()] }));
       const occurrence = events.get(binding.canonicalEventId);
       if (occurrence && binding.entryCheckpoint) {
         const checkpoint = binding.entryCheckpoint, seed = checkpoint.projectionSeed;
@@ -1608,7 +1609,7 @@ export class CompilerCommitService {
       ? validateEntityNameEvidence(entitySchema.parse(payload), inspected.excerpts)
       : [];
     const artifactId = compilerProposalArtifactId(kind, payload, proposalId);
-    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : [])];
+    const targetIssues = [...(kind === "event-execution" ? validateProcessRecoveryEvidence(eventExecutionSchema.parse(payload), evidenceAssertions) : []), ...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : [])];
     const characterEvidenceIssues = kind === "character-model"
       ? [
           ...validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),

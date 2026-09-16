@@ -1,3 +1,4 @@
+import { validateProcessRecoveryEvidence } from "../world/event-execution.js";
 import { validateIncapacityEvidence } from "../world/process-capacity.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { acquisitionSchema, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
@@ -302,7 +303,7 @@ export class CompilerProposalService {
       );
     }
     const artifactId = compilerProposalArtifactId(kind, payload, input.proposalId);
-    const targetIssues = [...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : []), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : []), ...(kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions) : []), ...(kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : []), ...(kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions) : [])];
+    const targetIssues = [...(kind === "event-execution" ? validateProcessRecoveryEvidence(eventExecutionSchema.parse(payload), evidenceAssertions) : []), ...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : []), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : []), ...(kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions) : []), ...(kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : []), ...(kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions) : [])];
     const characterEvidenceIssues = kind === "character-model"
       ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
       : [];
@@ -698,7 +699,7 @@ export async function validateCompilerProposalClosure(
   const executionBindings = new Map(canonicalEventExecutions.filter(fromActiveSource).map((binding) => [binding.id, binding]));
   for (const proposal of staged.values()) if (proposal.kind === "event-execution") { const binding = eventExecutionSchema.parse(proposal.payload); executionBindings.set(binding.id, binding); }
   const issues = new Set<string>();
-  for (const issue of validateEventExecutions([...executionBindings.values()], { participations: [...participationCatalog.participations.values()], entities: executableEntityCatalog, events: participationCatalog.events, actionSchemas: executableActionCatalog })) issues.add(`${issue.path}: ${issue.code}: ${issue.message}`);
+  for (const issue of validateEventExecutions([...executionBindings.values()], { participations: [...participationCatalog.participations.values()], entities: executableEntityCatalog, events: participationCatalog.events, actionSchemas: executableActionCatalog, processTemplates: processTemplateCatalog })) issues.add(`${issue.path}: ${issue.code}: ${issue.message}`);
   for (const proposalId of proposalIds) {
     const proposal = staged.get(proposalId);
     if (!proposal) {
@@ -990,6 +991,7 @@ function collectProposalClosureIssues(
     missing("entities", binding.actorId, "actorId");
     if (binding.action?.lane === "schema-bound") missing("actions", binding.action.schemaId, "action.schemaId");
     binding.action?.lane === "schema-bound" && binding.action.roleBindings.forEach((role) => role.entityIds.forEach((id) => missing("entities", id, "action.roleBindings")));
+    for (const recovery of binding.processRecoveries ?? []) { missing("processes", recovery.processTemplateId, "processRecoveries.processTemplateId"); missing("entities", recovery.subjectEntityId, "processRecoveries.subjectEntityId"); }
     if (binding.entryCheckpoint) collectStateDeltaIssues(binding.entryCheckpoint.delta, "entryCheckpoint.delta", missing, fieldReference);
     return;
   }

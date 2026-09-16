@@ -10,7 +10,7 @@ import { createEvidenceFixture } from "./helpers/evidence.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { canonicalEventSchema, processProposalOperationSchema } from "../src/world/model.js";
 import { processTemplateSchema, dueProcessInstances } from "../src/world/process-ontology.js";
-import { lacksCapacity, capacityUseIssues } from "../src/world/process-capacity.js";
+import { lacksCapacity, capacityUseIssues, incapacityRecoveries } from "../src/world/process-capacity.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { InitialWorldStore } from "../src/world/initial.js";
@@ -42,6 +42,9 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
   await canon.putProposition({ id: "at-site", subjectEntityId: "patient", relationId: "character.location", object: { kind: "entity", entityId: "site" }, polarity: "positive", modality: "asserted", evidence: source.evidence(text) });
   await canon.putClaim({ id: "at-site", subject: "patient", predicate: "character.location", object: "site", epistemicType: "explicit-fact", evidence: source.evidence(text) });
   for (const id of ["treatment", "treatment-again"]) await canon.putEvent({ ...event, id, title: "The antidote restores capacity", participants: ["patient", "helper"], participantPresence: [{ entityId: "patient", mode: "physical" }, { entityId: "helper", mode: "physical" }] });
+  await canon.putEvent({ ...event, id: "recovery", title: "Capacity returns", participants: ["patient", "helper"], participantPresence: [{ entityId: "patient", mode: "physical" }, { entityId: "helper", mode: "physical" }] });
+  if (!scene.known) await canon.putEventParticipation({ id: "recovery-agent", eventId: "recovery", entityId: "helper", role: "agent", presence: "physical", confidence: 1, evidence: source.evidence(text) });
+  if (!scene.known) await canon.putEventParticipation({ id: "recovery-patient", eventId: "recovery", entityId: "patient", role: "patient", presence: "physical", confidence: 1, evidence: source.evidence(text) });
   const toolset = createCompilerProposalToolset(root); await toolset.beginBatch([], "capacity", source.source.id);
   const invoke = (name: string, input: unknown) => toolset.tools.find(tool => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
   const role = (id: string) => ({ id, label: id, allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 });
@@ -53,6 +56,10 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
     await invoke("propose_process_template", { proposal_id: template.id, payload: template, evidence_segment_ids: [source.segmentId], evidence_selectors: selectors });
     await invoke("propose_semantic_effect", { proposal_id: `effect-${capacity}`, payload: { ontologyVersion: "semantic-effect-v1", id: `effect-${capacity}`, canonicalEventId: event.id, subjectEntityId: "patient", validTime: event.storyTime, kind: "temporary-incapacity", args: { capacity, duration }, lowering: { status: "mapped", processTemplateId: template.id } }, evidence_segment_ids: [source.segmentId], evidence_selectors: ["/canonicalEventId", "/subjectEntityId", "/kind", "/validTime", "/args/capacity", "/args/duration"].map(target_path => ({ segment_id: source.segmentId, exact: text, target_path, relation: "supports", strength: "explicit" })) });
   }
+  const treatmentAction = { lane: "schema-bound", schemaId: "treat", roleBindings: [{ roleId: "helper", entityIds: ["helper"] }, { roleId: "patient", entityIds: ["patient"] }], parameters: {} };
+  const recoveryBinding = { id: "recovery-binding", canonicalEventId: "recovery", actorId: scene.known ? "patient" : "helper", ...(scene.known ? {} : { action: treatmentAction }), processRecoveries: capacities.map(capacity => ({ processTemplateId: `incapacity-${capacity}`, subjectEntityId: "patient", outcomeId: "recovered" })) };
+  await expect(invoke("propose_event_execution", { proposal_id: "recovery-binding", payload: recoveryBinding, evidence_segment_ids: [source.segmentId] })).rejects.toThrow("PROCESS_RECOVERY_EVIDENCE_MISSING");
+  await invoke("propose_event_execution", { proposal_id: "recovery-binding", payload: recoveryBinding, evidence_segment_ids: [source.segmentId], evidence_selectors: ["/canonicalEventId", "/actorId", ...(scene.known ? [] : ["/action"]), ...capacities.flatMap((_, index) => ["processTemplateId", "subjectEntityId", "outcomeId"].map(field => `/processRecoveries/${index}/${field}`))].map(target_path => ({ segment_id: source.segmentId, exact: text, target_path, relation: "supports", strength: "explicit" })) });
   await invoke("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Capacity processes preserve known and unknown recovery times" });
   expect((await convergeWorldProposals(root, source.source.id)).canonical.blocked).toEqual([]);
   const initial = { version: 1 as const, operations: [{ op: "set" as const, entityId: "patient", field: "character.alive", value: true }, { op: "set" as const, entityId: "helper", field: "character.alive", value: true }, { op: "set" as const, entityId: "patient", field: "character.location", value: "site" }, { op: "set" as const, entityId: "helper", field: "character.location", value: "site" }, { op: "set" as const, entityId: "patient", field: "character.plan", value: "leave" }] };
@@ -66,6 +73,7 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
   const sceneOnset = { ...event, storyTime: { kind: "ordinal" as const, label: "onset", orderHint: 1 } };
   const attempt = { ...event, id: "attempt", storyTime: { kind: "ordinal" as const, label: "attempt", orderHint: 2 }, observedOutcome: { version: 1 as const, operations: [{ op: "set" as const, entityId: "patient", field: "character.plan", value: "leave now" }] } };
   sceneBundle.canonical.events = [sceneOnset, attempt];
+  sceneBundle.canonical.eventExecutions = [];
   sceneBundle.canonical.semanticEffects = sceneBundle.canonical.semanticEffects!.map(effect => ({ ...effect, validTime: sceneOnset.storyTime }));
   sceneBundle.canonical.initialWorld.checkpoint = { beforeCanonicalEventId: sceneOnset.id, storyTime: sceneOnset.storyTime } as never;
   sceneBundle.canonical.eventParticipations = [{ id: "attempt-agent", eventId: attempt.id, entityId: "patient", role: "agent", evidence: source.evidence(text) }] as never;
@@ -119,6 +127,31 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
   await entryRuntime.forkBranch("late-entry", entryHead, "late-fork", "Same historical onset");
   const forkHead = (await entryEngine.branches.read("late-fork")).headCommitId!;
   expect((await entryEngine.projections.project(forkHead, { fresh: true, useCheckpoints: false })).processes.instances).toEqual(entryReplay.processes.instances);
+  const recoveredEntryBundle = structuredClone(entryBundle);
+  const recoveryOccurrence = { ...bundle.canonical.events.find(item => item.id === "recovery")!, readerSummary: "The patient's capacities return", storyTime: { kind: "ordinal" as const, label: "recovery", orderHint: 3 }, narrativeContext: { layerId: "main", mode: "scene" as const, discourseOrder: 3 }, ...(scene.known ? { timeAdvance: { amount: 1, unit: "day" as const } } : {}) };
+  const afterRecoveryEntry = { ...entryEvent, storyTime: { kind: "ordinal" as const, label: "after recovery", orderHint: 4 }, narrativeContext: { layerId: "main", mode: "scene" as const, discourseOrder: 4 } };
+  recoveredEntryBundle.canonical.events = [beforeEntry, passingTime, recoveryOccurrence, afterRecoveryEntry];
+  recoveredEntryBundle.canonical.eventExecutions = bundle.canonical.eventExecutions;
+  recoveredEntryBundle.canonical.eventParticipations = bundle.canonical.eventParticipations;
+  recoveredEntryBundle.canonical.sceneOccurrences = [];
+  if (!scene.known) {
+    const guardedEntry = structuredClone(recoveredEntryBundle);
+    guardedEntry.canonical.initialWorld.projectionSeed = { version: 1, elapsedDays: 0, activeRuleIds: ["recovery-permitted"], semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] } };
+    guardedEntry.canonical.rules.push({ ontologyVersion: "world-rule-v2", id: "recovery-permitted", name: "Recovery permission fixture", kind: "physical", scope: "global", jurisdictionEntityIds: [], appliesWhen: [], visibility: "public", knownByClaimIds: [], priority: 1, defeasible: false, overridesRuleIds: [], clauses: [{ id: "guard", modality: "forbid", predicate: { op: "fact-equals", entityId: "patient", field: "character.plan", value: "forbidden" }, basis: "explicit", status: "supported", confidence: 1, evidence: source.evidence(text) }], exceptions: [], basis: "explicit", status: "supported", confidence: 1, evidence: source.evidence(text) });
+    guardedEntry.canonical.actionSchemas.find(item => item.id === "treat")!.preconditions.push({ op: "rule-active", ruleId: "recovery-permitted" });
+    expect(deriveCharacterEntrySeed(guardedEntry, "helper").projectionSeed!.processes.operations).toHaveLength(9);
+    guardedEntry.canonical.initialWorld.projectionSeed.activeRuleIds = [];
+    expect(() => deriveCharacterEntrySeed(guardedEntry, "helper")).toThrow("PROCESS_RECOVERY_PRECONDITION_UNPROVEN");
+  }
+  const recoveredEntrySeed = deriveCharacterEntrySeed(recoveredEntryBundle, "helper");
+  expect(recoveredEntrySeed.projectionSeed!.processes.operations).toHaveLength(9);
+  const sceneRecovered = executeSceneEvent(recoveredEntryBundle, afterRecoveryEntry, "helper");
+  expect(lacksCapacity("patient", "action", sceneRecovered.beforeProcesses, seedProcessContext.templates)).toBe(false);
+  const recoveredEntryContext = await new WorldContextStore(root).capturePrepared(source.source.id, contentHash(recoveredEntryBundle), { ...recoveredEntryBundle.canonical, events: [...recoveredEntryBundle.canonical.events, ...bundle.canonical.events.filter(item => item.id !== event.id && item.id !== "recovery")] });
+  const recoveredEntryEngine = new WorldEngine(root, recoveredEntryContext);
+  const recoveredEntryHead = await recoveredEntryEngine.createBranch("recovered-entry", "After recovery", recoveredEntrySeed.delta, undefined, undefined, undefined, [], { storyTime: recoveredEntrySeed.storyTime }, { projectionSeed: recoveredEntrySeed.projectionSeed, realizesCanonicalEventIds: recoveredEntrySeed.realizesCanonicalEventIds });
+  const recoveredEntryReplay = await recoveredEntryEngine.projections.project(recoveredEntryHead, { fresh: true, useCheckpoints: false });
+  expect(lacksCapacity("patient", "action", recoveredEntryReplay.processes, recoveredEntryContext.processTemplates!)).toBe(false);
   const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-capacity-clone-")); roots.push(cloneRoot);
   const cloneSource = await createEvidenceFixture(cloneRoot, text); await new PreparedNovelCache(cloneRoot, cacheRoot).restoreCompilerCheckpoint(cloneSource.source, archived.bundleHash!);
   const contexts = new WorldContextStore(cloneRoot), context = await contexts.captureCurrent(cloneSource.source.id), engine = new WorldEngine(cloneRoot, context);
@@ -127,16 +160,26 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
   const proposal = { proposalId: "onset", branchId: "main", expectedParentCommit: head, source: "canon-candidate", title: "The spell takes effect", participants: ["patient"], participantPresence: event.participantPresence, possibilityId: "canon-onset", preconditions: [], proposedTime: { kind: "unknown" }, proposedDelta: { version: 1, operations: [] }, causalParents: [], evidence: [] };
   const duplicate = await engine.commitProposal({ ...proposal, proposedProcesses: { version: 1, operations: ["local-first", "local-second"].map(localRef => ({ op: "start-process", localRef, process: { templateId: "incapacity-action", ownerBindings: [{ roleId: "patient", entityIds: ["patient"] }], progress: 0 } })) } } as never);
   expect(duplicate.report.errors.some(issue => issue.message.includes("INCAPACITY_ONSET_DUPLICATE"))).toBe(true);
+  const absentRecovery = await engine.commitProposal({ ...proposal, proposalId: "absent-recovery", possibilityId: "canon-recovery", participants: ["patient", "helper"], ...(scene.known ? {} : { action: treatmentAction }) } as never);
+  expect(absentRecovery.report.errors.some(issue => issue.message.includes("PROCESS_RECOVERY_TARGET_UNRESOLVED"))).toBe(true);
   const onset = await engine.commitProposal(proposal as never); expect(onset.report.errors).toEqual([]);
   const disabled = await engine.projections.project(onset.newHead, { fresh: true, useCheckpoints: false });
   expect(Object.values(disabled.processes.instances)).toHaveLength(3);
   for (const capacity of capacities) expect(lacksCapacity("patient", capacity, disabled.processes, context.processTemplates!)).toBe(true);
+  const ambiguous = structuredClone(disabled.processes);
+  const firstInstance = Object.values(ambiguous.instances)[0]!;
+  ambiguous.instances["duplicate-active"] = { ...structuredClone(firstInstance), id: "duplicate-active" };
+  expect(() => incapacityRecoveries(context.eventExecutions!.values(), new Set(["recovery"]), ambiguous, context.processTemplates!, scene.known ? undefined : treatmentAction as never)).toThrow("PROCESS_RECOVERY_TARGET_UNRESOLVED");
   const speak = { ...proposal, proposalId: "speak", possibilityId: undefined, expectedParentCommit: onset.newHead, source: "actor", actorId: "patient", participants: ["patient", "helper"], spokenUtterances: [{ speakerId: "patient", addresseeIds: ["helper"], content: "I can speak" }] };
   expect((await engine.commitProposal(speak as never)).report.errors.map(issue => issue.code)).toEqual(expect.arrayContaining(["CHARACTER_ACTION_INCAPACITATED", "CHARACTER_SPEECH_INCAPACITATED"]));
   expect((await engine.commitProposal({ ...speak, actorId: undefined, source: "background" } as never)).report.errors.some(issue => issue.code === "CHARACTER_SPEECH_INCAPACITATED")).toBe(true);
   expect(capacityUseIssues({ knowledge: { version: 1, operations: [{ op: "learn", actorId: "patient", claimId: "seen", propositionId: "seen", acquisitionMode: "observed", status: "heard", confidence: 1 }] } }, disabled.processes, disabled.processes, context.processTemplates!).some(issue => issue.code === "CHARACTER_PERCEPTION_INCAPACITATED")).toBe(true);
   const seen = await engine.commitProposal({ ...proposal, proposalId: "sense", source: "background", possibilityId: undefined, expectedParentCommit: onset.newHead, proposedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "patient", claimId: "at-site", propositionId: "at-site", acquisitionMode: "observed", status: "heard", confidence: 1 }] } } as never);
   expect(seen.report.errors.some(issue => issue.code === "CHARACTER_PERCEPTION_INCAPACITATED")).toBe(true);
+  const invalidBoundRecovery = await engine.commitProposal({ ...proposal, proposalId: "invalid-bound-recovery", expectedParentCommit: onset.newHead, possibilityId: "canon-recovery", participants: ["patient", "helper"] } as never);
+  expect(invalidBoundRecovery.report.errors.some(issue => issue.message.includes(scene.known ? "INCAPACITY_RECOVERY_UNAUTHORIZED" : "PROCESS_RECOVERY_ACTION_REQUIRED"))).toBe(true);
+  const hiddenInitiator = await engine.commitProposal({ ...proposal, proposalId: "hidden-initiator", source: "background", possibilityId: undefined, expectedParentCommit: onset.newHead, participants: ["patient", "helper"], action: { ...treatmentAction, roleBindings: [{ roleId: "helper", entityIds: ["patient"] }, { roleId: "patient", entityIds: ["patient"] }] } } as never);
+  expect(hiddenInitiator.report.errors.some(issue => issue.code === "CHARACTER_ACTION_INCAPACITATED")).toBe(true);
   const ids = Object.keys(disabled.processes.instances);
   const pause = await engine.commitProposal({ ...proposal, proposalId: "pause", source: "background", possibilityId: undefined, expectedParentCommit: onset.newHead, proposedProcesses: { version: 1, operations: [{ op: "pause-process", processRef: ids[0], reasonId: "pause" }] } } as never);
   expect(pause.report.errors.some(issue => issue.message.includes("INCAPACITY_RECOVERY_UNAUTHORIZED"))).toBe(true);
@@ -154,7 +197,7 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
     const inventedDeadline = await engine.commitProposal({ ...recover, expectedParentCommit: wait.newHead, source: "actor", actorId: "helper", action: actionInvocation, proposedProcesses: { version: 1, operations: [{ op: "advance-process", processRef: ids[0], amount: 1, phaseId: "recovered", dueAtElapsedDays: 101 }] } } as never);
     expect(inventedDeadline.report.accepted).toBe(false);
   }
-  const recovered = await engine.commitProposal({ ...recover, expectedParentCommit: wait.newHead, ...(scene.known ? {} : { source: "actor", actorId: "helper", action: actionInvocation }) } as never); expect(recovered.report.errors).toEqual([]);
+  const recovered = await engine.commitProposal({ ...recover, expectedParentCommit: wait.newHead, proposalId: "canonical-recovery", possibilityId: "canon-recovery", proposedProcesses: undefined, ...(scene.known ? {} : { source: "actor", actorId: "helper", action: actionInvocation }) } as never); expect(recovered.report.errors).toEqual([]);
   const replay = await engine.projections.project(recovered.newHead, { fresh: true, useCheckpoints: false });
   for (const capacity of capacities) expect(lacksCapacity("patient", capacity, replay.processes, context.processTemplates!)).toBe(false);
   const spoke = await engine.commitProposal({ ...speak, expectedParentCommit: recovered.newHead } as never); expect(spoke.report.errors).toEqual([]);
@@ -164,6 +207,11 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
   const { evidence: _savedEvidence, ...templatePayload } = saved;
   const missingProof = createCompilerProposalToolset(root); await missingProof.beginBatch([], "missing-capacity-proof", source.source.id);
   await expect(missingProof.tools.find(tool => tool.name === "propose_process_template")!.execute("missing", { proposal_id: "missing", payload: { ...templatePayload, id: "missing" }, evidence_segment_ids: [source.segmentId] } as never, undefined, undefined, {} as never)).rejects.toThrow("INCAPACITY_EVIDENCE_MISSING");
+  const recoveryProofStore = new EvidenceAssertionStore(root);
+  const recoveryProof = (await recoveryProofStore.bindingForArtifact("event-execution", "recovery-binding"))!;
+  await recoveryProofStore.replaceForArtifact("event-execution", "recovery-binding", recoveryProof.artifactHash, []);
+  await expect(cache.candidateSnapshot(source.source)).rejects.toThrow("Process recovery evidence");
+  await recoveryProofStore.replaceForArtifact("event-execution", "recovery-binding", recoveryProof.artifactHash, recoveryProof.assertions);
   await new EvidenceAssertionStore(root).replaceForArtifact("process-template", saved.id, contentHash(saved), []);
   await expect(cache.candidateSnapshot(source.source)).rejects.toThrow("Incapacity process evidence");
 });

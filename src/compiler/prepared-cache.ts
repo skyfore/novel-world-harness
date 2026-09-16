@@ -14,7 +14,7 @@ import { coreRoleRequirementHistorySchema, type CoreRoleRequirementDefinition } 
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import { RequirementLedger, requirementJournalSchema, requirementJournalBindingIssues, requirementSnapshotInputs, type LedgerRecord, coreRoleAttemptHistoryIssues, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
 import { captureReconciliationObligations, assertReconciliationObligationsRestorable, restoreReconciliationObligations, reconciliationObligationSnapshotSchema, type ReconciliationObligationSnapshot } from "./reconciliation-review-ledger.js";
-import { eventExecutionSchema } from "../world/event-execution.js";
+import { eventExecutionSchema, validateProcessRecoveryEvidence } from "../world/event-execution.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
@@ -1650,6 +1650,10 @@ async function assertPreparedCompilerSnapshotEvidence(
         resolutions: new Map(bundle.compilerSnapshot.entityResolutions.map(item => [item.mentionId, item])),
       })];
     if (!binding || binding.artifactHash !== contentHash(expression) || issues.length) throw new Error(`Utterance expression exact evidence is incomplete or stale: ${expression.id}: ${issues.map(item => item.message).join("; ")}`);
+  }
+  for (const execution of bundle.canonical.eventExecutions ?? []) if (execution.processRecoveries?.length) {
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "event-execution" && item.artifactId === execution.id);
+    if (!binding || binding.artifactHash !== contentHash(execution) || validateProcessRecoveryEvidence(execution, binding.assertions).length) throw new Error(`Process recovery evidence is incomplete or stale: ${execution.id}`);
   }
   for (const template of bundle.canonical.processTemplates) {
     if (!template.incapacity) continue;

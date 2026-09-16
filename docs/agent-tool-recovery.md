@@ -1407,3 +1407,28 @@ never alter elapsed time, remove the timestamp from a historical seed, or retry
 unchanged. `startedAtElapsedDays` belongs to host-materialized process operations,
 not model process proposals. Reviewed entry seeds may restore historical starts;
 an overdue restriction still needs a separately committed recovery event.
+
+### Occurrence-bound process recovery
+
+`PROCESS_RECOVERY_MECHANISM_MISSING`: within the authorized source and repair
+scope, use `find_compiler_artifacts` with kind `process-template`; copy
+`results[].readArguments.ref` verbatim into `read_compiler_artifact.ref`, then copy
+`payload.id` into `processTemplateId`. At most one corrected retry is allowed if
+the exact returned template and original occurrence support the recovery.
+Otherwise preserve the draft and stop; no ID guessing or scope expansion.
+
+`PROCESS_RECOVERY_EVIDENCE_MISSING` requires original occurrence evidence for
+canonicalEventId, actorId, action when present and each recovery's template,
+subject and outcome. Use the same proposal ID for a supported corrected attempt;
+changing IDs or restarting does not discharge the failed obligation. Missing
+source support requires host review, not a retry loop.
+
+`PROCESS_RECOVERY_DUPLICATED`, `SUBJECT_UNPROVEN`, `CONTROL_MISMATCH`,
+`DURATION_UNKNOWN`, `ACTION_REQUIRED` and `PRECONDITION_UNPROVEN` preserve the
+actual failure and stop for source/mechanism review. Unknown duration is not a
+timer. `PROCESS_RECOVERY_TARGET_UNRESOLVED` means the active branch has zero or
+multiple eligible instances (or an unsupported intermediate phase/progress);
+stop for host branch review, do not guess an instance. `PROCESS_RECOVERY_UNRESOLVED`
+retains that underlying cause in runtime validation. `PROCESS_RECOVERY_EFFECT_MISSING`
+is a history or entry-seed integrity failure: preserve head and stop, never
+rewrite committed history or let rendering supply the missing recovery.

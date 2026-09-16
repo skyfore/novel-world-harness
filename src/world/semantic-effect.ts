@@ -41,7 +41,7 @@ export function validateSemanticEffect(effect: SemanticEffect, catalog: {
   if (effect.kind === "state-change" && effect.lowering.status === "mapped") {
     const execution = catalog.eventExecutions?.get(effect.lowering.executionId);
     if (!execution?.action || execution.canonicalEventId !== effect.canonicalEventId) fail("SEMANTIC_EFFECT_EXECUTION_MISSING", "Mapped effect requires an action execution of the same occurrence", "lowering.executionId");
-    if (execution) issues.push(...validateEventExecutions([execution], { entities: catalog.entities, events: catalog.events, actionSchemas: catalog.actionSchemas ?? new Map(), participations: [...(catalog.eventParticipations?.values() ?? [])] }));
+    if (execution) issues.push(...validateEventExecutions([execution], { entities: catalog.entities, events: catalog.events, actionSchemas: catalog.actionSchemas ?? new Map(), processTemplates: catalog.processTemplates, participations: [...(catalog.eventParticipations?.values() ?? [])] }));
     if (effect.kind === "state-change" && !event?.observedOutcome.operations.some(op => op.op === "set" && op.entityId === effect.subjectEntityId && op.field === effect.args.field && contentHash(op.value) === contentHash(effect.args.value))) fail("SEMANTIC_EFFECT_LOWERING_MISMATCH", "Mapped effect must match an exact set operation in the validated occurrence", "args");
   }
   return issues;

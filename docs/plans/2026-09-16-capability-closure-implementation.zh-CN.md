@@ -884,3 +884,24 @@ P4f 已提交为 `73e75ff`。
 pipeline 42、engine 0.19.0。完整 P4 仍缺 canonical recovery occurrence 的显式过程执行绑定；历史知识在晚入口的收据/cut 恢复仍需后续完成，不能由本段的无知识入口测试推导已完成。未新增 provider 或人工体验证据，整体 P1–P7 仍开放。
 
 最终验证：15 项入口/过程定向检查通过；全仓 206 文件、1244 tests 全部通过（108.68 秒），TypeScript 与 diff whitespace 检查通过。首次新增冻结入口 fixture 缺 narrativeContext.layerId，被真实持久 schema 拒绝；补齐后重新执行上述检查。
+
+
+P4g 已提交为 `6ba5060`。
+
+## P4h：恢复 occurrence 的显式执行绑定
+
+扩展既有 EventExecution，增加 processRecoveries（过程模板、患者、结局）。恢复不是自然语言说明直接改状态：编译时验证原文事件、实际身体在场、schema action 对同一患者的 advance/finish 控制，或已知时长的到期 transition。canonicalEventId、actorId、action（存在时）和每个恢复字段均需 exact evidence。缺证据的提案必须用原 ID 补正，不能换 ID 消除失败义务。
+
+同一阶段接入 proposal、finish graph、converge validator、canonical revision、audit、prepared archive/rebuild、冻结 WorldContext、closure、场景认证和 requirement catalog hash。运行时只针对当前尝试 occurrence 解析绑定，并在当前分支寻找唯一活动失能实例；零个、多个或不支持的中间进度明确停止。宿主将绑定降为 advance/finish 操作，继续经过 action、actor ownership 和同一过程权限/reducer 校验。删除 action、背景标签或未知持续时间不能绕过恢复规则。
+
+fresh replay 核对已提交恢复 occurrence 是否确实包含声明的过程操作；Genesis 不从空物理 outcome 推断恢复已发生，显式恢复 realization 需要种子中的过程历史。独立场景执行同样消费恢复绑定，合同依赖包括前序重放事件、其恢复绑定和过程模板。晚入口逐事件应用原状态/时间切片，验证治疗动作前置条件与能力，再用同一过程降级、权限和归约器保留已恢复过程，不能让其重新失能。入口 seeds 是审查后的历史投影，不替代运行时事件提交。
+
+两组原创中英文短场景各覆盖已知/未知时长。实际提出恢复绑定、同 ID 修复缺证据、finish/converge、归档重建后，由恢复 occurrence 自动产生过程操作；用例不再手动把成功恢复 delta 填入运行时请求。另验证未发生失能就恢复、活动实例歧义、缺 action、提前恢复、删除冻结 recovery evidence 被拒；恢复后的 scene cut、晚入口分支与 fresh replay 保持能力恢复。消费侧 ordinal 历史仍是声明的工程 fixture，未冒充模型时间抽取。
+
+pipeline 43、engine 0.20.0。能力限制仍沿用既有 action/speech/perception 三类；多个同模板患者过程不自动猜选，其他过程阶段不能套用该专用恢复契约。历史获知收据的晚入口恢复、照片/远程渠道/秘密身份、更完整的 P5/P6 和 P7 外部验收仍需继续；本段没有真实 provider 或独立人工评分，整体 P1–P7 未完成。
+
+首轮全仓 206 文件、1244 tests 通过（106.83 秒）后，复查补齐 schema action 发起者能力检查：即使 actorId 被省略，绑定的 initiator role 仍参与 action capacity 门禁，历史重放同样检查。新增背景标签省略 actorId 的反例通过，相关 13 项定向检查及 TypeScript 通过；随后重新执行最终全仓验证。
+
+第二轮全仓通过（109.65 秒）后，入口复核补齐 opening seed 活动规则集的带入，避免已激活规则前置条件被误判。另加消费侧 synthetic 规则守卫反例：活动时恢复成功，撤去活动资格即停止；该额外规则不是原文抽取证据。9 项入口/失能检查与 TypeScript 通过，最终状态再次运行全仓。
+
+最终验证：全仓 206 文件、1244 tests 全部通过（109.91 秒），服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。原文恢复绑定、首次缺证据后同 ID 修复、完整 typed participation、历史恢复与活动规则入口反例均已纳入该最终状态。所有测试为确定性工程验证，不替代真实 Pi 或独立人工角色体验证据。

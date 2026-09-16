@@ -1,5 +1,6 @@
+import type { ProcessTemplate } from "./process-ontology.js";
 import { z } from "zod";
-import { schemaBoundActionInvocationSchema, characterEntryCheckpointSchema, entryProjectionSeedSchema, evidenceRefSchema, idSchema, type CanonicalEvent, type Entity, type EventParticipation, type ValidationIssue } from "./model.js";
+import { schemaBoundActionInvocationSchema, characterEntryCheckpointSchema, entryProjectionSeedSchema, evidenceRefSchema, idSchema, type CanonicalEvent, type Entity, type EventParticipation, type ValidationIssue, type EvidenceAssertion } from "./model.js";
 import { resolveActionInvocation, type ActionSchema } from "./action-ontology.js";
 import { canonicalJson } from "./canonical.js";
 
@@ -10,18 +11,22 @@ export const eventExecutionSchema = z.object({
   // runtime validation. A refine on the union advertised the forbidden ad-hoc
   // lane to providers and rejected it only after they submitted a proposal.
   action: schemaBoundActionInvocationSchema.optional(),
+  processRecoveries: z.array(z.object({ processTemplateId: idSchema, subjectEntityId: idSchema, outcomeId: idSchema }).strict()).min(1).max(32).optional(),
   entryCheckpoint: characterEntryCheckpointSchema.safeExtend({ projectionSeed: entryProjectionSeedSchema }).optional(),
   evidence: z.array(evidenceRefSchema).min(1),
-}).strict().refine((binding) => Boolean(binding.action || binding.entryCheckpoint), "An execution binding must supply an action mechanism or a complete character entry checkpoint");
+}).strict().refine((binding) => Boolean(binding.action || binding.entryCheckpoint || binding.processRecoveries?.length), "An execution binding must supply an action mechanism, process recovery or a complete character entry checkpoint");
 export type EventExecution = z.infer<typeof eventExecutionSchema>;
 
 export function validateEventExecutions(bindings: readonly EventExecution[], catalog: {
   events: ReadonlyMap<string, CanonicalEvent>; entities: ReadonlyMap<string, Entity>; actionSchemas: ReadonlyMap<string, ActionSchema>;
   participations?: readonly EventParticipation[];
+  processTemplates?: ReadonlyMap<string, ProcessTemplate>;
 }): ValidationIssue[] {
-  const issues: ValidationIssue[] = [], seen = new Set<string>(), entries = new Set<string>();
+  const issues: ValidationIssue[] = [], seen = new Set<string>(), entries = new Set<string>(), recoveries = new Set<string>();
   for (const binding of bindings) {
-    const path = `event-execution/${binding.id}`, fail = (code: string, message: string) => issues.push({ code, message, path });
+    const path = `event-execution/${binding.id}`, fail = (code: string, message: string) => issues.push({ code, message: message + (code === "PROCESS_RECOVERY_MECHANISM_MISSING"
+      ? "; call same-source find_compiler_artifacts with kind process-template, copy results[].readArguments.ref into read_compiler_artifact.ref and payload.id into processTemplateId. At most one corrected retry if the source proves this recovery; otherwise stop, never guess IDs or widen scope."
+      : code.startsWith("PROCESS_RECOVERY_") ? "; preserve draft and stop for source-supported mechanism review; never retry unchanged or invent recovery." : ""), path });
     const event = catalog.events.get(binding.canonicalEventId);
     if (binding.action && seen.has(binding.canonicalEventId)) fail("EVENT_EXECUTION_DUPLICATED", `Event ${binding.canonicalEventId} has multiple action execution bindings`);
     if (binding.action) seen.add(binding.canonicalEventId);
@@ -37,6 +42,20 @@ export function validateEventExecutions(bindings: readonly EventExecution[], cat
         actorId: binding.actorId, participants: event.participants, proposedDelta: event.observedOutcome,
         hasKnowledge: Boolean(event.observedKnowledge?.operations.length), hasTimeAdvance: Boolean(event.timeAdvance), hasSceneTransition: false,
       }).issues.map((issue) => ({ ...issue, path })));
+    }
+    for (const recovery of binding.processRecoveries ?? []) {
+      const key = `${event.id}/${recovery.processTemplateId}/${recovery.subjectEntityId}`;
+      if (recoveries.has(key)) fail("PROCESS_RECOVERY_DUPLICATED", "A recovery target may appear only once per occurrence");
+      recoveries.add(key);
+      const template = catalog.processTemplates?.get(recovery.processTemplateId);
+      if (!template?.incapacity || !template.outcomeIds.includes(recovery.outcomeId)) { fail("PROCESS_RECOVERY_MECHANISM_MISSING", "Recovery requires a declared incapacity template and outcome"); continue; }
+      if (!event.participantPresence?.some(item => item.entityId === recovery.subjectEntityId && item.mode === "physical")) fail("PROCESS_RECOVERY_SUBJECT_UNPROVEN", "Recovery requires the actual physically present patient");
+      if (binding.action) {
+        const action = binding.action;
+        if (!action.roleBindings.some(role => role.roleId === template.incapacity!.ownerRoleId && role.entityIds.length === 1 && role.entityIds[0] === recovery.subjectEntityId)
+          || !template.actorControls?.some(control => control.op === "advance-process" && control.actionPattern.kind === "schema" && control.actionPattern.schemaId === action.schemaId)
+          || !template.actorControls?.some(control => control.op === "finish-process" && control.outcomeId === recovery.outcomeId && control.actionPattern.kind === "schema" && control.actionPattern.schemaId === action.schemaId)) fail("PROCESS_RECOVERY_CONTROL_MISMATCH", "Recovery must use the declared action control and bind the same patient");
+      } else if (template.incapacity.duration.kind !== "days" || !template.transitions.some(transition => transition.toPhaseId === template.incapacity!.recoveryPhaseId && transition.onDue?.outcomeId === recovery.outcomeId)) fail("PROCESS_RECOVERY_DURATION_UNKNOWN", "Natural recovery requires a declared known-duration due transition");
     }
     if (binding.entryCheckpoint) {
       const checkpoint = binding.entryCheckpoint, entryKey = `${event.id}/${binding.actorId}`;
@@ -63,4 +82,10 @@ export function applyEventExecutions(events: readonly CanonicalEvent[], bindings
       ].sort((a, b) => a.actorId.localeCompare(b.actorId)) } : {}) });
   }
   return events.map((event) => index.get(event.id)!);
+}
+
+export function validateProcessRecoveryEvidence(binding: EventExecution, assertions: readonly EvidenceAssertion[]): ValidationIssue[] {
+  if (!binding.processRecoveries?.length) return [];
+  const pointers = ["/canonicalEventId", "/actorId", ...(binding.action ? ["/action"] : []), ...(binding.processRecoveries ?? []).flatMap((_, index) => ["processTemplateId", "subjectEntityId", "outcomeId"].map(field => `/processRecoveries/${index}/${field}`))];
+  return pointers.filter(pointer => !assertions.some(assertion => assertion.target.artifactKind === "event-execution" && assertion.target.artifactId === binding.id && assertion.target.jsonPointer === pointer && assertion.relation === "supports" && assertion.strength !== "weak-inference" && assertion.anchors.length)).map(path => ({ code: "PROCESS_RECOVERY_EVIDENCE_MISSING", message: `Recovery ${binding.id} requires exact source evidence at ${path}; preserve draft and stop for source review`, path }));
 }

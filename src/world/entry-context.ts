@@ -1,10 +1,13 @@
+import { applyProcessDelta, emptyProcessState } from "./process-effects.js";
+import { applyStateDelta, emptyWorldState, StateSchemaRegistry, DEFAULT_STATE_FIELDS, evaluatePredicateTruth, advanceTemporalState } from "./state.js";
+import { resolveActionInvocation } from "./action-ontology.js";
 import { contentHash } from "./canonical.js";
-import { incapacityOnsets } from "./process-capacity.js";
+import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateIncapacityChanges } from "./process-capacity.js";
 import { materializeProcessProposal } from "./process-ontology.js";
 import { validateSemanticEffect } from "./semantic-effect.js";
 import { deriveEntryCut, type EntryCut } from "./entry-cut.js";
 import { timeAdvanceInDays } from "./time.js";
-import { applyEventExecutions } from "./event-execution.js";
+import { applyEventExecutions, validateEventExecutions } from "./event-execution.js";
 import type { EntryProjectionSeed } from "./model.js";
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 import type {
@@ -211,9 +214,30 @@ export function deriveCharacterEntrySeed(
     }
     const templates = new Map((bundle.canonical.processTemplates ?? []).map(template => [template.id, template]));
     const processes: EntryProjectionSeed["processes"] = { version: 1, operations: [] };
+    const entities = new Map(bundle.canonical.entities.map(entity => [entity.id, entity]));
+    const rules = new Map(bundle.canonical.rules.map(rule => [rule.id, rule]));
+    const actions = new Map((bundle.canonical.actionSchemas ?? []).map(action => [action.id, action]));
+    const recoveryBindings = (bundle.canonical.eventExecutions ?? []).filter(binding => binding.processRecoveries?.length);
+    const recoveryIssues = validateEventExecutions(recoveryBindings, { entities, events: new Map(bundle.canonical.events.map(event => [event.id, event])), actionSchemas: actions, processTemplates: templates, participations: bundle.canonical.eventParticipations });
+    if (recoveryIssues.length) throw new Error(recoveryIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+    const registry = new StateSchemaRegistry(DEFAULT_STATE_FIELDS);
+    let processState = emptyProcessState(contentHash(cut));
+    let world = emptyWorldState(contentHash(cut));
+    world.logicalTime.elapsedDays = openingSeed?.elapsedDays ?? 0;
+    world.activeRuleIds = [...(openingSeed?.activeRuleIds ?? [])];
+    world = applyStateDelta(world, bundle.canonical.initialWorld.delta, registry, entities, rules);
     let elapsedDays = openingSeed?.elapsedDays ?? 0;
     for (const event of forwardEvents) {
+      const before = world;
       elapsedDays += timeAdvanceInDays(event.timeAdvance);
+      world = advanceTemporalState(world, { step: world.logicalTime.step + 1, elapsedDays, storyTime: event.storyTime }, registry, entities);
+      world = applyStateDelta(world, event.observedOutcome, registry, entities, rules);
+      const binding = recoveryBindings.find(binding => binding.canonicalEventId === event.id);
+      if (binding?.action) {
+        const resolved = resolveActionInvocation(binding.action, actions, entities, { actorId: binding.actorId, participants: event.participants, proposedDelta: event.observedOutcome, hasKnowledge: Boolean(event.observedKnowledge?.operations.length), hasTimeAdvance: Boolean(event.timeAdvance), hasSceneTransition: false });
+        const capacityIssues = capacityUseIssues({ actorId: binding.actorId }, processState, processState, templates);
+        if (resolved.issues.length || capacityIssues.length || [...event.preconditions, ...resolved.preconditions].some(predicate => evaluatePredicateTruth(before, predicate, registry) !== "true")) throw new Error("PROCESS_RECOVERY_PRECONDITION_UNPROVEN: Entry recovery action is not executable at its original cut; stop for source review.");
+      }
       const effects = (bundle.canonical.semanticEffects ?? []).filter(effect => effect.canonicalEventId === event.id);
       const issues = effects.flatMap(effect => validateSemanticEffect(effect, {
         entities: new Map(bundle.canonical.entities.map(entity => [entity.id, entity])), events: new Map(bundle.canonical.events.map(item => [item.id, item])),
@@ -223,9 +247,14 @@ export function deriveCharacterEntrySeed(
       if (issues.length) throw new Error(issues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
       if (effects.some(effect => effect.lowering.status === "unmapped")) throw new Error("SEMANTIC_EFFECT_UNMAPPED: Entry history contains an unsupported mechanism; preserve source and stop for host compilation.");
       const onsets = incapacityOnsets(effects, new Set([event.id]), templates);
-      if (onsets.length) processes.operations.push(...materializeProcessProposal({ version: 1, operations: onsets }, {
-        branchId: `entry-${actorId}`, parentCommitId: contentHash(cut), proposalHash: contentHash(event), templates, elapsedDays,
-      }).delta.operations);
+      const operations = [...onsets, ...incapacityRecoveries(recoveryBindings, new Set([event.id]), processState, templates, event.action)];
+      if (operations.length) {
+        const delta = materializeProcessProposal({ version: 1, operations }, { branchId: `entry-${actorId}`, parentCommitId: contentHash(cut), proposalHash: contentHash(event), templates, elapsedDays }).delta;
+        const provenance = { commitId: contentHash(cut), eventId: event.id, eventHash: contentHash(event) };
+        validateIncapacityChanges({ actorId: binding?.action ? binding.actorId : undefined, action: event.action }, delta, processState, { entities, templates }, before, world, provenance, onsets);
+        processState = applyProcessDelta(processState, delta, { entities, templates }, provenance, elapsedDays);
+        processes.operations.push(...delta.operations);
+      }
     }
     projectionSeed = { version: 1, semantics: { version: 1, operations: [] }, processes, norms: { version: 1, operations: [] },
       activeRuleIds: [...activeRuleIds].sort(), elapsedDays };

@@ -1,3 +1,4 @@
+import { eventExecutionSchema, validateProcessRecoveryEvidence } from "../world/event-execution.js";
 import { validateIncapacityEvidence } from "../world/process-capacity.js";
 import { validateAcquisition, validateAcquisitionEvidence, acquisitionSchema } from "../world/acquisition.js";
 import { validatePerceptionObservation, validatePerceptionObservationEvidence, perceptionObservationSchema } from "../world/perception-observation.js";
@@ -683,6 +684,7 @@ export async function auditCompiler(
     for (const issue of result.issues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
     const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
     if (!binding?.assertions.length) {
+      if (artifact.kind === "event-execution" && eventExecutionSchema.parse(artifact.payload).processRecoveries?.length) { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "PROCESS_RECOVERY_EVIDENCE_MISSING", message: "Recovery requires exact field evidence" }); }
       if (artifact.kind === "process-template" && processTemplateSchema.parse(artifact.payload).incapacity) { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "INCAPACITY_EVIDENCE_MISSING", message: "Incapacity process requires exact field evidence" }); }
       if (artifact.kind === "acquisition") { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "ACQUISITION_EVIDENCE_MISSING", message: "Acquisition has no exact evidence binding; it is unverified." }); }
       if (artifact.kind === "perception-observation") { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "PERCEPTION_EVIDENCE_MISSING", message: "Perception has no exact evidence binding; it is unverified." }); }
@@ -730,6 +732,7 @@ export async function auditCompiler(
     artifactsWithExactEvidence += 1;
     assertionsChecked += binding.assertions.length;
     const exactIssues = [
+      ...(artifact.kind === "event-execution" ? validateProcessRecoveryEvidence(eventExecutionSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(artifact.payload), binding.assertions) : []),

@@ -1,4 +1,5 @@
-import { capacityUseIssues, incapacityOnsets, validateIncapacityChanges } from "./process-capacity.js";
+import type { EventExecution } from "./event-execution.js";
+import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateIncapacityChanges } from "./process-capacity.js";
 import { acquisitionCatalog, validateAcquisitionOperation, validateAcquisition, type Acquisition } from "./acquisition.js";
 import { validatePerceptionAcquisition, validatePerceptionObservation, type PerceptionObservation } from "./perception-observation.js";
 import { validateExpressionAcquisition, validateUtteranceExpression, validateAttributionExpressions } from "./utterance-expression.js";
@@ -123,6 +124,7 @@ export type WorldModelContext = {
   spatialRelations?: readonly SpatialRelation[];
   sceneOccurrences?: readonly SceneOccurrence[];
   eventFrames?: ReadonlyMap<string, EventFrame>;
+  eventExecutions?: ReadonlyMap<string, EventExecution>;
   semanticEffects?: ReadonlyMap<string, SemanticEffect>;
   perceptionObservations?: ReadonlyMap<string, PerceptionObservation>;
   acquisitions?: ReadonlyMap<string, Acquisition>;
@@ -620,6 +622,7 @@ export class WorldEngine {
     for (const observation of this.context.perceptionObservations?.values() ?? []) expressionOccurrences.add(observation.canonicalEventId);
     for (const acquisition of this.context.acquisitions?.values() ?? []) expressionOccurrences.add(acquisition.canonicalEventId);
     for (const effect of this.context.semanticEffects?.values() ?? []) if (effect.kind === "temporary-incapacity") expressionOccurrences.add(effect.canonicalEventId);
+    for (const binding of this.context.eventExecutions?.values() ?? []) if (binding.processRecoveries?.length) expressionOccurrences.add(binding.canonicalEventId);
     const inferredRealizations = [...(this.context.events?.values() ?? [])]
       .filter((event) => !expressionOccurrences.has(event.id) && !semanticEffectRealizationIssues(this.context.semanticEffects?.values() ?? [], new Set([event.id])).length && canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
       .map((event) => event.id);
@@ -627,6 +630,13 @@ export class WorldEngine {
       ...(genesisOptions.realizesCanonicalEventIds === undefined ? inferredRealizations : []),
       ...(genesisOptions.realizesCanonicalEventIds ?? []),
     ])].sort();
+    for (const binding of this.context.eventExecutions?.values() ?? []) if (binding.processRecoveries?.length) {
+      if (realizesCanonicalEventIds.includes(binding.canonicalEventId)) for (const recovery of binding.processRecoveries) {
+        const condition = this.context.processTemplates?.get(recovery.processTemplateId)?.incapacity;
+        const starts = completeSeed?.processes.operations.filter(operation => operation.op === "start-process" && operation.process.templateId === recovery.processTemplateId && operation.process.ownerBindings.some(role => role.roleId === condition?.ownerRoleId && role.entityIds.includes(recovery.subjectEntityId))) ?? [];
+        if (!starts.some(start => start.op === "start-process" && completeSeed?.processes.operations.some(operation => operation.op === "finish-process" && operation.processId === start.process.id && operation.outcomeId === recovery.outcomeId))) throw new Error("PROCESS_RECOVERY_EFFECT_MISSING: Genesis recovery realization requires its reviewed process history; stop for host entry review.");
+      }
+    }
     const genesisOnsets = incapacityOnsets(this.context.semanticEffects?.values() ?? [], new Set(realizesCanonicalEventIds), this.context.processTemplates ?? new Map());
     for (const onset of genesisOnsets) if (onset.op === "start-process" && !completeSeed?.processes.operations.some(operation => operation.op === "start-process" && operation.process.templateId === onset.process.templateId && contentHash(operation.process.ownerBindings) === contentHash(onset.process.ownerBindings))) throw new Error("INCAPACITY_ONSET_MISSING: Genesis realization requires its reviewed process seed; equal state or prose does not establish incapacity. Stop for host entry review.");
     const semanticIssues = semanticEffectRealizationIssues(this.context.semanticEffects?.values() ?? [], new Set(realizesCanonicalEventIds));
@@ -725,6 +735,11 @@ export class WorldEngine {
     const realizedForCapacity = new Set(!parsed.canonicalAdaptation && parsed.possibilityId?.startsWith("canon-") ? [parsed.possibilityId.slice(6)] : []);
     const onsets = incapacityOnsets(context.semanticEffects?.values() ?? [], realizedForCapacity, context.processTemplates ?? new Map());
     if (onsets.length) parsed = eventProposalSchema.parse({ ...parsed, proposedProcesses: { version: 1, operations: [...(parsed.proposedProcesses?.operations ?? []), ...onsets.filter(onset => onset.op !== "start-process" || !(parsed.proposedProcesses?.operations ?? []).some(operation => operation.op === "start-process" && operation.process.templateId === onset.process.templateId && contentHash(operation.process.ownerBindings) === contentHash(onset.process.ownerBindings)))] } });
+    const recoveryErrors: ValidationIssue[] = [];
+    try {
+      const recoveries = incapacityRecoveries(context.eventExecutions?.values() ?? [], realizedForCapacity, projection.processes, context.processTemplates ?? new Map(), parsed.action);
+      if (recoveries.length) parsed = eventProposalSchema.parse({ ...parsed, proposedProcesses: { version: 1, operations: [...(parsed.proposedProcesses?.operations ?? []), ...recoveries.filter(operation => !(parsed.proposedProcesses?.operations ?? []).some(existing => contentHash(existing) === contentHash(operation)))] } });
+    } catch (error) { recoveryErrors.push({ code: "PROCESS_RECOVERY_UNRESOLVED", message: String(error), path: "proposedProcesses" }); }
     const causalRelationProposals = normalizedCausalRelationProposals(parsed, projection);
     const causalRelationErrors = validateBranchCausalRelationProposals(
       causalRelationProposals,
@@ -734,7 +749,7 @@ export class WorldEngine {
     );
     let semanticDelta: import("./model.js").BranchSemanticDelta | undefined;
     let stagedSemantics = projection.semantics;
-    const semanticErrors: ValidationIssue[] = [...validateActorOutcomeOwnership(parsed, projection, context.normTemplates, context.processTemplates), ...capacityUseIssues(parsed, projection.processes, projection.processes, context.processTemplates ?? new Map())];
+    const semanticErrors: ValidationIssue[] = [...recoveryErrors, ...validateActorOutcomeOwnership(parsed, projection, context.normTemplates, context.processTemplates), ...capacityUseIssues(parsed, projection.processes, projection.processes, context.processTemplates ?? new Map(), context.perceptionObservations, context.actionSchemas)];
     if ((parsed.source === "player" || parsed.source === "actor") && parsed.actorId) {
       const knownClaimIds = new Set(Object.values(projection.knowledge.actors[parsed.actorId] ?? {}).filter(isActionableKnowledge).map((fact) => fact.claimId));
       const check = (mechanism: Parameters<typeof mechanismIsDisclosed>[0] | undefined, path: string) => {
@@ -1422,6 +1437,7 @@ function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
     entities: [...context.entities.entries()].sort(([left], [right]) => left.localeCompare(right)),
     claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    eventExecutions: [...(context.eventExecutions?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     semanticEffects: [...(context.semanticEffects?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     perceptionObservations: [...(context.perceptionObservations?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     acquisitions: [...(context.acquisitions?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),

@@ -518,3 +518,20 @@ validity; it does not replay accepted proposals. `requirements inspect` remains
 read-only. `refresh` acquires the compiler lock, reports the journal and exits 2
 when the current role subject remains unavailable. It is not a role evaluator or
 a publication command. Do not reset history or retry the model unchanged.
+
+Role-review revision commands and saved role-review registration also observe
+the retained requirements, including a saved first review. Replaying the exact
+host revision decision repairs an interrupted observation without clearing the
+new roster. A changed roster or definition cannot inherit its predecessor's
+evaluation.
+
+`finish_compiler_batch` observes validity after marking the original receipt
+completed. Its result retains unavailable-subject diagnostics in text and in
+`requirementValidityIssues`; completion still means only the finish protocol.
+If the journal write fails at this point, preserve the already completed receipt
+and saved metadata. Stop model retries and use original verified host finish
+recovery or `requirements refresh` after repairing the reported state. Do not
+submit another review or a new batch to conceal the failure. Recovery observes
+again even for an already-converged world-only finish, without replaying its
+accepted proposals. The existing single-use and changed-dependency checks remain
+in force.

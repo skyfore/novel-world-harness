@@ -3215,10 +3215,12 @@ export function createCompilerProposalToolset(
         accounting: listedAccounting.length,
       };
       if (receipts && receipt) await receipts.complete(receipt.fingerprint);
+      const { observeRequirementValidity } = await import("./requirement-observation.js");
+      const requirementValidityIssues = activeSourceId ? await observeRequirementValidity(workspaceRoot, activeSourceId) : [];
       finished = true;
       return {
-        content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}). World proposals: ${artifactCounts.world}; accounting proposals: ${artifactCounts.accounting}. This checkpoint does not certify executable closure or playability.` }],
-        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: expected, reviewedSegmentIds: reviewedIds, artifactCounts },
+        content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}). World proposals: ${artifactCounts.world}; accounting proposals: ${artifactCounts.accounting}. This checkpoint does not certify executable closure or playability.${requirementValidityIssues.length ? ` Requirement validity: ${requirementValidityIssues.join("; ")}` : ""}` }],
+        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: expected, reviewedSegmentIds: reviewedIds, artifactCounts, requirementValidityIssues },
         terminate: true,
       };
     },

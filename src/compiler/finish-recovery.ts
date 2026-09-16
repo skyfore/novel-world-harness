@@ -40,6 +40,8 @@ export async function recoverCompilerFinish(root: string, sourceId: string, batc
           }
         }
         await store.retainRequirementAttempts(receipt);
+        const { observeRequirementValidity } = await import("./requirement-observation.js");
+        await observeRequirementValidity(root, sourceId);
         return true;
       } catch (error) { throw finishHostError(String(error)); }
     }

@@ -8,6 +8,7 @@ import { baseStructuralUnits } from "./structure.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
 import { assertRoleReviewRevisionEvidence } from "./role-review-revision.js";
+import { observeRequirementValidity } from "./requirement-observation.js";
 
 export const beginCoreRoleReviewSchema = z.object({
   sourceId: idSchema, revisionId: idSchema, priorRosterHash: z.string().regex(/^[a-f0-9]{64}$/),
@@ -26,9 +27,13 @@ export async function beginCoreRoleReviewRevision(root: string, raw: z.infer<typ
       || existing.scopeDecisionRef !== input.scopeDecisionRef || existing.reason !== input.reason) throw new Error("Role review revision replay differs from the original host decision. Preserve history and stop unchanged retries; never rewind to an earlier revision");
     assertRoleReviewRevisionEvidence(existing, bytes);
     if (fresh.subjectHash !== existing.nextRoster.subjectHash) throw new Error("Review subject changed during revision recovery; stop for host source review, do not overwrite partial reviews");
-    if (saved?.reviewRevisionId === existing.id && saved.subjectHash === existing.nextRoster.subjectHash) return existing;
+    if (saved?.reviewRevisionId === existing.id && saved.subjectHash === existing.nextRoster.subjectHash) {
+      await observeRequirementValidity(root, input.sourceId);
+      return existing;
+    }
     if (!saved || contentHash(saved) !== existing.priorRosterHash) throw new Error("Saved roster changed during revision recovery; stop for host review, do not overwrite it");
     await store.write(existing.nextRoster);
+    await observeRequirementValidity(root, input.sourceId);
     return existing;
   }
   if (!saved?.reviews.length) throw new Error("There is no retained review to revise. Continue the current independent review; do not begin another revision or reset partial work");
@@ -45,5 +50,6 @@ export async function beginCoreRoleReviewRevision(root: string, raw: z.infer<typ
     nextRoster: { ...fresh, reviewRevisionId: input.revisionId }, units: baseStructuralUnits(structure), scopeDecisionRef: input.scopeDecisionRef, reason: input.reason,
   }, bytes);
   await store.write(revision.nextRoster);
+  await observeRequirementValidity(root, input.sourceId);
   return revision;
 }

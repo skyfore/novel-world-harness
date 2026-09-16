@@ -198,3 +198,40 @@ it.each(["before-save", "before-completion", "retired"])("restores an active pre
   expect((await new CompilerFinishReceipts(f.root, f.source.source.id, batchId).read())!.state).toBe("prepared");
   await expect(cloneCache.restoreCompilerCheckpoint(cloneSource.source, archive.bundleHash!)).rejects.toThrow();
 });
+
+it("invalidates prior role results on a host revision and recovers observation after a completed finish", async () => {
+  const { settleCoreRoleRequirements } = await import("../src/compiler/core-role-requirement-service.js");
+  const { recoverCompilerFinish } = await import("../src/compiler/finish-recovery.js");
+  const f = await fixture();
+  await new InitialWorldStore(f.root).put({ version: 1, evidence: f.source.evidence("Hero waits."), participantPresence: [{ entityId: "hero", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }] } });
+  const batches = await prepareCompilerBatches(f.root, f.source.source); await new CompilerBatchStore(f.root).replaceCompleted(f.source.source.id, batches.map(batch => batch.id));
+  await settleCoreRoleRequirements(f.root, f.source.source.id, path.join(f.root, "cache"));
+  await beginCoreRoleReviewRevision(f.root, f.input);
+  let history = await f.ledger.history();
+  expect(history.filter(record => record.payload.kind === "core-role-invalidation")).toHaveLength(1);
+  const unchanged = history;
+  await beginCoreRoleReviewRevision(f.root, f.input);
+  expect(await f.ledger.history()).toEqual(unchanged);
+  const batchId = `role-roster-${f.source.source.id}-observed`;
+  const finish = await prepareReview(f.root, f.source.source.id, batchId);
+  // Only interrupt observation after the receipt was actually marked completed.
+  const original = CompilerFinishReceipts.prototype.complete;
+  vi.spyOn(CompilerFinishReceipts.prototype, "complete").mockImplementationOnce(async function (this: CompilerFinishReceipts, fingerprint) {
+    const result = await original.call(this, fingerprint);
+    vi.spyOn(RequirementLedger.prototype, "invalidateCoreRoleEvaluation").mockRejectedValueOnce(new Error("interrupted post-finish observation"));
+    return result;
+  });
+  await expect(finish()).rejects.toThrow("Committed writes remain committed");
+  expect((await new CompilerFinishReceipts(f.root, f.source.source.id, batchId).read())!.state).toBe("completed");
+  const saved = await f.store.read(f.source.source.id);
+  expect(saved!.reviews).toHaveLength(1);
+  vi.restoreAllMocks();
+  await recoverCompilerFinish(f.root, f.source.source.id, batchId);
+  await recoverCompilerFinish(f.root, f.source.source.id, batchId);
+  expect(await f.store.read(f.source.source.id)).toEqual(saved);
+  history = await f.ledger.history();
+  expect(history.filter(record => record.payload.kind === "core-role-evaluation")).toHaveLength(1);
+  const cache = new PreparedNovelCache(f.root, path.join(f.root, "cache"));
+  const currentHash = preparedSubjectHash(await cache.candidateSnapshot(f.source.source));
+  expect(history.filter(record => record.payload.kind === "core-role-invalidation" && record.payload.nextSubjectSnapshotHash === currentHash)).toHaveLength(1);
+});

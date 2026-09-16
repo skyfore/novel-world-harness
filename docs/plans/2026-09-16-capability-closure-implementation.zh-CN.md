@@ -221,3 +221,17 @@ P1l 已提交为 `5ac2535`。
 这仍不是 P1 的完整完成声明：直接底层 store 写入、独立 metadata/范围变化命令的即时观察及完整验收映射还需核对；当前认证继续从冻结输入重算。P2–P7 尚未完成；未调用真实 provider，未执行独立人工体验验收。
 
 验证：`pnpm test --maxWorkers=2` 的 186 文件、1085 tests 全部通过（78.37 秒）；最终 `pnpm check` 的服务端、Web、E2E TypeScript 检查、`git diff --check` 及新 CLI 帮助入口通过。
+
+P1m 已提交为 `366c874`。
+
+## P1n：审阅范围与 finish 元数据写入后的观察
+
+角色审阅宿主修订的首次执行、指针恢复和原决策重放都观察当前要求；已保存的第一份审阅及双审定义登记也接入同一入口。旧评估不会因暂未开始下次 converge 而继续被当作当前结果。观察不制造新满足，也不清除已有审阅。
+
+finish_compiler_batch 在原回执标记 completed 后观察要求，将不可冻结原因放入文本和 requirementValidityIssues。若这一阶段追加账本失败，completed 回执和已保存 metadata 保留，恢复原 finish 只补观察，不重开模型审阅。已收敛 world-only 回执的恢复快捷路径同样接入。旧单次提交、原依赖核验和恢复边界保持有效。
+
+回归先创建真实候选评估，再开启宿主修订，验证立即失效及原决策重放幂等；随后在第一份新审阅 finish 标记 completed 后注入观察失败，验证回执与审阅仍保留，重复宿主恢复不会增加审阅或能力评估，且最终失效引用当前真实 subject hash。
+
+该接线位于 compiler/宿主领域入口，未向底层世界 store 或运行时 reducer 引入编译账本写入。底层直接写入后的宿主可用 refresh；认证仍强制重算当前冻结输入。P1 的完整验收矩阵仍需核对，P2 的宿主授权修复执行链尚未落地，P3–P7 也未完成。未调用真实 provider 或进行独立人工体验评价。
+
+验证：15 项针对性测试通过；全量 186 文件、1086 tests 通过（77.38 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。

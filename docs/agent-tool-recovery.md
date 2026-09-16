@@ -491,3 +491,30 @@ partial review. Copy `savedRosterHash` and the last
 `coreRoleDefinitions[].revisionHash` (when present), with at most one corrected
 host retry. An active prepared finish must still be recovered first. Never reset
 the roster, downgrade a completed receipt, guess references or retry unchanged.
+
+### Requirement validity after host proposal acceptance
+
+Single-proposal acceptance and general convergence observe retained requirement
+validity under their host compiler operation. Scene requirements use the current
+canonical evaluator. Previously evaluated role requirements compare the complete
+current candidate subject; a changed subject appends invalidation and never
+grants a new role success. Sources without prior role evaluations do not acquire
+invented evaluations. Observation conservatively checks all retained sources
+because canonical inputs can be shared.
+
+If pending work or invalid canonical inputs prevent freezing the current role
+subject, append invalidation with `nextSubjectSnapshotHash: null` and the actual
+failure reason. This means the current subject is unavailable, not an empty or
+guessed hash. Convergence reports the issue and can still quarantine invalid
+drafts. Current certification must evaluate a valid frozen subject independently.
+After host repair, re-evaluation appends a new result even if its subject has
+returned to a previously evaluated value; the intervening invalidation remains.
+
+If the validity journal append fails after acceptance, accepted artifacts remain
+committed. Stop model retries and preserve receipts and history. Repair the
+reported storage error, then run `nwh requirements refresh --source <exact-id>`
+or resume the original convergence. An empty convergence retry also observes
+validity; it does not replay accepted proposals. `requirements inspect` remains
+read-only. `refresh` acquires the compiler lock, reports the journal and exits 2
+when the current role subject remains unavailable. It is not a role evaluator or
+a publication command. Do not reset history or retry the model unchanged.

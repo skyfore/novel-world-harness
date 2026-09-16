@@ -37,7 +37,7 @@ export type RequirementResult = z.infer<typeof requirementResultSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("core-role-review-snapshot"), roster: roleRosterSchema }).strict(),
   z.object({ kind: z.literal("core-role-review-revision"), revision: roleReviewRevisionSchema }).strict(),
-  z.object({ kind: z.literal("core-role-invalidation"), evaluationRef: hash, nextSubjectSnapshotHash: hash, reason: text }).strict(),
+  z.object({ kind: z.literal("core-role-invalidation"), evaluationRef: hash, nextSubjectSnapshotHash: hash.nullable(), reason: text }).strict(),
   z.object({ kind: z.literal("core-role-attempt-evaluation"), settlementKey: hash, receiptFingerprint: hash, definitionRevision: hash,
     subjectSnapshotHash: hash, evaluationRef: hash, result: requirementResultSchema.shape.requirements.element }).strict(),
   z.object({ kind: z.literal("core-role-attempt"), receipt: compilerFinishReceiptSchema }).strict(),
@@ -259,12 +259,17 @@ export class RequirementLedger {
   }
   async invalidateCoreRoleEvaluation(nextSubjectSnapshotHash: string): Promise<void> {
     hash.parse(nextSubjectSnapshotHash);
+    await this.recordCoreRoleInvalidation(nextSubjectSnapshotHash, "Frozen subject changed; retain the previous evaluation as historical evidence only");
+  }
+  async invalidateUnobservableCoreRoleEvaluation(reason: string): Promise<void> {
+    await this.recordCoreRoleInvalidation(null, text.parse(reason));
+  }
+  private async recordCoreRoleInvalidation(nextSubjectSnapshotHash: string | null, reason: string): Promise<void> {
     const history = await this.history(), previous = history.findLast(record => record.payload.kind === "core-role-evaluation");
     if (!previous || previous.payload.kind !== "core-role-evaluation" || previous.payload.subjectSnapshotHash === nextSubjectSnapshotHash) return;
     const evaluationRef = contentHash(previous.payload);
-    if (history.some(record => record.payload.kind === "core-role-invalidation" && record.payload.evaluationRef === evaluationRef && record.payload.nextSubjectSnapshotHash === nextSubjectSnapshotHash)) return;
-    await this.publish({ kind: "core-role-invalidation", evaluationRef, nextSubjectSnapshotHash,
-      reason: "Frozen subject changed; retain the previous evaluation as historical evidence only" });
+    if (history.slice(previous.sequence + 1).some(record => record.payload.kind === "core-role-invalidation" && record.payload.evaluationRef === evaluationRef && record.payload.nextSubjectSnapshotHash === nextSubjectSnapshotHash && record.payload.reason === reason)) return;
+    await this.publish({ kind: "core-role-invalidation", evaluationRef, nextSubjectSnapshotHash, reason });
   }
   async recordCoreRoleEvaluation(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): Promise<void> {
     const definition = (await this.coreRoleDefinitionHistory()).at(-1);
@@ -277,8 +282,9 @@ export class RequirementLedger {
     const result = evaluateCoreRoleCapabilities(bundle, assessment.roster, assessment.playability, subjectSnapshotHash);
     if (result.revisionHash !== definition.specHash || contentHash(result) !== contentHash(assessment.coreRoleResult)) throw new Error("Core role evaluation differs from its frozen deterministic result; stop for host review");
     const payload = { kind: "core-role-evaluation" as const, definitionRevision: definition.revisionHash, subjectSnapshotHash, result };
-    const previous = (await this.history()).findLast(record => record.payload.kind === "core-role-evaluation");
-    if (!previous || contentHash(previous.payload) !== contentHash(payload)) {
+    const history = await this.history(), previous = history.findLast(record => record.payload.kind === "core-role-evaluation");
+    const invalidated = previous && history.slice(previous.sequence + 1).some(record => record.payload.kind === "core-role-invalidation" && record.payload.evaluationRef === contentHash(previous.payload));
+    if (!previous || invalidated || contentHash(previous.payload) !== contentHash(payload)) {
       await this.invalidateCoreRoleEvaluation(subjectSnapshotHash);
       await this.publish(payload);
     }

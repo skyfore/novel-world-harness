@@ -89,6 +89,15 @@ program.command("review-scenes").requiredOption("--spec <path>", "independent so
 const requirementsCommand = program.command("requirements").description("Inspect persistent capability definitions and evaluation history");
 requirementsCommand.command("inspect").requiredOption("--source <id>", "registered source ID")
   .action(async options => inspectRequirementsCommand(rootFor({}), options.source));
+requirementsCommand.command("refresh").requiredOption("--source <id>", "registered source ID")
+  .description("Observe current requirement validity without replaying proposals or granting role satisfaction")
+  .action(async options => {
+    const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
+    const { observeRequirementValidity } = await import("./compiler/requirement-observation.js");
+    const issues = await withWorkspaceOperationLock(rootFor({}), "compiler", () => observeRequirementValidity(rootFor({}), options.source));
+    await inspectRequirementsCommand(rootFor({}), options.source);
+    if (issues.length) process.exitCode = 2;
+  });
 requirementsCommand.command("begin-core-role-review").requiredOption("--source <id>", "registered source ID")
   .requiredOption("--revision <id>", "stable host review revision ID; reuse the same ID to recover")
   .requiredOption("--roster-hash <hash>", "exact savedRosterHash from requirements inspect")

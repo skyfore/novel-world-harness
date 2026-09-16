@@ -695,6 +695,7 @@ async function convergeForPreparation(
 }
 
 function printConvergence(result: WorldProposalConvergence, report: (message: string) => void): void {
+  for (const issue of result.requirementValidityIssues ?? []) report(`Requirement validity: ${issue}`);
   for (const item of result.canonical.accepted) report(`Accepted ${item.kind} proposal ${item.id}.`);
   for (const id of result.possibilities.accepted) report(`Accepted possibility proposal ${id}.`);
   for (const item of result.canonical.blocked) {

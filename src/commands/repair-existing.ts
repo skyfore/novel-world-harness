@@ -275,6 +275,7 @@ export async function repairExistingCommand(
         `Converging repair proposals · ${progress.phase} ${progress.processed}/${progress.total}`,
       ),
     });
+    for (const issue of convergence.requirementValidityIssues ?? []) report(`Requirement validity: ${issue}`);
     const quarantined = await quarantineUncommittableProposals(root, convergence);
     report(
       `Repair convergence accepted ${convergence.canonical.accepted.length + convergence.possibilities.accepted.length} proposal(s)`

@@ -1,4 +1,6 @@
 import { stdout } from "node:process";
+import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { observeRequirementValidity } from "../compiler/requirement-observation.js";
 import { convergeWorldProposals } from "../compiler/converge.js";
 import { PossibilityCommitService } from "../compiler/possibility-commit.js";
 import { CompilerCommitService, type CanonicalProposalKind } from "../compiler/validator.js";
@@ -28,6 +30,10 @@ export async function showProposalCommand(root: string, id: string, status: Prop
 }
 
 export async function acceptProposalCommand(root: string, kind: string, id: string): Promise<void> {
+  return withWorkspaceOperationLock(root, "compiler", () => acceptProposal(root, kind, id));
+}
+
+async function acceptProposal(root: string, kind: string, id: string): Promise<void> {
   if (kind === "possibility") {
     const validation = await new PossibilityCommitService(root).accept(id);
     if (!validation.accepted) {
@@ -36,6 +42,7 @@ export async function acceptProposalCommand(root: string, kind: string, id: stri
       process.exitCode = 2;
       return;
     }
+    for (const issue of await observeRequirementValidity(root)) stdout.write(`Requirement validity: ${issue}\n`);
     stdout.write(`Accepted possibility proposal ${id} into the possibility template store.\n`);
     return;
   }
@@ -47,12 +54,14 @@ export async function acceptProposalCommand(root: string, kind: string, id: stri
     process.exitCode = 2;
     return;
   }
+  for (const issue of await observeRequirementValidity(root)) stdout.write(`Requirement validity: ${issue}\n`);
   stdout.write(`Accepted ${kind} proposal ${id} into canonical model.\n`);
   for (const warning of validation.warnings) stdout.write(`warning ${warning.code}: ${warning.message}\n`);
 }
 
 export async function acceptAllValidProposalsCommand(root: string): Promise<void> {
-  const result = await convergeWorldProposals(root);
+  const result = await withWorkspaceOperationLock(root, "compiler", () => convergeWorldProposals(root));
+  for (const issue of result.requirementValidityIssues ?? []) stdout.write(`Requirement validity: ${issue}\n`);
   for (const item of result.canonical.accepted) stdout.write(`accepted\t${item.kind}\t${item.id}\n`);
   for (const id of result.possibilities.accepted) stdout.write(`accepted\tpossibility\t${id}\n`);
   for (const item of result.canonical.blocked) {

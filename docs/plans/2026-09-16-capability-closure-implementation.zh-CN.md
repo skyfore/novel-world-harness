@@ -207,3 +207,17 @@ P1k 已提交为 `46dcf72`。
 新增回归覆盖保存前中断、保存后完成标记前中断、已退休回执三种情况，使用真实工具和候选归档在新工作区重复恢复。验证原 finish 先于第二次模型调用恢复、退休回执不激活、错误 epoch 和世界依赖被拒绝、原工作区不被改写，以及旧候选不能撤销后续完成。
 
 验证：14 项针对性测试通过；`pnpm test --maxWorkers=2` 的 186 文件、1084 tests 全部通过（75.65 秒）；`pnpm check` 的服务端、Web、E2E TypeScript 检查通过。P1 仍需完成其他 canonical 写入入口的失效观察和整体验收映射；P2–P7 尚未完成。未调用真实 provider，未执行独立人工体验验收。
+
+P1l 已提交为 `5ac2535`。
+
+## P1m：通用收敛与单条接受后的失效观察
+
+通用 convergeWorldProposals 和单条提案接受命令新增宿主要求观察，补上 prepare-all 专用修复路径之外的入口。单条与批量接受 CLI 使用 compiler lock；prepare-all、reparse、repair-existing 继续由原宿主操作持锁。观察保守扫描已保留的来源：场景使用当前 canonical 评估，角色仅比较已有评估与完整当前候选 subject，变化时追加失效而不宣布新满足。没有历史评估时不补造结果。
+
+收敛之后可能还有待隔离的无效提案，或当前 initial world 已不可冻结。这些情况记录原始错误原因及 nextSubjectSnapshotHash=null，明确表示无法观察有效后继快照；不伪造 hash，也不阻断既有 quarantine 流程。各宿主收敛报告保留这些问题。再次经过真实角色评估时，即使回到此前同一 subject，也追加失效之后的新结果；同一评估之后的重复观察保持幂等。
+
+接受成功后账本追加失败不回滚已经提交的世界，也不要求重跑模型。新增 requirements refresh --source 在 compiler lock 下补观察，并打印账本；未能冻结当前角色输入时退出 2。空 converge 重试同样补观察。requirements inspect 保持只读。测试用真实提案接受验证 append 中断后的 accepted 状态、空重试补失效且不重复接受，以及缺 initial world 和待隔离草稿不会继承旧成功。
+
+这仍不是 P1 的完整完成声明：直接底层 store 写入、独立 metadata/范围变化命令的即时观察及完整验收映射还需核对；当前认证继续从冻结输入重算。P2–P7 尚未完成；未调用真实 provider，未执行独立人工体验验收。
+
+验证：`pnpm test --maxWorkers=2` 的 186 文件、1085 tests 全部通过（78.37 秒）；最终 `pnpm check` 的服务端、Web、E2E TypeScript 检查、`git diff --check` 及新 CLI 帮助入口通过。

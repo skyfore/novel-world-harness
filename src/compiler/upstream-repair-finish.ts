@@ -44,6 +44,7 @@ export async function prepareUpstreamRepairFinish(root: string, sourceId: string
   const state = await ledger.inspect(), current = state.plans.find(item => item.plan.planHash === planHash);
   if (!current || !["staging", "finish-frozen"].includes(current.state)) throw upstreamRepairHostError("Upstream finish requires an active fully staged plan");
   if (current.finishIntent && contentHash(current.finishIntent.input) !== contentHash(input)) throw upstreamRepairHostError("Original frozen finish input changed");
+  if (!current.finishIntent) await ledger.recordFinishReview(planHash, input);
   const verified = await verifyUpstreamRepairPlan(root, current.plan);
   const proposals: UpstreamRepairFinishIntent["proposals"] = [];
   for (const slot of [...current.plan.allowedWrites, ...current.plan.allowedCreations]) {

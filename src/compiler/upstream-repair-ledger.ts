@@ -1,3 +1,4 @@
+import { compilerFinishInputSchema } from "./finish-input.js";
 import { upstreamRepairEvaluationSchema, type UpstreamRepairEvaluation } from "./upstream-repair-evaluation-model.js";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
@@ -18,6 +19,7 @@ const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("model-session-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, promptHash: hash }).strict(),
   z.object({ kind: z.literal("model-session-ended"), planHash: hash, sessionRef: hash, attemptRef: hash.nullable(), diagnostic: z.string().trim().min(1).optional() }).strict(),
   z.object({ kind: z.literal("authorized"), planHash: hash }).strict(),
+  z.object({ kind: z.literal("finish-review-recorded"), planHash: hash, input: compilerFinishInputSchema }).strict(),
   z.object({ kind: z.literal("evaluated"), planHash: hash, evaluation: upstreamRepairEvaluationSchema }).strict(),
   z.object({ kind: z.literal("evaluation-invalidated"), planHash: hash, evaluationRef: hash, nextSubjectSnapshotHash: hash.nullable(), reason: z.string().trim().min(1) }).strict(),
   z.object({ kind: z.literal("converged"), planHash: hash, receiptFingerprint: hash, activeRevisions: z.array(upstreamRepairReadableRefSchema.extend({ revisionHash: hash }).strict()) }).strict(),
@@ -33,7 +35,7 @@ const recordSchema = z.object({ version: z.literal(1), sourceId: idSchema, seque
 type Record = z.infer<typeof recordSchema>;
 export type UpstreamRepairRecord = Record;
 type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
-type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "converged" | "evaluated" | "needs-host-review"; evaluation?: { ref: string; result: UpstreamRepairEvaluation }; finishIntent?: UpstreamRepairFinishIntent; finishedReceipt?: string };
+type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "converged" | "evaluated" | "needs-host-review"; evaluation?: { ref: string; result: UpstreamRepairEvaluation }; finishReview?: z.infer<typeof compilerFinishInputSchema>; finishIntent?: UpstreamRepairFinishIntent; finishedReceipt?: string };
 type ModelSession = { started: Extract<Record["payload"], { kind: "model-session-started" }>; closed: boolean; chargedFailure: boolean };
 function project(records: Record[]) {
   const plans = new Map<string, PlanState>();
@@ -70,8 +72,14 @@ function project(records: Record[]) {
     } else if (event.kind === "authorized") {
       if (current.state !== "planned") throw upstreamRepairHostError("Repair authorization was consumed or stopped");
       current.state = "authorized";
+    } else if (event.kind === "finish-review-recorded") {
+      if (current.finishReview || !["authorized", "staging"].includes(current.state)
+        || event.input.outcome !== "complete" || event.input.target_reviews !== undefined
+        || contentHash(event.input.reviewed_segments.map(item => item.segment_id).sort()) !== contentHash(current.plan.sourceScope.segmentIds.slice().sort())) throw upstreamRepairHostError("Finish review must preserve the original active source scope and cannot be rewritten");
+      current.finishReview = event.input;
     } else if (event.kind === "finish-frozen") {
       const { intent } = event, plan = current.plan;
+      if (current.finishReview && contentHash(current.finishReview) !== contentHash(intent.input)) throw upstreamRepairHostError("Finish intent differs from the original retained host review");
       if ([...sessions.values()].some(item => item.started.planHash === event.planHash && !item.closed)) throw upstreamRepairHostError("Close the original model session before freezing finish");
       if (current.state !== "staging" || intent.authorizationHeadHash !== record.predecessorHash || intent.planHash !== plan.planHash || intent.sourceId !== record.sourceId || intent.sourceSha256 !== plan.sourceScope.sourceSha256 || intent.requirementSetHash !== plan.requirementSetHash) throw upstreamRepairHostError("Finish intent is outside its active authorization");
       const slots = [...plan.allowedWrites, ...plan.allowedCreations].map(ref => `${ref.kind}:${ref.id}`).sort();
@@ -257,6 +265,17 @@ export class UpstreamRepairLedger {
   private async verifyOrStop(plan: UpstreamRepairPlan) {
     try { return await verifyUpstreamRepairPlan(this.root, plan); }
     catch (error) { await this.stop(plan.planHash, error instanceof Error ? error.message : String(error)); throw error; }
+  }
+  async recordFinishReview(planHash: string, raw: unknown): Promise<void> {
+    const input = compilerFinishInputSchema.parse(raw), current = (await this.inspect()).plans.find(item => item.plan.planHash === planHash);
+    if (!current) throw upstreamRepairHostError("Finish review plan is missing; use requirements inspect-upstream in this source scope, copy plans[].plan.planHash, and correct once without guessing");
+    if (current.finishReview) {
+      if (contentHash(current.finishReview) !== contentHash(input)) throw upstreamRepairHostError("Original retained finish review changed; preserve it and do not reopen the task with a replacement review");
+      return;
+    }
+    if (!["authorized", "staging"].includes(current.state)) throw upstreamRepairHostError("Finish review requires original active authorization");
+    await this.verifyOrStop(current.plan);
+    await this.append({ kind: "finish-review-recorded", planHash, input });
   }
   async startModelSession(planHash: string, input: { artifactKind: Started["artifactKind"]; artifactId: string; proposalId: string; promptHash: string }): Promise<string> {
     const current = project(await this.history()).plans.get(planHash);

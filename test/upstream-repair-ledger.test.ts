@@ -323,7 +323,8 @@ it("freezes the exact upstream finish input, staged set and original baselines w
   const staged = await stageUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, { proposal_id: "repair-proposal", annotation_id: "quote-one", selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 });
   const priorHead = (await f.ledger.history()).at(-1)!.hash;
   const intent = await prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, input);
-  expect(intent.authorizationHeadHash).toBe(priorHead);
+  expect(intent.authorizationHeadHash).toBe((await f.ledger.history()).find(record => record.payload.kind === "finish-review-recorded")!.hash);
+  expect(intent.authorizationHeadHash).not.toBe(priorHead);
   expect(intent.proposals).toEqual([{ artifactKind: "quotation", artifactId: "quote-one", proposalId: staged.proposalId, proposalHash: staged.proposalHash, attemptRef: staged.attemptRef, payloadHash: (await f.ledger.inspect()).attempts[0]!.validatedHash }]);
   expect(intent.baselines[0]!.payload).toEqual(f.annotation);
   expect((await f.ledger.inspect()).plans[0]!.state).toBe("finish-frozen");
@@ -354,7 +355,7 @@ it("refuses stray batch proposals and stale baselines before freezing finish aut
   await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, input)).rejects.toThrow("unauthorized upstream proposals");
   expect((await f.ledger.inspect()).plans[0]!.state).toBe("staging");
   await annotations.withdraw(f.sourceId, "stray-proposal");
-  await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, { ...input, reviewed_segments: [] })).rejects.toThrow("reviewed source segments");
+  await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, { ...input, reviewed_segments: [] })).rejects.toThrow("retained finish review changed");
   await f.write({ ...f.annotation, attributionConfidence: 0.7 }, "host-changed-baseline");
   await expect(prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, input)).rejects.toThrow("Active dependency changed");
   expect((await f.ledger.history()).some(record => record.payload.kind === "finish-frozen")).toBe(false);
@@ -1047,4 +1048,37 @@ it("cancels an isolated upstream model through Pi and retains its original sessi
   expect((await f.ledger.history()).at(-1)!.payload).toMatchObject({ kind: "model-session-ended", diagnostic: expect.stringContaining("host cancelled preparation") });
   await expect(runUpstreamRepairModelSlot(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, { signal: controller.signal }, create)).rejects.toBe(reason);
   expect(create).toHaveBeenCalledOnce();
+});
+
+
+it("retains the host review before staging and resumes it after a host interruption", async () => {
+  const { prepareAuthorizedUpstreamRepair, pendingAuthorizedUpstreamRepairs } = await import("../src/compiler/upstream-repair-preparation.js");
+  const f = await frozenQuotationFinish(false);
+  const interrupted = vi.fn(async () => {
+    expect((await f.ledger.inspect()).plans[0]!.finishReview).toEqual(f.finishInput);
+    throw new Error("host interruption before model");
+  });
+  await expect(prepareAuthorizedUpstreamRepair(f.root, f.sourceId, f.plan.planHash, f.finishInput, {}, interrupted)).rejects.toThrow("host interruption");
+  expect((await f.ledger.inspect()).plans[0]!.finishIntent).toBeUndefined();
+  expect(await pendingAuthorizedUpstreamRepairs(f.root, f.sourceId)).toEqual([f.plan.planHash]);
+  await expect(f.ledger.recordFinishReview(f.plan.planHash, { ...f.finishInput, summary: "replacement" })).rejects.toThrow("retained finish review changed");
+  const stage = vi.fn(async () => ({ planHash: f.plan.planHash, phase: "staged" as const, results: [] }));
+  expect((await prepareAuthorizedUpstreamRepair(f.root, f.sourceId, f.plan.planHash, undefined, {}, stage)).state).toBe("converged");
+  expect(stage).toHaveBeenCalledOnce();
+  expect((await f.ledger.history()).filter(record => record.payload.kind === "finish-review-recorded")).toHaveLength(1);
+  expect(await pendingAuthorizedUpstreamRepairs(f.root, f.sourceId)).toEqual([]);
+});
+
+it("default preparation routes retained authorization before ordinary compilation and stops on retained host failures", async () => {
+  const { prepareAllCommand } = await import("../src/commands/prepare-all.js");
+  const { pendingAuthorizedUpstreamRepairs } = await import("../src/compiler/upstream-repair-preparation.js");
+  const f = await frozenQuotationFinish(false);
+  await f.ledger.recordFinishReview(f.plan.planHash, f.finishInput);
+  const repairUpstream = vi.fn(async () => { throw new Error("default authorized repair selected"); });
+  const compileSource = vi.fn();
+  await expect(prepareAllCommand({ root: f.root, sourceId: f.sourceId, yes: true }, { repairUpstream, compileSource })).rejects.toThrow("default authorized repair selected");
+  expect(repairUpstream).toHaveBeenCalledWith(f.root, f.sourceId, f.plan.planHash, undefined, expect.any(Object));
+  expect(compileSource).not.toHaveBeenCalled();
+  await f.ledger.stop(f.plan.planHash, "original host failure");
+  await expect(pendingAuthorizedUpstreamRepairs(f.root, f.sourceId)).rejects.toThrow("is stopped");
 });

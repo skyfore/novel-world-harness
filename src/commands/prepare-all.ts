@@ -14,7 +14,7 @@ import { reviewNovelRoles } from "../workflow/role-review.js";
 import { stdout } from "node:process";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { convergeWorldProposals, quarantineUncommittableProposals, type WorldProposalConvergence } from "../compiler/converge.js";
-import { prepareAuthorizedUpstreamRepair } from "../compiler/upstream-repair-preparation.js";
+import { prepareAuthorizedUpstreamRepair, pendingAuthorizedUpstreamRepairs } from "../compiler/upstream-repair-preparation.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import { inspectPreparation, resolvePreparationBranchId, type PreparationInspection } from "../workflow/prepare.js";
 import { askUserQuestion, recommendedAnswer, type AskUserQuestion } from "../util/ask-user-question.js";
@@ -163,12 +163,13 @@ export async function prepareAllCommand(
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
   sourceId = inspection.source!.id;
-  if (options.upstreamRepairPlan) {
+  const upstreamPlans = options.upstreamRepairPlan ? [options.upstreamRepairPlan] : await pendingAuthorizedUpstreamRepairs(root, sourceId);
+  for (const planHash of upstreamPlans) {
     const config = await loadOptionalConfig(configPath);
     const input: unknown = options.upstreamRepairFinishFile ? JSON.parse(await fs.readFile(options.upstreamRepairFinishFile, "utf8")) : undefined;
     const profile = config ? profileForRole(config, "extractor").profile : undefined;
-    report(`Continuing authorized upstream repair ${options.upstreamRepairPlan}.`);
-    const result = await dependencies.repairUpstream(root, sourceId, options.upstreamRepairPlan, input, {
+    report(`Continuing authorized upstream repair ${planHash}.`);
+    const result = await dependencies.repairUpstream(root, sourceId, planHash, input, {
       ...(profile ? { profile } : {}), ...(options.model ? { model: options.model } : {}), signal: options.signal,
       onText: options.onModelText, onThinking: options.onModelThinking, onTool: options.onModelToolCall,
       onToolResult: options.onModelToolResult, onEvent: options.onModelEvent,

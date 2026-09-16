@@ -1051,3 +1051,26 @@ with no typed result follows the existing persisted failed-session policy; do no
 reopen it or reset its budget. An unresolved write retains the original reservation
 and must use exact-draft recovery. Process loss/SIGKILL still uses the original
 owning-host lock recovery protocol, never automatic lock deletion.
+
+
+### Retained upstream finish reviews in default preparation
+
+`prepare-all --source <id>` now resumes existing active authorized/staging,
+finish-frozen and finished repair plans before ordinary compilation or cache
+restoration. It does not register or authorize new plans. An active stopped plan
+halts this path with its retained diagnostic; no replacement namespace or model
+retry is permitted. Superseded requirements retain their original history.
+
+The first explicit `--upstream-plan <hash> --upstream-finish <review.json>` call
+records the exact complete host review in the append-only repair journal before
+staging invokes a model. After that record is durable, default preparation and
+`requirements finish-upstream-plan` can use it without the external file. The
+latter still requires already staged results. Neither path fabricates review
+completion or replaces its segments, dispositions or summary. Frozen intents
+from older journals remain recoverable without a separate review record.
+
+If an authorized plan lacks both retained review and frozen intent, stop before
+model invocation. Use same-source `requirements inspect-upstream`, copy
+`plans[].plan.planHash`, and supply the original host review through the explicit
+prepare-all flags once. Do not retry unchanged, infer review from model output,
+or reset the authorization/session budget.

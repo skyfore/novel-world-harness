@@ -72,8 +72,9 @@ export async function finishUpstreamRepairPlanCommand(root: string, sourceId: st
     if (current.finishIntent) {
       if (input && contentHash(input) !== contentHash(current.finishIntent.input)) throw upstreamRepairHostError("Original frozen finish input changed; omit --input to recover the original receipt, never replace the reviewed segments or summary");
     } else {
-      if (!input) throw upstreamRepairHostError("First finish requires --input with the original host review; do not fabricate source review or replay model slots");
-      await prepareUpstreamRepairFinish(root, sourceId, planHash, input);
+      const retainedInput = input ?? current.finishReview;
+      if (!retainedInput) throw upstreamRepairHostError("First finish requires --input with the original host review; do not fabricate source review or replay model slots");
+      await prepareUpstreamRepairFinish(root, sourceId, planHash, retainedInput);
     }
     const receipt = await executeUpstreamRepairFinish(root, sourceId, planHash);
     return { planHash, state: (await ledger.inspect()).plans.find(item => item.plan.planHash === planHash)!.state, receipt };

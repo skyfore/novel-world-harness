@@ -523,3 +523,17 @@ P2r 已提交为 `0eac855`。
 本段为明确选定授权计划的正常流程入口；自动发现/规划/授权策略尚未默认调度所有根因。核心角色及不支持路径/修订策略、P2 完整退出验收和 P3–P7 仍待完成。未调用真实 provider 或人工体验评价。
 
 验证：65 项最终定向回归通过；全仓 190 文件、1155 tests 通过（91.13 秒）；最终服务端、Web、E2E TypeScript、prepare-all CLI 帮助与 diff whitespace 检查通过。
+
+P2s 已提交为 `92c2100`。
+
+## P2t：持久复核输入与默认授权计划续跑
+
+新增 append-only finish-review-recorded 记录。prepare-all 在 staging/模型调用前保存完整宿主复核，绑定原计划和精确 source segment 集合；重复保存同一输入幂等，替换输入拒绝。finish intent 继续冻结实际 proposals、原始 baselines 与当前授权链头，并检查其输入与已保存复核一致。旧日志没有单独复核事件时，仍可恢复原 frozen intent。
+
+默认 prepare-all 在普通编译和缓存恢复之前，顺序恢复该 source 当前有效的 authorized/staging/finish-frozen/finished 计划。只恢复既有授权，不从诊断创建权限；当前 needs-host-review 计划阻止普通模型流程。首次缺失复核时在模型前停止并给出原 source/plan 的修复命令。宿主中断后无需原外部文件即可继续，finish-upstream-plan 也可读取同一份持久输入。
+
+回归覆盖复核先于 staging 持久化、中断后默认输入恢复、禁止复核替换、单次记录幂等、默认准备优先路由已有授权、停止状态不继续普通编译，以及原 finish、checkpoint 和预算恢复约束。
+
+本段只补齐既有授权任务的默认续跑。新根因的自动规划/授权策略、核心角色和未支持路径/修订策略、P2 完整退出验收、P3–P7 仍未完成。没有真实 provider 或人工体验验收证据。
+
+验证：67 项定向测试通过；最终全仓 190 文件、1157 tests 通过（92.28 秒）；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

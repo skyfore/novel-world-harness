@@ -45,6 +45,7 @@ export const compilerFinishReceiptSchema = z.object({
 });
 export type CompilerFinishReceipt = z.infer<typeof compilerFinishReceiptSchema>;
 export type CompilerFinishIdentity = Omit<z.infer<typeof identitySchema>, "pipelineVersion">;
+const archivedFinishSchema = z.object({ receipt: compilerFinishReceiptSchema, reason: z.string().trim().min(1), archivedAt: z.string().datetime() }).strict();
 
 export function finishHostError(reason: string): Error {
   if (reason.startsWith("Error: Compiler finish requires host review:")) return new Error(reason.slice(7));
@@ -169,5 +170,46 @@ export class CompilerFinishReceipts {
       result.push(receipt);
     }
     return result;
+  }
+
+  /** Historical review evidence, never authorization to replay retired writes. */
+  static async listRetained(root: string, sourceId: string): Promise<Array<{ receipt: CompilerFinishReceipt; archived: boolean }>> {
+    const current = await this.list(root, sourceId);
+    const result = new Map(current.map(receipt => [receipt.fingerprint, { receipt, archived: false }]));
+    const directory = path.join(worldStorageRoot(root), "compiler", "finish-receipts", idSchema.parse(sourceId), "history");
+    let batches: string[];
+    try { batches = await fs.readdir(directory); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return [...result.values()]; throw error; }
+    for (const batchHash of batches.sort()) {
+      if (!/^[a-f0-9]{64}$/.test(batchHash)) throw finishHostError("invalid retained finish directory");
+      for (const name of (await fs.readdir(path.join(directory, batchHash))).filter(name => name.endsWith(".json")).sort()) {
+        const archived = archivedFinishSchema.parse(JSON.parse(await fs.readFile(path.join(directory, batchHash, name), "utf8")));
+        const receipt = archived.receipt;
+        if (receipt.identity.sourceId !== sourceId || contentHash(receipt.identity.batchId) !== batchHash || name !== `${receipt.fingerprint}-${contentHash(archived.reason)}.json`) throw finishHostError("retained finish source, identity or filename mismatch");
+        const prior = result.get(receipt.fingerprint);
+        if (prior && (prior.receipt.preparedAt !== receipt.preparedAt || (prior.receipt.completedAt && receipt.completedAt && prior.receipt.completedAt !== receipt.completedAt))) throw finishHostError("conflicting retained finish lifecycle");
+        if (!prior || (prior.archived && receipt.state === "completed")) result.set(receipt.fingerprint, { receipt, archived: true });
+      }
+    }
+    return [...result.values()].sort((a, b) => a.receipt.fingerprint.localeCompare(b.receipt.fingerprint));
+  }
+
+  /** Restore only historical accountability, without creating an active finish. */
+  static async retainSnapshot(root: string, sourceId: string, receiptInput: CompilerFinishReceipt): Promise<void> {
+    const receipt = compilerFinishReceiptSchema.parse(receiptInput);
+    if (receipt.identity.sourceId !== sourceId) throw finishHostError("imported finish source mismatch");
+    const existing = (await this.listRetained(root, sourceId)).find(item => item.receipt.fingerprint === receipt.fingerprint);
+    if (existing) {
+      if (contentHash(existing.receipt) !== contentHash(receipt)) throw finishHostError("imported finish conflicts with retained lifecycle");
+      return;
+    }
+    const reason = "Imported frozen reconciliation accountability; replay is not authorized";
+    const directory = path.join(worldStorageRoot(root), "compiler", "finish-receipts", sourceId, "history", contentHash(receipt.identity.batchId));
+    const file = path.join(directory, `${receipt.fingerprint}-${contentHash(reason)}.json`), temporary = `${file}.${crypto.randomUUID()}.tmp`;
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    try {
+      await fs.writeFile(temporary, JSON.stringify({ receipt, reason, archivedAt: new Date().toISOString() }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+      await fs.rename(temporary, file);
+    } finally { await fs.rm(temporary, { force: true }); }
   }
 }

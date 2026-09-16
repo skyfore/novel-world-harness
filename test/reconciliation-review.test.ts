@@ -154,6 +154,9 @@ it("freezes capability-level partial success through finish, restart, plan reuse
   await fs.writeFile(planPath, JSON.stringify({ ...JSON.parse(originalPlan), createdAt: "2026-01-01T00:00:00Z" }));
   await expect(receipts.verify(receipt)).rejects.toThrow("requirement definition or plan changed");
   await fs.writeFile(planPath, originalPlan);
+  await receipts.archive("Explicit reparse preserves unresolved capability obligations");
+  expect(await receipts.read()).toBeUndefined();
+  await expect(assertReconciliationDeferralsReviewed(root, fixture.source.id)).rejects.toThrow("character:hero:ontology");
   const reviewBase = { sourceId: fixture.source.id, batchId, finishFingerprint: receipt.fingerprint, reviewedAt: new Date().toISOString() };
   await expect(reviewReconciliationDeferrals(root, { ...reviewBase, reviews: [{ target: "character:hero", reason: "Whole target reviewed", auditRef: "review" }] })).rejects.toThrow("every deferred target");
   await reviewReconciliationDeferrals(root, { ...reviewBase, reviews: reconciliationDeferredRequirementIds(receipt.identity.input.target_reviews!).map(target => ({ target, reason: "Source does not authorize inventing the missing capability", auditRef: `review:${target}` })) });

@@ -8,7 +8,8 @@
 | --- | --- | --- |
 | 设计基线 | `7078f4c`，方案与前序核验记录 | 已提交 |
 | P1a 独立场景要求的持久约束 | `52f72ee`，requirement ledger、注册/查询命令、canonical 重评、冻结快照/恢复/closure/certification 接线 | 已提交；1038 项测试与类型检查通过 |
-| P1b 逐能力报告与批次尝试 | 新 reconciliation 计划冻结 ontology/development/driver 项；finish v2 绑定计划与报告；逐要求保留 deferral | 实现及全仓验证完成；本记录随该段代码提交 |
+| P1b 逐能力报告与批次尝试 | `fb4c738`，新 reconciliation 计划冻结 ontology/development/driver 项；finish v2 绑定计划与报告；逐要求保留 deferral | 已提交；1040 项测试与类型检查通过 |
+| P1c 归档与快照中的义务保留 | 当前/历史 finish 统一读取、历史宿主复核、候选认证和恢复前置检查 | 实现完成；1044 项测试与类型检查通过；本记录随该段提交 |
 | P1 后续完整结算 | 核心角色的独立要求分母、上述结构性修复要求与统一 ledger/evaluator 的消费连接、跨 reparse 的完整义务恢复 | 未完成；P1 整体仍进行中 |
 | P2–P7 | 受限修复、语义获知、本体、文学/工作集、自主推进、完整体验验收 | 未完成 |
 
@@ -53,3 +54,13 @@ finish identity v2 保存计划 hash 和要求列表，原始 input 冻结子报
 复核通过只表示宿主读过缺口，不能作为 semantic satisfied 或发布证据。将这些结构性发现与 P1a 的独立场景/角色评估统一，并在 reparse 归档回执后继续保留全量义务，仍是 P1 的下一项工作。
 
 本段验证：`pnpm test --maxWorkers=2` 的 180 文件、1040 tests 全部通过（70.16 秒），`pnpm check` 全部通过。新增回归包含只提交 goal 的真实 finish、逐能力 deferral、全局比例改善后的计划复用、原计划 hash 被篡改时恢复拒绝，以及宿主不能用整个角色的单条 review 清掉多个能力义务。
+
+## P1c：归档不清除义务
+
+发布检查现在同时读取当前回执与 `finish-receipts/<source>/history/` 的历史回执，校验源、batch 路径、fingerprint、归档原因和生命周期一致性。重建、换 namespace、同 batch 的新工作不能覆盖历史 deferral。原归档格式不变，也不复制出另一套可写世界状态。
+
+显式归档的 prepared/completed 尝试可以按原 fingerprint 做宿主来源复核。复核验证原文 hash，但不要求历史工件仍是 active revision，也不重放旧 proposal。当前未完成的 prepared 回执仍不能当 completed 复核。复核只记录流程责任，不证明语义已经成立。
+
+候选的 compilerSnapshot 保存待复核项与既有决策，认证检查每个源和精确要求身份。恢复首先验证不能丢弃本地义务或撤销已记录的复核，然后只导入历史回执，不重新激活旧 finish。坏 scope 在世界材料化之前被拒绝。
+
+验证：181 文件、1044 tests 通过（`pnpm test --maxWorkers=2`，70.65 秒）；`pnpm check` 通过。新增测试覆盖 prepared/completed 归档、换 batch 后的旧缺口、篡改归档、历史导入、无重放、真实候选认证及恢复前拒绝。角色独立分母及结构性要求的语义结算仍待下一段完成。

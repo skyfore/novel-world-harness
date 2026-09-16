@@ -1,5 +1,6 @@
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import { RequirementLedger, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
+import { captureReconciliationObligations, assertReconciliationObligationsRestorable, restoreReconciliationObligations, reconciliationObligationSnapshotSchema, type ReconciliationObligationSnapshot } from "./reconciliation-review-ledger.js";
 import { eventExecutionSchema } from "../world/event-execution.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
 import crypto from "node:crypto";
@@ -133,6 +134,7 @@ const preparedCanonicalSchema = z.object({
 
 const preparedCompilerSnapshotSchema = z.object({
   requirementDefinitions: requirementDefinitionHistorySchema.optional(),
+  reconciliationObligations: reconciliationObligationSnapshotSchema.optional(),
   evidenceBindings: z.array(evidenceAssertionBindingSnapshotSchema),
   structure: sourceStructureManifestSchema,
   annotations: z.array(sourceAnnotationSchema),
@@ -853,6 +855,7 @@ export class PreparedNovelCache {
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).definitionHistory();
+    const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, source.id);
     const bundle = preparedNovelBundleSchema.parse({
       version: 4,
       source: {
@@ -875,6 +878,7 @@ export class PreparedNovelCache {
       canonical: preparedCanonical,
       compilerSnapshot: {
         ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
+        ...(reconciliationObligations.length ? { reconciliationObligations } : {}),
         evidenceBindings: evidenceBindings.sort((left, right) =>
           left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
         structure,
@@ -1053,6 +1057,7 @@ export class PreparedNovelCache {
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
     roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
     requirementDefinitions?: RequirementSet[];
+    reconciliationObligations?: ReconciliationObligationSnapshot;
   }> {
     const sourceId = bundle.source.id;
     const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
@@ -1075,8 +1080,10 @@ export class PreparedNovelCache {
       new SourceAccountingStore(this.workspaceRoot).read(sourceId),
     ]);
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).definitionHistory();
+    const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, sourceId);
     return {
       ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
+      ...(reconciliationObligations.length ? { reconciliationObligations } : {}),
       evidenceBindings: evidenceBindings.sort((left, right) =>
         left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
       structure,
@@ -1091,6 +1098,7 @@ export class PreparedNovelCache {
   private async materialize(bundle: PreparedNovelBundle, exact: boolean): Promise<void> {
     const sourceId = bundle.source.id;
     await new RequirementLedger(this.workspaceRoot, sourceId).assertRestorable(bundle.compilerSnapshot.requirementDefinitions ?? []);
+    await assertReconciliationObligationsRestorable(this.workspaceRoot, sourceId, bundle.compilerSnapshot.reconciliationObligations ?? []);
     const workspace = await WorkspaceStore.create(this.workspaceRoot);
     await assertPreparedCompilerSnapshotEvidence(this.workspaceRoot, bundle);
     await assertPreparedInitialWorldEvidence(this.workspaceRoot, bundle);
@@ -1158,6 +1166,7 @@ export class PreparedNovelCache {
     for (const possibility of bundle.canonical.possibilities) await possibilities.put(possibility);
     const snapshot = bundle.compilerSnapshot;
     await new RequirementLedger(this.workspaceRoot, sourceId).restore(snapshot.requirementDefinitions ?? []);
+    await restoreReconciliationObligations(this.workspaceRoot, sourceId, snapshot.reconciliationObligations ?? []);
     await new SourceStructureStore(this.workspaceRoot).write(snapshot.structure);
     await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.annotations);
     await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.entityResolutions);

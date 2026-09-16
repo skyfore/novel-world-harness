@@ -270,6 +270,17 @@ not just its containing character/event. Historical target-only receipts retain
 their original version and review identity. None of these progress reports is a
 semantic capability certificate.
 
+Source deferral checks include retained `finish-receipts/<source>/history/`
+records. Archiving for reparse/restore never clears an obligation. A host may
+review an explicitly retired attempt by its exact original fingerprint after
+checking the immutable source; this records accountability only and cannot
+replay the retired writes. Active prepared finishes still require the normal
+completion/recovery protocol. Candidate snapshots retain these records and
+their reviewed requirement IDs. Restoration that would forget local obligations
+or replace an existing review stops before world materialization; use an isolated
+workspace, never delete history or retry unchanged. Corrupt archive identity,
+source or filename requires host inspection, not a fresh model session.
+
 Finish receipts freeze these reports. Post-convergence target audits are stored
 in `compiler/reconciliation-reviews/`; a completed batch or accepted proposal is
 not semantic resolution. Publication scans durable receipts across repair

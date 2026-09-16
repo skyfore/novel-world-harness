@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { activeRequirementSets, evaluateRequirementSet, requirementResultSchema, requirementResultIssues } from "./requirement-ledger.js";
+import { reconciliationObligationIssues } from "./reconciliation-review-ledger.js";
 import { frozenSceneCatalog } from "./requirement-service.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -43,6 +44,7 @@ export function preparedSubjectHash(bundle: Pick<PreparedNovelBundle, "version" 
 export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle): Promise<NovelClosureAssessment> {
   const subjectSnapshotHash = preparedSubjectHash(bundle), closure = buildPreparedClosure(bundle);
   const issues = [...closure.issues, ...validateFrozenAccounting(bundle)];
+  issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));
   const snapshot = bundle.compilerSnapshot;
   const requirementSets = activeRequirementSets(snapshot.requirementDefinitions ?? []);
   const requirementResults: z.infer<typeof requirementResultSchema>[] = [];
@@ -88,6 +90,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
 
 export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): string[] {
   const issues: string[] = [];
+  issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256));
   issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));
   if (preparedSubjectHash(bundle) !== assessment.subjectSnapshotHash) issues.push("ENTRY_CUT_STALE: prepared inputs changed after entry evaluation");
   if (assessment.sourceId !== bundle.source.id || assessment.sourceSha256 !== bundle.source.contentSha256) issues.push("WORLD_SOURCE_MISMATCH: certificate belongs to another source");

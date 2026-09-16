@@ -235,3 +235,15 @@ finish_compiler_batch 在原回执标记 completed 后观察要求，将不可�
 该接线位于 compiler/宿主领域入口，未向底层世界 store 或运行时 reducer 引入编译账本写入。底层直接写入后的宿主可用 refresh；认证仍强制重算当前冻结输入。P1 的完整验收矩阵仍需核对，P2 的宿主授权修复执行链尚未落地，P3–P7 也未完成。未调用真实 provider 或进行独立人工体验评价。
 
 验证：15 项针对性测试通过；全量 186 文件、1086 tests 通过（77.38 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。
+
+P1n 已提交为 `dfb6ad8`。
+
+## P2a：受限上游修复的严格计划与差异校验
+
+新增 upstream-repair-plan，冻结 source/requirement hash、原回执引用、所有有效依赖 revision、固定逻辑对象、允许字段、精确新建槽、可读引用、可引用 segment、依赖边、后置要求、授权及预算引用。schema 拒绝未注册写入类型、重复成员、缺基线、缺依赖槽、范围越界、依赖环与后置要求分母缩减。保留完整计划 hash；冻结本身不代表已持久授权。
+
+写入前纯校验器使用既有 annotation/entity-resolution/event-resolution schema，比较实际 baseline/payload 差异。JSON Pointer 先解码再按注册字段匹配，不使用字符串前缀；数组只接受宿主明确授权的整个字段，不接受下标或 '-'。id/source 等未授权字段保持不变，derivation 必须精确匹配宿主本批次 provenance。身份、引语与话语中的 typed refs 必须有冻结可读依赖，或使用声明的创建依赖边；可读不等于可引用。新对象只能占用宿主预分配的单个逻辑 ID 槽，不能借计数扩大对象种类或范围。
+
+15 项测试覆盖引语截断扩展、身份决议绑定、数组位移权限、转义 pointer、越权字段、来源/要求/依赖修订冲突、引用越界、伪造 hash、循环、分母缩减、任意新 ID 和未声明的新建依赖。服务端、Web、E2E TypeScript 检查通过。本段没有接入模型工具或执行写入；原文字节校验仍由现有证据验证器负责，测试证明的是计划和纯校验边界。
+
+P2 尚未完成：必须继续接入持久授权状态与跨会话预算、现有窄提案工具、finish 授权回执和恢复、converge 后基线复核及逐项评估，才可执行缺 mention/quotation 的上游修复。P1 整体验收映射及 P3–P7 保持待完成。未运行真实 provider 或人工体验验收。

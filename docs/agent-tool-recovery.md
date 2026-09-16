@@ -535,3 +535,26 @@ submit another review or a new batch to conceal the failure. Recovery observes
 again even for an already-converged world-only finish, without replaying its
 accepted proposals. The existing single-use and changed-dependency checks remain
 in force.
+
+### Upstream repair plan validation (not an execution capability)
+
+`upstream-repair-plan.ts` defines a strict frozen host policy input for existing
+annotation and identity/event-resolution types. Freezing the plan does not
+persist authorization, consume a retry budget, open model tools or permit
+finish. The executor must add those gates before using it for mutation.
+
+The pure pre-stage validator checks source/requirement identity and all supplied
+active baseline revisions, exact logical IDs, host provenance, citable segment
+IDs, registered field differences and frozen typed references. It does not
+replace original-byte evidence validation. Readable references do not grant
+citation authority. Array element/index pointers are unregistered; the host
+must explicitly authorize replacement of the complete named array field.
+New objects require exact host-allocated dependency slots; references to other
+planned creations must follow declared acyclic dependency edges.
+
+`UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW` is terminal for that repair task: preserve
+the plan, budget and drafts; do not guess references, rotate namespaces or retry
+unchanged. A changed dependency requires host re-planning linked to the retained
+predecessor. No agent tool is exposed by this module. When the executor is wired,
+its narrow tools must still use `withNwhToolRecovery`, exact same-source discovery
+instructions and the existing evidence, proposal-obligation and finish checks.

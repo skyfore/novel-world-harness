@@ -1,3 +1,4 @@
+import { upstreamRepairEvaluationSchema, type UpstreamRepairEvaluation } from "./upstream-repair-evaluation-model.js";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -15,6 +16,8 @@ export type UpstreamStagedDependency = z.infer<typeof stagedDependencySchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("planned"), plan: upstreamRepairPlanSchema, predecessorPlanHash: hash.nullable() }).strict(),
   z.object({ kind: z.literal("authorized"), planHash: hash }).strict(),
+  z.object({ kind: z.literal("evaluated"), planHash: hash, evaluation: upstreamRepairEvaluationSchema }).strict(),
+  z.object({ kind: z.literal("evaluation-invalidated"), planHash: hash, evaluationRef: hash, nextSubjectSnapshotHash: hash.nullable(), reason: z.string().trim().min(1) }).strict(),
   z.object({ kind: z.literal("converged"), planHash: hash, receiptFingerprint: hash, activeRevisions: z.array(upstreamRepairReadableRefSchema.extend({ revisionHash: hash }).strict()) }).strict(),
   z.object({ kind: z.literal("finished"), planHash: hash, receiptFingerprint: hash }).strict(),
   z.object({ kind: z.literal("finish-frozen"), planHash: hash, intent: upstreamRepairFinishIntentSchema }).strict(),
@@ -28,7 +31,7 @@ const recordSchema = z.object({ version: z.literal(1), sourceId: idSchema, seque
 type Record = z.infer<typeof recordSchema>;
 export type UpstreamRepairRecord = Record;
 type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
-type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "converged" | "needs-host-review"; finishIntent?: UpstreamRepairFinishIntent };
+type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "converged" | "evaluated" | "needs-host-review"; evaluation?: { ref: string; result: UpstreamRepairEvaluation }; finishIntent?: UpstreamRepairFinishIntent };
 function project(records: Record[]) {
   const plans = new Map<string, PlanState>();
   const attempts = new Map<string, { started: Started; failed: boolean; staged: boolean; validatedHash?: string; dependencies?: UpstreamStagedDependency[] }>();
@@ -76,6 +79,15 @@ function project(records: Record[]) {
       if (event.activeRevisions.length !== expected.size || new Set(event.activeRevisions.map(ref => `${ref.kind}:${ref.id}`)).size !== expected.size
         || event.activeRevisions.some(ref => expected.get(`${ref.kind}:${ref.id}`) !== ref.revisionHash)) throw upstreamRepairHostError("Convergence revisions differ from authorized outputs and original unchanged baselines");
       current.state = "converged";
+    } else if (event.kind === "evaluated") {
+      const evaluation = event.evaluation, convergence = records.slice(0, index).find(item => item.hash === evaluation.convergenceRef)?.payload;
+      if (!["converged", "evaluated"].includes(current.state) || evaluation.planHash !== event.planHash || evaluation.requirementSetHash !== current.plan.requirementSetHash
+        || convergence?.kind !== "converged" || convergence.planHash !== event.planHash || convergence.receiptFingerprint !== evaluation.receiptFingerprint
+        || contentHash(evaluation.result.requirements.map(item => item.id).sort()) !== contentHash(current.plan.requirementIds.slice().sort())) throw upstreamRepairHostError("Evaluation escapes its original convergence or independent requirement inventory");
+      current.state = "evaluated"; current.evaluation = { ref: record.hash, result: evaluation };
+    } else if (event.kind === "evaluation-invalidated") {
+      if (current.state !== "evaluated" || !current.evaluation || current.evaluation.ref !== event.evaluationRef || current.evaluation.result.subjectSnapshotHash === event.nextSubjectSnapshotHash) throw upstreamRepairHostError("Invalidation does not name the active evaluation and changed inputs");
+      current.state = "converged"; current.evaluation = undefined;
     } else if (event.kind === "attempt-started") {
       if (event.toolInput !== undefined && contentHash(event.toolInput) !== event.inputHash) throw upstreamRepairHostError("Reserved tool input hash mismatch");
       assertStart(current, event, plans, attempts);
@@ -213,7 +225,7 @@ export class UpstreamRepairLedger {
   }
   async authorize(planHash: string): Promise<void> {
     const current = project(await this.history()).plans.get(planHash);
-    if (!current || current.state === "needs-host-review" || ["finish-frozen", "finished", "converged"].includes(current.state)) throw upstreamRepairHostError("Plan is missing, stopped or already frozen for finish");
+    if (!current || current.state === "needs-host-review" || ["finish-frozen", "finished", "converged", "evaluated"].includes(current.state)) throw upstreamRepairHostError("Plan is missing, stopped or already frozen for finish");
     await this.verifyOrStop(current.plan);
     if (current.state === "planned") await this.append({ kind: "authorized", planHash });
   }
@@ -288,6 +300,19 @@ export class UpstreamRepairLedger {
       return;
     }
     await this.append(payload);
+  }
+  async recordEvaluation(planHash: string): Promise<UpstreamRepairEvaluation> {
+    const { prepareUpstreamRepairEvaluation } = await import("./upstream-repair-evaluation.js");
+    const evaluation = await prepareUpstreamRepairEvaluation(this.root, this.sourceId, planHash);
+    const current = (await this.inspect()).plans.find(item => item.plan.planHash === planHash);
+    if (current?.evaluation && contentHash(current.evaluation.result) === contentHash(evaluation)) return current.evaluation.result;
+    await this.append({ kind: "evaluated", planHash, evaluation });
+    return evaluation;
+  }
+  async invalidateEvaluation(planHash: string, nextSubjectSnapshotHash: string | null, reason: string): Promise<void> {
+    const current = (await this.inspect()).plans.find(item => item.plan.planHash === planHash);
+    if (current?.state !== "evaluated" || !current.evaluation || current.evaluation.result.subjectSnapshotHash === nextSubjectSnapshotHash) return;
+    await this.append({ kind: "evaluation-invalidated", planHash, evaluationRef: current.evaluation.ref, nextSubjectSnapshotHash, reason });
   }
   async freezeFinish(raw: UpstreamRepairFinishIntent): Promise<void> {
     const intent = upstreamRepairFinishIntentSchema.parse(raw), state = project(await this.history()).plans.get(intent.planHash);

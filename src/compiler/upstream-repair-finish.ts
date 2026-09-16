@@ -66,7 +66,7 @@ export async function prepareUpstreamRepairFinish(root: string, sourceId: string
 /** Host verification accepts own exact outputs only after the original receipt is durable. */
 export async function verifyUpstreamRepairFinish(root: string, sourceId: string, planHash: string, expectedIntent?: UpstreamRepairFinishIntent, requireCommitted = false, expectedBatchId?: string, restoringReceipt?: import("./finish-receipts.js").CompilerFinishReceipt) {
   const current = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(item => item.plan.planHash === planHash);
-  if (!current?.finishIntent || !["finish-frozen", "finished", "converged"].includes(current.state)) throw upstreamRepairHostError("Original active frozen finish intent is missing");
+  if (!current?.finishIntent || !["finish-frozen", "finished", "converged", "evaluated"].includes(current.state)) throw upstreamRepairHostError("Original active frozen finish intent is missing");
   const { plan, finishIntent: intent } = current;
   if (expectedBatchId && plan.batchId !== expectedBatchId) throw upstreamRepairHostError("Finish receipt batch differs from retained authorization");
   if (expectedIntent && contentHash(intent) !== contentHash(expectedIntent)) throw upstreamRepairHostError("Finish receipt differs from retained authorization");

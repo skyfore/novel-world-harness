@@ -371,3 +371,21 @@ P2h 已提交为 `85ab5cc`。
 converged 仍不等于 evaluated，认证继续保留 NOT_EVALUATED 阻塞。P2 尚待逐独立要求评估、结果失效及认证接线、修复调度/模型会话入口；P1 完整验收映射及 P3–P7 保持原范围，未调用真实 provider 或人工体验评价。
 
 验证：42 项定向回归通过；全量 188 文件、1130 tests 通过（86.39 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。
+
+P2i 已提交为 `c3c8375`。
+
+## P2j：逐独立要求评估、输入失效和认证重算
+
+新增版本化 upstream evaluation，绑定原 plan/definition、completed receipt、convergence record、实际候选 subject hash 及完整选定 requirement 结果。宿主读取当前工作区并调用原场景/核心角色评估器，不接受模型成功声明；未知、阻塞、未映射均保留原状态。本体、发展、开场驱动仍是分离的义务，局部通过不替代其余项。
+
+认证从当前冻结定义和 canonical 输入重算选定结果，比较实际结果与保留 evaluation，并逐项要求 satisfied。合法关联后继计划承接重叠稳定 requirement ID 的活动义务；旧计划、失败与预算历史不删除，后继尚未评估时仍阻塞。其他角色、世界闭包与真实质量验收 gate 不受这一步替代。
+
+subject hash 投影保留计划、授权、原输入、预算、finish、converge 等输入 payload，排除派生 evaluation/invalidation 及其哈希链元数据；完整原 journal 继续持久化、校验和导入。追加评估不会产生自引用失效。原 host requirement observation 接入上游失效记录：输入变化或 pending 等原因导致候选无法冻结时，保留旧结果并使当前状态回到待评估；认证无需等待显式 refresh 也能拒绝旧 subject。
+
+新增 requirements evaluate-upstream --source，在 compiler lock 下执行宿主结算，返回逐项结果和剩余 issues；有未解决上游问题时退出 2。prepare-all 在候选阶段结算 eligible 修复。重复相同评估幂等；可移植 checkpoint 保存 evaluated 状态，跨工作区恢复后可继续核验，旧记录不会被当作新结果。
+
+回归覆盖缺失能力不冒充成功、篡改结果即使重算 journal hash 仍被认证拒绝、评估/失效不改变自身输入 hash、真实 no-change 要求满足、后来 canonical 改变导致 stale、无法冻结时失效、后继计划仍承接未满足义务，以及核心角色三类能力的独立重算。真实质量验收仍会阻止不完整世界发布。
+
+P2 尚未整体完成：自动修复规划/调度、受限模型会话接入、后继修复执行及全链验收仍待落实。P1 完整验收映射及 P3–P7 保持原范围，未调用真实 provider 或人工体验评价。
+
+验证：66 项定向回归及全量 188 文件、1135 tests 通过（87.23 秒）；随后加强结算入口与未知来源检查，44 项最终定向回归通过。服务端、Web、E2E TypeScript、evaluate-upstream CLI 帮助入口及 diff whitespace 检查通过。

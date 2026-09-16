@@ -28,7 +28,7 @@ function storeFor(root: string, store: Draft["store"]) {
 export function assertUpstreamRepairCheckpoint(input: UpstreamRepairCheckpoint, journal: readonly UpstreamRepairRecord[], sourceId: string, includeCompleted = true) {
   const checkpoint = upstreamRepairCheckpointSchema.parse(input), records = upstreamRepairJournalSchema.parse(journal);
   const state = inspectUpstreamRepairJournal(records);
-  const live = new Set(state.plans.filter(item => ["staging", "finish-frozen", ...(includeCompleted ? ["finished", "converged"] : [])].includes(item.state)).map(item => item.plan.planHash));
+  const live = new Set(state.plans.filter(item => ["staging", "finish-frozen", ...(includeCompleted ? ["finished", "converged", "evaluated"] : [])].includes(item.state)).map(item => item.plan.planHash));
   const expected = state.attempts.filter(item => live.has(item.started.planHash) && item.staged).map(item => item.attemptRef).sort();
   if (contentHash(expected) !== contentHash(checkpoint.drafts.map(item => item.attemptRef).sort())) throw upstreamRepairHostError("Checkpoint must retain every live staged envelope exactly once");
   const seen = new Set<string>();
@@ -64,7 +64,7 @@ export function assertUpstreamRepairCheckpoint(input: UpstreamRepairCheckpoint, 
 export async function captureUpstreamRepairCheckpoint(root: string, sourceId: string): Promise<UpstreamRepairCheckpoint | undefined> {
   const state = await new UpstreamRepairLedger(root, sourceId).inspect();
   const drafts: Draft[] = [], activeReceipts = [];
-  for (const current of state.plans.filter(item => ["staging", "finish-frozen", "finished", "converged"].includes(item.state))) {
+  for (const current of state.plans.filter(item => ["staging", "finish-frozen", "finished", "converged", "evaluated"].includes(item.state))) {
     if (state.attempts.some(item => item.started.planHash === current.plan.planHash && !item.failed && !item.staged)) throw upstreamRepairHostError("Checkpoint has an unresolved reserved attempt; recover the original draft before capture");
     const receipt = await new CompilerFinishReceipts(root, sourceId, current.plan.batchId).read();
     if (receipt) { await new CompilerFinishReceipts(root, sourceId, current.plan.batchId).verify(receipt); activeReceipts.push(receipt); }
@@ -130,7 +130,7 @@ export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRe
   const { checkUpstreamRepairMutation } = await import("./upstream-repair-staging.js");
   const segments = [...payloads].filter(([key]) => key.startsWith("source-segment:")).map(([, value]) => contentHash(value)).sort();
   for (const receipt of checkpoint.activeReceipts) if (contentHash(receipt.identity.segments.map(segment => contentHash(segment)).sort()) !== contentHash(segments)) throw upstreamRepairHostError("Checkpoint receipt source segment layout changed");
-  for (const current of state.plans.filter(item => ["staging", "finish-frozen", "finished", "converged"].includes(item.state))) {
+  for (const current of state.plans.filter(item => ["staging", "finish-frozen", "finished", "converged", "evaluated"].includes(item.state))) {
     const plan = current.plan, original = new Map(payloads);
     if (plan.sourceScope.sourceSha256 !== sourceSha256) throw upstreamRepairHostError("Checkpoint immutable source revision changed");
     const drafts = checkpoint.drafts.filter(item => item.planHash === plan.planHash);

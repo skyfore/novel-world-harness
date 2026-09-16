@@ -11,6 +11,8 @@ export async function observeRequirementValidity(root: string, sourceId?: string
   const sources = sourceId ? [await workspace.getSource(sourceId)] : await workspace.listSources();
   for (const source of sources) {
     if (!source) throw new Error("Requirement observation source is missing; stop for host storage review, do not guess or retry unchanged.");
+    const { observeUpstreamRepairEvaluationValidity } = await import("./upstream-repair-evaluation.js");
+    await observeUpstreamRepairEvaluationValidity(root, source.id);
     const ledger = new RequirementLedger(root, source.id);
     const history = await ledger.history();
     if (!history.length) continue;

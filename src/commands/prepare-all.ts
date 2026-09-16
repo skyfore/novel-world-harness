@@ -529,6 +529,14 @@ export async function prepareAllCommand(
   )) throw preparationFailure(inspection);
 
   await assertReconciliationDeferralsReviewed(root, sourceId);
+  if (["create-branch", "ready"].includes(inspection.stage)) {
+    const { UpstreamRepairLedger } = await import("../compiler/upstream-repair-ledger.js");
+    if ((await new UpstreamRepairLedger(root, sourceId).inspect()).plans.some(item => ["converged", "evaluated"].includes(item.state))) {
+      const { settleUpstreamRepairRequirements } = await import("../compiler/upstream-repair-evaluation.js");
+      const upstream = await settleUpstreamRepairRequirements(root, sourceId);
+      for (const issue of upstream.issues) report(`Upstream requirement: ${issue}`);
+    }
+  }
   const requirements = await settleSourceRequirements(root, sourceId);
   if (requirements.issues.length) throw new Error(`Registered capability requirements block publication: ${requirements.issues.join("; ")}. Inspect nwh requirements inspect --source ${sourceId}; preserve unresolved requirements and stop for host source review. Do not rotate namespaces or retry unchanged.`);
 

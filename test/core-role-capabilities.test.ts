@@ -134,3 +134,31 @@ it("retains omitted roles and rejects stale exact evidence bindings and forged s
   expect(f.evaluate().requirements.find(item => item.id === "core-roles:source-review")!.state).toBe("satisfied");
   expect(f.evaluate().requirements.filter(item => item.id.startsWith("omitted-role-")).every(item => item.state !== "satisfied")).toBe(true);
 });
+
+it("recomputes all selected upstream core-role obligations instead of trusting reported capability success", async () => {
+  const { coreRoleRequirementDefinitionSchema } = await import("../src/compiler/core-role-requirement-records.js");
+  const { freezeUpstreamRepairPlan } = await import("../src/compiler/upstream-repair-plan.js");
+  const { upstreamRepairRequirementResult } = await import("../src/compiler/upstream-repair-evaluation.js");
+  const { roleRosterSchema } = await import("../src/compiler/role-roster.js");
+  const f = await fixture();
+  f.roster = roleRosterSchema.parse(f.roster); f.bundle.compilerSnapshot.roleRoster = f.roster;
+  const evaluate = () => evaluateCoreRoleCapabilities(f.bundle, f.roster, f.playability, subject), original = evaluate();
+  const identity = { version: 1 as const, id: "core-roles" as const, sourceId: f.source.source.id, sourceSha256: f.source.source.contentSha256, parentRevision: null, specHash: original.revisionHash,
+    scopeDecisionRef: "independent-role-review", scopeChangeReason: "Original full denominator", removedRequirementIds: [], roster: f.roster, units: baseStructuralUnits(f.bundle.compilerSnapshot.structure) };
+  const definition = coreRoleRequirementDefinitionSchema.parse({ ...identity, revisionHash: contentHash(identity) });
+  f.bundle.compilerSnapshot.coreRoleRequirementDefinitions = [definition];
+  const requirementIds = original.requirements.map(item => item.id), selected = requirementIds[0]!;
+  const plan = freezeUpstreamRepairPlan({ version: 1, planId: "role-upstream", batchId: "role-upstream-batch", requirementSetHash: definition.revisionHash, requirementIds, predecessorReceiptRefs: [],
+    sourceScope: { sourceId: f.source.source.id, sourceSha256: f.source.source.contentSha256, segmentIds: [f.source.segmentId] }, baselineRefs: [], allowedWrites: [],
+    allowedCreations: [{ kind: "quotation", id: "missing-quote", maxCount: 1, dependencyOf: selected }], readableRefs: [], citableEvidenceRefs: [f.source.segmentId],
+    dependencyEdges: [{ from: `requirement:${selected}`, to: "quotation:missing-quote", purpose: "source-evidence" }], postconditionIds: requirementIds, authorizationRef: "host-scope", retryBudgetRef: "retained-budget" });
+  const assessment = { subjectSnapshotHash: subject, roster: f.roster, playability: f.playability, coreRoleResult: original };
+  expect(upstreamRepairRequirementResult(f.bundle, assessment, plan).requirements.every(item => item.state === "satisfied")).toBe(true);
+  f.bundle.canonical.models = [];
+  expect(() => upstreamRepairRequirementResult(f.bundle, assessment, plan)).toThrow("differs from the deterministic result");
+  const current = upstreamRepairRequirementResult(f.bundle, { ...assessment, coreRoleResult: evaluate() }, plan);
+  expect(current.requirements.find(item => item.id.endsWith(":ontology"))?.state).toBe("blocked");
+  expect(current.requirements.find(item => item.id.endsWith(":development"))?.state).toBe("blocked");
+  expect(current.requirements.find(item => item.id.endsWith(":opening-driver"))?.state).toBe("satisfied");
+  expect(current.requirements.map(item => item.id).sort()).toEqual(requirementIds.slice().sort());
+});

@@ -95,6 +95,15 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
   });
+requirementsCommand.command("evaluate-upstream").requiredOption("--source <id>", "registered source ID")
+  .description("Evaluate converged upstream repairs against actual independent requirements without model replay")
+  .action(async options => {
+    const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
+    const { settleUpstreamRepairRequirements } = await import("./compiler/upstream-repair-evaluation.js");
+    const result = await withWorkspaceOperationLock(rootFor({}), "compiler", () => settleUpstreamRepairRequirements(rootFor({}), options.source));
+    console.log(JSON.stringify(result, null, 2));
+    if (result.issues.length) process.exitCode = 2;
+  });
 requirementsCommand.command("refresh").requiredOption("--source <id>", "registered source ID")
   .description("Observe current requirement validity without replaying proposals or granting role satisfaction")
   .action(async options => {

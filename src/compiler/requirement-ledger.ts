@@ -1,3 +1,5 @@
+import { requirementResultSchema, type RequirementResult } from "./requirement-result.js";
+export { requirementResultSchema, type RequirementResult } from "./requirement-result.js";
 import { roleReviewRevisionSchema, assertRoleReviewRevisionEvidence, type RoleReviewRevision } from "./role-review-revision.js";
 import { compilerFinishReceiptSchema, type CompilerFinishReceipt } from "./finish-receipts.js";
 import { coreRoleAttemptScope } from "./requirement-attempts.js";
@@ -25,15 +27,6 @@ export const requirementSetSchema = z.object({
   if (contentHash(identity) !== revisionHash) ctx.addIssue({ code: "custom", message: "Requirement definition hash mismatch" });
 });
 export type RequirementSet = z.infer<typeof requirementSetSchema>;
-export const requirementResultSchema = z.object({
-  setId: idSchema, revisionHash: hash, catalogHash: hash, evaluatorVersion: text,
-  requirements: z.array(z.object({
-    id: text, definitionHash: hash,
-    state: z.enum(["satisfied", "blocked", "unknown", "unmapped", "stale"]),
-    diagnostics: z.array(text), blockedBy: z.array(text),
-  }).strict()).min(1),
-}).strict();
-export type RequirementResult = z.infer<typeof requirementResultSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("core-role-review-snapshot"), roster: roleRosterSchema }).strict(),
   z.object({ kind: z.literal("core-role-review-revision"), revision: roleReviewRevisionSchema }).strict(),
@@ -86,7 +79,7 @@ export function evaluateRequirementSet(setInput: RequirementSet, bytes: Uint8Arr
   const report = evaluateSceneCapabilities(set.spec, bytes, catalog);
   return resultFromReport(set, report, catalog);
 }
-function resultFromReport(set: RequirementSet, report: ReturnType<typeof evaluateReviewedSceneCapabilities>, catalog: SceneReviewCatalog): RequirementResult {
+export function resultFromReport(set: RequirementSet, report: ReturnType<typeof evaluateReviewedSceneCapabilities>, catalog: SceneReviewCatalog): RequirementResult {
   return requirementResultSchema.parse({ setId: set.id, revisionHash: set.revisionHash,
     catalogHash: sceneCatalogHash(catalog), evaluatorVersion: SCENE_REQUIREMENT_EVALUATOR_VERSION,
     requirements: report.requirements.requirements.map(({ state, ownState: _own, diagnostics, blockedBy, ...definition }) => ({

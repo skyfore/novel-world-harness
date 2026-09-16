@@ -705,12 +705,12 @@ Completion verifies every output is active, then records the exact completed
 receipt fingerprint as `finished`. Recovery after receipt completion resumes
 journal recording without rerunning mutation tools. Finished records and their
 original receipts are retained in candidate history and still block certification
-until convergence and independent requirement evaluation are implemented.
+until convergence and current independent requirement evaluation have succeeded.
 
 ### Portable upstream draft and finish checkpoints
 
 Candidates may retain `upstreamRepairCheckpoint` for live staging, frozen,
-finished or converged plans. It contains every original staged envelope, pending/accepted
+finished, converged or evaluated plans. It contains every original staged envelope, pending/accepted
 status and explicitly active v3 receipt. Other pending compiler or world work
 still prevents capture. An unresolved reserved attempt must first use local
 draft recovery; do not rerun the model to manufacture a replacement envelope.
@@ -757,3 +757,35 @@ Current checkpoints also retain finished/converged envelopes and active receipts
 so observation can continue after workspace migration. Older history-only
 checkpoints remain readable but cannot invent missing envelopes or reactivate
 historical receipts to claim convergence; preserve them for host review.
+
+### Independent upstream requirement evaluation and invalidation
+
+`nwh requirements evaluate-upstream --source <id>` runs under the compiler lock
+after an observed convergence. It reads the actual candidate and uses the existing
+scene and core-role evaluators; it accepts no model-provided result or replacement
+requirement list. `prepare-all` also settles eligible repairs at its candidate
+stage. Each `evaluated` record binds the original plan/definition, completed
+receipt, convergence record, subject hash and every selected requirement result.
+Blocked, unknown and unmapped results remain unresolved; the CLI exits 2 for
+remaining upstream issues. Other world, role and quality gates stay independent.
+
+Certification recomputes current results from the frozen definitions. A matching
+hash plus a claimed `satisfied` state is insufficient. Only currently satisfied
+obligations clear this gate. Legally linked successor plans take over their
+selected obligations; predecessor attempts and failure budgets remain retained,
+and an unevaluated successor does not clear the predecessor's unresolved work.
+
+The subject hash retains all upstream authorization, proposal, budget and
+convergence inputs, but excludes derived evaluation/invalidation events and
+their chain metadata. The complete original journal is still stored and checked.
+Adding an evaluation therefore cannot invalidate itself. Host validity observation
+appends an invalidation when canonical/definition/other subject inputs change,
+or records an unavailable subject when pending work prevents a candidate freeze.
+Certification also detects stale input hashes before any explicit refresh.
+
+On an unavailable candidate, preserve the original plan, envelopes, result and
+budget. Inspect the existing source workflow and resolve its host blocker, then
+run `requirements evaluate-upstream` again; do not replay repair tools, guess new
+IDs or restart a model namespace. Use `requirements inspect-upstream` and its exact
+`plans[].plan.planHash` to locate retained evaluation history. Repeated identical
+evaluation is idempotent, and portable checkpoints preserve evaluated state.

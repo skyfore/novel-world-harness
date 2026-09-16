@@ -11,7 +11,7 @@ import { verifyUpstreamRepairPlan, upstreamRepairHostError } from "./upstream-re
 /** Reads actual post-commit state. A caller cannot supply revision hashes or success claims. */
 export async function verifyUpstreamRepairConvergence(root: string, sourceId: string, planHash: string) {
   const current = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(item => item.plan.planHash === planHash);
-  if (!current?.finishIntent || !["finished", "converged"].includes(current.state)) throw upstreamRepairHostError("Convergence requires the original finished repair");
+  if (!current?.finishIntent || !["finished", "converged", "evaluated"].includes(current.state)) throw upstreamRepairHostError("Convergence requires the original finished repair");
   const receipts = new CompilerFinishReceipts(root, sourceId, current.plan.batchId), receipt = await receipts.read();
   if (!receipt || receipt.state !== "completed") throw upstreamRepairHostError("Convergence requires its original completed active receipt");
   await receipts.verify(receipt);
@@ -38,7 +38,7 @@ export async function observeUpstreamRepairConvergence(root: string, sourceId?: 
   for (const source of sources) {
     if (!source) throw upstreamRepairHostError("Convergence source is not registered");
     const ledger = new UpstreamRepairLedger(root, source.id);
-    for (const current of (await ledger.inspect()).plans.filter(item => ["finished", "converged"].includes(item.state))) {
+    for (const current of (await ledger.inspect()).plans.filter(item => ["finished", "converged", "evaluated"].includes(item.state))) {
       try { await ledger.recordConverged(current.plan.planHash); }
       catch (error) {
         const message = error instanceof Error ? error.message : String(error);

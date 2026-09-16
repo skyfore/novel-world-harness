@@ -3293,7 +3293,7 @@ export function createCompilerProposalToolset(
         const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
         const managed = (await new UpstreamRepairLedger(workspaceRoot, activeSourceId).inspect()).plans.find(item => item.plan.batchId === compilerBatchId);
         if (managed) {
-          const finishPermit = hostOptions.upstreamFinish && managed.finishIntent && isDeepStrictEqual(hostOptions.upstreamFinish, managed.finishIntent) && ["finish-frozen", "finished", "converged"].includes(managed.state);
+          const finishPermit = hostOptions.upstreamFinish && managed.finishIntent && isDeepStrictEqual(hostOptions.upstreamFinish, managed.finishIntent) && ["finish-frozen", "finished", "converged", "evaluated"].includes(managed.state);
           const stagePermit = hostOptions.upstreamRepair?.planHash === managed.plan.planHash && ["authorized", "staging"].includes(managed.state);
           if ((!finishPermit && !stagePermit) || (hostOptions.upstreamFinish && hostOptions.upstreamRepair)) throw finishHostError("managed upstream batch requires its exact active host authorization; preserve its ledger and stop ordinary batch recovery");
           managedUpstream = true;

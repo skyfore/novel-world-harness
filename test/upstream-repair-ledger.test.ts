@@ -446,7 +446,7 @@ it("runs the original finish graph validation before any authorized canonical mu
   expect(await new CompilerFinishReceipts(f.root, f.sourceId, plan.batchId).read()).toBeUndefined();
 });
 
-it.each(["staged", "frozen", "partial", "completed", "finished", "converged"])("ports original upstream drafts and %s finish state into a fresh workspace", async point => {
+it.each(["staged", "frozen", "partial", "completed", "finished", "converged", "evaluated"])("ports original upstream drafts and %s finish state into a fresh workspace", async point => {
   const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
   const { CompilerFinishReceipts } = await import("../src/compiler/finish-receipts.js");
   const { PreparedNovelCache } = await import("../src/compiler/prepared-cache.js");
@@ -466,8 +466,9 @@ it.each(["staged", "frozen", "partial", "completed", "finished", "converged"])("
   } else if (point === "completed") vi.spyOn(UpstreamRepairLedger.prototype, "recordFinished").mockRejectedValueOnce(new Error("checkpoint injected crash"));
   if (["partial", "completed"].includes(point)) await expect(executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("checkpoint injected");
   const { convergeWorldProposals } = await import("../src/compiler/converge.js");
-  if (["finished", "converged"].includes(point)) await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
-  if (point === "converged") await convergeWorldProposals(f.root, f.sourceId);
+  if (["finished", "converged", "evaluated"].includes(point)) await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  if (["converged", "evaluated"].includes(point)) await convergeWorldProposals(f.root, f.sourceId);
+  if (point === "evaluated") await f.ledger.recordEvaluation(f.plan.planHash);
   const receipts = new CompilerFinishReceipts(f.root, f.sourceId, f.plan.batchId), originalReceipt = await receipts.read();
   const cacheRoot = path.join(f.root, "portable-cache"), cache = new PreparedNovelCache(f.root, cacheRoot);
   const bundle = await cache.candidateSnapshot(f.source.source), checkpoint = bundle.compilerSnapshot.upstreamRepairCheckpoint!;
@@ -507,9 +508,9 @@ it.each(["staged", "frozen", "partial", "completed", "finished", "converged"])("
   expect((await proposals.read(f.sourceId, "quote-one")).anchor.endByte).toBe(f.annotation.anchor.endByte + 1);
   if (originalReceipt) expect(completed.fingerprint).toBe(originalReceipt.fingerprint);
   expect((await convergeWorldProposals(cloneRoot, f.sourceId)).upstreamRepairIssues).toBeUndefined();
-  expect((await new UpstreamRepairLedger(cloneRoot, f.sourceId).inspect()).plans[0]!.state).toBe("converged");
+  expect((await new UpstreamRepairLedger(cloneRoot, f.sourceId).inspect()).plans[0]!.state).toBe(point === "evaluated" ? "evaluated" : "converged");
   // Later convergence cannot be replaced by an earlier portable checkpoint.
-  if (point === "converged") await cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!);
+  if (["converged", "evaluated"].includes(point)) await cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!);
   else await expect(cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!)).rejects.toThrow();
 });
 
@@ -565,4 +566,95 @@ it.each([false, true])("stops changed active revisions on convergence (previousl
   const history = await f.ledger.history();
   await convergeWorldProposals(f.root, f.sourceId);
   expect(await f.ledger.history()).toEqual(history);
+});
+
+async function convergedEvaluationFixture() {
+  const { CanonicalModelStore } = await import("../src/world/canonical-model.js");
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { CompilerBatchStore, prepareCompilerBatches } = await import("../src/compiler/batches.js");
+  const { PreparedNovelCache } = await import("../src/compiler/prepared-cache.js");
+  const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const f = await frozenQuotationFinish(), canonical = new CanonicalModelStore(f.root);
+  await canonical.putEntity({ id: "ada", kind: "character", canonicalName: "Ada", aliases: [], evidence: f.source.evidence("Ada") });
+  await new InitialWorldStore(f.root).put({ version: 1, evidence: f.source.evidence("Ada"), participantPresence: [{ entityId: "ada", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.alive", value: true }, { op: "set", entityId: "ada", field: "character.plan", value: "wait" }] } });
+  await new CompilerBatchStore(f.root).replaceCompleted(f.sourceId, (await prepareCompilerBatches(f.root, f.source.source)).map(item => item.id));
+  await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  await convergeWorldProposals(f.root, f.sourceId);
+  return { ...f, canonical, cache: new PreparedNovelCache(f.root, path.join(f.root, "eval-cache")) };
+}
+
+it("records actual per-requirement failures without a hash cycle and rejects forged success", async () => {
+  const { preparedSubjectHash, validateAssessmentRevision } = await import("../src/compiler/certification.js");
+  const { upstreamRepairEvaluationIssues } = await import("../src/compiler/upstream-repair-evaluation.js");
+  const f = await convergedEvaluationFixture();
+  const before = await f.cache.candidateSnapshot(f.source.source), subject = preparedSubjectHash(before);
+  const { settleUpstreamRepairRequirements } = await import("../src/compiler/upstream-repair-evaluation.js");
+  const settlement = await settleUpstreamRepairRequirements(f.root, f.sourceId), result = settlement.results[0]!;
+  expect(settlement.results).toHaveLength(1);
+  expect(settlement.issues.some(issue => issue.includes("REQUIREMENT_UNRESOLVED"))).toBe(true);
+  await expect(settleUpstreamRepairRequirements(f.root, "missing-source")).rejects.toThrow("Evaluation source is not registered");
+  expect(result.subjectSnapshotHash).toBe(subject);
+  expect(result.result.requirements.map(item => item.id).sort()).toEqual(f.plan.requirementIds.slice().sort());
+  expect(result.result.requirements.some(item => item.state !== "satisfied")).toBe(true);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("evaluated");
+  const { bundle, assessment } = await f.cache.inspectCandidate(f.source.source);
+  expect(preparedSubjectHash(bundle)).toBe(subject);
+  expect(upstreamRepairEvaluationIssues(bundle, assessment).some(issue => issue.includes("REQUIREMENT_UNRESOLVED"))).toBe(true);
+  expect(validateAssessmentRevision(bundle, assessment).some(issue => issue.includes("UPSTREAM_REPAIR_REQUIREMENT_UNRESOLVED"))).toBe(true);
+  const records = await f.ledger.history();
+  await f.ledger.recordEvaluation(f.plan.planHash);
+  expect(await f.ledger.history()).toEqual(records);
+  const forged = structuredClone(bundle), last = forged.compilerSnapshot.upstreamRepairJournal!.at(-1)!;
+  if (last.payload.kind !== "evaluated") throw new Error("Expected evaluation");
+  for (const item of last.payload.evaluation.result.requirements) { item.state = "satisfied"; item.diagnostics = []; item.blockedBy = []; }
+  const { hash: _hash, ...identity } = last; last.hash = contentHash(identity);
+  expect(preparedSubjectHash(forged)).toBe(subject);
+  expect(upstreamRepairEvaluationIssues(forged, assessment)).toContain(`UPSTREAM_REPAIR_EVALUATION_MISMATCH: ${f.plan.planHash}`);
+});
+
+it("certifies only actual satisfied repair obligations and invalidates changed or unobservable inputs", async () => {
+  const { canonicalEventSchema } = await import("../src/world/model.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const { preparedSubjectHash } = await import("../src/compiler/certification.js");
+  const { upstreamRepairEvaluationIssues } = await import("../src/compiler/upstream-repair-evaluation.js");
+  const { observeRequirementValidity } = await import("../src/compiler/requirement-observation.js");
+  const f = await convergedEvaluationFixture();
+  const event = canonicalEventSchema.parse({ id: "waiting", title: "Waiting", participants: ["ada"], participantPresence: [{ entityId: "ada", mode: "physical" }], storyTime: { kind: "unknown" }, preconditions: [], observedOutcome: { version: 1, operations: [] }, causalParents: [], confidence: 1, evidence: f.source.evidence("Nothing changes.") });
+  await f.canonical.putEvent(event);
+  const result = await f.ledger.recordEvaluation(f.plan.planHash);
+  expect(result.result.requirements.every(item => item.state === "satisfied")).toBe(true);
+  let current = await f.cache.inspectCandidate(f.source.source);
+  expect(upstreamRepairEvaluationIssues(current.bundle, current.assessment)).toEqual([]);
+  // Other closure/role/quality requirements remain independent; repair satisfaction is not publication.
+  expect(current.assessment.fullNovelReady).toBe(false);
+  const annotations = new SourceAnnotationStore(f.root);
+  await annotations.stage(f.sourceId, { version: 1, id: "unrelated-pending", annotationType: "quotation", payload: { ...f.annotation, id: "other-quote" }, generatedBy: { worker: "fixture" }, createdAt: "2026-09-16T00:00:00Z" });
+  await observeRequirementValidity(f.root, f.sourceId);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("converged");
+  expect((await f.ledger.history()).at(-1)!.payload).toMatchObject({ kind: "evaluation-invalidated", nextSubjectSnapshotHash: null });
+  await annotations.withdraw(f.sourceId, "unrelated-pending");
+  expect(preparedSubjectHash(await f.cache.candidateSnapshot(f.source.source))).toBe(result.subjectSnapshotHash);
+  await f.ledger.recordEvaluation(f.plan.planHash);
+  await f.canonical.putEvent({ ...event, observedOutcome: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.alive", value: false }] } });
+  current = await f.cache.inspectCandidate(f.source.source);
+  expect(upstreamRepairEvaluationIssues(current.bundle, current.assessment)).toContain(`UPSTREAM_REPAIR_EVALUATION_STALE: ${f.plan.planHash}`);
+  await convergeWorldProposals(f.root, f.sourceId);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("converged");
+  const changed = await f.ledger.recordEvaluation(f.plan.planHash);
+  expect(changed.result.requirements.some(item => item.state !== "satisfied")).toBe(true);
+  expect(changed.subjectSnapshotHash).not.toBe(result.subjectSnapshotHash);
+});
+
+it("keeps successor obligations unresolved instead of erasing failed predecessor history", async () => {
+  const { upstreamRepairEvaluationIssues } = await import("../src/compiler/upstream-repair-evaluation.js");
+  const f = await convergedEvaluationFixture(); await f.ledger.recordEvaluation(f.plan.planHash);
+  const prior = await f.ledger.history();
+  await f.ledger.stop(f.plan.planHash, "Host approved a revised source dependency");
+  const changed = { ...f.annotation, attributionConfidence: 0.7 }; await f.write(changed, "host-successor-baseline");
+  const next = freezeUpstreamRepairPlan({ ...f.identity, planId: "successor", batchId: "successor-batch", baselineRefs: [{ kind: "quotation", id: changed.id, revisionHash: contentHash(changed) }] });
+  await f.ledger.register(next, f.plan.planHash);
+  const { bundle, assessment } = await f.cache.inspectCandidate(f.source.source);
+  expect(upstreamRepairEvaluationIssues(bundle, assessment)).toEqual([`UPSTREAM_REPAIR_NOT_EVALUATED: ${next.planHash} (planned)`]);
+  expect((await f.ledger.history()).slice(0, prior.length)).toEqual(prior);
 });

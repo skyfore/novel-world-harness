@@ -132,6 +132,11 @@ export function upstreamRepairUnsettledIssues(records: readonly Record[]): strin
   return [...project(parsed.data).plans.values()].map(item => `UPSTREAM_REPAIR_NOT_EVALUATED: ${item.plan.planHash} (${item.state})`);
 }
 
+export function inspectUpstreamRepairJournal(input: readonly UpstreamRepairRecord[]) {
+  const records = upstreamRepairJournalSchema.parse(input), state = project(records);
+  return { records, plans: [...state.plans.values()], attempts: [...state.attempts].map(([attemptRef, value]) => ({ attemptRef, ...value })) };
+}
+
 /** Host-only storage, always called under the compiler lock. No model tool is granted by registration. */
 export class UpstreamRepairLedger {
   readonly directory: string;

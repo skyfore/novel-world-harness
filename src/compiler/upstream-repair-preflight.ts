@@ -19,10 +19,12 @@ export function upstreamRepairHostError(reason: string): Error {
 }
 
 /** Read actual source-local host state under the compiler lock; no caller-supplied revision claims. */
-export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepairPlan, committedOutputs: ReadonlyMap<string, string> = new Map()) {
+export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepairPlan, committedOutputs: ReadonlyMap<string, string> = new Map(), restoringReceipt?: import("./finish-receipts.js").CompilerFinishReceipt) {
   const plan = upstreamRepairPlanSchema.parse(raw), sourceId = plan.sourceScope.sourceId;
   if (committedOutputs.size) {
-    const receipt = await new CompilerFinishReceipts(root, sourceId, plan.batchId).read();
+    const active = await new CompilerFinishReceipts(root, sourceId, plan.batchId).read();
+    const retained = restoringReceipt && (await CompilerFinishReceipts.listRetained(root, sourceId)).find(item => contentHash(item.receipt) === contentHash(restoringReceipt))?.receipt;
+    const receipt = active ?? retained;
     const intent = receipt?.identity.upstreamRepairIntent;
     if (!intent || intent.planHash !== plan.planHash || committedOutputs.size !== intent.proposals.length
       || intent.proposals.some(item => committedOutputs.get(`${item.artifactKind}:${item.artifactId}`) !== item.payloadHash)) throw upstreamRepairHostError("Recovery revisions lack the exact durable upstream finish receipt");

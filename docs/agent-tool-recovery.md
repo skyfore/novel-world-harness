@@ -658,12 +658,9 @@ history requires an isolated workspace or host storage review; never delete the
 head to make restoration pass. Failure counts remain effective after restoration
 into a new workspace.
 
-Journal import does not execute proposals, invent missing pending envelopes or
-reactivate historical predecessor finishes. The existing candidate gate still
-rejects pending proposal work. This stage therefore preserves archiveable
-candidate history and budgets; it does not yet provide a portable checkpoint
-for a live pending upstream draft graph. Preserve those original drafts for host
-recovery until draft/finish snapshot support is implemented.
+Journal import alone does not execute proposals, invent missing pending envelopes
+or reactivate historical predecessor finishes. Portable recovery requires the
+explicit upstream checkpoint described below, including its original envelopes.
 
 ### Frozen upstream finish intent
 
@@ -708,5 +705,30 @@ Completion verifies every output is active, then records the exact completed
 receipt fingerprint as `finished`. Recovery after receipt completion resumes
 journal recording without rerunning mutation tools. Finished records and their
 original receipts are retained in candidate history and still block certification
-until convergence and independent requirement evaluation are implemented. This
-does not provide portable recovery for missing live draft envelopes.
+until convergence and independent requirement evaluation are implemented.
+
+### Portable upstream draft and finish checkpoints
+
+Candidates may retain `upstreamRepairCheckpoint` for live staging or frozen
+finish plans. It contains every original staged envelope, pending/accepted
+status and explicitly active v3 receipt. Other pending compiler or world work
+still prevents capture. An unresolved reserved attempt must first use local
+draft recovery; do not rerun the model to manufacture a replacement envelope.
+The full original journal, requirement history and retained receipts remain
+mandatory. This is a compiler checkpoint, not a publishable Play revision.
+
+Before materialization, verify all draft/attempt hashes, complete membership,
+source bytes and layout, original baselines, allowed field mutations, accepted
+active outputs and receipt lifecycle. Local pending proposals absent from the
+checkpoint, changed envelopes, rejected identities or accepted-to-pending
+regressions require host review or an isolated workspace. Preserve the local
+history; do not delete drafts or rotate proposal IDs to make import pass.
+
+Restore original envelope bytes without tool execution. Pending envelopes do
+not commit artifacts; accepted envelopes reproduce only the already verified
+snapshot outputs. Reactivate only receipts explicitly marked active in the
+checkpoint after their exact envelopes and retained authorization are present.
+Historical predecessor receipts remain historical. Restoring the same checkpoint
+is idempotent; later attempts or finish completion prevent rollback to an older
+checkpoint. The host then resumes staging or the original finish through the
+existing bounded services. No provider call or new budget is created by import.

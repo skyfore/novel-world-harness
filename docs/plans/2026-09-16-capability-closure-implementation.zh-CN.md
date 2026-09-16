@@ -339,3 +339,21 @@ finished 事件绑定实际 completed receipt fingerprint；回执完成后记�
 P2 仍待活动 pending/finish 可移植 checkpoint、converge 后实际修订复核及逐项评估、宿主修复调度与模型会话接入；P1 完整验收映射及 P3–P7 仍未完成。未调用真实 provider 或人工体验评价。
 
 验证：全量 188 文件、1120 tests 通过（82.60 秒）；随后补强持久回执修订授权、快照回执绑定和确定性 finish 失败停止状态，32 项定向回归通过。服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。
+
+P2g 已提交为 `1300043`。
+
+## P2h：活动草案与 finish 的可移植候选恢复
+
+新增 upstreamRepairCheckpoint，保存 live staging/finish-frozen 计划的全部原始 envelope、pending/accepted 状态和显式活动 v3 回执。成员必须与完整 journal 中的 attempt、validated payload、staged envelope hash 精确一致；遗漏草案、重复身份、缺原回执或已完成回执对应未接受草案均拒绝。未解决的预留尝试先执行原本地恢复，不补造 envelope。
+
+候选允许保存这组已验证的上游 pending 草案，其他 pending compiler/world 工作仍拒绝。导入在 materialize 写入前验证原文字节、segment layout、独立要求历史、原 baseline、字段/证据权限、已接受输出的 active revision 及回执生命周期；本地无关 pending、同 ID 不同内容、rejected 身份或 accepted→pending 回退均拒绝。原账本前缀及保留要求/回执检查继续生效。
+
+恢复复用原 envelope 字节，不执行模型工具。pending 只恢复草案；accepted 只能在已验证 snapshot 的同一输出上恢复原接受状态。活动回执必须明确存在于 checkpoint，且原授权、已恢复 envelope、来源和 segment 均通过验证，才重新成为可恢复的活动 finish；历史前驱回执不激活。恢复保留原 fingerprint、preparedAt、输入和预算。完成后追加的新 journal 阻止较旧 checkpoint 覆盖。
+
+新增跨工作区回归覆盖 staging、冻结未提交、annotation 提交后中断、回执完成但尚未写 finished 的四类状态；重复导入幂等，之后可继续原 finish，且不会重跑提案工具。覆盖篡改 envelope、遗漏草案、本地无关 pending 拒绝及失败前 canonical 未写入。
+
+另将 discourse→mention→resolution 跨存储中断点归档到新工作区，恢复已接受 annotation 与仍 pending 的 resolution，再完成原 finish，验证多类型依赖链迁移。
+
+该路径仍使用候选的既有前提：原始 compiler batches 已完成、存在 evidence-backed initial world；本段没有新增任意早期编译状态的通用 checkpoint。P2 仍待 converge 后实际修订复核与逐项评估、修复调度/模型会话接入；P1 完整验收映射及 P3–P7 仍未完成，未调用真实 provider 或人工体验评价。
+
+验证：全量 188 文件、1123 tests 通过（82.00 秒）；随后补充 staging 与跨存储依赖链迁移、活动回执/接受状态约束，36 项定向回归通过。服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。

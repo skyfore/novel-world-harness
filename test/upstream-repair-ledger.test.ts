@@ -238,6 +238,19 @@ it("consumes only declared same-plan staged mentions and freezes their exact rev
   await expect(executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash)).rejects.toThrow("injected between");
   expect((await annotations.read(f.sourceId, "new-mention")).id).toBe("new-mention");
   expect(await new EntityResolutionStore(f.root).list(f.sourceId)).toEqual([]);
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { CompilerBatchStore, prepareCompilerBatches } = await import("../src/compiler/batches.js");
+  const { PreparedNovelCache } = await import("../src/compiler/prepared-cache.js");
+  await new InitialWorldStore(f.root).put({ version: 1, evidence: f.source.evidence("Ada"), participantPresence: [{ entityId: "ada", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.alive", value: true }, { op: "set", entityId: "ada", field: "character.plan", value: "wait" }] } });
+  await new CompilerBatchStore(f.root).replaceCompleted(f.sourceId, (await prepareCompilerBatches(f.root, f.source.source)).map(item => item.id));
+  const cacheRoot = path.join(f.root, "dag-cache"), cache = new PreparedNovelCache(f.root, cacheRoot);
+  const archived = await cache.archiveCandidate(f.source.source);
+  const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-upstream-dag-clone-")); roots.push(cloneRoot);
+  const clone = await createEvidenceFixture(cloneRoot, 'Ada said, "Wait." Nothing changes.');
+  await new PreparedNovelCache(cloneRoot, cacheRoot).restoreCompilerCheckpoint(clone.source, archived.bundleHash!);
+  noReplay.mockClear();
+  await executeUpstreamRepairFinish(cloneRoot, f.sourceId, plan.planHash);
+  expect((await new EntityResolutionStore(cloneRoot).list(f.sourceId)).map(item => item.id)).toEqual(["new-resolution"]);
   await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
   expect((await new EntityResolutionStore(f.root).list(f.sourceId)).map(item => item.id)).toEqual(["new-resolution"]);
   expect(noReplay).not.toHaveBeenCalled();
@@ -347,13 +360,14 @@ it("refuses stray batch proposals and stale baselines before freezing finish aut
   expect((await f.ledger.history()).some(record => record.payload.kind === "finish-frozen")).toBe(false);
 });
 
-async function frozenQuotationFinish() {
+async function frozenQuotationFinish(freeze = true) {
   const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
   const { prepareUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
   const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
   await stageUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, { proposal_id: "repair-proposal", annotation_id: "quote-one", selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 });
-  const intent = await prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Reviewed" }], summary: "Bounded repair" });
-  return { ...f, intent };
+  const finishInput = { outcome: "complete" as const, reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed" as const, summary: "Reviewed" }], summary: "Bounded repair" };
+  const intent = freeze ? await prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, finishInput) : undefined;
+  return { ...f, intent, finishInput };
 }
 
 it.each(["none", "annotation", "completion", "journal"])("executes the original authorized finish and recovers after %s without model replay", async point => {
@@ -430,4 +444,65 @@ it("runs the original finish graph validation before any authorized canonical mu
   expect(await annotations.list(f.sourceId)).toEqual(before);
   expect((await f.ledger.inspect()).plans[0]!.state).toBe("needs-host-review");
   expect(await new CompilerFinishReceipts(f.root, f.sourceId, plan.batchId).read()).toBeUndefined();
+});
+
+it.each(["staged", "frozen", "partial", "completed"])("ports original upstream drafts and %s finish state into a fresh workspace", async point => {
+  const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { CompilerFinishReceipts } = await import("../src/compiler/finish-receipts.js");
+  const { PreparedNovelCache } = await import("../src/compiler/prepared-cache.js");
+  const { CanonicalModelStore } = await import("../src/world/canonical-model.js");
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { CompilerBatchStore, prepareCompilerBatches } = await import("../src/compiler/batches.js");
+  const { assertUpstreamRepairCheckpoint } = await import("../src/compiler/upstream-repair-checkpoint.js");
+  const f = await frozenQuotationFinish(point !== "staged");
+  const entity = { id: "ada", kind: "character" as const, canonicalName: "Ada", aliases: [], evidence: f.source.evidence("Ada") };
+  await new CanonicalModelStore(f.root).putEntity(entity);
+  await new InitialWorldStore(f.root).put({ version: 1, evidence: f.source.evidence("Ada"), participantPresence: [{ entityId: "ada", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.alive", value: true }, { op: "set", entityId: "ada", field: "character.plan", value: "wait" }] } });
+  const batches = await prepareCompilerBatches(f.root, f.source.source);
+  await new CompilerBatchStore(f.root).replaceCompleted(f.sourceId, batches.map(batch => batch.id));
+  if (point === "partial") {
+    const original = SourceAnnotationStore.prototype.commitProposals;
+    vi.spyOn(SourceAnnotationStore.prototype, "commitProposals").mockImplementationOnce(async function (...args) { await original.apply(this, args); throw new Error("checkpoint injected crash"); });
+  } else if (point === "completed") vi.spyOn(UpstreamRepairLedger.prototype, "recordFinished").mockRejectedValueOnce(new Error("checkpoint injected crash"));
+  if (["partial", "completed"].includes(point)) await expect(executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash)).rejects.toThrow("checkpoint injected");
+  const receipts = new CompilerFinishReceipts(f.root, f.sourceId, f.plan.batchId), originalReceipt = await receipts.read();
+  const cacheRoot = path.join(f.root, "portable-cache"), cache = new PreparedNovelCache(f.root, cacheRoot);
+  const bundle = await cache.candidateSnapshot(f.source.source), checkpoint = bundle.compilerSnapshot.upstreamRepairCheckpoint!;
+  expect(checkpoint.drafts).toHaveLength(1);
+  expect(checkpoint.drafts[0]!.status).toBe(["staged", "frozen"].includes(point) ? "pending" : "accepted");
+  expect(checkpoint.activeReceipts).toEqual(originalReceipt ? [originalReceipt] : []);
+  const corrupt = structuredClone(checkpoint); corrupt.drafts[0]!.envelope.createdAt = "2026-09-17T00:00:00Z";
+  expect(() => assertUpstreamRepairCheckpoint(corrupt, bundle.compilerSnapshot.upstreamRepairJournal!, f.sourceId)).toThrow("original validated");
+  expect(() => assertUpstreamRepairCheckpoint({ ...checkpoint, drafts: [] }, bundle.compilerSnapshot.upstreamRepairJournal!, f.sourceId)).toThrow("every live staged");
+  const archived = await cache.archiveCandidate(f.source.source);
+  const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-upstream-portable-")); roots.push(cloneRoot);
+  const clone = await createEvidenceFixture(cloneRoot, 'Ada said, "Wait." Nothing changes.');
+  const cloneCache = new PreparedNovelCache(cloneRoot, cacheRoot);
+  if (point === "staged") {
+    const local = new SourceAnnotationStore(cloneRoot), draft = checkpoint.drafts[0]!;
+    if (draft.store !== "annotation") throw new Error("Expected quotation fixture");
+    await local.stage(f.sourceId, { ...draft.envelope, id: "local-stray" });
+    await expect(cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!)).rejects.toThrow("unrelated local pending");
+    expect(await new CanonicalModelStore(cloneRoot).listEntities()).toEqual([]);
+    expect((await local.listProposals(f.sourceId, "pending")).map(item => item.id)).toEqual(["local-stray"]);
+    await local.withdraw(f.sourceId, "local-stray");
+  }
+  await cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!);
+  await cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!);
+  const cloneReceipts = new CompilerFinishReceipts(cloneRoot, f.sourceId, f.plan.batchId);
+  expect(await cloneReceipts.read()).toEqual(originalReceipt);
+  expect(await new UpstreamRepairLedger(cloneRoot, f.sourceId).history()).toEqual(await f.ledger.history());
+  const proposals = new SourceAnnotationStore(cloneRoot);
+  expect(await proposals.readProposal(f.sourceId, checkpoint.drafts[0]!.status, "repair-proposal")).toEqual(checkpoint.drafts[0]!.envelope);
+  const { prepareUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const expectedIntent = f.intent ?? await prepareUpstreamRepairFinish(cloneRoot, f.sourceId, f.plan.planHash, f.finishInput);
+  const noStage = vi.spyOn(SourceAnnotationStore.prototype, "stage");
+  const completed = await executeUpstreamRepairFinish(cloneRoot, f.sourceId, f.plan.planHash);
+  expect(completed.state).toBe("completed");
+  expect(completed.identity.upstreamRepairIntent).toEqual(expectedIntent);
+  expect(noStage).not.toHaveBeenCalled();
+  expect((await proposals.read(f.sourceId, "quote-one")).anchor.endByte).toBe(f.annotation.anchor.endByte + 1);
+  if (originalReceipt) expect(completed.fingerprint).toBe(originalReceipt.fingerprint);
+  // A later completed journal cannot be replaced by the earlier portable checkpoint.
+  await expect(cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!)).rejects.toThrow();
 });

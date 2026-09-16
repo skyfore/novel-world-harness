@@ -1,3 +1,4 @@
+import { upstreamRepairCheckpointSchema, captureUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointState, assertUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointRestorable, restoreUpstreamRepairCheckpoint, type UpstreamRepairCheckpoint } from "./upstream-repair-checkpoint.js";
 import { UpstreamRepairLedger, upstreamRepairJournalSchema, type UpstreamRepairRecord } from "./upstream-repair-ledger.js";
 import { upstreamRepairSnapshotIssues } from "./upstream-repair-snapshot.js";
 import { roleReviewResumeIssues } from "./role-review-finish.js";
@@ -54,7 +55,7 @@ import {
   prepareCompilerBatches,
   type PersistedBatchProgress,
 } from "./batches.js";
-import { SEGMENTER_VERSION } from "./segments.js";
+import { SEGMENTER_VERSION, segmentSource } from "./segments.js";
 import { CompilerValidator, type CanonicalProposalKind, type CompilerValidationCatalog } from "./validator.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { actionConstraintSchema } from "../world/action-constraint.js";
@@ -139,6 +140,7 @@ const preparedCanonicalSchema = z.object({
 
 const preparedCompilerSnapshotSchema = z.object({
   upstreamRepairJournal: upstreamRepairJournalSchema.optional(),
+  upstreamRepairCheckpoint: upstreamRepairCheckpointSchema.optional(),
   requirementJournal: requirementJournalSchema.optional(),
   coreRoleReviewRevision: roleReviewRevisionSchema.optional(),
   requirementDefinitions: requirementDefinitionHistorySchema.optional(),
@@ -189,6 +191,14 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
   const snapshot = bundle.compilerSnapshot;
   const upstreamIssues = upstreamRepairSnapshotIssues(snapshot, sourceId, bundle.source.contentSha256);
   if (upstreamIssues.length) throw new Error(upstreamIssues.join("; "));
+  assertUpstreamRepairCheckpoint(snapshot.upstreamRepairCheckpoint ?? { version: 1, drafts: [], activeReceipts: [] }, snapshot.upstreamRepairJournal ?? [], sourceId);
+  if (snapshot.upstreamRepairCheckpoint) {
+    for (const receipt of snapshot.upstreamRepairCheckpoint.activeReceipts) if (!snapshot.reconciliationObligations?.some(item => contentHash(item.receipt) === contentHash(receipt))) throw new Error("Upstream checkpoint receipt is missing its retained history");
+    for (const { receipt } of snapshot.reconciliationObligations ?? []) {
+      if (snapshot.upstreamRepairCheckpoint.drafts.some(draft => draft.planHash === receipt.identity.upstreamRepairIntent?.planHash)
+        && !snapshot.upstreamRepairCheckpoint.activeReceipts.some(active => contentHash(active) === contentHash(receipt))) throw new Error("Live upstream checkpoint cannot drop its original finish lifecycle");
+    }
+  }
   const roleResumeIssues = roleReviewResumeIssues(snapshot.reconciliationObligations ?? [], snapshot.roleRoster, sourceId);
   if (roleResumeIssues.length) throw new Error(roleResumeIssues.join("; "));
   const journalIssues = requirementJournalBindingIssues(snapshot, sourceId, bundle.source.contentSha256);
@@ -761,9 +771,11 @@ export class PreparedNovelCache {
     const proposals = new ProposalStore(this.workspaceRoot);
     const pending = await proposals.list("pending", source.id);
     if (pending.length) throw new Error(`Cannot cache ${source.id}: ${pending.length} source proposal(s) are still pending.`);
+    const upstreamRepairCheckpoint = await captureUpstreamRepairCheckpoint(this.workspaceRoot, source.id);
     const pendingCompilerMetadata = await pendingSourceCompilerMetadataCount(this.workspaceRoot, source.id);
-    if (pendingCompilerMetadata) {
-      throw new Error(`Cannot cache ${source.id}: ${pendingCompilerMetadata} source observation/resolution/accounting proposal(s) are still pending.`);
+    const retainedPending = upstreamRepairCheckpoint?.drafts.filter(item => item.status === "pending").length ?? 0;
+    if (pendingCompilerMetadata !== retainedPending) {
+      throw new Error(`Cannot cache ${source.id}: ${pendingCompilerMetadata - retainedPending} source observation/resolution/accounting proposal(s) lack an exact upstream checkpoint.`);
     }
     // Refresh because the successful opening batch can replace the ingest
     // label with accepted model-derived title metadata while callers retain an
@@ -898,6 +910,7 @@ export class PreparedNovelCache {
         .sort(),
       canonical: preparedCanonical,
       compilerSnapshot: {
+        ...(upstreamRepairCheckpoint ? { upstreamRepairCheckpoint } : {}),
         ...(upstreamRepairJournal.length ? { upstreamRepairJournal } : {}),
         ...(requirementJournal.length ? { requirementJournal } : {}),
         ...(coreRoleReviewRevision ? { coreRoleReviewRevision } : {}),
@@ -1082,6 +1095,7 @@ export class PreparedNovelCache {
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
     roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
     upstreamRepairJournal?: UpstreamRepairRecord[];
+    upstreamRepairCheckpoint?: UpstreamRepairCheckpoint;
     requirementJournal?: LedgerRecord[];
     coreRoleReviewRevision?: RoleReviewRevision;
     requirementDefinitions?: RequirementSet[];
@@ -1114,7 +1128,9 @@ export class PreparedNovelCache {
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).definitionHistory();
     const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).coreRoleDefinitionHistory();
     const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, sourceId);
+    const upstreamRepairCheckpoint = await captureUpstreamRepairCheckpoint(this.workspaceRoot, sourceId);
     return {
+      ...(upstreamRepairCheckpoint ? { upstreamRepairCheckpoint } : {}),
       ...(upstreamRepairJournal.length ? { upstreamRepairJournal } : {}),
       ...(requirementJournal.length ? { requirementJournal } : {}),
       ...(coreRoleReviewRevision ? { coreRoleReviewRevision } : {}),
@@ -1134,6 +1150,7 @@ export class PreparedNovelCache {
 
   private async materialize(bundle: PreparedNovelBundle, exact: boolean): Promise<void> {
     const sourceId = bundle.source.id;
+    await assertUpstreamRepairCheckpointRestorable(this.workspaceRoot, sourceId, bundle.compilerSnapshot.upstreamRepairCheckpoint);
     await new RequirementLedger(this.workspaceRoot, sourceId).assertRestorable(bundle.compilerSnapshot.requirementDefinitions ?? []);
     const coreDefinitions = bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [];
     const coreSource = (coreDefinitions.length || bundle.compilerSnapshot.requirementJournal?.length || bundle.compilerSnapshot.upstreamRepairJournal?.length) ? await WorkspaceStore.openReadOnly(this.workspaceRoot).getSource(sourceId) : null;
@@ -1248,6 +1265,7 @@ export class PreparedNovelCache {
       chapterSplitPlan: bundle.chapterSplitPlan ?? null,
     });
     await new CompilerBatchStore(this.workspaceRoot).replaceCompleted(sourceId, bundle.batchIds);
+    if (snapshot.upstreamRepairCheckpoint) await restoreUpstreamRepairCheckpoint(this.workspaceRoot, sourceId, snapshot.upstreamRepairCheckpoint);
   }
 
   private async assertTitleInferenceEvidence(bundle: PreparedNovelBundle): Promise<void> {
@@ -1561,6 +1579,21 @@ async function assertPreparedCompilerSnapshotEvidence(
   const artifacts = new Map(preparedArtifactDescriptors(bundle.canonical)
     .map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const));
   const verifier = new EvidenceVerifier(workspaceRoot);
+  if (bundle.compilerSnapshot.upstreamRepairCheckpoint) {
+    const snapshot = bundle.compilerSnapshot;
+    const source = await WorkspaceStore.openReadOnly(workspaceRoot).getSource(bundle.source.id);
+    if (!source) throw new Error("Upstream checkpoint source is not registered");
+    const bytes = await readSourceMaterial(workspaceRoot, source);
+    const manifest = await segmentSource(workspaceRoot, source, { chapterSplitPlan: bundle.chapterSplitPlan ?? null });
+    const payloads = new Map<string, unknown>();
+    for (const artifact of artifacts.values()) payloads.set(`${artifact.kind}:${artifact.id}`, artifact.payload);
+    for (const annotation of snapshot.annotations) payloads.set(`${annotation.annotationType}:${annotation.id}`, annotation);
+    for (const item of snapshot.entityResolutions) payloads.set(`entity-resolution:${item.id}`, item);
+    for (const item of snapshot.eventResolutions) payloads.set(`event-resolution:${item.id}`, item);
+    for (const segment of manifest.segments) payloads.set(`source-segment:${segment.id}`, segment);
+    for (const binding of snapshot.evidenceBindings) for (const assertion of binding.assertions) payloads.set(`evidence-assertion:${assertion.id}`, assertion);
+    await assertUpstreamRepairCheckpointState(snapshot.upstreamRepairCheckpoint!, snapshot.upstreamRepairJournal ?? [], source.id, source.contentSha256, bytes, payloads);
+  }
   for (const binding of bundle.compilerSnapshot.evidenceBindings) {
     const artifact = artifacts.get(`${binding.artifactKind}/${binding.artifactId}`);
     if (!artifact) {

@@ -24,7 +24,7 @@ async function pending(root: string, sourceId: string, kind: UpstreamRepairKind,
 function derivation(kind: UpstreamRepairKind, batchId: string) {
   return { runId: batchId, compilerBatchId: batchId, worker: toolNames[kind], ontologyVersion: kind === "entity-resolution" ? "entity-resolution-v1" : kind === "event-resolution" ? "event-resolution-v1" : "observation-v1" };
 }
-export function checkUpstreamRepairMutation(verified: Awaited<ReturnType<typeof verifyUpstreamRepairPlan>>, kind: UpstreamRepairKind, id: string, payload: unknown, stagedDependencies: ReadonlyMap<string, unknown> = new Map()) {
+export function checkUpstreamRepairMutation(verified: Pick<Awaited<ReturnType<typeof verifyUpstreamRepairPlan>>, "plan" | "bytes" | "payloads" | "activeRevisions">, kind: UpstreamRepairKind, id: string, payload: unknown, stagedDependencies: ReadonlyMap<string, unknown> = new Map()) {
   const { plan, bytes, payloads, activeRevisions } = verified;
   const anchors: Array<ReturnType<typeof textAnchorSchema.parse>> = [];
   const collect = (value: unknown): void => {

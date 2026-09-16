@@ -64,14 +64,15 @@ export async function prepareUpstreamRepairFinish(root: string, sourceId: string
 }
 
 /** Host verification accepts own exact outputs only after the original receipt is durable. */
-export async function verifyUpstreamRepairFinish(root: string, sourceId: string, planHash: string, expectedIntent?: UpstreamRepairFinishIntent, requireCommitted = false, expectedBatchId?: string) {
+export async function verifyUpstreamRepairFinish(root: string, sourceId: string, planHash: string, expectedIntent?: UpstreamRepairFinishIntent, requireCommitted = false, expectedBatchId?: string, restoringReceipt?: import("./finish-receipts.js").CompilerFinishReceipt) {
   const current = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(item => item.plan.planHash === planHash);
   if (!current?.finishIntent || !["finish-frozen", "finished"].includes(current.state)) throw upstreamRepairHostError("Original active frozen finish intent is missing");
   const { plan, finishIntent: intent } = current;
   if (expectedBatchId && plan.batchId !== expectedBatchId) throw upstreamRepairHostError("Finish receipt batch differs from retained authorization");
   if (expectedIntent && contentHash(intent) !== contentHash(expectedIntent)) throw upstreamRepairHostError("Finish receipt differs from retained authorization");
   await assertFinishInventory(root, plan, intent.proposals, intent);
-  const receipt = await new CompilerFinishReceipts(root, sourceId, plan.batchId).read();
+  const receipt = await new CompilerFinishReceipts(root, sourceId, plan.batchId).read() ?? restoringReceipt;
+  if (receipt && (receipt.identity.batchId !== plan.batchId || contentHash(receipt.identity.upstreamRepairIntent ?? null) !== contentHash(intent))) throw upstreamRepairHostError("Restored receipt differs from frozen authorization");
   const committedOutputs = new Map<string, string>(), outputs = new Map<string, unknown>();
   for (const proposal of intent.proposals) {
     const store = proposal.artifactKind === "entity-resolution" ? new EntityResolutionStore(root) : proposal.artifactKind === "event-resolution" ? new EventResolutionStore(root) : new SourceAnnotationStore(root);
@@ -83,7 +84,7 @@ export async function verifyUpstreamRepairFinish(root: string, sourceId: string,
     outputs.set(key, envelope.payload);
     if (receipt) committedOutputs.set(key, proposal.payloadHash);
   }
-  const verified = await verifyUpstreamRepairPlan(root, plan, committedOutputs);
+  const verified = await verifyUpstreamRepairPlan(root, plan, committedOutputs, restoringReceipt);
   if (requireCommitted) for (const proposal of intent.proposals) if (verified.activeRevisions.get(`${proposal.artifactKind}:${proposal.artifactId}`) !== proposal.payloadHash) throw upstreamRepairHostError("Completed finish output is no longer active");
   // Re-run the field and source guard against the original baselines, never
   // against a partially committed proposal masquerading as its own baseline.

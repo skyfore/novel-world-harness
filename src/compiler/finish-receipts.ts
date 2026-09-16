@@ -265,6 +265,18 @@ export class CompilerFinishReceipts {
     await store.verify(receipt);
     await store.write(receipt);
   }
+  /** Reactivate only an explicitly captured upstream checkpoint after its exact envelopes are restored. */
+  static async restoreActiveUpstreamFinish(root: string, sourceId: string, input: CompilerFinishReceipt): Promise<void> {
+    const receipt = compilerFinishReceiptSchema.parse(input), intent = receipt.identity.upstreamRepairIntent;
+    if (!intent || receipt.identity.sourceId !== sourceId) throw finishHostError("restored upstream receipt source or authorization mismatch");
+    const store = new CompilerFinishReceipts(root, sourceId, receipt.identity.batchId), existing = await store.read();
+    if (existing && contentHash(existing) !== contentHash(receipt)) throw finishHostError("restored upstream receipt would rewrite its active lifecycle");
+    const { verifyUpstreamRepairFinish } = await import("./upstream-repair-finish.js");
+    await verifyUpstreamRepairFinish(root, sourceId, intent.planHash, intent, receipt.state === "completed", receipt.identity.batchId, receipt);
+    const { SegmentStore } = await import("./segments.js");
+    if (contentHash(await new SegmentStore(root).list(sourceId)) !== contentHash(receipt.identity.segments)) throw finishHostError("restored upstream receipt segment layout differs");
+    if (!existing) await store.write(receipt);
+  }
   /** Restore only historical accountability, without creating an active finish. */
   static async retainSnapshot(root: string, sourceId: string, receiptInput: CompilerFinishReceipt): Promise<void> {
     const receipt = compilerFinishReceiptSchema.parse(receiptInput);

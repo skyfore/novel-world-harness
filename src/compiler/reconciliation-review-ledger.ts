@@ -1,3 +1,4 @@
+import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -57,8 +58,9 @@ export async function reviewReconciliationDeferrals(root: string, input: z.infer
 /** Capture active AND retired work. Archiving is not a settlement operation. */
 export async function captureReconciliationObligations(root: string, sourceId: string): Promise<ReconciliationObligationSnapshot> {
   const snapshot: ReconciliationObligationSnapshot = [];
+  const upstreamPredecessors = new Set((await new UpstreamRepairLedger(root, sourceId).history()).flatMap(record => record.payload.kind === "planned" ? record.payload.plan.predecessorReceiptRefs : []));
   for (const { receipt, archived } of await CompilerFinishReceipts.listRetained(root, sourceId)) {
-    if (!receipt.identity.input.target_reviews?.length && !receipt.identity.metadata.roleReview) continue;
+    if (!receipt.identity.input.target_reviews?.length && !receipt.identity.metadata.roleReview && !upstreamPredecessors.has(receipt.fingerprint)) continue;
     let decision;
     try { decision = decisionSchema.parse(JSON.parse(await fs.readFile(decisionPath(root, sourceId, receipt.fingerprint), "utf8"))); }
     catch (error) {

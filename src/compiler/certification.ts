@@ -1,3 +1,5 @@
+import { upstreamRepairUnsettledIssues } from "./upstream-repair-ledger.js";
+import { upstreamRepairSnapshotIssues } from "./upstream-repair-snapshot.js";
 import { roleReviewFinishIssues } from "./role-review-finish.js";
 import { coreRoleAttemptHistoryIssues, requirementJournalBindingIssues, requirementSnapshotInputs } from "./requirement-ledger.js";
 import fs from "node:fs/promises";
@@ -50,6 +52,8 @@ export function preparedSubjectHash(bundle: Pick<PreparedNovelBundle, "version" 
 export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle): Promise<NovelClosureAssessment> {
   const subjectSnapshotHash = preparedSubjectHash(bundle), closure = buildPreparedClosure(bundle);
   const issues = [...closure.issues, ...validateFrozenAccounting(bundle)];
+  issues.push(...upstreamRepairSnapshotIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "UPSTREAM_REPAIR_SNAPSHOT_INVALID", message })));
+  issues.push(...upstreamRepairUnsettledIssues(bundle.compilerSnapshot.upstreamRepairJournal ?? []).map(message => ({ code: "UPSTREAM_REPAIR_UNRESOLVED", message })));
   issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true).map(message => ({ code: "REQUIREMENT_JOURNAL_INVALID", message })));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));
   issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id).map(message => ({ code: "CORE_ROLE_ATTEMPT_DEFINITION_MISMATCH", message })));
@@ -109,6 +113,8 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
 
 export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): string[] {
   const issues: string[] = [];
+  issues.push(...upstreamRepairSnapshotIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256));
+  issues.push(...upstreamRepairUnsettledIssues(bundle.compilerSnapshot.upstreamRepairJournal ?? []));
   issues.push(...coreRoleDefinitionBindingIssues(bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], { sourceId: bundle.source.id,
     sourceSha256: bundle.source.contentSha256, roster: assessment.roster, specHash: assessment.coreRoleResult?.revisionHash }));
   issues.push(...coreRoleResultIssues(bundle, assessment.roster, assessment.playability, assessment.subjectSnapshotHash, assessment.coreRoleResult));

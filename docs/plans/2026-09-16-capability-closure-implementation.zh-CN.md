@@ -295,3 +295,17 @@ P2c 已提交为 `72dbd91`。
 P2 仍未完成：授权 finish 与恢复、计划/预算的候选快照保留、converge 后实际 revision 复核及逐项评估仍需接线；普通 finish 仍被禁止，尚无自主修复模型会话。P1 完整验收映射及 P3–P7 继续保留原范围，未调用真实 provider 或人工体验评价。
 
 验证：全量 188 文件、1111 tests 通过（80.33 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。
+
+P2d 已提交为 `42b65ee`。
+
+## P2e：候选中的上游历史保留与预算恢复
+
+compilerSnapshot 新增 upstreamRepairJournal，冻结完整计划、授权、原输入、失败、validated intent、staged 结果及依赖链。计划必须绑定快照内保留的原独立要求定义和 completed 前驱回执；无 target review 的普通 annotation-only 前驱也纳入历史回执捕获。当前尚未 evaluated 的上游计划明确阻止认证，不把 authorized/staged 当作能力完成。
+
+材料化前校验完整源、序号、前驱、hash、状态转移及本地链必须为输入链的精确前缀，再校验原文字节。恢复逐条复用原 payload，生成相同原 hash；重复导入幂等，旧候选不能抹除新计划、尝试或失败计数。快照中的上游输入进入当前 subject hash，因此新增预算历史会使旧评估输入失效。
+
+新增真实候选归档/恢复测试：两次失败后生成候选，检查未结算 gate；旧候选被拒且 canonical 未变化；新工作区重复恢复完整链和原前驱回执，第三次尝试仍因预算耗尽拒绝。另覆盖缺原定义/回执、坏 hash 和错误原文字节。导入回执保持历史状态，不激活原 finish。
+
+当前 candidate 仍拒绝 pending proposal，因此本段证明的是可归档候选的完整上游历史及预算恢复；尚未提供带活动 pending 草案图的可移植 checkpoint。导入 journal 不补造丢失草案，也不会执行模型或提案。授权 finish、pending/finish 快照、converge 后核验与逐项评估仍待落地。P1 完整验收映射及 P3–P7 保持待完成，未调用真实 provider 或人工体验评价。
+
+验证：全量 188 文件、1112 tests 通过（80.06 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。

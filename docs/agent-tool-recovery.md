@@ -641,3 +641,26 @@ extraneous dependency slots. Consumer recovery checks the same closure without
 executing tools. These references provide staged compiler inputs only; ordinary
 finish and publication remain unavailable for managed repair batches until the
 authorization-aware finish protocol is implemented.
+
+### Upstream history in prepared candidates
+
+Candidate snapshots retain the complete upstream repair journal. Frozen plans
+must match a retained original requirement definition and the exact completed
+predecessor receipt identities; ordinary annotation-only predecessor receipts
+are retained too. Pending, stopped or otherwise unevaluated plans block current
+certification. An authorized or staged record never counts as capability success.
+
+Checkpoint materialization validates source bytes and the entire incoming chain
+before writing canonical artifacts. The local journal must be an exact prefix;
+an old candidate cannot erase later failures, attempts or authorizations. Import
+reuses the original record payloads/hashes and is idempotent. Missing or divergent
+history requires an isolated workspace or host storage review; never delete the
+head to make restoration pass. Failure counts remain effective after restoration
+into a new workspace.
+
+Journal import does not execute proposals, invent missing pending envelopes or
+reactivate historical predecessor finishes. The existing candidate gate still
+rejects pending proposal work. This stage therefore preserves archiveable
+candidate history and budgets; it does not yet provide a portable checkpoint
+for a live pending upstream draft graph. Preserve those original drafts for host
+recovery until draft/finish snapshot support is implemented.

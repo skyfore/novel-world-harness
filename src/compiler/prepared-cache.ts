@@ -1,3 +1,5 @@
+import { UpstreamRepairLedger, upstreamRepairJournalSchema, type UpstreamRepairRecord } from "./upstream-repair-ledger.js";
+import { upstreamRepairSnapshotIssues } from "./upstream-repair-snapshot.js";
 import { roleReviewResumeIssues } from "./role-review-finish.js";
 import { roleReviewRevisionSchema, type RoleReviewRevision } from "./role-review-revision.js";
 import { coreRoleRequirementHistorySchema, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
@@ -136,6 +138,7 @@ const preparedCanonicalSchema = z.object({
 }).strict();
 
 const preparedCompilerSnapshotSchema = z.object({
+  upstreamRepairJournal: upstreamRepairJournalSchema.optional(),
   requirementJournal: requirementJournalSchema.optional(),
   coreRoleReviewRevision: roleReviewRevisionSchema.optional(),
   requirementDefinitions: requirementDefinitionHistorySchema.optional(),
@@ -184,6 +187,8 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     throw new Error("Prepared bundle chapter split plan does not match its source identity.");
   }
   const snapshot = bundle.compilerSnapshot;
+  const upstreamIssues = upstreamRepairSnapshotIssues(snapshot, sourceId, bundle.source.contentSha256);
+  if (upstreamIssues.length) throw new Error(upstreamIssues.join("; "));
   const roleResumeIssues = roleReviewResumeIssues(snapshot.reconciliationObligations ?? [], snapshot.roleRoster, sourceId);
   if (roleResumeIssues.length) throw new Error(roleResumeIssues.join("; "));
   const journalIssues = requirementJournalBindingIssues(snapshot, sourceId, bundle.source.contentSha256);
@@ -866,6 +871,7 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(source.id),
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
+    const upstreamRepairJournal = await new UpstreamRepairLedger(this.workspaceRoot, source.id).history();
     const requirementJournal = await new RequirementLedger(this.workspaceRoot, source.id).history();
     const coreRoleReviewRevision = (await new RequirementLedger(this.workspaceRoot, source.id).roleReviewRevisions()).at(-1);
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).definitionHistory();
@@ -892,6 +898,7 @@ export class PreparedNovelCache {
         .sort(),
       canonical: preparedCanonical,
       compilerSnapshot: {
+        ...(upstreamRepairJournal.length ? { upstreamRepairJournal } : {}),
         ...(requirementJournal.length ? { requirementJournal } : {}),
         ...(coreRoleReviewRevision ? { coreRoleReviewRevision } : {}),
         ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
@@ -1074,6 +1081,7 @@ export class PreparedNovelCache {
     eventResolutions: Awaited<ReturnType<EventResolutionStore["list"]>>;
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
     roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
+    upstreamRepairJournal?: UpstreamRepairRecord[];
     requirementJournal?: LedgerRecord[];
     coreRoleReviewRevision?: RoleReviewRevision;
     requirementDefinitions?: RequirementSet[];
@@ -1100,12 +1108,14 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(sourceId),
       new SourceAccountingStore(this.workspaceRoot).read(sourceId),
     ]);
+    const upstreamRepairJournal = await new UpstreamRepairLedger(this.workspaceRoot, sourceId).history();
     const requirementJournal = await new RequirementLedger(this.workspaceRoot, sourceId).history();
     const coreRoleReviewRevision = (await new RequirementLedger(this.workspaceRoot, sourceId).roleReviewRevisions()).at(-1);
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).definitionHistory();
     const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).coreRoleDefinitionHistory();
     const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, sourceId);
     return {
+      ...(upstreamRepairJournal.length ? { upstreamRepairJournal } : {}),
       ...(requirementJournal.length ? { requirementJournal } : {}),
       ...(coreRoleReviewRevision ? { coreRoleReviewRevision } : {}),
       ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
@@ -1126,8 +1136,9 @@ export class PreparedNovelCache {
     const sourceId = bundle.source.id;
     await new RequirementLedger(this.workspaceRoot, sourceId).assertRestorable(bundle.compilerSnapshot.requirementDefinitions ?? []);
     const coreDefinitions = bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [];
-    const coreSource = (coreDefinitions.length || bundle.compilerSnapshot.requirementJournal?.length) ? await WorkspaceStore.openReadOnly(this.workspaceRoot).getSource(sourceId) : null;
+    const coreSource = (coreDefinitions.length || bundle.compilerSnapshot.requirementJournal?.length || bundle.compilerSnapshot.upstreamRepairJournal?.length) ? await WorkspaceStore.openReadOnly(this.workspaceRoot).getSource(sourceId) : null;
     const coreBytes = coreSource ? await readSourceMaterial(this.workspaceRoot, coreSource) : undefined;
+    await new UpstreamRepairLedger(this.workspaceRoot, sourceId).assertRestorable(bundle.compilerSnapshot.upstreamRepairJournal ?? [], coreBytes);
     await new RequirementLedger(this.workspaceRoot, sourceId).assertCoreRolesRestorable(coreDefinitions, coreBytes);
     await new RequirementLedger(this.workspaceRoot, sourceId).assertJournalRestorable(bundle.compilerSnapshot.requirementJournal ?? [], coreBytes);
     await new RequirementLedger(this.workspaceRoot, sourceId).assertCoreRoleAttemptsRestorable((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), coreDefinitions);
@@ -1198,6 +1209,7 @@ export class PreparedNovelCache {
     for (const model of bundle.canonical.models) await actors.putModel(model);
     for (const possibility of bundle.canonical.possibilities) await possibilities.put(possibility);
     const snapshot = bundle.compilerSnapshot;
+    if (snapshot.upstreamRepairJournal) await new UpstreamRepairLedger(this.workspaceRoot, sourceId).restore(snapshot.upstreamRepairJournal, coreBytes);
     if (snapshot.requirementJournal) await new RequirementLedger(this.workspaceRoot, sourceId).restoreJournal(snapshot.requirementJournal, coreBytes);
     await new RequirementLedger(this.workspaceRoot, sourceId).restore(snapshot.requirementDefinitions ?? []);
     await new RequirementLedger(this.workspaceRoot, sourceId).restoreCoreRoles(snapshot.coreRoleRequirementDefinitions ?? [], coreBytes);

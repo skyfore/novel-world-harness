@@ -22,6 +22,7 @@ const payloadSchema = z.discriminatedUnion("kind", [
 ]);
 const recordSchema = z.object({ version: z.literal(1), sourceId: idSchema, sequence: z.number().int().nonnegative(), predecessorHash: hash.nullable(), payload: payloadSchema, hash }).strict();
 type Record = z.infer<typeof recordSchema>;
+export type UpstreamRepairRecord = Record;
 type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
 type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "needs-host-review" };
 function project(records: Record[]) {
@@ -101,6 +102,17 @@ function assertStart(current: PlanState, input: Started, plans: Map<string, Plan
   if (previous && (previous.started.proposalId !== input.proposalId || previous.started.inputHash === input.inputHash)) throw upstreamRepairHostError("Failed repair requires the same proposal identity and one materially corrected input");
 }
 
+export const upstreamRepairJournalSchema = z.array(recordSchema).superRefine((records, ctx) => {
+  try { project(records); }
+  catch (error) { ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : String(error) }); }
+});
+
+export function upstreamRepairUnsettledIssues(records: readonly Record[]): string[] {
+  const parsed = upstreamRepairJournalSchema.safeParse(records);
+  if (!parsed.success) return ["UPSTREAM_REPAIR_JOURNAL_INVALID"];
+  return [...project(parsed.data).plans.values()].map(item => `UPSTREAM_REPAIR_NOT_EVALUATED: ${item.plan.planHash} (${item.state})`);
+}
+
 /** Host-only storage, always called under the compiler lock. No model tool is granted by registration. */
 export class UpstreamRepairLedger {
   readonly directory: string;
@@ -127,6 +139,20 @@ export class UpstreamRepairLedger {
     project(records); return records;
   }
   async inspect() { const records = await this.history(); const state = project(records); return { records, plans: [...state.plans.values()], attempts: [...state.attempts].map(([attemptRef, value]) => ({ attemptRef, ...value })) }; }
+  async assertRestorable(input: readonly Record[], bytes?: Uint8Array): Promise<void> {
+    const records = upstreamRepairJournalSchema.parse(input), current = await this.history();
+    if (current.length > records.length || current.some((record, index) => record.hash !== records[index]?.hash)) throw upstreamRepairHostError("Repair restore would forget or rewrite retained plans, attempts or budgets; use an isolated workspace");
+    const sourceSha256 = bytes && crypto.createHash("sha256").update(bytes).digest("hex");
+    for (const record of records) {
+      if (record.sourceId !== this.sourceId || (record.payload.kind === "planned" && record.payload.plan.sourceScope.sourceSha256 !== sourceSha256)) throw upstreamRepairHostError("Repair journal restore requires matching immutable original source bytes");
+    }
+  }
+  /** Import original history only. This never executes a model tool or recreates a pending draft. */
+  async restore(input: readonly Record[], bytes?: Uint8Array): Promise<void> {
+    await this.assertRestorable(input, bytes);
+    const records = upstreamRepairJournalSchema.parse(input), current = await this.history();
+    for (const record of records.slice(current.length)) await this.append(record.payload);
+  }
   private async append(payload: Record["payload"]): Promise<Record> {
     const records = await this.history(), identity = { version: 1 as const, sourceId: this.sourceId, sequence: records.length, predecessorHash: records.at(-1)?.hash ?? null, payload };
     const record = recordSchema.parse({ ...identity, hash: contentHash(identity) }); project([...records, record]);

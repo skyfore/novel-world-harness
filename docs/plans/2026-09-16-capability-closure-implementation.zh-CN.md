@@ -653,3 +653,21 @@ P6a 已提交为 `f7b2534`。
 本段完善已返回 actor 候选的门禁，不宣称所有 entry driver 发现已完成。deterministicActorProposalSource 仍按主体预选单条候选，完整替代 action/goal 枚举和预算诊断待补；selectOpeningDriverActor 在物理角色为空时仍有全书频率回退，及其 reconciliation 义务处理需一起修正，不能仅换选择函数造成义务消失。已有 entry-driver probe 使用隔离 fork/真实 commit，不能把 audit 中 active-goal 数量当作该证明。P3/P4/P5/P6 余项及 P7 继续在原目标内；未调用真实 provider 或独立人工体验评价。
 
 验证：最终全仓 196 文件、1190 tests 通过（94.65 秒）；此前 20 项 actor/runtime/entry-driver/策略定向通过；最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。最初新测试把 accepted trace 状态误写为 committed，并要求仅一个 gate，已按既有 trace schema 修正；实现另明确区分预检拒绝与真实 commit 尝试。
+
+P6b 已提交为 `01431d5`。
+
+## P6c：确定性 actor 替代行动与独立驱动搜索
+
+确定性 actor source 原先在每个 goal 中只取第一条前提满足的 action，然后按主体去重；因此首选在真实引擎中无效果或非法时，合法的 actionPatterns/低优先级目标永远不会进入上一段 runtime 门禁。本段枚举 candidateAction 与各 actionPatterns，保留既有 source、知识、goal activation、局部性和材料性检查，再按稳定顺序进行只读 engine preview，选出每个主体的合法方案。初始自主与已发生 actor event 后的响应两条路径均接线。proposalId 纳入 actionIndex，避免同目标不同方案共用身份。正式 runtime 仍执行独立预检、冲突裁决和实际 head 再验证。
+
+每次选择至多 64 个 engine preview，达到边界但尚未确定选择时抛出带原 rejected IDs/codes 的 ActorAlternativeBudgetError；不截断后把未查明当作无合法驱动。入口探针在 goal 枚举前排除焦点角色；actor 搜索不足不会抹去独立环境 lane 的真实提交能力。环境也未给出 witness 时明确 ENTRY_DRIVER_SEARCH_INCOMPLETE，保留 search 失败，不重置边界或重复原搜索。
+
+两段独立原创短文本验证“原计划已生效，重说无变化，但替代计划可执行”，包括更高优先级空效果目标；真实 source 返回稳定的合法候选，预检不改 head/原状态，WorldRuntime 实际提交替代结果。响应路径测试保留“仅有模型画像不制造反应”的反例，再添加有证据的 goal 验证合法替代响应。额外覆盖 65 个候选的预算停止、焦点角色 65 个候选不消耗其他主体搜索预算，以及 actor 搜索超限时环境有/无真实 witness 的不同结论；原 bundle 不变。
+
+策略升为 legal-alternatives-v4，engine 0.8.0；旧 world-pressure-v2、legality-first-v3 及无策略字段 canonical snapshots 可读，旧引擎 history 仍按既有协议拒绝不兼容解释。此处是确定性工程证据，不是模型质量或独立体验验收。
+
+P6 的入口提示全书频率回退及 reconciliation 义务处理、统一世界压力依据等仍未完成；64-preview 搜索不能宣称穷尽任意规模世界。P3/P4/P5 余项及 P7 仍保持原目标范围。
+
+边界补充：maxActors 是上限，不要求填满。搜索达到 64-preview 边界时，若已有较高排序且完整验证的合法方案，返回这些方案供正常裁决；只在没有任何已确定方案时抛出预算错误。返回子集不宣称其余主体无行动，测试同时保留全空搜索超限和已确定合法主体两种情况。
+
+验证：全仓 197 文件、1196 tests 通过（96.64 秒）；上述最终边界补充后 20 项 source/响应/entry-driver 定向通过；最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。首轮预算夹具漏填 goal 必需的 evidence，被 schema 正确拒绝，已补为原创源证据后再验证预算路径。

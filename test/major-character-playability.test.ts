@@ -128,3 +128,38 @@ it("commits a due world process at the entry cut without inventing a player wait
   expect(hero.driverWitness!.events[0]!.effects.processDelta!.operations).toContainEqual(expect.objectContaining({ op: "finish-process", processId: "opening-storm" }));
   expect(bundle).toEqual(before);
 });
+
+it("excludes the focal actor before spending the driver alternative-search budget", async () => {
+  const { bundle, roster } = fixture();
+  const original = bundle.canonical.goals[0]!;
+  original.priority = 0.1;
+  for (let index = 0; index < 65; index++) bundle.canonical.goals.push({ ...original,
+    id: `focal-noop-${index}`, actorId: "hero", priority: 1,
+    candidateAction: { title: "Repeat the focal plan", preconditions: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "Carry a letter" }] } },
+  });
+  const manifest = await probeMajorRoleEntries(bundle, roster, "c".repeat(64));
+  const hero = manifest.roles.find(role => role.actorId === "hero")!;
+  expect(hero.issues).toEqual([]);
+  expect(hero.driverWitness).toMatchObject({ lane: "actor", excludedActorId: "hero", events: [{ event: { actorId: "courier" } }] });
+});
+
+it.each([false, true])("keeps actor search exhaustion distinct from an independent background witness (environment=%s)", async environment => {
+  const { bundle, roster } = fixture();
+  const base = bundle.canonical.goals[0]!;
+  bundle.canonical.goals = Array.from({ length: 65 }, (_, index) => ({ ...base, id: `courier-noop-${index}`,
+    candidateAction: { title: "Repeat the courier plan", preconditions: [], proposedDelta: { version: 1 as const, operations: [{ op: "set" as const, entityId: "courier", field: "character.plan", value: "old plan" }] } },
+  }));
+  bundle.canonical.initialWorld!.delta.operations.push({ op: "set", entityId: "courier", field: "character.plan", value: "old plan" }, { op: "set", entityId: "hall", field: "location.open", value: true });
+  if (environment) bundle.canonical.possibilities = [{ id: "wind-closes-gate", kind: "environmental", title: "Wind closes the gate", preconditions: [{ op: "fact-equals", entityId: "hall", field: "location.open", value: true }], blockers: [], participants: ["hall"], causalParents: [], pressure: 1, relevance: 1, proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hall", field: "location.open", value: false }] }, evidence }];
+  const before = structuredClone(bundle);
+  const manifest = await probeMajorRoleEntries(bundle, roster, "c".repeat(64));
+  const hero = manifest.roles.find(role => role.actorId === "hero")!;
+  if (environment) {
+    expect(hero.issues).toEqual([]);
+    expect(hero.driverWitness).toMatchObject({ lane: "background", events: [{ event: { possibilityId: "wind-closes-gate" } }] });
+  } else {
+    expect(hero.driverWitness).toBeUndefined();
+    expect(hero.issues.map(issue => issue.message).join()).toContain("ENTRY_DRIVER_SEARCH_INCOMPLETE");
+  }
+  expect(bundle).toEqual(before);
+});

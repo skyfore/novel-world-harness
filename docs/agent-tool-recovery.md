@@ -1185,3 +1185,19 @@ only an evidence-supported proposal once under the existing actor tool protocol;
 unknown prerequisites remain blocked until world evidence changes. Legal selected
 proposals are validated again at the actual commit head. Preview acceptance is
 not a commit receipt and grants no world-state or character-knowledge change.
+
+### Compiled actor alternatives
+
+`legal-alternatives-v4` enumerates compiled `candidateAction` and
+`actionPatterns`, then checks actual engine legality before selecting one action
+per actor. The action index participates in the proposal identity; never reuse
+a different pattern's ID. No-effect, unknown, or illegal patterns do not prove
+that another pattern is unavailable. The deterministic source permits at most
+64 read-only engine previews for one selection. `ACTOR_ALTERNATIVE_BUDGET_EXHAUSTED`
+retains rejected proposal IDs/error codes and stops that search; do not retry
+unchanged, raise the bound, or infer absence of a driver. Host scope review is
+required. Entry probes exclude the focal actor before this budget is consumed.
+The independent background lane may still establish a real witness; if neither
+lane establishes one and actor search was incomplete, report
+`ENTRY_DRIVER_SEARCH_INCOMPLETE` rather than a completed negative search. These
+are host search bounds, not model token-usage measurements or new write authority.

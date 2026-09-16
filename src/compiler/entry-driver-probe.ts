@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ActorModelStore, deterministicActorProposalSource } from "../world/actors.js";
+import { ActorAlternativeBudgetError, ActorModelStore, deterministicActorProposalSource } from "../world/actors.js";
 import { contentHash } from "../world/canonical.js";
 import type { WorldEngine } from "../world/engine.js";
 import { AUTONOMOUS_BACKGROUND_KINDS, committedEventSchema, idSchema, stateDeltaSchema, knowledgeDeltaSchema, branchSemanticDeltaSchema, processDeltaSchema, normDeltaSchema, type Possibility } from "../world/model.js";
@@ -50,7 +50,7 @@ export function entryDriverWitnessIssues(witness: EntryDriverWitness | undefined
 export async function probeEntryDriver(engine: WorldEngine, scratch: string, input: {
   branchId: string; head: string; actorId: string; sourceId: string; subjectSnapshotHash: string; entryCutHash: string;
 }): Promise<EntryDriverWitness> {
-  const actorSource = deterministicActorProposalSource(engine, new ActorModelStore(scratch));
+  const actorSource = deterministicActorProposalSource(engine, new ActorModelStore(scratch), { excludedActorIds: new Set([input.actorId]) });
   const allowed = (possibility: Pick<Possibility, "kind" | "canonicalEventId" | "sourceActorId">) =>
     !possibility.canonicalEventId && possibility.kind !== "canon-analogue" && possibility.kind !== "player-choice"
     && (possibility.sourceActorId !== input.actorId || possibility.kind === "due-process");
@@ -61,15 +61,21 @@ export async function probeEntryDriver(engine: WorldEngine, scratch: string, inp
       .map(template => ({ ...template, branchId, evaluatedAtCommit: commitId }));
   }, undefined, async request => (await actorSource(request)).filter(candidate => candidate.proposal.actorId !== input.actorId));
   const attempts: MoveResult[] = [];
+  const incompleteSearches: string[] = [];
   for (const lane of ["actor", "background"] as const) {
     const branchId = `${input.branchId}-driver-${lane}`;
     await runtime.forkBranch(input.branchId, input.head, branchId, `Entry driver: ${lane}`);
     const frontier = await runtime.refreshFrontier(branchId, input.head, { temporalMode: "current-window" });
-    const result = await runtime.move({ branchId, maxActorCandidates: lane === "actor" ? 32 : 0,
+    let result: MoveResult;
+    try { result = await runtime.move({ branchId, maxActorCandidates: lane === "actor" ? 32 : 0,
       maxBackgroundCandidates: lane === "background" ? 1 : 0, temporalMode: "current-window",
       backgroundKinds: AUTONOMOUS_BACKGROUND_KINDS,
       excludedBackgroundPossibilityIds: frontier.evaluated.filter(entry => !allowed(entry.possibility)).map(entry => entry.possibility.id),
-    });
+    }); } catch (error) {
+      if (!(error instanceof ActorAlternativeBudgetError)) throw error;
+      incompleteSearches.push(error.message);
+      continue; // The independent environmental lane can still supply a real witness.
+    }
     attempts.push(result);
     const events = await Promise.all(result.committedEvents.map(async eventHash => {
       const event = await engine.objects.getEvent(eventHash), refs = event.effects;
@@ -89,5 +95,6 @@ export async function probeEntryDriver(engine: WorldEngine, scratch: string, inp
     if (issues.length) throw new Error(issues.join("; "));
     return witness;
   }
+  if (incompleteSearches.length) throw new Error(`ENTRY_DRIVER_SEARCH_INCOMPLETE: no witness was established, but actor search exhausted its bound. Stop for host scope review; do not retry unchanged or infer that no driver exists. ${incompleteSearches.join("; ")}`);
   throw new Error(`ENTRY_DRIVER_UNPROVEN: no material autonomous event committed at the entry cut after excluding ${input.actorId}. Bounded probe: 32 actor candidates and 1 background commit; rejected proposals: ${attempts.flatMap(result => result.rejectedProposals).join(", ") || "none"}. A goal or future canonical event is not a driver witness.`);
 }

@@ -821,3 +821,19 @@ Inspect `requirements inspect-upstream` and copy `modelSessions[].sessionRef`.
 and closes its reservation without executing a tool or restarting Pi. If no such
 draft exists, preserve the reservation for host review; do not replay the model.
 This API does not yet provide automatic plan generation or a full DAG scheduler.
+
+Host CLI entry points:
+
+- `nwh requirements run-upstream-slot --source <id> --plan <hash> --kind <kind> --artifact <id>`
+  consumes existing host authorization. Copy `plans[].plan.planHash` and the
+  matching `allowedWrites[]` / `allowedCreations[]` kind and id from
+  `requirements inspect-upstream`. It does not register, authorize, finish or
+  publish a plan. `--config` explicitly selects the extractor profile;
+  `--model` optionally overrides the model and `--timeout-ms` bounds the turn.
+- `nwh requirements recover-upstream-session --source <id> --session-ref <hash>`
+  copies the exact `modelSessions[].sessionRef` from that inspection and invokes
+  only original-draft recovery. Both operations hold the compiler lock.
+
+After process termination, first inspect the original compiler lock and follow
+its owning-host recovery protocol if needed. Never delete the lock or start a
+new model invocation to work around the original unresolved session.

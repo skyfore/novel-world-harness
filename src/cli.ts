@@ -95,6 +95,27 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
   });
+requirementsCommand.command("run-upstream-slot").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact authorized plans[].plan.planHash from inspect-upstream")
+  .requiredOption("--kind <kind>", "exact allowedWrites/allowedCreations kind")
+  .requiredOption("--artifact <id>", "exact allowedWrites/allowedCreations id")
+  .option("--config <path>", "explicit configuration containing the extractor profile")
+  .option("--model <model>", "override the Pi model for this isolated invocation")
+  .option("--timeout-ms <number>", "bounded invocation timeout, 1–600000 milliseconds", Number)
+  .description("Stage one already authorized upstream slot in an isolated Pi session; never finish or publish")
+  .action(async options => {
+    const { runUpstreamRepairSlotCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await runUpstreamRepairSlotCommand(rootFor({}), {
+      ...options, model: options.model ?? program.opts().model,
+    }), null, 2));
+  });
+requirementsCommand.command("recover-upstream-session").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--session-ref <hash>", "exact modelSessions[].sessionRef from inspect-upstream")
+  .description("Recover an original validated draft without another model invocation")
+  .action(async options => {
+    const { recoverUpstreamRepairSessionCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await recoverUpstreamRepairSessionCommand(rootFor({}), options.source, options.sessionRef), null, 2));
+  });
 requirementsCommand.command("evaluate-upstream").requiredOption("--source <id>", "registered source ID")
   .description("Evaluate converged upstream repairs against actual independent requirements without model replay")
   .action(async options => {

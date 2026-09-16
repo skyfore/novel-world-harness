@@ -405,3 +405,13 @@ P2j 已提交为 `7628c32`。
 本段是单槽执行 API；自动诊断到计划、完整 DAG 调度和正常命令入口仍待实现。P2 尚未整体完成，P1 完整退出证据映射及 P3–P7 仍保留原范围。
 
 验证：37 项定向回归及全量 188 文件、1139 tests 通过（89.61 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。
+
+P2k 已提交为 `a86c42f`。
+
+## P2l：已授权单槽执行与原会话恢复命令
+
+新增 requirements run-upstream-slot 和 recover-upstream-session。命令从 inspect-upstream 返回值复制精确 plan/slot/session 引用，不隐式注册或扩大授权，不替代 finish/converge/evaluation。运行命令支持显式 extractor 配置、model override 和受限超时；配置或类型错误在模型调用前拒绝。两条命令均持有 compiler lock，正常异常路径释放锁，进程丢失沿用原锁恢复与原草案恢复协议。
+
+新增命令测试验证模型执行期间确实持锁、并发编译被拒、原错误传播和 finally 释放，以及非法类型/缺失配置不进入模型调用。CLI 帮助可显示两条正常入口。仍无真实 provider 调用；自动规划、DAG 调度及完整 P2 退出证据尚未完成，P3–P7 保持待实施。
+
+验证：两个相关测试文件共 38 项通过；服务端、Web、E2E TypeScript、两个 CLI 帮助入口及 diff whitespace 检查通过。此前单槽底层提交的全仓 1139 项通过；命令接线后未重复全仓测试。

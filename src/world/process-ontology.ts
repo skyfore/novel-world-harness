@@ -175,6 +175,7 @@ export function materializeProcessProposal(
           id,
           ...structuredClone(operation.process),
           phaseId: operation.process.phaseId ?? template.initialPhaseId,
+          ...(template.incapacity ? { startedAtElapsedDays: options.elapsedDays } : {}),
           ...(operation.process.dueAtElapsedDays !== undefined
             ? { dueAtElapsedDays: operation.process.dueAtElapsedDays }
             : template.cadence

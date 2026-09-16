@@ -572,7 +572,7 @@ export class WorldEngine {
       attributions: this.context.attributions, acquisitions: this.context.acquisitions, utteranceExpressions: this.context.utteranceExpressions, perceptionObservations: this.context.perceptionObservations, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
     });
     if (completeSeed) {
-      const seedProcesses = applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map() }, seedProvenance, logicalTime.elapsedDays ?? 0);
+      const seedProcesses = applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map(), allowHistoricalStarts: true }, seedProvenance, logicalTime.elapsedDays ?? 0);
       const seedCapacityIssues = capacityUseIssues({ knowledge }, seedProcesses, seedProcesses, this.context.processTemplates ?? new Map(), this.context.perceptionObservations);
       if (seedCapacityIssues.length) throw new Error(seedCapacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
       applyNormDelta(emptyNormState("genesis"), completeSeed.norms, { entities: this.context.entities, templates: this.context.normTemplates ?? new Map(), postState: initialState,

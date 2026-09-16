@@ -869,3 +869,18 @@ P4e 已提交为 `4ffedd7`。
 本段解决已提交 P4e 所记录的场景消费遗漏，仍不宣称所有 P4 能力完成。canonical recovery occurrence 的显式过程执行契约、晚入口原始起始时间及历史获知种子语义仍需完整实现；当前执行器不根据恢复文字或时间流逝虚构恢复操作。真实模型和独立人工体验证据仍未取得。
 
 最终验证：12 项相关定向检查通过，补充认证依赖修订断言后 7 项场景/失能检查通过；全仓 206 文件、1244 tests 全部通过（108.29 秒），TypeScript 和 diff whitespace 检查通过。首轮暴露非失能场景向非空提案 schema 提交空过程操作，已改为复用空归约；新增合同测试首轮缺 participation ID，补齐后验证了机制依赖。
+
+
+P4f 已提交为 `73e75ff`。
+
+## P4g：晚入口保留失能起始时钟
+
+持久过程操作增加可选 startedAtElapsedDays，正常失能起始由宿主 materializer 填写当前 elapsedDays；模型 process proposal 不暴露该字段。reducer 在普通事件中拒绝倒填时钟，也拒绝起始晚于入口 cut。只有已审查入口/Genesis 种子的恢复调用允许更早的起始时间，期限仍严格等于原起始时间加已知时长。到期但未恢复的种子可以恢复为 overdue/running，不重排期限、不静默解除能力限制。未知持续时间始终没有截止时间。
+
+无完整 checkpoint 的晚入口，从 deriveEntryCut 已排序的 replayEventIds 逐事件累计显式 timeAdvance，读取实际发生的 semantic effects 并验证机制，以相同 materializer 生成过程起始操作。生成的种子保留每个失能的原始计时；未来事件不进入入口过程。已有完整入口种子仍走明确的恢复路径，带未结算过程/规范的复杂 opening seed 仍要求显式完整 checkpoint，不能猜测其变化。
+
+两组中英文编译 fixture，各验证已知/未知时长：一个入口发生在起始后一天，已知两天期限仍为第 2 天；第 3 天恢复同一种子仍是待结算失能；未知期限始终为空。普通事件倒填、模型提供宿主 timestamp、未来起始均被拒。入口种子实际创建冻结上下文分支，fresh replay 和 fork 保持起始时间及限制。消费侧 ordinal 安排仍是预先声明的测试切片，不冒充真实模型时间抽取。
+
+pipeline 42、engine 0.19.0。完整 P4 仍缺 canonical recovery occurrence 的显式过程执行绑定；历史知识在晚入口的收据/cut 恢复仍需后续完成，不能由本段的无知识入口测试推导已完成。未新增 provider 或人工体验证据，整体 P1–P7 仍开放。
+
+最终验证：15 项入口/过程定向检查通过；全仓 206 文件、1244 tests 全部通过（108.68 秒），TypeScript 与 diff whitespace 检查通过。首次新增冻结入口 fixture 缺 narrativeContext.layerId，被真实持久 schema 拒绝；补齐后重新执行上述检查。

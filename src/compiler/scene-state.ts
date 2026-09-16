@@ -50,7 +50,7 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
   const processContext = { entities: context.entities, templates: context.processTemplates! };
   let processes = emptyProcessState(state.atCommit);
   if (seed) {
-    processes = applyProcessDelta(emptyProcessState(state.atCommit), seed.processes, { entities: context.entities, templates: context.processTemplates! }, provenance, state.logicalTime.elapsedDays ?? 0);
+    processes = applyProcessDelta(emptyProcessState(state.atCommit), seed.processes, { entities: context.entities, templates: context.processTemplates!, allowHistoricalStarts: true }, provenance, state.logicalTime.elapsedDays ?? 0);
     applyNormDelta(emptyNormState(state.atCommit), seed.norms, { entities: context.entities, templates: context.normTemplates!, postState: state,
       normativeRuleIds: new Set(c.rules.filter(isNormativeWorldRule).map((rule) => rule.id)) }, provenance);
   }

@@ -1,3 +1,7 @@
+import { contentHash } from "./canonical.js";
+import { incapacityOnsets } from "./process-capacity.js";
+import { materializeProcessProposal } from "./process-ontology.js";
+import { validateSemanticEffect } from "./semantic-effect.js";
 import { deriveEntryCut, type EntryCut } from "./entry-cut.js";
 import { timeAdvanceInDays } from "./time.js";
 import { applyEventExecutions } from "./event-execution.js";
@@ -205,8 +209,26 @@ export function deriveCharacterEntrySeed(
       if (operation.op === "activate-rule") activeRuleIds.add(operation.ruleId);
       if (operation.op === "deactivate-rule") activeRuleIds.delete(operation.ruleId);
     }
-    projectionSeed = { version: 1, semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] },
-      activeRuleIds: [...activeRuleIds].sort(), elapsedDays: (openingSeed?.elapsedDays ?? 0) + forwardEvents.reduce((days, event) => days + timeAdvanceInDays(event.timeAdvance), 0) };
+    const templates = new Map((bundle.canonical.processTemplates ?? []).map(template => [template.id, template]));
+    const processes: EntryProjectionSeed["processes"] = { version: 1, operations: [] };
+    let elapsedDays = openingSeed?.elapsedDays ?? 0;
+    for (const event of forwardEvents) {
+      elapsedDays += timeAdvanceInDays(event.timeAdvance);
+      const effects = (bundle.canonical.semanticEffects ?? []).filter(effect => effect.canonicalEventId === event.id);
+      const issues = effects.flatMap(effect => validateSemanticEffect(effect, {
+        entities: new Map(bundle.canonical.entities.map(entity => [entity.id, entity])), events: new Map(bundle.canonical.events.map(item => [item.id, item])),
+        processTemplates: templates, eventExecutions: new Map((bundle.canonical.eventExecutions ?? []).map(item => [item.id, item])), actionSchemas: new Map((bundle.canonical.actionSchemas ?? []).map(item => [item.id, item])),
+        eventParticipations: new Map((bundle.canonical.eventParticipations ?? []).map(item => [item.id, item])),
+      }));
+      if (issues.length) throw new Error(issues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+      if (effects.some(effect => effect.lowering.status === "unmapped")) throw new Error("SEMANTIC_EFFECT_UNMAPPED: Entry history contains an unsupported mechanism; preserve source and stop for host compilation.");
+      const onsets = incapacityOnsets(effects, new Set([event.id]), templates);
+      if (onsets.length) processes.operations.push(...materializeProcessProposal({ version: 1, operations: onsets }, {
+        branchId: `entry-${actorId}`, parentCommitId: contentHash(cut), proposalHash: contentHash(event), templates, elapsedDays,
+      }).delta.operations);
+    }
+    projectionSeed = { version: 1, semantics: { version: 1, operations: [] }, processes, norms: { version: 1, operations: [] },
+      activeRuleIds: [...activeRuleIds].sort(), elapsedDays };
   }
   const evidence = uniqueEvidence([
     ...bundle.canonical.initialWorld.evidence,

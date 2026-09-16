@@ -1400,3 +1400,10 @@ one corrected retry when the returned artifact and original source support it;
 otherwise stop for host review. Never guess IDs, manufacture duration or widen
 repair scope. An unknown duration is valid with no deadline or due transition;
 it does not authorize immediate recovery.
+
+`PROCESS_ONSET_TIME_INVALID` means a process start attempts to backdate an ordinary
+event or lies after its entry cut. Preserve head and stop for host entry review;
+never alter elapsed time, remove the timestamp from a historical seed, or retry
+unchanged. `startedAtElapsedDays` belongs to host-materialized process operations,
+not model process proposals. Reviewed entry seeds may restore historical starts;
+an overdue restriction still needs a separately committed recovery event.

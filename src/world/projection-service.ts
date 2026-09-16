@@ -291,7 +291,7 @@ export class ProjectionService {
           const onsets = incapacityOnsets(context.semanticEffects?.values() ?? [], new Set(event.realizesCanonicalEventIds ?? []), processContext.templates);
           for (const onset of onsets) if (onset.op === "start-process" && !effects.processDelta?.operations.some(operation => operation.op === "start-process" && operation.process.templateId === onset.process.templateId && contentHash(operation.process.ownerBindings) === contentHash(onset.process.ownerBindings))) throw new Error("INCAPACITY_ONSET_MISSING: Committed realization lacks its capacity process; stop for history review.");
           if (entry.commit.parentCommitId && effects.processDelta) validateIncapacityChanges(event, effects.processDelta, processes, processContext, eventIndex === 0 ? stateBeforeCommit : stateBeforeEffects, state, provenance, onsets);
-          const processesAfter = effects.processDelta ? applyProcessDelta(processes, effects.processDelta, processContext, provenance, entry.commit.logicalTime.elapsedDays ?? 0) : processes;
+          const processesAfter = effects.processDelta ? applyProcessDelta(processes, effects.processDelta, { ...processContext, allowHistoricalStarts: !entry.commit.parentCommitId }, provenance, entry.commit.logicalTime.elapsedDays ?? 0) : processes;
           const capacityIssues = capacityUseIssues({ ...(entry.commit.parentCommitId ? { actorId: event.actorId, spokenUtterances: event.spokenUtterances } : {}), knowledge: effects.knowledgeDelta }, processes, processesAfter, processContext.templates, context.perceptionObservations);
           if (capacityIssues.length) throw new Error(capacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
           if (effects.knowledgeDelta) {

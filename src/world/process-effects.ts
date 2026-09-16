@@ -19,6 +19,8 @@ export type ProcessState = {
 };
 
 export type ProcessReducerContext = {
+  /** Only reviewed genesis/entry seeds may restore an earlier onset. */
+  allowHistoricalStarts?: boolean;
   entities: ReadonlyMap<EntityId, Entity>;
   templates: ReadonlyMap<string, ProcessTemplate>;
 };
@@ -47,11 +49,13 @@ export function applyProcessDelta(
         if (process.phaseId !== template.initialPhaseId) {
           throw new Error(`Process ${process.id} must start in template phase ${template.initialPhaseId}`);
         }
+        const startedAt = process.startedAtElapsedDays ?? elapsedDays;
+        if (startedAt > elapsedDays || (startedAt !== elapsedDays && !context.allowHistoricalStarts)) throw new Error("PROCESS_ONSET_TIME_INVALID: Ordinary events cannot backdate a process; preserve head and stop for host entry review.");
         if (template.incapacity) {
-          const expected = template.incapacity.duration.kind === "days" ? elapsedDays + template.incapacity.duration.days : undefined;
+          const expected = template.incapacity.duration.kind === "days" ? startedAt + template.incapacity.duration.days : undefined;
           if (process.progress !== 0 || process.dueAtElapsedDays !== expected) throw new Error("INCAPACITY_DURATION_MISMATCH: Preserve exact known/unknown duration and zero initial progress; never invent or advance a recovery deadline.");
         }
-        assertFutureDueDate(process.id, process.dueAtElapsedDays, elapsedDays);
+        assertFutureDueDate(process.id, process.dueAtElapsedDays, context.allowHistoricalStarts ? startedAt : elapsedDays);
         output.instances[process.id] = {
           ...structuredClone(process),
           status: "running",

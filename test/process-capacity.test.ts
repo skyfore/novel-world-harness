@@ -1,3 +1,5 @@
+import { deriveCharacterEntrySeed } from "../src/world/entry-context.js";
+import { applyProcessDelta, emptyProcessState } from "../src/world/process-effects.js";
 import { buildSceneExecutionContracts } from "../src/compiler/scene-execution-contracts.js";
 import { executeSceneEvent } from "../src/compiler/scene-state.js";
 import fs from "node:fs/promises";
@@ -6,7 +8,7 @@ import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
-import { canonicalEventSchema } from "../src/world/model.js";
+import { canonicalEventSchema, processProposalOperationSchema } from "../src/world/model.js";
 import { processTemplateSchema, dueProcessInstances } from "../src/world/process-ontology.js";
 import { lacksCapacity, capacityUseIssues } from "../src/world/process-capacity.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
@@ -80,6 +82,43 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
   const unmappedScene = structuredClone(sceneBundle);
   unmappedScene.canonical.semanticEffects![0]!.lowering = { status: "unmapped", reason: "No supported mechanism" } as never;
   expect(() => executeSceneEvent(unmappedScene, sceneOnset)).toThrow("SEMANTIC_EFFECT_UNMAPPED");
+  const entryBundle = structuredClone(sceneBundle);
+  const beforeEntry = { ...sceneOnset, readerSummary: "The spell removes the patient's capacities", narrativeContext: { layerId: "main", mode: "scene" as const, discourseOrder: 1 } };
+  const passingTime = { ...beforeEntry, id: "passing-time", title: "A day passes", storyTime: { kind: "ordinal" as const, label: "one day later", orderHint: 2 }, timeAdvance: { amount: 1, unit: "day" as const }, narrativeContext: { layerId: "main", mode: "scene" as const, discourseOrder: 2 } };
+  const entryEvent = { ...beforeEntry, id: "helper-entry", participants: ["helper", "patient"], participantPresence: [{ entityId: "helper", mode: "physical" as const }, { entityId: "patient", mode: "physical" as const }], storyTime: { kind: "ordinal" as const, label: "arrival", orderHint: 3 }, narrativeContext: { layerId: "main", mode: "scene" as const, discourseOrder: 3 }, characterEntryCheckpoints: [{ actorId: "helper", readerSetup: "The patient remains incapacitated", actorObservation: "The patient lies still", participantPresence: [{ entityId: "helper", mode: "physical" as const }], delta: { version: 1 as const, operations: [{ op: "set" as const, entityId: "helper", field: "character.location", value: "site" }] } }] };
+  entryBundle.canonical.events = [beforeEntry, passingTime, entryEvent];
+  entryBundle.canonical.eventParticipations = [];
+  const entrySeed = deriveCharacterEntrySeed(entryBundle, "helper");
+  expect(entrySeed.projectionSeed!.elapsedDays).toBe(1);
+  expect(entrySeed.projectionSeed!.processes.operations).toHaveLength(3);
+  for (const operation of entrySeed.projectionSeed!.processes.operations) if (operation.op === "start-process") {
+    expect(operation.process.startedAtElapsedDays).toBe(0);
+    expect(operation.process.dueAtElapsedDays).toBe(scene.known ? 2 : undefined);
+  }
+  const seedProcessContext = { entities: new Map(entryBundle.canonical.entities.map(item => [item.id, item])), templates: new Map(entryBundle.canonical.processTemplates.map(item => [item.id, item])) };
+  const seedProvenance = { commitId: "entry", eventId: "entry", eventHash: "a".repeat(64) };
+  expect(() => applyProcessDelta(emptyProcessState("entry"), entrySeed.projectionSeed!.processes, seedProcessContext, seedProvenance, 1)).toThrow("PROCESS_ONSET_TIME_INVALID");
+  expect(processProposalOperationSchema.safeParse({ op: "start-process", localRef: "local-backdated", process: { templateId: "incapacity-action", ownerBindings: [{ roleId: "patient", entityIds: ["patient"] }], progress: 0, startedAtElapsedDays: 0 } }).success).toBe(false);
+  const futureSeed = structuredClone(entrySeed.projectionSeed!.processes);
+  const futureStart = futureSeed.operations[0]!;
+  if (futureStart.op === "start-process") futureStart.process.startedAtElapsedDays = 2;
+  expect(() => applyProcessDelta(emptyProcessState("entry"), futureSeed, { ...seedProcessContext, allowHistoricalStarts: true }, seedProvenance, 1)).toThrow("PROCESS_ONSET_TIME_INVALID");
+  const restored = applyProcessDelta(emptyProcessState("entry"), entrySeed.projectionSeed!.processes, { ...seedProcessContext, allowHistoricalStarts: true }, seedProvenance, 3);
+  expect(dueProcessInstances(restored, 3)).toHaveLength(scene.known ? 3 : 0);
+  expect(lacksCapacity("patient", "action", restored, seedProcessContext.templates)).toBe(true);
+  const entryContext = await new WorldContextStore(root).capturePrepared(source.source.id, contentHash(entryBundle), {
+    ...entryBundle.canonical, sceneOccurrences: [], events: [...entryBundle.canonical.events, ...bundle.canonical.events.filter(item => item.id !== event.id)],
+  });
+  const entryEngine = new WorldEngine(root, entryContext);
+  const entryHead = await entryEngine.createBranch("late-entry", "A day after onset", entrySeed.delta, entrySeed.knowledge, undefined, undefined, [], { storyTime: entrySeed.storyTime }, { projectionSeed: entrySeed.projectionSeed, realizesCanonicalEventIds: entrySeed.realizesCanonicalEventIds });
+  const entryReplay = await entryEngine.projections.project(entryHead, { fresh: true, useCheckpoints: false });
+  expect(entryReplay.state.logicalTime.elapsedDays).toBe(1);
+  expect(Object.values(entryReplay.processes.instances).map(item => item.dueAtElapsedDays)).toEqual(capacities.map(() => scene.known ? 2 : undefined));
+  expect(lacksCapacity("patient", "action", entryReplay.processes, entryContext.processTemplates!)).toBe(true);
+  const entryRuntime = new WorldRuntime(entryEngine, () => []);
+  await entryRuntime.forkBranch("late-entry", entryHead, "late-fork", "Same historical onset");
+  const forkHead = (await entryEngine.branches.read("late-fork")).headCommitId!;
+  expect((await entryEngine.projections.project(forkHead, { fresh: true, useCheckpoints: false })).processes.instances).toEqual(entryReplay.processes.instances);
   const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-capacity-clone-")); roots.push(cloneRoot);
   const cloneSource = await createEvidenceFixture(cloneRoot, text); await new PreparedNovelCache(cloneRoot, cacheRoot).restoreCompilerCheckpoint(cloneSource.source, archived.bundleHash!);
   const contexts = new WorldContextStore(cloneRoot), context = await contexts.captureCurrent(cloneSource.source.id), engine = new WorldEngine(cloneRoot, context);

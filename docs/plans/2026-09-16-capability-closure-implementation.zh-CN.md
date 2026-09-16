@@ -593,3 +593,17 @@ P2w 已提交为 `80e1d34`。
 这是一条新持久类型的纵向实现，不代表 P3 完成：Expression/Perception/Acquisition 及其复用命题/嵌套/晚期报告/legacy 验收仍待完成；失能执行扩展属于 P4，P5–P7 仍在原目标范围。P1/P2 余下完整退出审计仍保留。未调用真实 provider 或独立人工体验评价。
 
 验证：最终全仓 192 文件、1173 tests 通过（95.73 秒）；此前 111 项编译/重建定向、65 项类型/状态定向和 33 项语义/恢复定向通过；最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。首轮全仓发现工具固定数量及 pipeline-35 进度预期已过时；迁移按新语义边界调整为保留 observation 并重开 semantic/executable，未将旧检查点当作新能力证据。
+
+P3a 已提交为 `1cce655`。
+
+## P3b：表达内容的 schema 覆盖与嵌套验证前置链
+
+修复既有 attribution 内容检查从提交 assertion 推导必需字段的缺口。新增确定性表达内容评估器，从实际 proposition object schema 推导语义叶字段；父命题必须同时覆盖 propositionId 引用及递归子内容，父 /object 的整体证据不能免除子内容要求。每条 assertion 内 anchors 为 AND，同字段的不同 assertion 为 OR；每个 anchor 必须位于某一原始 fragment，不能跨片段空隙。返回具体 proposition ID、object hash、缺失路径及 missing/cycle/expansion-limit 分类，最多展开 32 层。
+
+现有 proposal 与 committed attribution trace 均接入实际命题及精确证据目录，pending overlay 只参与候选验证。错误恢复定位实际缺陷子命题，并提供同 source 的 discovery/ref 字段与一次纠正约束；循环和展开上限明确停止重试。旧三参数纯函数保留兼容，无精确内容断言的旧 attribution 仍可读，不补造证明，也不作为新表达认证。
+
+两个原创改名/句序场景覆盖字段伪装、同命题不同话语、片段间隙、AND/OR、父引用与子内容；额外测试覆盖缺失引用、循环和深度边界。两个持久化场景通过正常 quotation proposal/finish 创建引用，验证已提交父/子命题的异处证据被拒、pending 修正不改 canonical 验证、单独更新 committed binding 后通过且原命题/quotation 不变。最后一步为工程夹具直接更新 evidence binding，不宣称完成新的 Expression finish/converge 纵向链。
+
+本段是生产验证器修复和新表达类型的前置能力，不是 UtteranceExpression 持久化交付；独立 expression revision/evidence、Perception、Acquisition 及 P4–P7 仍待实现。未调用真实 provider 或独立人工体验评价。
+
+验证：全仓 193 文件、1178 tests 通过（96.45 秒）；最终恢复提示定向 3 tests 通过；原生语义契约 2 文件通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

@@ -1,3 +1,5 @@
+import { assessExpressionObjectSupport } from "./expression-content.js";
+import { propositionSchema, type Proposition } from "../world/model.js";
 import { assessQuotationContentSupport } from "./content-support.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import {
@@ -42,7 +44,8 @@ export async function validateAttributionProposalTrace(
   const issues: string[] = [];
   for (const attribution of attributions.all.values()) {
     issues.push(...attributionQuotationTraceIssues(attribution, sourceId, catalog));
-    issues.push(...attributionContentTraceIssues(attribution, await propositionAssertions(workspaceRoot, attribution.propositionId, worldProposalIds), catalog.quotations));
+    const content = await loadPropositionContent(workspaceRoot, attribution.propositionId, worldProposalIds);
+    issues.push(...attributionContentTraceIssues(attribution, content.assertions, catalog.quotations, content.propositions));
   }
   return [...new Set(issues)].sort();
 }
@@ -89,12 +92,13 @@ export async function validateCommittedAttributionTrace(
   const sourceId = idSchema.parse(sourceIdInput);
   const attribution = attributionSchema.parse(attributionInput);
   const catalog = await loadTraceCatalog(workspaceRoot, sourceId);
+  const content = await loadPropositionContent(workspaceRoot, attribution.propositionId);
   return [...attributionQuotationTraceIssues(attribution, sourceId, catalog),
-    ...attributionContentTraceIssues(attribution, await propositionAssertions(workspaceRoot, attribution.propositionId), catalog.quotations)];
+    ...attributionContentTraceIssues(attribution, content.assertions, catalog.quotations, content.propositions)];
 }
 
 /** Exact object evidence must be supported by the cited discourse, not merely the same segment. */
-export function attributionContentTraceIssues(attribution: Attribution, assertions: readonly EvidenceAssertion[], quotations: ReadonlyMap<string, Quotation>): string[] {
+export function attributionContentTraceIssues(attribution: Attribution, assertions: readonly EvidenceAssertion[], quotations: ReadonlyMap<string, Quotation>, propositions?: ReadonlyMap<string, Proposition>): string[] {
   if (!attribution.quotationIds?.length) return [];
   const content = assertions.filter(a => a.target.artifactKind === "proposition" && a.target.artifactId === attribution.propositionId
     && (a.target.jsonPointer === "/object" || a.target.jsonPointer.startsWith("/object/")) && a.relation === "supports");
@@ -102,19 +106,38 @@ export function attributionContentTraceIssues(attribution: Attribution, assertio
   // structural-only selectors cannot be used as a substitute for its content.
   if (!content.length) return [];
   const cited = attribution.quotationIds.flatMap(id => { const q = quotations.get(id); return q ? [q.anchor] : []; });
-  const assessment = assessQuotationContentSupport(attribution.propositionId, content, cited);
-  return assessment.status === "supported" ? [] : [`Attribution ${attribution.id}: proposition ${attribution.propositionId} object evidence is outside its cited quotation content or lacks content-bearing support (${assessment.status}: ${assessment.missingPaths.join(", ")}). The defective dependency is proposition ${attribution.propositionId} at /object (or its child pointer), not the attribution evidence. Inspect and correct that proposition content selector; changing attribution /propositionId, /holderEntityId or /quotationIds selectors cannot repair it. Read the exact quotation and proposition evidence with find_compiler_artifacts, copying readArguments.ref. A shared segment or speaker is insufficient. Correct the named trace once only when source supports it; if a quotation revision or wider authority is needed, preserve drafts and stop for host source review. Do not remove content assertions, change acquisition mode, or substitute IDs to bypass this check.`];
+  const expression = propositions ? assessExpressionObjectSupport(attribution.propositionId, propositions, assertions, cited) : undefined;
+  const assessment = expression ? { status: expression.status, missingPaths: expression.objects.flatMap(item => item.missingPaths.map(path => `${item.propositionId}${path}`)).concat(expression.issues.filter(item => !item.code.startsWith("EXPRESSION_CONTENT_")).map(item => `${item.code}:${item.propositionId}`)) } : assessQuotationContentSupport(attribution.propositionId, content, cited);
+  const defectiveId = expression?.issues[0]?.propositionId ?? attribution.propositionId;
+  const expansionStopped = expression?.issues.some(issue => issue.code === "EXPRESSION_PROPOSITION_CYCLE" || issue.code === "EXPRESSION_EXPANSION_LIMIT");
+  if (expansionStopped) return [`Attribution ${attribution.id}: proposition ${defectiveId} content expansion stopped (${expression!.issues.map(issue => issue.code).join(", ")}). Preserve drafts and stop for host graph review; do not retry, increase expansion limits, remove references, or guess replacement IDs.`];
+  return assessment.status === "supported" ? [] : [`Attribution ${attribution.id}: proposition ${attribution.propositionId} object evidence is outside its cited quotation content or lacks content-bearing support (${assessment.status}: ${assessment.missingPaths.join(", ")}). The defective dependency is proposition ${defectiveId} at /object (or its child pointer), not the attribution evidence. Inspect and correct that proposition content selector; changing attribution /propositionId, /holderEntityId or /quotationIds selectors cannot repair it. Read the proposition evidence with same-source find_compiler_artifacts (kind proposition), copying results[].readArguments.ref into read_compiler_artifact.ref; copy payload.id only when a logical ID is required. Discover the exact quotation with same-source find_source_annotations (annotation_type quotation), copying results[].readArguments.ref into read_source_annotation.ref. A shared segment or speaker is insufficient. Correct the named trace once only when source supports it; if a quotation revision or wider authority is needed, preserve drafts and stop for host source review. Do not remove content assertions, change acquisition mode, or substitute IDs to bypass this check.`];
 }
 
-async function propositionAssertions(root: string, propositionId: string, proposalIds: readonly string[] = []): Promise<EvidenceAssertion[]> {
-  const store = new ProposalStore(root);
+async function loadPropositionContent(root: string, rootId: string, proposalIds: readonly string[] = []) {
+  const pending = new Map<string, { payload: Proposition; assertions: EvidenceAssertion[] }>();
+  const store = new ProposalStore(root), canonical = new CanonicalModelStore(root), exact = new EvidenceAssertionStore(root);
   for (const id of proposalIds) {
     const envelope = await store.readEnvelope("pending", id).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
-    if (envelope?.kind === "proposition" && (envelope.payload as { id?: string }).id === propositionId) {
-      return (Array.isArray(envelope.evidenceAssertions) ? envelope.evidenceAssertions : []).map(value => evidenceAssertionSchema.parse(value));
-    }
+    if (envelope?.kind !== "proposition") continue;
+    const payload = propositionSchema.parse(envelope.payload);
+    if (pending.has(payload.id)) continue;
+    pending.set(payload.id, { payload, assertions: evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []) });
   }
-  return new EvidenceAssertionStore(root).listForArtifact("proposition", propositionId);
+  const propositions = new Map<string, Proposition>(), assertions: EvidenceAssertion[] = [], seen = new Set<string>();
+  let id: string | undefined = rootId;
+  // At most one child per current object variant. A 33rd record lets the
+  // deterministic assessor report its own depth bound rather than guess.
+  while (id && !seen.has(id) && seen.size < 33) {
+    seen.add(id);
+    const staged = pending.get(id);
+    const payload: Proposition | undefined = staged?.payload ?? await canonical.getProposition(id).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+    if (!payload) break;
+    propositions.set(id, payload);
+    assertions.push(...(staged?.assertions ?? await exact.listForArtifact("proposition", id)));
+    id = payload.object.kind === "proposition" ? payload.object.propositionId : undefined;
+  }
+  return { propositions, assertions };
 }
 
 export async function validateCommittedKnowledgeAcquisitionTrace(

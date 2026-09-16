@@ -1127,3 +1127,19 @@ explicitly rejects old-engine branch history. Old canonical snapshots without
 semantic-effect refs remain readable as having no such records; no meanings or
 knowledge are fabricated during migration. New candidates and snapshots retain
 new effect revisions; old publications are not rewritten.
+
+### Nested quotation content validation
+
+Attribution content diagnostics derive required object pointers from the actual
+proposition schema and name the defective nested proposition. Discover that
+proposition with same-source `find_compiler_artifacts` (`kind: proposition`);
+copy `results[].readArguments.ref` into `read_compiler_artifact.ref`, and use
+`payload.id` only for logical references. Discover quotations with same-source
+`find_source_annotations` (`annotation_type: quotation`), copying
+`results[].readArguments.ref` into `read_source_annotation.ref`. Correct the identified content selector at most
+once when the cited source supports it. A parent reference or evidence from a
+different utterance cannot replace child content. Preserve drafts and stop for
+host source review if quotation revision or wider authority is needed. Missing
+exact legacy evidence remains unverified; removing assertions is not a repair.
+Cycles and expansion limits require host graph review: do not retry, raise the
+limit, delete references, or guess substitute IDs.

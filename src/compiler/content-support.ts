@@ -39,14 +39,15 @@ export function assessQuotationContentSupport(
   propositionId: string,
   assertions: readonly ContentAssertion[],
   quotationSpans: readonly ContentSpan[],
+  requiredPaths?: readonly string[],
 ): ContentSupportAssessment {
   const content = assertions.filter(assertion =>
     assertion.target.artifactKind === "proposition"
     && assertion.target.artifactId === propositionId
     && assertion.relation === "supports"
     && (assertion.target.jsonPointer === "/object"
-      || CONTENT_PATHS.has(assertion.target.jsonPointer)));
-  if (!content.length) return { status: "unverified", supportedPaths: [], missingPaths: ["/object"] };
+      || (requiredPaths ? requiredPaths.includes(assertion.target.jsonPointer) : CONTENT_PATHS.has(assertion.target.jsonPointer))));
+  if (!content.length) return { status: "unverified", supportedPaths: [], missingPaths: requiredPaths ? [...requiredPaths] : ["/object"] };
 
   const covered = (assertion: ContentAssertion): boolean => assertion.anchors.length > 0
     && assertion.anchors.every(anchor => validSpan(anchor) && quotationSpans.some(quote =>
@@ -56,7 +57,7 @@ export function assessQuotationContentSupport(
   if (content.some(assertion => assertion.target.jsonPointer === "/object" && covered(assertion))) {
     return { status: "supported", supportedPaths: ["/object"], missingPaths: [] };
   }
-  const paths = [...new Set(content.map(assertion => assertion.target.jsonPointer)
+  const paths = [...new Set(requiredPaths ?? content.map(assertion => assertion.target.jsonPointer)
     .filter(pointer => pointer !== "/object"))].sort();
   if (!paths.length) return { status: "unsupported", supportedPaths: [], missingPaths: ["/object"] };
   const supportedPaths = paths.filter(pointer => content.some(assertion =>

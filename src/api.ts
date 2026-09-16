@@ -416,6 +416,8 @@ export {
 } from "./world/play-session.js";
 export {
   assertPlaySceneNarration,
+  settlePlaySceneNarration,
+  requiresNarrationBlocks,
   buildPlayOpeningFrame,
   readerNarrativePrelude,
   playSceneRequestForEntry,
@@ -485,3 +487,5 @@ export { CompilerProposalObligations } from "./compiler/proposal-obligations.js"
 export { RuntimeHooks, runtimeHooks, currentRuntimeHooks, withRuntimeHooks, type RuntimeHook, type RuntimeHookEvent, type RuntimeHookType, type RuntimeHookStatus, type RuntimeHookMetadata, type RuntimeHookFailure } from "./runtime/hooks.js";
 
 export { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, semanticEffectRealizationIssues, SEMANTIC_EFFECT_VERSION, type SemanticEffect } from "./world/semantic-effect.js";
+
+export { committedUtteranceId, narrationBlocksSchema, renderNarrationBlocks, type NarrationBlocks, type LockedUtterance } from "./world/utterance-rendering.js";

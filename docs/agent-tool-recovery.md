@@ -1143,3 +1143,21 @@ host source review if quotation revision or wider authority is needed. Missing
 exact legacy evidence remains unverified; removing assertions is not a repair.
 Cycles and expansion limits require host graph review: do not retry, raise the
 limit, delete references, or guess substitute IDs.
+
+### Committed utterance rendering
+
+For accepted turns carrying host-derived utterance IDs, narration must return
+`narration-blocks-v1`. Copy `resolvedAct.lockedUtterances[].utteranceId` directly
+into `committed-utterance` blocks, exactly once each in supplied order. IDs are
+already in the immutable frame: do not discover unrelated events or construct
+replacement IDs. Correct invalid blocks once in a fresh rendering session with
+the same frame. A prose block that copies dialogue (including an ambiguous
+short substring) must be rewritten; never delete a legitimate repeated speech
+block. Adjacent prose blocks cannot split a copied utterance to evade checking.
+Missing or duplicate host IDs require host frame review before any model call;
+do not retry that frame. Provider failure or invalid rendering leaves committed
+actions intact. Use the existing narration-retry operation at that same head;
+never resubmit the player action to repair presentation. Raw provider text and
+native assistant events are drafts, and only complete validated prose is
+published to terminal/Web consumers. Legacy frames without IDs remain readable
+via their prior text checks; they do not prove block-contract compliance.

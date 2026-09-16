@@ -352,6 +352,7 @@ describe("player opening narration", () => {
       worldStatus: "accepted",
       actualOutcomes: ["你问见证人门外是谁。"],
       lockedUtterances: [{
+        utteranceId: `${event.eventId}:0`,
         speaker: "福贵",
         addressees: ["见证人"],
         text: "门外是谁？",

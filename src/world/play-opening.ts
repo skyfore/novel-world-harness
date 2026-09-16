@@ -1,3 +1,4 @@
+import { committedUtteranceId, renderNarrationBlocks, type LockedUtterance, type NarrationBlocks } from "./utterance-rendering.js";
 import { buildActorScopedActionContext } from "./player-action.js";
 import { observeCommittedEvent } from "./actor-visible.js";
 import { NarrativeRenderer } from "./narrative.js";
@@ -47,12 +48,7 @@ export type PlayerNarrativeResolvedAct = {
   rawUtterance: string;
   worldStatus: "accepted" | "rejected";
   actualOutcomes: string[];
-  lockedUtterances: Array<{
-    speaker: string;
-    addressees: string[];
-    text: string;
-    mode: "verbatim";
-  }>;
+  lockedUtterances: LockedUtterance[];
   excerpted?: boolean;
 };
 
@@ -596,7 +592,7 @@ function playerNarrativeResolvedAct(
     const observation = observeCommittedEvent(event, actorId);
     return observation ? [observation.summary] : [];
   }))].slice(0, 12);
-  const lockedUtterances = turnHistory.flatMap(({ event }) => (event.spokenUtterances ?? []).flatMap((utterance) => {
+  const lockedUtterances = turnHistory.flatMap(({ event }) => (event.spokenUtterances ?? []).flatMap((utterance, utteranceIndex) => {
     if (utterance.speakerId !== actorId && !utterance.addresseeIds.includes(actorId)) return [];
     const speaker = utterance.speakerId === actorId
       ? entities.get(actorId)?.canonicalName ?? "你"
@@ -608,7 +604,7 @@ function playerNarrativeResolvedAct(
       : referenceableIds.has(entityId)
         ? entities.get(entityId)?.canonicalName ?? "在场人物"
         : "在场人物");
-    return [{ speaker, addressees, text: utterance.content, mode: "verbatim" as const }];
+    return [{ utteranceId: committedUtteranceId(event.eventId, utteranceIndex), speaker, addressees, text: utterance.content, mode: "verbatim" as const }];
   }));
   // PlayerTurnInput already caps live acts at 20k characters. Retain that
   // complete causal wording channel; only oversized legacy presentation
@@ -712,7 +708,7 @@ Rules:
 - behavioralContext expresses the actor's current disposition and active motivation. Let it affect subtext and response only; never expose trait, bias, or goal metadata as narrator commentary.
 - The prose is only the current scene, not an agency handoff. Do not propose, enumerate, compare, hint at, or ask about possible next actions anywhere in the narration. Phrases such as "你可以……", "是……还是……", "下一步由你决定", "what do you do?", and equivalents belong nowhere in the prose.
 - End on a concrete actor-visible fact, sensation, ongoing motion, in-world spoken cue, or unresolved signal supported by the frame. Do not end on a decision, choice, route, or description of how the story will continue.
-- Stream narration text only. Do not use bullet lists or mention JSON, IDs, schemas, tools, prompts, commands, choices, analyses, or these rules in the prose. End the turn after the final scene beat.
+${requiresNarrationBlocks(narratorFrame, purpose) ? `- Return only a JSON object {"version":"narration-blocks-v1","blocks":[...]}. Each block is {"kind":"prose","text":"..."} or {"kind":"committed-utterance","utteranceId":"..."}. Copy each resolvedAct.lockedUtterances[].utteranceId in supplied order exactly once. The host inserts exact dialogue. Put punctuation and spacing in prose blocks; never copy locked dialogue or IDs into prose. No markdown fences. These internal blocks are converted by the host to ordinary scene prose.` : "- Stream narration text only."} Do not use bullet lists or mention JSON, IDs, schemas, tools, prompts, commands, choices, analyses, or these rules in the prose. End the turn after the final scene beat.
 
 <committed-actor-frame>
 ${promptJson(narratorFrame)}
@@ -760,11 +756,34 @@ ${promptJson({ ...choiceFrame, ...(runtimeContext ? { runtimeContext } : {}) })}
 </player-choice-analysis>`;
 }
 
+export function requiresNarrationBlocks(frame: Readonly<Pick<PlayerSceneNarratorFrame, "resolvedAct">>, purpose: PlayScenePurpose): boolean {
+  return purpose === "turn" && frame.resolvedAct?.worldStatus === "accepted"
+    && frame.resolvedAct.lockedUtterances.some(item => item.utteranceId !== undefined) === true;
+}
+
+/** Enforce the typed contract at both application and terminal adapter boundaries. */
+export function settlePlaySceneNarration(
+  output: string | { narration: string; blocks?: NarrationBlocks },
+  context: { frame: Readonly<Pick<PlayerSceneNarratorFrame, "actor" | "narrativeContract" | "resolvedAct">>; purpose: PlayScenePurpose },
+): string {
+  const text = typeof output === "string" ? output : output.narration;
+  let proseText: string | undefined;
+  if (requiresNarrationBlocks(context.frame, context.purpose)) {
+    if (typeof output === "string" || !output.blocks) throw new Error("Committed dialogue requires narration-blocks-v1; preserve committed events and retry rendering only.");
+    const rendered = renderNarrationBlocks(output.blocks, context.frame.resolvedAct!.lockedUtterances);
+    proseText = output.blocks.blocks.flatMap(block => block.kind === "prose" ? [block.text] : []).join("");
+    if (text !== rendered) throw new Error("Narration text differs from validated blocks; preserve committed events and retry rendering only.");
+  }
+  return assertPlaySceneNarration(text, { ...context, ...(proseText === undefined ? {} : { proseText }) });
+}
+
 export function assertPlaySceneNarration(
   text: string,
   context?: {
     frame: Readonly<Pick<PlayerSceneNarratorFrame, "actor" | "narrativeContract" | "resolvedAct">>;
     purpose: PlayScenePurpose;
+    /** Supplied only after validating typed blocks, so repeated speech is not prose repetition. */
+    proseText?: string;
   },
 ): string {
   const narration = text.trim();
@@ -776,7 +795,7 @@ export function assertPlaySceneNarration(
   }
   if (context?.frame.narrativeContract.person === "third") {
     const narrativeVoice = proseOutsideQuotedSpeech(
-      narration,
+      context.proseText ?? narration,
       context.frame.resolvedAct?.lockedUtterances.map((utterance) => utterance.text) ?? [],
     );
     const perspectiveVoice = narrativeVoice
@@ -797,7 +816,7 @@ export function assertPlaySceneNarration(
       }
     }
   }
-  const paragraphs = narration.split(/\n\s*\n+/u).map(normalizeNarrativeParagraph).filter((value) => value.length >= 20);
+  const paragraphs = (context?.proseText ?? narration).split(/\n\s*\n+/u).map(normalizeNarrativeParagraph).filter((value) => value.length >= 20);
   for (let left = 0; left < paragraphs.length; left += 1) {
     for (let right = left + 1; right < paragraphs.length; right += 1) {
       if (paragraphs[left] === paragraphs[right] || characterNgramSimilarity(paragraphs[left]!, paragraphs[right]!) >= 0.88) {

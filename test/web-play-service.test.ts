@@ -56,6 +56,7 @@ async function fixture() {
 const narrator: PlayerOpeningNarrator = (frame, purpose, observer) => {
   const narration = `${frame.actor.name}站在前厅斑驳的窗影里，风从门缝缓慢穿过，带来远处草木与尘土的气味。他听见自己的呼吸落在寂静中，也看见通往营地的道路在门外延伸。此刻没有任何力量替他作出决定，只有眼前已经发生的${purpose}场景仍在延展，门槛边的微光随风轻轻一颤。`;
   observer?.onAttempt?.(1);
+  observer?.onText?.("UNVALIDATED_ADAPTER_DRAFT");
   observer?.onText?.(narration);
   return {
     narration,
@@ -245,6 +246,10 @@ describe("Web Play application service", () => {
       "presentation.message.appended",
       "run.succeeded",
     ]));
+    const confirmedDeltas = events.replayAfter().filter(event => event.type === "play.narration.delta");
+    expect(confirmedDeltas.length).toBeGreaterThan(0);
+    expect(confirmedDeltas.every(event => event.data.validated === true)).toBe(true);
+    expect(JSON.stringify(confirmedDeltas)).not.toContain("UNVALIDATED_ADAPTER_DRAFT");
     expect(events.replayAfter().map((event) => event.type)).toEqual(expect.arrayContaining([
       "play.narration.delta",
       "play.narration.completed",
@@ -454,6 +459,7 @@ describe("Web Play application service", () => {
     const started = new Promise<void>((resolve) => { narrationStarted = resolve; });
     const gate = new Promise<void>((resolve) => { releaseNarration = resolve; });
     const blockingNarrator: PlayerOpeningNarrator = async (_frame, _purpose, observer) => {
+      observer?.onText?.("UNVALIDATED_INTERRUPTED_DRAFT");
       narrationStarted();
       await gate;
       observer?.signal?.throwIfAborted();
@@ -479,6 +485,7 @@ describe("Web Play application service", () => {
 
     await started;
     expect(operations.get(accepted.operation.id).commitBoundaryCrossed).toBe(true);
+    expect(events.replayAfter().filter(event => event.type === "play.narration.delta")).toEqual([]);
     operations.cancel(accepted.operation.id);
     releaseNarration();
     const completed = await operations.wait(accepted.operation.id);

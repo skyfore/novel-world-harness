@@ -41,7 +41,7 @@ import {
 } from "../world/play-experience.js";
 import { choosePlayExperience } from "../world/play-choice.js";
 import {
-  assertPlaySceneNarration,
+  settlePlaySceneNarration,
   buildPlayOpeningFrame,
   playSceneRequestForEntry,
   playerRuntimeContextFrame,
@@ -1157,19 +1157,22 @@ export class PlayApplicationService {
           signal: context.signal,
           onAttempt: (attempt) => context.update("narrating", { purpose, attempt }),
           onRetry: (message) => context.update("narration-retry", { purpose, statusText: message }),
-          onText: (delta) => this.options.events.publish("play.narration.delta", {
-            sessionId: session.id,
-            branchId: session.branchId,
-            delta,
-          }, { operationId: context.operationId, runId: recorder.manifest.id }),
+          // Adapters may emit drafts; publish only after validating their complete output.
+          onText: () => undefined,
         },
         modelPlayConversation(frame.messageHistory),
       );
       context.signal.throwIfAborted();
-      const narration = assertPlaySceneNarration(
-        typeof output === "string" ? output : output.narration,
+      const narration = settlePlaySceneNarration(
+        output,
         { frame: playerSceneModelFrame(frame, purpose), purpose },
       );
+      this.options.events.publish("play.narration.delta", {
+        sessionId: session.id,
+        branchId: session.branchId,
+        delta: narration,
+        validated: true,
+      }, { operationId: context.operationId, runId: recorder.manifest.id });
       const narratedChoices = typeof output === "string"
         ? []
         : parsedNarratedChoices(output.choices);

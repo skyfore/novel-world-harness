@@ -358,3 +358,75 @@ describe("Pi player scene narrator", () => {
     expect((result as { choices: unknown[] }).choices).toHaveLength(2);
   });
 });
+
+describe("committed utterance block boundary", () => {
+  it("withholds native/provider drafts and retries only rendering against the same ordered IDs", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-typed-narration-")); roots.push(root);
+    const supplied = playerSceneModelFrame(frame());
+    const first = { ...supplied.resolvedAct!.lockedUtterances[0]!, utteranceId: "event-a:0" };
+    supplied.resolvedAct!.lockedUtterances = [first, { ...first, utteranceId: "event-b:0" }];
+    const before = structuredClone(supplied);
+    const document = { version: "narration-blocks-v1", blocks: [
+      { kind: "prose", text: "福贵站在门槛内，肩头压着一层薄薄的寒意。木板上的纹路一直伸向阴影深处，像是被岁月悄悄磨开的细缝。他的呼吸贴着衣领，掌心仍留着粗糙木头的触感。风绕过墙角，门闩轻轻颤了一下。他开口道：“" },
+      { kind: "committed-utterance", utteranceId: "event-a:0" },
+      { kind: "prose", text: "”片刻之后，他又问：“" },
+      { kind: "committed-utterance", utteranceId: "event-b:0" },
+      { kind: "prose", text: "”最后一个字落下，门板后仍是一片沉静。" },
+    ] };
+    const deltas: string[] = [], nativeEvents: unknown[] = [], attempts: number[] = [];
+    let renders = 0;
+    vi.spyOn(PiAgentSession, "create").mockImplementation(async options => ({
+      abort: async () => undefined,
+      dispose: async () => undefined,
+      promptWithReport: async () => {
+        if (toolKind(options.additionalTools?.map(tool => tool.name) ?? []) !== "narrator") return { text: "" } as never;
+        renders++;
+        options.onText?.("UNVALIDATED_DRAFT_WITH_INTERNAL_IDS");
+        options.onEvent?.({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "RAW_NATIVE_DRAFT" }] } } as never);
+        expect(deltas).toEqual([]);
+        return { text: JSON.stringify(renders === 1 ? { ...document, blocks: [...document.blocks].reverse() } : document) } as never;
+      },
+    }) as unknown as PiAgentSession);
+    const result = await createPiPlayerOpeningNarrator({ root })(supplied, "turn", { onAttempt: value => attempts.push(value), onText: value => deltas.push(value), onEvent: value => nativeEvents.push(value) });
+    expect(typeof result).toBe("object");
+    if (typeof result === "string") throw new Error("Expected typed result");
+    expect(result.blocks).toEqual(document);
+    expect(deltas).toEqual([result.narration]);
+    expect(nativeEvents).toEqual([]);
+    expect(result.narration.split(first.text)).toHaveLength(3);
+    expect(result.narration).not.toContain("event-a");
+    expect(attempts).toEqual([1, 2]);
+    expect(supplied).toEqual(before);
+  });
+});
+
+it("stops a corrupt host utterance frame before model calls rather than spending a prose retry", async () => {
+  const supplied = playerSceneModelFrame(frame());
+  const utterance = { ...supplied.resolvedAct!.lockedUtterances[0]!, utteranceId: "same-event:0" };
+  supplied.resolvedAct!.lockedUtterances = [utterance, { ...utterance }];
+  const create = vi.spyOn(PiAgentSession, "create").mockRejectedValue(new Error("Unexpected model call from corrupt host frame"));
+  await expect(createPiPlayerOpeningNarrator({ root: "/tmp" })(supplied, "turn")).rejects.toThrow("do not retry");
+  expect(create).not.toHaveBeenCalled();
+});
+
+it("retains both malformed rendering errors and stops after one correction without publishing JSON", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-invalid-blocks-")); roots.push(root);
+  const supplied = playerSceneModelFrame(frame());
+  supplied.resolvedAct!.lockedUtterances[0]!.utteranceId = "original-event:0";
+  let renders = 0;
+  const deltas: string[] = [];
+  vi.spyOn(PiAgentSession, "create").mockImplementation(async options => ({
+    abort: async () => undefined, dispose: async () => undefined,
+    promptWithReport: async () => {
+      if (toolKind(options.additionalTools?.map(tool => tool.name) ?? []) === "narrator") renders++;
+      return { text: "not a JSON document" } as never;
+    },
+  }) as unknown as PiAgentSession);
+  const error = await createPiPlayerOpeningNarrator({ root })(supplied, "turn", { onText: text => deltas.push(text) }).catch(error => error);
+  expect(error).toBeInstanceOf(AggregateError);
+  expect(error.message).toContain("stop this rendering task");
+  expect(error.errors).toHaveLength(2);
+  expect(error.errors.every((cause: unknown) => cause instanceof SyntaxError)).toBe(true);
+  expect(renders).toBe(2);
+  expect(deltas).toEqual([]);
+});

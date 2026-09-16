@@ -132,12 +132,14 @@ describe("play experience NPC integration", () => {
     expect(frame.recentVisibleEvents.at(-1)?.title).toContain("I saw the courier leave through the east door");
     expect(frame.resolvedAct?.lockedUtterances).toEqual([
       {
+        utteranceId: `${playerEvent.eventId}:0`,
         speaker: "Hero",
         addressees: ["Witness"],
         text: "Where did the courier go?",
         mode: "verbatim",
       },
       {
+        utteranceId: `${npcEvent.eventId}:0`,
         speaker: "Witness",
         addressees: ["Hero"],
         text: "I saw the courier leave through the east door.",

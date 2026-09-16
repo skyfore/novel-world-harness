@@ -607,3 +607,21 @@ P3a 已提交为 `1cce655`。
 本段是生产验证器修复和新表达类型的前置能力，不是 UtteranceExpression 持久化交付；独立 expression revision/evidence、Perception、Acquisition 及 P4–P7 仍待实现。未调用真实 provider 或独立人工体验评价。
 
 验证：全仓 193 文件、1178 tests 通过（96.45 秒）；最终恢复提示定向 3 tests 通过；原生语义契约 2 文件通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P3b 已提交为 `206f2a7`。
+
+## P5a：已提交台词身份与完整块验证发布
+
+按方案允许的独立顺序先推进台词机制；P3 Expression/Perception/Acquisition 的完整纵向工件链仍未完成，没有拆出仅 schema 的持久类型提交。
+
+运行时从不可变 eventId 与事件内零起始 utteranceIndex 派生稳定 utteranceId，保留已提交历史的顺序、speaker/addressees 和原字节；actor 可见性过滤后仍使用原事件内索引。无需覆写旧 event 或改变 reducer/engine 解释。新 turn frame 将身份传递给 narrator；同文发言各有独立 ID，不按文本去重。
+
+有身份的 accepted turn 使用 narration-blocks-v1：prose 或 committed-utterance ID。宿主按顺序插入原话，拒绝缺失、重复、逆序、未知 ID，以及 prose 额外复制原话或内部 ID；相邻 prose 也不能拆词绕过。短句/子串歧义要求改写 prose，不删除合法发言。新格式的段落重复检查只针对 prose，长台词合法重说与嵌套短句不会因此被拒。终端和 Web 应用边界再次验证 typed output 与最终文本逐字一致，纯文本不能替有身份 turn 通过新契约。旧无 ID frame/无锁定台词的叙述继续走既有文本格式，不据此宣称新 block 认证。
+
+Pi 在完整输出解析、身份/顺序、叙述约束全部通过后才发布文字；provider text/native assistant events 为草稿，不转发给用户。终端与 Web 同样扣住注入 adapter 的草稿；Web 发布带 validated 标记的完整文字，前端拒绝未验证 delta。断流/取消仍保留已提交 world event，现有 narration-retry 在原 head 只补叙述。非法块只允许同一冻结 frame 的一次干净重渲染；损坏的宿主 ID 在模型调用前停止。消费方回调失败不触发额外模型重渲染。
+
+验收包括两个原创改名/语言扰动场景的同文重说、嵌套、顺序/缺项/未知 ID/分块绕过反例；实际 player/NPC event 派生 ID；Pi 错序首稿→同 frame 第二稿、原生草稿不外泄与 settled 字节一致；终端只发布最终文本；Web 未验证 adapter 草稿不发布、Stop 后原 head 保留、render-only retry 无 world.commit 事件。这里仍是确定性工程证据，没有真实 provider 或独立体验评分。
+
+P5 的 DecisionContextManifest、端到端预算和 LiteraryReferenceIndex 尚未实现；expression ref 绑定等待 P3 的真实持久工件。P1/P2 完整退出审计及 P3/P4/P6/P7 继续保持原范围。
+
+验证：冻结源码后的全仓 194 文件、1183 tests 通过（94.07 秒）；随后错误保留/停止路径的最终 10 项定向测试通过，包含新增双 malformed JSON 反例。此前终端/Web 等 86 项定向通过。最终服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。首轮全仓期间新增预检测试，已加载模块与新测试混用导致 1 项失败；停止源码修改后完整复跑通过。最初 4 项终端测试仍要求展示原生草稿，已按新发布契约改为验证草稿不可见、最终文本仅发布一次，未删除对应场景。

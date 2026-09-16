@@ -91,7 +91,7 @@ import { WorkspaceOperationLock, withWorkspaceOperationLock } from "../util/work
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
 import { createWorldBranch } from "../world/instance.js";
 import {
-  assertPlaySceneNarration,
+  settlePlaySceneNarration,
   buildPlayOpeningFrame,
   playSceneRequestForEntry,
   renderPlaySceneFailure,
@@ -998,11 +998,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         const output = await narrator(
           playerSceneModelFrame(frame, purpose),
           purpose,
-          stream.observer,
+          { ...stream.observer, onText: () => undefined, onEvent: () => undefined },
           modelPlayConversation(frame.messageHistory),
         );
-        const narration = assertPlaySceneNarration(
-          typeof output === "string" ? output : output.narration,
+        const narration = settlePlaySceneNarration(
+          output,
           { frame: playerSceneModelFrame(frame, purpose), purpose },
         );
         const parsedChoices = typeof output === "string"
@@ -1019,6 +1019,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           affordanceId: affordance.id,
         }));
         const choices = mergePresentedPlayerChoices(hostChoices, narratedChoices);
+        stream.observer.onText?.(narration);
         stream.verifyFinalText(narration);
         if (controller.signal.aborted) {
           await currentRuntimeHooks().emit({ type: "play.response", name: "play.narrate", status: "cancelled",

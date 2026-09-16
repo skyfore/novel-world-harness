@@ -703,3 +703,19 @@ P6d 已提交为 `5b8534a`。
 冻结路径补充：无正式 snapshot 的宿主 context fallback hash 也纳入按 ID 排序的 actorGoals；目标变化产生不同 hash，输入顺序扰动不改变 hash。原创夹具使用“选择下一步计划”作为真实决策效果，避免把灯已点燃等物理结果借塞入 character.plan。
 
 验证：全仓 198 文件、1200 tests 通过（96.15 秒）；最终 fallback hash 补充后 25 项 goal pressure/冻结/causal/runtime 定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。最初两条新测试误读不存在的 commit result.accepted，改为核验实际 newHead 前进与随后真实 projection/压力；未更改引擎成功契约。
+
+P6e 已提交为 `4bbb2de`。
+
+## P6f：宿主到期证明与自声明压力退出排序
+
+上一段之后非 canonical 候选仍可自行声明 pressure，due-process 标签或 dueAtElapsedDays 也能自行取得 Tier 0。本段使所有候选的 legacy pressure 退出排序；旧字段与原 artifact 字节保留兼容，压力只能来自当前冻结目标或宿主按当前 projection/frozen templates 派生的到期规范/过程。到期压力固定为 1，与目标压力取最大值，不累加重复来源。
+
+runtime 将自己派生、正常 schema 验证后的到期候选交给 frontier，只有完整候选哈希匹配才授予到期压力、Tier 0 和 dueAt 日期排序。哈希包含 branch/head 和具体 effects；外部 source 自填 due 标签、改写 payload、跨 head 复用不能得到该证明。重复 ID 仍由既有 callback 边界拒绝。trace 记录宿主匹配哈希，对应 frontier 候选保留 norm/process instance refs。合法性与真实 commit 仍独立验证，压力不是效果权限。
+
+两段独立原创场景分别是 Ada 的归还书籍期限与降雨到达、Neri 的关门期限与潮汐到达。用 source-pattern 模板及源文 premise 事件建立明确机制，实际提交实例、推进一天并由 WorldRuntime 提交规范违约和过程完成；到期前、结算后和未推进 fork 均没有到期候选，旧 head 重建得到相同 frontier。篡改声明压力或跨 head 重用同一 witness 均得不到到期压力/Tier 0。另两段原创场景验证一般候选 pressure 0→0.5→1→100 不改变排序元组，伪造 due 标签/日期不授予到期排序。
+
+策略升为 host-world-pressure-v6、engine 0.10.0；旧 active-goal-pressure-v5 snapshot 保持可读，旧 engine history 不原地重解释。hazard 若由现有 process 表达，沿相同到期链处理；本段没有引入独立 hazard 本体，也没有将未验证危险描述自动升级为世界机制。规范活动/例外边界等 P4 工作及 P3/P5/P7 余项继续保留，不能据此宣称全目标完成。
+
+初轮新增机制测试被 schema 拒绝：domain-module provenance 不允许同时挂 novel evidence。按源文夹具改为 source-pattern 并提供可引用的 canonical premise 后，28 项定向通过；未放宽验证器。
+
+最终验证：全仓 198 文件、1203 tests 通过（97.40 秒）；28 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

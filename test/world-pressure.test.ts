@@ -86,3 +86,25 @@ it("freezes the policy in new snapshots and rejects old-engine histories without
   expect(await engine.objects.getCommit(head)).toEqual(commit);
   expect(await fs.readFile(path.join(contexts.root, `${legacyHash}.json`), "utf8")).toBe(legacyBytes);
 });
+
+it.each([
+  { text: "Ada may prepare a letter; Bo may check the gate.", actor: "ada" },
+  { text: "Neri may watch the lamp; Venn may tidy the room.", actor: "neri" },
+])("does not rank unverified declarations as world pressure: $actor", async scene => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-declared-pressure-")); roots.push(root);
+  const fixture = await createEvidenceFixture(root, scene.text);
+  const state = emptyWorldState("head");
+  const candidate = possibilitySchema.parse({ id: "ordinary", branchId: "main", evaluatedAtCommit: "head", kind: "environmental",
+    title: scene.text, participants: [scene.actor], preconditions: [], blockers: [], causalParents: [], pressure: 0,
+    relevance: 1, evidence: fixture.evidence(scene.text) });
+  const first = buildFrontier("main", "head", state, [candidate]).evaluated[0]!;
+  for (const pressure of [0.5, 1, 100]) {
+    const changed = buildFrontier("main", "head", state, [{ ...candidate, pressure }]).evaluated[0]!;
+    expect(changed.trace.tuple).toEqual(first.trace.tuple);
+    expect(changed.trace.pressureBasis).toBe("unspecified");
+  }
+  const pretendDue = buildFrontier("main", "head", state, [{ ...candidate, kind: "due-process", dueAtElapsedDays: 0, pressure: 100 }]).evaluated[0]!;
+  expect(pretendDue.factors.pressure).toBe(0);
+  expect(pretendDue.trace.tuple.tier).toBe(4);
+  expect(pretendDue.trace.tuple.dueTime).toBeNull();
+});

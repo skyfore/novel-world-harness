@@ -521,6 +521,7 @@ export class WorldRuntime {
     const history = await this.possibilityHistory(head);
     const frontier = buildFrontier(branchId, head, state, templates, {
       activeGoalPressures: await activeGoalPressures(this.engine, head),
+      dueMechanisms: new Map(due.map(candidate => [candidate.id, possibilitySchema.parse(candidate)])),
       realizedIds: history.realizedIds,
       adaptedIds: history.adaptedIds,
       supersededIds: history.supersededIds,

@@ -1239,3 +1239,21 @@ ranking of a frozen branch. No model retry or synthetic goal is authorized when 
 current goal is absent; preserve the neutral result and use normal legal candidate
 selection. Engine 0.9.0 histories freeze this policy; preserve incompatible history
 and follow the existing engine-version stop/migration protocol.
+
+### Host-derived due pressure
+
+`host-world-pressure-v6` ignores every possibility's legacy `pressure` declaration
+for ranking. Keep old artifacts readable; do not rewrite their bytes or raise the
+number to force selection. Current pinned goals and host-derived due norm/process
+instances are the available pressure sources. Unsupported pressure remains zero.
+The current head's projection and frozen mechanism templates produce due candidates;
+the evaluator requires an exact candidate hash match with that host-only set.
+`kind: due-process` or `dueAtElapsedDays` alone grants neither due pressure nor the
+due tier/date ordering. A changed payload or a different branch/head fails the
+match. Do not retry unchanged, forge a due label, or create a synthetic mechanism
+to obtain urgency; use the ordinary typed mechanism/goal evidence path and normal
+commit gates. Source confidence and presentation preferences cannot supply missing
+pressure. Traces retain the matched candidate hash, whose frontier entry includes
+the instance references. This host proof is not a new model-write field or an
+actor knowledge grant. Engine 0.10.0 freezes the policy; incompatible histories
+retain the existing stop/migration protocol.

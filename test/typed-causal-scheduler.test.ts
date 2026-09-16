@@ -1,10 +1,11 @@
+import { createEvidenceFixture } from "./helpers/evidence.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import { buildFrontier, possibilityToProposal } from "../src/world/frontier.js";
-import type { Entity, EventProposal, Possibility } from "../src/world/model.js";
+import { canonicalEventSchema, type Entity, type EventProposal, type Possibility } from "../src/world/model.js";
 import type { NormTemplate } from "../src/world/norm-ontology.js";
 import type { ProcessTemplate } from "../src/world/process-ontology.js";
 import { WorldRuntime } from "../src/world/runtime.js";
@@ -142,7 +143,10 @@ describe("typed causal frontier and scheduler v2", () => {
       causal,
       base("due-b", "due-process", { dueAtElapsedDays: 4 }),
       base("due-a", "due-process", { dueAtElapsedDays: 4 }),
-    ], { realizedIds: new Set(["source"]) });
+    ], { realizedIds: new Set(["source"]), dueMechanisms: new Map([
+      ["due-a", base("due-a", "due-process", { dueAtElapsedDays: 4 })],
+      ["due-b", base("due-b", "due-process", { dueAtElapsedDays: 4 })],
+    ]) });
     expect(frontier.evaluated.filter((item) => item.status === "eligible").map((item) => item.possibility.id)).toEqual([
       "due-a",
       "due-b",
@@ -200,14 +204,18 @@ describe("typed causal frontier and scheduler v2", () => {
     expect(rejected.report.errors).toContainEqual(expect.objectContaining({ code: "UNKNOWN_CAUSAL_SOURCE_EVENT" }));
   });
 
-  it("surfaces due norm and executable process transitions as Tier 0 committed events", async () => {
+  it.each([
+    { name: "Ada", text: "Ada must return the book within one day. The rain gathering overhead will arrive after one day.", duty: "Return the book", process: "Rain arrival" },
+    { name: "Neri", text: "Neri must close the gate within one day. The rising tide will reach the wall after one day.", duty: "Close the gate", process: "Tide arrival" },
+  ])("derives due norm/process pressure only at the current head: $name", async scene => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-due-scheduler-"));
     roots.push(root);
-    const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] };
+    const fixture = await createEvidenceFixture(root, scene.text), evidence = fixture.evidence(scene.text);
+    const hero: Entity = { id: "hero", kind: "character", canonicalName: scene.name, aliases: [], evidence };
     const duty: NormTemplate = {
       ontologyVersion: "norm-template-v1",
       id: "return-home",
-      name: "Return home",
+      name: scene.duty,
       modality: "obligation",
       actionPattern: { kind: "ad-hoc", actionKindId: "return-home" },
       appliesWhen: [],
@@ -220,13 +228,13 @@ describe("typed causal frontier and scheduler v2", () => {
       status: "supported",
       visibility: "public",
       knownByClaimIds: [],
-      induction: { kind: "domain-module", moduleId: "duty", moduleVersion: "1" },
-      evidence: [],
+      induction: { kind: "source-pattern", supportingEventIds: ["premise"] },
+      evidence,
     };
     const timer: ProcessTemplate = {
       ontologyVersion: "process-template-v1",
       id: "storm-arrival",
-      name: "Storm arrival",
+      name: scene.process,
       ownerRoles: [{ id: "witness", label: "Witness", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
       phases: [{ id: "gathering", label: "Gathering", terminal: false }, { id: "arrived", label: "Arrived", terminal: true }],
       initialPhaseId: "gathering",
@@ -239,10 +247,13 @@ describe("typed causal frontier and scheduler v2", () => {
       cadence: { kind: "elapsed-days", intervalDays: 1 },
       outcomeIds: ["storm-arrived"],
       visibility: "observable",
-      induction: { kind: "domain-module", moduleId: "weather", moduleVersion: "1" },
-      evidence: [],
+      induction: { kind: "source-pattern", supportingEventIds: ["premise"] },
+      evidence,
     };
     const context: WorldModelContext = {
+      sourceId: fixture.source.id,
+      events: new Map([["premise", canonicalEventSchema.parse({ id: "premise", title: scene.text, participants: [hero.id], storyTime: { kind: "unknown" },
+        preconditions: [], observedOutcome: { version: 1, operations: [] }, causalParents: [], confidence: 1, evidence })]]),
       entities: new Map([[hero.id, hero]]),
       rules: new Map(),
       normTemplates: new Map([[duty.id, duty]]),
@@ -267,20 +278,36 @@ describe("typed causal frontier and scheduler v2", () => {
         process: { templateId: timer.id, ownerBindings: [{ roleId: "witness", entityIds: [hero.id] }], progress: 0 },
       }] },
     }));
+    const runtime = new WorldRuntime(engine, () => []);
+    expect((await runtime.refreshFrontier("main")).evaluated).toEqual([]);
+    await runtime.forkBranch("main", started.newHead, "before-deadline", "Before deadline");
     const clock = await engine.commitProposal(proposal(started.newHead, {
       proposalId: "one-day-passes",
       timeAdvance: { amount: 1, unit: "day" },
     }));
-    const runtime = new WorldRuntime(engine, () => []);
     const frontier = await runtime.refreshFrontier("main", clock.newHead);
     const due = frontier.evaluated.filter((item) => item.possibility.kind === "due-process");
     expect(due).toHaveLength(2);
     expect(due.every((item) => item.status === "eligible" && item.trace.tuple.tier === 0)).toBe(true);
+    expect(due.every(item => item.factors.pressure === 1 && item.trace.pressureBasis === "due-mechanism"
+      && /^[a-f0-9]{64}$/.test(item.trace.dueMechanism?.candidateHash ?? ""))).toBe(true);
+    const dueState = await engine.projector.project(clock.newHead);
+    const witness = due[0]!.possibility;
+    const forged = { ...witness, pressure: 100 };
+    const rejectedPressure = buildFrontier("main", clock.newHead, dueState, [forged], { dueMechanisms: new Map([[witness.id, witness]]) }).evaluated[0]!;
+    expect(rejectedPressure.factors.pressure).toBe(0);
+    expect(rejectedPressure.trace.tuple.tier).toBe(4);
+    const oldHeadReplay = buildFrontier("main", started.newHead, await engine.projector.project(started.newHead), [witness], { dueMechanisms: new Map([[witness.id, witness]]) }).evaluated[0]!;
+    expect(oldHeadReplay.factors.pressure).toBe(0);
+    expect((await runtime.refreshFrontier("before-deadline")).evaluated).toEqual([]);
 
     const settled = await runtime.move({ branchId: "main", maxBackgroundCandidates: 2 });
     expect(settled.committedEvents).toHaveLength(2);
     const projection = await engine.projections.project(settled.newHead);
     expect(Object.values(projection.norms.instances)[0]).toMatchObject({ status: "violated", violationReasonId: "deadline-expired" });
     expect(Object.values(projection.processes.instances)[0]).toMatchObject({ status: "finished", phaseId: "arrived", outcomeId: "storm-arrived" });
+    expect((await runtime.refreshFrontier("main")).evaluated).toEqual([]);
+    expect((await runtime.refreshFrontier("main", clock.newHead)).evaluated).toEqual(frontier.evaluated);
+    expect((await runtime.refreshFrontier("before-deadline")).evaluated).toEqual([]);
   });
 });

@@ -94,7 +94,7 @@ describe("typed causal frontier and scheduler v2", () => {
     });
     expect(after.evaluated.find((item) => item.possibility.id === "contributory")?.status).toBe("eligible");
     expect(after.evaluated.find((item) => item.possibility.id === "blocking")?.status).toBe("invalidated");
-    expect(after.evaluated.find((item) => item.possibility.id === "motivational")?.factors.pressure).toBe(0.25);
+    expect(after.evaluated.find((item) => item.possibility.id === "motivational")?.factors.pressure).toBe(0);
     expect(after.evaluated.find((item) => item.possibility.id === "explanatory")?.status).toBe("eligible");
     expect(possibilityToProposal(after.evaluated.find((item) => item.possibility.id === "motivational")!))
       .toMatchObject({

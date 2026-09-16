@@ -1,3 +1,4 @@
+import { activeGoalPressures } from "./goal-pressure.js";
 import { z } from "zod";
 import { actorProposalCandidateSchema, type ActorCandidateSource, type ActorProposalCandidate, type ActorProposalSource } from "./actors.js";
 import {
@@ -519,6 +520,7 @@ export class WorldRuntime {
     if (duplicateId) throw new Error(`Duplicate possibility id ${duplicateId} in the current frontier`);
     const history = await this.possibilityHistory(head);
     const frontier = buildFrontier(branchId, head, state, templates, {
+      activeGoalPressures: await activeGoalPressures(this.engine, head),
       realizedIds: history.realizedIds,
       adaptedIds: history.adaptedIds,
       supersededIds: history.supersededIds,

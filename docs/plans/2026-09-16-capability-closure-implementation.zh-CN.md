@@ -687,3 +687,19 @@ P6c 已提交为 `3a90c89`。
 本段解决入口提示和义务保存，不把 initial-world 修复当作真实无玩家动作驱动证明。统一世界压力依据、P3/P4/P5 余项及 P7 仍在原范围；未取得真实 provider 或独立人工体验证据。
 
 最终验证：全仓 197 文件、1198 tests 通过（96.91 秒）；16 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P6d 已提交为 `5b8534a`。
+
+## P6e：历史动机压力改为当前冻结目标的宿主评估
+
+原调度器对每条已发生来源事件的 motivational relation 增加 0.25 压力，即使目标已完成、过期或角色从未知情。本段移除此常量累计。宿主在 frontier 的同一 commit 读取 pinned actorGoals，以同源历史、角色 actionable knowledge、客观/个人经历、activation/story window、completion/expiry 和既有 phase support 评估目标。只有当前目标能通过 sourceGoal/sourceActor 或已满足动机关系的明确 goalIds/motivatedActorIds 绑定候选参与者，才贡献冻结 priority；多个关系取最大目标压力，不重复累计同一目标。trace 记录目标 ID、actor、revision hash 和压力值。
+
+该派生输入不进入模型 proposal schema，不读取 mutable ActorModelStore 来补充冻结目标；无冻结目标或旧多源上下文无法判定时保持中性。实际门禁仍独立先于合法候选排序，活动目标不授予提交权限。策略升为 active-goal-pressure-v5，engine 0.9.0；旧 legal-alternatives-v4 snapshot 保持可读，旧 engine history 按现有协议拒绝不兼容解释，不原地改写。
+
+两段原创短场景通过实际 WorldRuntime.refreshFrontier、engine commit 和 fork 验证当前压力、目标完成后归零、旧 head/fork 保留原值，以及 mutable 目标改写不影响原分支。反例覆盖缺知识、unknown activation、未发生未来事件、未亲历事件、过期目标、错误 actor/goal 绑定、未发生动机来源、重复动机关系和高压力非法前提。旧 typed causal 测试明确改为“历史动机本身没有压力”，其 causal relation 仍保留为历史解释，不删事件关系。
+
+本段仍未完成所有世界压力来源：非 canonical 模板的 declared pressure、规范/过程/hazard 的统一来源证明待继续处理。P3/P4/P5 余项及 P7 仍在范围，真实模型与独立人工体验尚无证据。
+
+冻结路径补充：无正式 snapshot 的宿主 context fallback hash 也纳入按 ID 排序的 actorGoals；目标变化产生不同 hash，输入顺序扰动不改变 hash。原创夹具使用“选择下一步计划”作为真实决策效果，避免把灯已点燃等物理结果借塞入 character.plan。
+
+验证：全仓 198 文件、1200 tests 通过（96.15 秒）；最终 fallback hash 补充后 25 项 goal pressure/冻结/causal/runtime 定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。最初两条新测试误读不存在的 commit result.accepted，改为核验实际 newHead 前进与随后真实 projection/压力；未更改引擎成功契约。

@@ -1,3 +1,4 @@
+import type { ActiveGoalPressure } from "./goal-pressure.js";
 import { SCHEDULING_POLICY_VERSION, UNSPECIFIED_WORLD_PRESSURE } from "./scheduling-policy.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -65,7 +66,8 @@ export type SchedulerCausalTrace = {
 };
 export type SchedulerTrace = {
   policyVersion?: typeof SCHEDULING_POLICY_VERSION;
-  pressureBasis?: "unspecified" | "declared-candidate" | "due-mechanism" | "fulfilled-motivation";
+  pressureBasis?: "unspecified" | "declared-candidate" | "due-mechanism" | "active-goal";
+  pressureGoals?: ActiveGoalPressure[];
   sourceConfidence?: number;
   candidateSource: PossibilityKind;
   gates: SchedulerGateTrace[];
@@ -92,6 +94,7 @@ export type Frontier = {
 };
 
 type FrontierEvaluationOptions = {
+  activeGoalPressures?: ReadonlyMap<string, ActiveGoalPressure>;
   realizedIds?: ReadonlySet<string>;
   adaptedIds?: ReadonlySet<string>;
   supersededIds?: ReadonlySet<string>;
@@ -137,7 +140,14 @@ export function evaluatePossibility(
     ));
   const satisfiedPreconditions = possibility.preconditions.filter((predicate) => evaluatePredicate(state, predicate)).length;
   const conditionStrength = possibility.preconditions.length ? satisfiedPreconditions / possibility.preconditions.length : 1;
-  const motivationalPressure = causalTrace.filter((item) => item.operationality === "motivational" && item.resolution === "fulfilled").length * 0.25;
+  const pressureGoals = [...(options.activeGoalPressures?.values() ?? [])].filter(goal =>
+    possibility.participants.includes(goal.actorId) && (
+      (possibility.sourceGoalId === goal.goalId && possibility.sourceActorId === goal.actorId)
+      || causalTrace.some(link => link.operationality === "motivational" && link.resolution === "fulfilled"
+        && link.goalIds?.includes(goal.goalId) && link.motivatedActorIds?.includes(goal.actorId))
+    )).sort((a, b) => a.goalId.localeCompare(b.goalId));
+  // Repeated relations cannot multiply the urgency of the same current goal.
+  const motivationalPressure = Math.max(0, ...pressureGoals.map(goal => goal.pressure));
   const canonicalCandidate = Boolean(possibility.canonicalEventId) || possibility.kind === "canon-analogue";
   const basePressure = canonicalCandidate ? UNSPECIFIED_WORLD_PRESSURE : possibility.pressure;
   const factors: SchedulerFactors = {
@@ -228,14 +238,16 @@ export function evaluatePossibility(
     score,
     trace: {
       policyVersion: SCHEDULING_POLICY_VERSION,
-      pressureBasis: motivationalPressure > 0 ? "fulfilled-motivation" : canonicalCandidate ? "unspecified" : possibility.kind === "due-process" ? "due-mechanism" : "declared-candidate",
+      pressureBasis: motivationalPressure > 0 ? "active-goal" : canonicalCandidate ? "unspecified" : possibility.kind === "due-process" ? "due-mechanism" : "declared-candidate",
       ...(possibility.sourceConfidence === undefined ? {} : { sourceConfidence: possibility.sourceConfidence }),
+      pressureGoals,
       candidateSource: possibility.kind, gates, causalLinks: causalTrace, tuple,
     },
   };
 }
 
 export function buildFrontier(branchId: BranchId, commitId: CommitId, state: WorldState, templates: readonly Possibility[], options: {
+  activeGoalPressures?: ReadonlyMap<string, ActiveGoalPressure>;
   realizedIds?: ReadonlySet<string>;
   adaptedIds?: ReadonlySet<string>;
   supersededIds?: ReadonlySet<string>;
@@ -252,6 +264,7 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
   const evaluated = templates.map((template) => {
     const possibility: Possibility = { ...template, branchId, evaluatedAtCommit: commitId };
     return evaluatePossibility(state, possibility, {
+      activeGoalPressures: options.activeGoalPressures,
       realizedIds: options.realizedIds,
       adaptedIds: options.adaptedIds,
       supersededIds: options.supersededIds,

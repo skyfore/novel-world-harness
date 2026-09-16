@@ -1357,6 +1357,7 @@ function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
   }
   const canonicalSnapshotHash = context.canonicalSnapshotHash ?? contentHash({
     schedulingPolicyVersion: SCHEDULING_POLICY_VERSION,
+    actorGoals: [...(context.actorGoals ?? [])].sort((left, right) => left.id.localeCompare(right.id)),
     entities: [...context.entities.entries()].sort(([left], [right]) => left.localeCompare(right)),
     claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),

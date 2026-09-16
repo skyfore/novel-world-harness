@@ -1223,3 +1223,19 @@ retries and preserve the original plan, receipts, and requirements for host sour
 review/replanning. Do not guess another actor ID, repeat unchanged, rotate the
 namespace, or delete the old obligation. This host scope failure grants no new
 mutation authority.
+
+### Current goal pressure
+
+`active-goal-pressure-v5` derives goal pressure at the exact frontier commit from
+pinned actor goals, source-scoped history, actionable actor knowledge, activation,
+completion, expiry, personal experience, and phase support. The derived goal map
+is host input, not a model-writable proposal field. Unknown required knowledge or
+activation contributes no goal pressure. A fulfilled historical `motivates` edge
+alone contributes none: its explicit goal and motivated actor must match a current
+goal and candidate participant. Repeated edges do not multiply pressure. Traces
+record the accepted goal revision and priority; do not interpret those host traces
+as an actor-visible knowledge grant. Mutable actor-store edits cannot change the
+ranking of a frozen branch. No model retry or synthetic goal is authorized when a
+current goal is absent; preserve the neutral result and use normal legal candidate
+selection. Engine 0.9.0 histories freeze this policy; preserve incompatible history
+and follow the existing engine-version stop/migration protocol.

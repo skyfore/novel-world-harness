@@ -95,6 +95,12 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
   });
+requirementsCommand.command("bind-upstream-repairs").requiredOption("--source <id>", "registered source ID")
+  .description("Bind current structural findings to unresolved scene requirements through exact typed dependency paths")
+  .action(async options => {
+    const { bindUpstreamRepairCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await bindUpstreamRepairCommand(rootFor({}), options.source), null, 2));
+  });
 requirementsCommand.command("discover-upstream-repairs").requiredOption("--source <id>", "registered source ID")
   .description("Discover actual missing source dependencies without guessing identities or granting write authority")
   .action(async options => {

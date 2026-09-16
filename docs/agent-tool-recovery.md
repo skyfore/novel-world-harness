@@ -963,3 +963,31 @@ change preserves the old plan and stops model retries; do not recreate the old
 missing dependency or overwrite the new resolution. A successful unresolved
 resolution removes a structural absence finding but does not satisfy independent
 requirements or clear certification gates.
+
+### Scene requirement dependency binding
+
+`requirements bind-upstream-repairs --source <id>` regenerates structural findings
+and source-verified scene assessments under the compiler lock, freezes the current
+candidate, then traces declared closure dependencies from each unresolved event,
+norm or action requirement to the finding's exact annotation revision. It returns
+`subjectSnapshotHash`, `closureHash`, original definition revision/requirement ID
+and the directed path of node revisions. No claimed links or success states are
+accepted as command input; the result remains diagnostic-only.
+
+Only typed dependency paths qualify. Sharing a source, source unit, roster,
+entry, requirement set or overlapping text does not establish a repair binding.
+Missing/stale target revisions have no path; duplicate closure identities and
+stale edges stop for host review. The host indexes the closure once and reuses one
+search per target, so repeated capability checks do not repeatedly parse the
+whole graph. Quotation `speakerMentionId` and discourse `viewpointMentionId` now
+participate in closure validation alongside their plural forms. Existing stored
+closure assessments are still compared with a freshly rebuilt graph, so an old
+assessment that omitted these dependencies cannot silently remain valid.
+
+Copy the exact binding's `requirementSetHash` and `requirementId` into a host
+review only after inspecting its diagnostic and path. Regenerate after subject
+changes; a path proves dependency, not that this repair will satisfy a capability.
+`unboundFindingIds` and `coreRoleBinding: requires-host-review` must remain explicit.
+Do not assign them by matching names or shared text, and do not treat a structural
+repair as a new requirement evaluation. An unfreezable candidate requires resolving
+its original pending host work; preserve diagnostics and do not replay models.

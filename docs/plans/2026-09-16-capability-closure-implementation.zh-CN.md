@@ -477,3 +477,19 @@ P2o 已提交为 `c7d60ed`。
 P2 仍需把诊断与独立要求的绑定纳入自动流程、补齐修订类根因策略与完整退出验收；P3–P7 仍保留原范围。未调用真实 provider 或独立人工评审。
 
 验证：全仓 189 文件、1148 tests 通过（93.38 秒）；补充候选引用输出和 checkpoint 负依赖验证后，61 项最终定向回归及最终服务端、Web、E2E TypeScript 检查通过。discover-upstream-repairs CLI 帮助和 diff whitespace 检查通过。
+
+P2p 已提交为 `8d9e913`。
+
+## P2q：场景要求的实际依赖路径绑定
+
+新增 bindUpstreamRepairRequirements 与 requirements bind-upstream-repairs。compiler lock 内重新发现当前结构诊断、冻结候选、读取原文并重新评估活动独立场景要求；只从尚未满足的 event/norm/action 目标沿实际有向类型依赖追踪到诊断的确切 annotation revision。返回 subject/closure hash、原 definition revision/requirement ID 和路径上的 node revisions，不接受调用方提供的绑定或成功声明。
+
+共享 source/unit、roster、entry、整组 requirements 或文字重叠不会构成绑定依据。无路径的 finding 明确保留 unbound；核心角色绑定仍需独立宿主判断，不从角色名猜关联。闭包只解析一次，每个目标复用一次有界图遍历，避免每个 finding/capability 重复扫描全图。重复节点和过期 edge 拒绝，环不会导致无限遍历。
+
+核查发现闭包遗漏单值 speakerMentionId/viewpointMentionId，已补入 annotation 引用表；缺失说话者和视角引用现在会形成实际 dangling dependency。既有认证入口继续重建 closure 并比较旧评估，新增发现不会绕过 WORLD_CLOSURE_STALE 校验；没有改写原 snapshot 或运行时事件解释。
+
+测试覆盖实际 canonical event→attribution→quotation 依赖与未满足 scene requirement 的绑定、删除依赖后即使原文重叠仍解除绑定、subject 修订变化、不写上游授权历史，以及共享文本/猜测角色/旧 revision/重复节点/环等反例。结果仍是诊断层的依赖证明，不是满足证明或自动写权限。
+
+P2 尚待自动消费这些已证实绑定、核心角色的精确绑定、修订类根因策略与完整退出验收；P3–P7 继续保留原范围。未调用真实 provider 或人工体验评价。
+
+验证：55 项相关回归通过；随后缓存每个目标的图遍历结果，最终全仓 190 文件、1152 tests 通过（91.67 秒）。最终服务端、Web、E2E TypeScript、bind-upstream-repairs CLI 帮助及 diff whitespace 检查通过。

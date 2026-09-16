@@ -30,6 +30,7 @@ const referenceFields: Readonly<Record<string, ClosureKind>> = {
   sceneOccurrenceIds: "scene", frameId: "frame", schemaId: "action", ruleId: "rule", activeRuleIds: "rule", overridesRuleIds: "rule", overridesConstraintIds: "constraint", overridesTemplateIds: "norm",
   goalId: "goal", parentGoalId: "goal",
   unitIds: "unit", reviewedUnitIds: "unit", basisUnitIds: "unit", resolutionIds: "entity-resolution",
+  speakerMentionId: "annotation", viewpointMentionId: "annotation",
   mentionId: "annotation", mentionIds: "annotation", participantMentionIds: "annotation", speakerMentionIds: "annotation", addresseeMentionIds: "annotation", viewpointMentionIds: "annotation", eventMentionIds: "annotation", quotationIds: "annotation", basisMentionIds: "annotation", basisEventMentionIds: "annotation", discourseSegmentId: "discourse", discourseSegmentIds: "discourse", sceneId: "discourse",
 };
 

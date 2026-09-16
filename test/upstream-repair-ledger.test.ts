@@ -967,3 +967,35 @@ it.each(["entity", "event"] as const)("discovers missing %s resolution and deriv
   }
   await expect(verifyUpstreamRepairPlan(f.root, plan, new Map([[`${slot.kind}:${slot.id}`, contentHash(stored[0])]]))).rejects.toThrow("Resolution absence changed");
 });
+
+it("binds regenerated findings to unresolved scene obligations through actual canonical dependencies", async () => {
+  const { bindUpstreamRepairRequirements } = await import("../src/compiler/upstream-repair-binding.js");
+  const { CanonicalModelStore } = await import("../src/world/canonical-model.js");
+  const { canonicalEventSchema } = await import("../src/world/model.js");
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { CompilerBatchStore, prepareCompilerBatches } = await import("../src/compiler/batches.js");
+  const f = await fixture('Ada told Bo, "Wait." Nothing changes.');
+  await f.write({ ...f.annotation, speakerMentionId: "missing-speaker" }, "missing-speaker-quote");
+  const canonical = new CanonicalModelStore(f.root);
+  for (const [id, name] of [["ada", "Ada"], ["bo", "Bo"]] as const) await canonical.putEntity({ id, kind: "character", canonicalName: name, aliases: [], evidence: f.source.evidence(name) });
+  await canonical.putProposition({ id: "waiting-content", subjectEntityId: "bo", relationId: "wait", object: { kind: "literal", value: true }, polarity: "positive", modality: "asserted", evidence: f.source.evidence("Wait.") });
+  await canonical.putAttribution({ id: "spoken-content", propositionId: "waiting-content", holderKind: "character", holderEntityId: "ada", attitude: "asserts", certainty: 1, quotationIds: [f.annotation.id], evidence: f.source.evidence("Wait.") });
+  await canonical.putClaim({ id: "heard-content", subject: "bo", predicate: "wait", object: true, epistemicType: "character-claim", speaker: "ada", evidence: f.source.evidence("Wait.") });
+  const event = canonicalEventSchema.parse({ id: "waiting", title: "Waiting", participants: ["ada", "bo"], participantPresence: [{ entityId: "ada", mode: "physical" }, { entityId: "bo", mode: "physical" }], storyTime: { kind: "unknown" }, preconditions: [], causalParents: [], confidence: 1, evidence: f.source.evidence("Nothing changes."),
+    observedOutcome: { version: 1, operations: [{ op: "set", entityId: "bo", field: "character.plan", value: "leave" }] },
+    observedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "bo", claimId: "heard-content", propositionId: "waiting-content", attributionId: "spoken-content", acquisitionMode: "told", sourceActorId: "ada", status: "knows", confidence: 1 }] } });
+  await canonical.putEvent(event);
+  await new InitialWorldStore(f.root).put({ version: 1, evidence: f.source.evidence("Bo"), participantPresence: [{ entityId: "bo", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "bo", field: "character.alive", value: true }, { op: "set", entityId: "bo", field: "character.plan", value: "wait" }] } });
+  await new CompilerBatchStore(f.root).replaceCompleted(f.sourceId, (await prepareCompilerBatches(f.root, f.source.source)).map(item => item.id));
+  const result = await bindUpstreamRepairRequirements(f.root, f.sourceId);
+  expect(result.authority).toBe("diagnostic-only");
+  expect(result.bindings.some(item => item.requirementId === "waiting:state-effect" && item.path.map(node => node.id).join("/") === "waiting/spoken-content/quote-one")).toBe(true);
+  expect(result.bindings.every(item => item.state !== "satisfied")).toBe(true);
+  expect(await f.ledger.history()).toEqual([]);
+  // Removing the actual dependency must remove the link even though the source evidence still overlaps.
+  await canonical.putEvent({ ...event, observedKnowledge: { version: 1, operations: [] } });
+  const changed = await bindUpstreamRepairRequirements(f.root, f.sourceId);
+  expect(changed.bindings).toEqual([]);
+  expect(changed.unboundFindingIds).toHaveLength(1);
+  expect(changed.subjectSnapshotHash).not.toBe(result.subjectSnapshotHash);
+});

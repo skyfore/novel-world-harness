@@ -101,3 +101,9 @@ export async function discoverUpstreamRepairCommand(root: string, sourceId: stri
   const { discoverUpstreamRepairDiagnostics } = await import("../compiler/upstream-repair-discovery.js");
   return withWorkspaceOperationLock(root, "compiler", () => discoverUpstreamRepairDiagnostics(root, sourceId));
 }
+
+export async function bindUpstreamRepairCommand(root: string, sourceId: string) {
+  idSchema.parse(sourceId);
+  const { bindUpstreamRepairRequirements } = await import("../compiler/upstream-repair-binding.js");
+  return withWorkspaceOperationLock(root, "compiler", () => bindUpstreamRepairRequirements(root, sourceId));
+}

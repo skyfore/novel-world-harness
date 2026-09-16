@@ -389,3 +389,19 @@ subject hash 投影保留计划、授权、原输入、预算、finish、converg
 P2 尚未整体完成：自动修复规划/调度、受限模型会话接入、后继修复执行及全链验收仍待落实。P1 完整验收映射及 P3–P7 保持原范围，未调用真实 provider 或人工体验评价。
 
 验证：66 项定向回归及全量 188 文件、1135 tests 通过（87.23 秒）；随后加强结算入口与未知来源检查，44 项最终定向回归通过。服务端、Web、E2E TypeScript、evaluate-upstream CLI 帮助入口及 diff whitespace 检查通过。
+
+P2j 已提交为 `7628c32`。
+
+## P2k：单槽 Pi 会话、持久预留和后继执行
+
+新增宿主单槽运行入口 runUpstreamRepairModelSlot，沿用 PiAgentSession 的 provider、超时、流式回调和原提案工具 schema。会话创建前持久化原计划、目标、固定 proposal ID 和 prompt hash；不加载项目指令、本地文件工具、NWH extension 或旧会话。仅提供冻结授权上下文读取和对应一种窄提案工具，原文及工件明确视为不可信证据。选定工具先登记尝试，再解析 JSON 和执行原字段、证据、身份及依赖验证；模型不能 finish 或直接修改 canonical。
+
+无提案返回也记一次失败，已有 typed 失败不会在会话结束时重复计数。预算跨关联计划保留，耗尽时在 provider 创建前拒绝。一个原始调用未解决时，禁止新模型调用、旁路宿主 staging 和 checkpoint 迁移。写入后 bookkeeping 中断可按原 sessionRef 校验并恢复已存在的草案，不调用模型或重新执行提案工具；没有原 validated 结果时保留预留供宿主检查，不重放。
+
+修正原成功草案的后继限制：旧计划必须已经完成原 finish、明确停止，且新计划通过原依赖修订/定义变化及前驱关联检查；新 proposal ID 不覆盖旧 accepted envelope。尚未完成的成功草案仍不能通过此入口直接替换，相关撤销/退休流程待后续实现。
+
+新增回归覆盖创建 Pi 前已持久预留、仅两种工具及隔离选项、格式错误后同身份一次修正、无提案跨计划预算、第三次 provider 调用前停止、completed 后继保留旧草案，以及写入中断时禁止重复调用/迁移且可恢复原结果。会话测试使用注入的 session factory，未调用真实外部 provider，不能作为真实语义抽取或体验验收证据。
+
+本段是单槽执行 API；自动诊断到计划、完整 DAG 调度和正常命令入口仍待实现。P2 尚未整体完成，P1 完整退出证据映射及 P3–P7 仍保留原范围。
+
+验证：37 项定向回归及全量 188 文件、1139 tests 通过（89.61 秒）；服务端、Web、E2E TypeScript 检查及 diff whitespace 检查通过。

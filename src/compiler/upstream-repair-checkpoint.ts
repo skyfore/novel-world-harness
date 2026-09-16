@@ -28,6 +28,7 @@ function storeFor(root: string, store: Draft["store"]) {
 export function assertUpstreamRepairCheckpoint(input: UpstreamRepairCheckpoint, journal: readonly UpstreamRepairRecord[], sourceId: string, includeCompleted = true) {
   const checkpoint = upstreamRepairCheckpointSchema.parse(input), records = upstreamRepairJournalSchema.parse(journal);
   const state = inspectUpstreamRepairJournal(records);
+  if (state.modelSessions.some(item => !item.closed)) throw upstreamRepairHostError("Checkpoint cannot detach an unresolved model session; recover or stop its original invocation first");
   const live = new Set(state.plans.filter(item => ["staging", "finish-frozen", ...(includeCompleted ? ["finished", "converged", "evaluated"] : [])].includes(item.state)).map(item => item.plan.planHash));
   const expected = state.attempts.filter(item => live.has(item.started.planHash) && item.staged).map(item => item.attemptRef).sort();
   if (contentHash(expected) !== contentHash(checkpoint.drafts.map(item => item.attemptRef).sort())) throw upstreamRepairHostError("Checkpoint must retain every live staged envelope exactly once");
@@ -63,6 +64,7 @@ export function assertUpstreamRepairCheckpoint(input: UpstreamRepairCheckpoint, 
 /** Capture only existing envelopes; unresolved writes require ordinary local recovery first. */
 export async function captureUpstreamRepairCheckpoint(root: string, sourceId: string): Promise<UpstreamRepairCheckpoint | undefined> {
   const state = await new UpstreamRepairLedger(root, sourceId).inspect();
+  if (state.modelSessions.some(item => !item.closed)) throw upstreamRepairHostError("Checkpoint cannot detach an unresolved model session; recover or stop its original invocation first");
   const drafts: Draft[] = [], activeReceipts = [];
   for (const current of state.plans.filter(item => ["staging", "finish-frozen", "finished", "converged", "evaluated"].includes(item.state))) {
     if (state.attempts.some(item => item.started.planHash === current.plan.planHash && !item.failed && !item.staged)) throw upstreamRepairHostError("Checkpoint has an unresolved reserved attempt; recover the original draft before capture");

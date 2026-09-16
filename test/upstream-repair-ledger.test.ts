@@ -658,3 +658,94 @@ it("keeps successor obligations unresolved instead of erasing failed predecessor
   expect(upstreamRepairEvaluationIssues(bundle, assessment)).toEqual([`UPSTREAM_REPAIR_NOT_EVALUATED: ${next.planHash} (planned)`]);
   expect((await f.ledger.history()).slice(0, prior.length)).toEqual(prior);
 });
+
+it("allows a stopped completed repair to have a validated successor without rewriting its old draft", async () => {
+  const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const f = await frozenQuotationFinish(); await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  const annotations = new SourceAnnotationStore(f.root), old = await annotations.readProposal(f.sourceId, "accepted", "repair-proposal"), current = await annotations.read(f.sourceId, "quote-one");
+  await f.ledger.stop(f.plan.planHash, "Host reviewed the next bounded source refinement");
+  const { CompilerFinishReceipts } = await import("../src/compiler/finish-receipts.js");
+  const receipt = await new CompilerFinishReceipts(f.root, f.sourceId, f.plan.batchId).read();
+  const next = freezeUpstreamRepairPlan({ ...f.identity, planId: "next-completed-repair", batchId: "next-completed-batch", predecessorReceiptRefs: [receipt!.fingerprint], baselineRefs: [{ kind: "quotation", id: current.id, revisionHash: contentHash(current) }] });
+  await f.ledger.register(next, f.plan.planHash); await f.ledger.authorize(next.planHash);
+  await stageUpstreamRepair(f.root, f.sourceId, next.planHash, { kind: "quotation", id: current.id }, { proposal_id: "successor-proposal", annotation_id: current.id, selector: { segment_id: f.source.segmentId, exact: '"Wait."' }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 });
+  expect(await annotations.readProposal(f.sourceId, "accepted", "repair-proposal")).toEqual(old);
+  expect((await f.ledger.inspect()).attempts).toHaveLength(2);
+});
+
+it("reserves one isolated Pi slot before session construction and charges malformed payloads before correction", async () => {
+  const { runUpstreamRepairModelSlot } = await import("../src/compiler/pi-upstream-repair.js");
+  const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  const dispose = vi.fn(async () => {});
+  const createSession = vi.fn(async (options: import("../src/agent/pi-session.js").PiAgentSessionOptions) => {
+    expect((await f.ledger.inspect()).modelSessions).toHaveLength(1);
+    expect(options).toMatchObject({ saveSession: false, includeProjectInstructions: false, includeLocalTools: false, includeNwhExtension: false, trackLastOpenedSession: false });
+    expect(options.sessionId).toBeUndefined();
+    expect(options.additionalTools?.map(tool => tool.name)).toEqual(["read_upstream_repair_context", "propose_quotation"]);
+    return { dispose, promptWithReport: async (prompt: string) => {
+      const data = JSON.parse(prompt), tool = options.additionalTools!.find(tool => tool.name === "propose_quotation")!;
+      const call = async (proposal_json: string) => tool.execute("model-call", tool.prepareArguments!({ proposal_json }) as never, undefined, undefined, {} as never);
+      expect(data.context.evidence[0].segmentId).toBe(f.source.segmentId);
+      await expect(call("not JSON")).rejects.toThrow();
+      expect((await f.ledger.inspect()).attempts[0]!.failed).toBe(true);
+      await call(JSON.stringify({ annotation_id: "quote-one", selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 }));
+      return {} as never;
+    } };
+  });
+  await runUpstreamRepairModelSlot(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, {}, createSession);
+  expect(dispose).toHaveBeenCalledOnce();
+  const state = await f.ledger.inspect();
+  expect(state.modelSessions[0]).toMatchObject({ closed: true, chargedFailure: false });
+  expect(state.attempts).toHaveLength(2);
+  expect(state.attempts[0]!.started.proposalId).toBe(state.attempts[1]!.started.proposalId);
+  expect(state.attempts[1]!.staged).toBe(true);
+  expect(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")).toEqual(f.annotation);
+  await expect(runUpstreamRepairModelSlot(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, {}, createSession)).rejects.toThrow("successful draft");
+  expect(createSession).toHaveBeenCalledOnce();
+});
+
+it("counts model sessions with no proposal across revised plans and stops before a third provider invocation", async () => {
+  const { runUpstreamRepairModelSlot } = await import("../src/compiler/pi-upstream-repair.js");
+  const f = await fixture(), createSession = vi.fn(async () => ({ dispose: async () => {}, promptWithReport: async () => ({} as never) }));
+  let plan = f.plan, predecessor: string | null = null;
+  for (let index = 0; index < 3; index++) {
+    if (index) {
+      const changed = { ...f.annotation, attributionConfidence: 1 - index / 10 }; await f.write(changed, `host-model-baseline-${index}`);
+      predecessor = plan.planHash;
+      plan = freezeUpstreamRepairPlan({ ...f.identity, planId: `model-plan-${index}`, batchId: `model-batch-${index}`, baselineRefs: [{ kind: "quotation", id: changed.id, revisionHash: contentHash(changed) }] });
+    }
+    await f.ledger.register(plan, predecessor); await f.ledger.authorize(plan.planHash);
+    await expect(runUpstreamRepairModelSlot(f.root, f.sourceId, plan.planHash, { kind: "quotation", id: "quote-one" }, {}, createSession)).rejects.toThrow(index < 2 ? "without its required" : "budget exhausted");
+  }
+  expect(createSession).toHaveBeenCalledTimes(2);
+  expect((await f.ledger.inspect()).modelSessions.filter(item => item.chargedFailure)).toHaveLength(2);
+});
+
+it("recovers an interrupted model write without invoking the provider or staging twice", async () => {
+  const { runUpstreamRepairModelSlot, recoverUpstreamRepairModelSession } = await import("../src/compiler/pi-upstream-repair.js");
+  const { captureUpstreamRepairCheckpoint } = await import("../src/compiler/upstream-repair-checkpoint.js");
+  const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  const createSession = vi.fn(async (options: import("../src/agent/pi-session.js").PiAgentSessionOptions) => ({
+    dispose: async () => {}, promptWithReport: async () => {
+      const tool = options.additionalTools!.find(item => item.name === "propose_quotation")!;
+      await tool.execute("interrupted", tool.prepareArguments!({ proposal_json: JSON.stringify({ annotation_id: "quote-one", selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 }) }) as never, undefined, undefined, {} as never);
+      return {} as never;
+    },
+  }));
+  const record = vi.spyOn(UpstreamRepairLedger.prototype, "recordStaged").mockRejectedValueOnce(new Error("interrupted staged result append"));
+  const invoke = () => runUpstreamRepairModelSlot(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, {}, createSession);
+  await expect(invoke()).rejects.toThrow("original unresolved attempt");
+  record.mockRestore();
+  const reservation = (await f.ledger.inspect()).modelSessions[0]!;
+  expect(reservation.closed).toBe(false);
+  await expect(captureUpstreamRepairCheckpoint(f.root, f.sourceId)).rejects.toThrow("unresolved model session");
+  await expect(invoke()).rejects.toThrow();
+  expect(createSession).toHaveBeenCalledOnce();
+  const stage = vi.spyOn(SourceAnnotationStore.prototype, "stage");
+  await recoverUpstreamRepairModelSession(f.root, f.sourceId, reservation.sessionRef);
+  expect(stage).not.toHaveBeenCalled();
+  expect((await f.ledger.inspect()).modelSessions[0]).toMatchObject({ closed: true, chargedFailure: false });
+  expect((await f.ledger.inspect()).attempts).toHaveLength(1);
+  expect(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")).toEqual(f.annotation);
+});

@@ -15,13 +15,15 @@ const stagedDependencySchema = z.object({ attemptRef: hash, proposalHash: hash }
 export type UpstreamStagedDependency = z.infer<typeof stagedDependencySchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("planned"), plan: upstreamRepairPlanSchema, predecessorPlanHash: hash.nullable() }).strict(),
+  z.object({ kind: z.literal("model-session-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, promptHash: hash }).strict(),
+  z.object({ kind: z.literal("model-session-ended"), planHash: hash, sessionRef: hash, attemptRef: hash.nullable(), diagnostic: z.string().trim().min(1).optional() }).strict(),
   z.object({ kind: z.literal("authorized"), planHash: hash }).strict(),
   z.object({ kind: z.literal("evaluated"), planHash: hash, evaluation: upstreamRepairEvaluationSchema }).strict(),
   z.object({ kind: z.literal("evaluation-invalidated"), planHash: hash, evaluationRef: hash, nextSubjectSnapshotHash: hash.nullable(), reason: z.string().trim().min(1) }).strict(),
   z.object({ kind: z.literal("converged"), planHash: hash, receiptFingerprint: hash, activeRevisions: z.array(upstreamRepairReadableRefSchema.extend({ revisionHash: hash }).strict()) }).strict(),
   z.object({ kind: z.literal("finished"), planHash: hash, receiptFingerprint: hash }).strict(),
   z.object({ kind: z.literal("finish-frozen"), planHash: hash, intent: upstreamRepairFinishIntentSchema }).strict(),
-  z.object({ kind: z.literal("attempt-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, inputHash: hash, toolInput: z.unknown().optional() }).strict(),
+  z.object({ kind: z.literal("attempt-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, inputHash: hash, modelSessionRef: hash.optional(), toolInput: z.unknown().optional() }).strict(),
   z.object({ kind: z.literal("attempt-staged"), planHash: hash, attemptRef: hash, proposalHash: hash }).strict(),
   z.object({ kind: z.literal("attempt-validated"), planHash: hash, attemptRef: hash, payloadHash: hash, dependencies: z.array(stagedDependencySchema).max(256).optional() }).strict(),
   z.object({ kind: z.literal("attempt-failed"), planHash: hash, attemptRef: hash, diagnostic: z.string().trim().min(1) }).strict(),
@@ -31,9 +33,11 @@ const recordSchema = z.object({ version: z.literal(1), sourceId: idSchema, seque
 type Record = z.infer<typeof recordSchema>;
 export type UpstreamRepairRecord = Record;
 type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
-type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "converged" | "evaluated" | "needs-host-review"; evaluation?: { ref: string; result: UpstreamRepairEvaluation }; finishIntent?: UpstreamRepairFinishIntent };
+type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "converged" | "evaluated" | "needs-host-review"; evaluation?: { ref: string; result: UpstreamRepairEvaluation }; finishIntent?: UpstreamRepairFinishIntent; finishedReceipt?: string };
+type ModelSession = { started: Extract<Record["payload"], { kind: "model-session-started" }>; closed: boolean; chargedFailure: boolean };
 function project(records: Record[]) {
   const plans = new Map<string, PlanState>();
+  const sessions = new Map<string, ModelSession>();
   const attempts = new Map<string, { started: Started; failed: boolean; staged: boolean; validatedHash?: string; dependencies?: UpstreamStagedDependency[] }>();
   for (const [index, record] of records.entries()) {
     const { hash: ownHash, ...identity } = record;
@@ -52,11 +56,23 @@ function project(records: Record[]) {
     }
     const current = plans.get(event.planHash);
     if (!current) throw upstreamRepairHostError("Repair event has no frozen plan");
-    if (event.kind === "authorized") {
+    if (event.kind === "model-session-started") {
+      assertStart(current, { kind: "attempt-started", planHash: event.planHash, artifactKind: event.artifactKind, artifactId: event.artifactId, proposalId: event.proposalId, inputHash: event.promptHash }, plans, attempts, sessions);
+      sessions.set(record.hash, { started: event, closed: false, chargedFailure: false });
+    } else if (event.kind === "model-session-ended") {
+      const session = sessions.get(event.sessionRef), attempt = event.attemptRef ? attempts.get(event.attemptRef) : undefined;
+      if (!session || session.closed || session.started.planHash !== event.planHash) throw upstreamRepairHostError("Model session completion has no original open reservation");
+      if (event.attemptRef && (!attempt?.staged || attempt.started.modelSessionRef !== event.sessionRef)) throw upstreamRepairHostError("Model session completion differs from its original staged result");
+      if (!event.attemptRef && (!event.diagnostic || [...attempts.values()].some(item => item.started.modelSessionRef === event.sessionRef && !item.failed))) throw upstreamRepairHostError("Recover the original unresolved model attempt before closing its session");
+      session.closed = true;
+      session.chargedFailure = !event.attemptRef && ![...attempts.values()].some(item => item.started.modelSessionRef === event.sessionRef && item.failed);
+      if (!event.attemptRef) current.state = "needs-host-review";
+    } else if (event.kind === "authorized") {
       if (current.state !== "planned") throw upstreamRepairHostError("Repair authorization was consumed or stopped");
       current.state = "authorized";
     } else if (event.kind === "finish-frozen") {
       const { intent } = event, plan = current.plan;
+      if ([...sessions.values()].some(item => item.started.planHash === event.planHash && !item.closed)) throw upstreamRepairHostError("Close the original model session before freezing finish");
       if (current.state !== "staging" || intent.authorizationHeadHash !== record.predecessorHash || intent.planHash !== plan.planHash || intent.sourceId !== record.sourceId || intent.sourceSha256 !== plan.sourceScope.sourceSha256 || intent.requirementSetHash !== plan.requirementSetHash) throw upstreamRepairHostError("Finish intent is outside its active authorization");
       const slots = [...plan.allowedWrites, ...plan.allowedCreations].map(ref => `${ref.kind}:${ref.id}`).sort();
       if (contentHash(slots) !== contentHash(intent.proposals.map(ref => `${ref.artifactKind}:${ref.artifactId}`).sort()) || contentHash(plan.sourceScope.segmentIds.slice().sort()) !== contentHash(intent.input.reviewed_segments.map(item => item.segment_id).sort())) throw upstreamRepairHostError("Finish must preserve all planned slots and reviewed source segments");
@@ -70,7 +86,7 @@ function project(records: Record[]) {
       current.state = "finish-frozen"; current.finishIntent = intent;
     } else if (event.kind === "finished") {
       if (current.state !== "finish-frozen" || !current.finishIntent) throw upstreamRepairHostError("Finished repair lacks its original frozen intent");
-      current.state = "finished";
+      current.state = "finished"; current.finishedReceipt = event.receiptFingerprint;
     } else if (event.kind === "converged") {
       const finished = records.slice(0, index).find(item => item.payload.kind === "finished" && item.payload.planHash === event.planHash)?.payload;
       if (current.state !== "finished" || !current.finishIntent || finished?.kind !== "finished" || finished.receiptFingerprint !== event.receiptFingerprint) throw upstreamRepairHostError("Convergence lacks its original completed finish");
@@ -90,7 +106,7 @@ function project(records: Record[]) {
       current.state = "converged"; current.evaluation = undefined;
     } else if (event.kind === "attempt-started") {
       if (event.toolInput !== undefined && contentHash(event.toolInput) !== event.inputHash) throw upstreamRepairHostError("Reserved tool input hash mismatch");
-      assertStart(current, event, plans, attempts);
+      assertStart(current, event, plans, attempts, sessions);
       attempts.set(record.hash, { started: event, failed: false, staged: false }); current.state = "staging";
     } else if (event.kind === "attempt-validated") {
       const attempt = attempts.get(event.attemptRef);
@@ -120,26 +136,35 @@ function project(records: Record[]) {
       const attempt = attempts.get(event.attemptRef);
       if (!attempt || attempt.failed || attempt.staged || attempt.started.planHash !== event.planHash || !["staging", "needs-host-review"].includes(current.state)) throw upstreamRepairHostError("Failure does not match an active repair attempt");
       attempt.failed = true;
-      if (current.plan.requirementIds.some(id => [...attempts.values()].filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(id)).length >= 2)) current.state = "needs-host-review";
+      if (current.plan.requirementIds.some(id => [...attempts.values()].filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(id)).length + [...sessions.values()].filter(item => item.chargedFailure && plans.get(item.started.planHash)!.plan.requirementIds.includes(id)).length >= 2)) current.state = "needs-host-review";
     } else {
       if (current.state === "needs-host-review") throw upstreamRepairHostError("Repair stop was rewritten");
       current.state = "needs-host-review";
     }
   }
-  return { plans, attempts };
+  return { plans, attempts, sessions };
 }
-function assertStart(current: PlanState, input: Started, plans: Map<string, PlanState>, attempts: Map<string, { started: Started; failed: boolean; staged: boolean }>) {
+function assertStart(current: PlanState, input: Started, plans: Map<string, PlanState>, attempts: Map<string, { started: Started; failed: boolean; staged: boolean }>, sessions: Map<string, ModelSession>) {
   const plan = current.plan;
+  const activeSession = [...sessions].find(([, item]) => !item.closed && plans.get(item.started.planHash)!.plan.requirementIds.some(id => plan.requirementIds.includes(id)));
+  if (activeSession && input.modelSessionRef !== activeSession[0]) throw upstreamRepairHostError("An original model session is unresolved; recover it before another invocation or host staging call");
+  if (input.modelSessionRef) {
+    const session = sessions.get(input.modelSessionRef);
+    if (!session || session.closed || session.started.planHash !== plan.planHash || session.started.artifactKind !== input.artifactKind || session.started.artifactId !== input.artifactId || session.started.proposalId !== input.proposalId) throw upstreamRepairHostError("Proposal escapes its original model session slot");
+  }
   if (![...plan.allowedWrites, ...plan.allowedCreations].some(ref => ref.kind === input.artifactKind && ref.id === input.artifactId)) throw upstreamRepairHostError("Attempt escapes the exact allocated write slot");
   const related = [...attempts.values()].filter(item => plans.get(item.started.planHash)!.plan.requirementIds.some(id => plan.requirementIds.includes(id)));
   if (related.some(item => !item.failed && !item.staged)) throw upstreamRepairHostError("A reserved attempt is unresolved; recover that original attempt without opening a new model call");
   for (const requirementId of plan.requirementIds) {
-    if (related.filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(requirementId)).length >= 2) throw upstreamRepairHostError(`Persistent failure budget exhausted for ${requirementId}`);
+    if (related.filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(requirementId)).length + [...sessions.values()].filter(item => item.chargedFailure && plans.get(item.started.planHash)!.plan.requirementIds.includes(requirementId)).length >= 2) throw upstreamRepairHostError(`Persistent failure budget exhausted for ${requirementId}`);
   }
   if (!["authorized", "staging"].includes(current.state)) throw upstreamRepairHostError("Repair is not authorized or has stopped");
   const previous = related.findLast(item => item.started.artifactKind === input.artifactKind && item.started.artifactId === input.artifactId);
-  if (previous?.staged) throw upstreamRepairHostError("This logical repair already has a successful draft; preserve it and require a validated host successor instead of another attempt");
-  if (previous && (previous.started.proposalId !== input.proposalId || previous.started.inputHash === input.inputHash)) throw upstreamRepairHostError("Failed repair requires the same proposal identity and one materially corrected input");
+  if (previous?.staged) {
+    const predecessor = plans.get(previous.started.planHash)!;
+    if (previous.started.planHash === plan.planHash || predecessor.state !== "needs-host-review" || !predecessor.finishedReceipt || input.proposalId === previous.started.proposalId) throw upstreamRepairHostError("This logical repair already has a successful draft; preserve it and require a validated host successor of its completed finish with a new proposal ID");
+  }
+  if (previous && !previous.staged && (previous.started.proposalId !== input.proposalId || previous.started.inputHash === input.inputHash)) throw upstreamRepairHostError("Failed repair requires the same proposal identity and one materially corrected input");
 }
 
 export const upstreamRepairJournalSchema = z.array(recordSchema).superRefine((records, ctx) => {
@@ -155,7 +180,7 @@ export function upstreamRepairUnsettledIssues(records: readonly Record[]): strin
 
 export function inspectUpstreamRepairJournal(input: readonly UpstreamRepairRecord[]) {
   const records = upstreamRepairJournalSchema.parse(input), state = project(records);
-  return { records, plans: [...state.plans.values()], attempts: [...state.attempts].map(([attemptRef, value]) => ({ attemptRef, ...value })) };
+  return { records, plans: [...state.plans.values()], attempts: [...state.attempts].map(([attemptRef, value]) => ({ attemptRef, ...value })), modelSessions: [...state.sessions].map(([sessionRef, value]) => ({ sessionRef, ...value })) };
 }
 
 /** Host-only storage, always called under the compiler lock. No model tool is granted by registration. */
@@ -183,7 +208,7 @@ export class UpstreamRepairLedger {
     }
     project(records); return records;
   }
-  async inspect() { const records = await this.history(); const state = project(records); return { records, plans: [...state.plans.values()], attempts: [...state.attempts].map(([attemptRef, value]) => ({ attemptRef, ...value })) }; }
+  async inspect() { const records = await this.history(); const state = project(records); return { records, plans: [...state.plans.values()], attempts: [...state.attempts].map(([attemptRef, value]) => ({ attemptRef, ...value })), modelSessions: [...state.sessions].map(([sessionRef, value]) => ({ sessionRef, ...value })) }; }
   async assertRestorable(input: readonly Record[], bytes?: Uint8Array): Promise<void> {
     const records = upstreamRepairJournalSchema.parse(input), current = await this.history();
     if (current.length > records.length || current.some((record, index) => record.hash !== records[index]?.hash)) throw upstreamRepairHostError("Repair restore would forget or rewrite retained plans, attempts or budgets; use an isolated workspace");
@@ -233,11 +258,26 @@ export class UpstreamRepairLedger {
     try { return await verifyUpstreamRepairPlan(this.root, plan); }
     catch (error) { await this.stop(plan.planHash, error instanceof Error ? error.message : String(error)); throw error; }
   }
+  async startModelSession(planHash: string, input: { artifactKind: Started["artifactKind"]; artifactId: string; proposalId: string; promptHash: string }): Promise<string> {
+    const current = project(await this.history()).plans.get(planHash);
+    if (!current) throw upstreamRepairHostError("Model session plan is missing");
+    await this.verifyOrStop(current.plan);
+    return (await this.append({ kind: "model-session-started", planHash, ...input })).hash;
+  }
+  async endModelSession(planHash: string, sessionRef: string, attemptRef: string | null, diagnostic?: string): Promise<void> {
+    const payload = { kind: "model-session-ended" as const, planHash, sessionRef, attemptRef, ...(diagnostic ? { diagnostic } : {}) };
+    const existing = (await this.history()).find(record => record.payload.kind === "model-session-ended" && record.payload.sessionRef === sessionRef);
+    if (existing) {
+      if (contentHash(existing.payload) !== contentHash(payload)) throw upstreamRepairHostError("Original model session result changed");
+      return;
+    }
+    await this.append(payload);
+  }
   async startAttempt(planHash: string, input: Omit<Started, "kind" | "planHash">): Promise<string> {
     const started = payloadSchema.parse({ kind: "attempt-started", planHash, ...input }) as Started;
     const state = project(await this.history()), current = state.plans.get(planHash);
     if (!current) throw upstreamRepairHostError("Plan is missing");
-    assertStart(current, started, state.plans, state.attempts);
+    assertStart(current, started, state.plans, state.attempts, state.sessions);
     await this.verifyOrStop(current.plan);
     return (await this.append(started)).hash;
   }

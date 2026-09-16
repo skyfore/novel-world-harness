@@ -85,15 +85,20 @@ async function stagedDependencies(root: string, verified: Awaited<ReturnType<typ
 }
 
 /** Host-only staging under the compiler lock. This is not a model session or finish permit. */
-export async function stageUpstreamRepair(root: string, sourceId: string, planHash: string, target: { kind: UpstreamRepairKind; id: string }, raw: Record<string, unknown>) {
+export async function stageUpstreamRepair(root: string, sourceId: string, planHash: string, target: { kind: UpstreamRepairKind; id: string }, raw: unknown, host?: { proposalId: string; modelSessionRef: string }) {
   const ledger = new UpstreamRepairLedger(root, sourceId);
   const current = (await ledger.inspect()).plans.find(item => item.plan.planHash === planHash);
   if (!current) throw upstreamRepairHostError("Repair plan is missing");
   // Wrong order is a host scheduling issue, not a failed model attempt.
   await stagedDependencies(root, await verifyUpstreamRepairPlan(root, current.plan), target);
-  const proposalId = typeof raw.proposal_id === "string" ? raw.proposal_id : "";
-  const attemptRef = await ledger.startAttempt(planHash, { artifactKind: target.kind, artifactId: target.id, proposalId, inputHash: contentHash(raw), toolInput: raw });
+  const originalInput = raw === undefined ? null : raw;
+  const object = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : undefined;
+  const proposalId = host?.proposalId ?? (typeof object?.proposal_id === "string" ? object.proposal_id : "");
+  const attemptRef = await ledger.startAttempt(planHash, { artifactKind: target.kind, artifactId: target.id, proposalId, inputHash: contentHash(originalInput), toolInput: originalInput, ...(host ? { modelSessionRef: host.modelSessionRef } : {}) });
   try {
+    if (!object) throw new Error("Repair proposal must be one JSON object. Copy the provided typed tool schema and correct the payload once; do not repeat an unchanged input.");
+    if (host && object.proposal_id !== undefined && object.proposal_id !== proposalId) throw upstreamRepairHostError("The model cannot change the host-reserved proposal ID");
+    const input = host ? { ...object, proposal_id: proposalId } : object;
     const tools = createCompilerProposalToolset(root, {}, { upstreamRepair: { planHash, beforeStage: async (kind, id, payload) => {
       if (kind !== target.kind || id !== target.id) throw upstreamRepairHostError("Proposed artifact differs from the reserved host slot");
       const verified = await verifyUpstreamRepairPlan(root, current.plan), dependencies = await stagedDependencies(root, verified, target);
@@ -102,7 +107,7 @@ export async function stageUpstreamRepair(root: string, sourceId: string, planHa
     } } });
     await tools.beginBatch(current.plan.sourceScope.segmentIds, current.plan.batchId, sourceId);
     const tool = withNwhToolRecovery(tools.tools.find(tool => tool.name === toolNames[target.kind])!);
-    const prepared = tool.prepareArguments ? tool.prepareArguments(raw) : raw;
+    const prepared = tool.prepareArguments ? tool.prepareArguments(input) : input;
     const result = await tool.execute(attemptRef, prepared as never, undefined, undefined, {} as ExtensionContext);
     if ((result as { isError?: boolean }).isError) throw new Error(result.content.filter(item => item.type === "text").map(item => item.text).join("\n"));
     const recovered = await recoverUpstreamRepairStage(root, sourceId, planHash, attemptRef);
@@ -139,4 +144,20 @@ export async function recoverUpstreamRepairStage(root: string, sourceId: string,
   const proposalHash = contentHash(envelope);
   await ledger.recordStaged(planHash, attemptRef, proposalHash);
   return { attemptRef, proposalId: envelope.id, proposalHash };
+}
+
+/** Host-only immutable model context; only declared readable refs, evidence and DAG inputs escape. */
+export async function upstreamRepairSlotContext(root: string, sourceId: string, planHash: string, target: { kind: UpstreamRepairKind; id: string }) {
+  const current = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(item => item.plan.planHash === planHash);
+  if (!current || ![...current.plan.allowedWrites, ...current.plan.allowedCreations].some(item => item.kind === target.kind && item.id === target.id)) throw upstreamRepairHostError("Unknown authorized repair slot");
+  const verified = await verifyUpstreamRepairPlan(root, current.plan), dependencies = await stagedDependencies(root, verified, target);
+  return {
+    plan: current.plan, target,
+    readable: current.plan.readableRefs.map(ref => ({ ...ref, payload: verified.payloads.get(`${ref.kind}:${ref.id}`) })),
+    stagedDependencies: [...dependencies.payloads].map(([ref, payload]) => ({ ref, payload })),
+    evidence: current.plan.citableEvidenceRefs.map(segmentId => {
+      const segment = verified.payloads.get(`source-segment:${segmentId}`) as SourceSegment;
+      return { segmentId, startByte: segment.startByte, endByte: segment.endByte, text: verified.bytes.subarray(segment.startByte, segment.endByte).toString("utf8") };
+    }),
+  };
 }

@@ -789,3 +789,35 @@ run `requirements evaluate-upstream` again; do not replay repair tools, guess ne
 IDs or restart a model namespace. Use `requirements inspect-upstream` and its exact
 `plans[].plan.planHash` to locate retained evaluation history. Repeated identical
 evaluation is idempotent, and portable checkpoints preserve evaluated state.
+
+### Isolated upstream model slot
+
+`runUpstreamRepairModelSlot` is a host API called under the compiler lock for
+one previously authorized slot. It reserves a durable model session before Pi
+construction. The fresh session has no project instructions, local file tools,
+NWH extensions or resumed transcript. Its only tools are
+`read_upstream_repair_context` and the selected original narrow proposal tool.
+The latter transports `proposal_json`; the host reserves the attempt before
+parsing and validating the original domain schema and exact authorized slot.
+
+For an ID or evidence miss, read `read_upstream_repair_context`, copy exactly
+`readable[].id`, `stagedDependencies[].payload.id` or `evidence[].segmentId`, and
+make at most one materially corrected retry using the same host proposal ID.
+Never guess IDs, rotate proposal identities or retry unchanged. Host authority,
+source drift, consumed slot and budget failures stop immediately. A successful
+proposal only stages a draft; the host retains finish and commitment authority.
+
+No-proposal sessions consume a failure and stop the plan for host review. Typed
+proposal failures are not counted twice when the session closes. Failures remain
+shared across revised plans for the same independent requirements, and exhausted
+budgets reject before another provider invocation. A stopped completed predecessor
+may be followed by an explicitly linked plan with a changed dependency revision;
+its accepted draft remains immutable. Pending successful drafts cannot be retired
+by this API to obtain another model attempt.
+
+An unresolved invocation blocks another model session and checkpoint capture.
+Inspect `requirements inspect-upstream` and copy `modelSessions[].sessionRef`.
+`recoverUpstreamRepairModelSession` verifies an existing validated original draft
+and closes its reservation without executing a tool or restarting Pi. If no such
+draft exists, preserve the reservation for host review; do not replay the model.
+This API does not yet provide automatic plan generation or a full DAG scheduler.

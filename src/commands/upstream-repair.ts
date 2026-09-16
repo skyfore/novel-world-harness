@@ -95,3 +95,9 @@ export async function planUpstreamRepairCommand(root: string, reviewFile: string
   const review: unknown = JSON.parse(await fs.readFile(reviewFile, "utf8"));
   return withWorkspaceOperationLock(root, "compiler", () => planUpstreamRepair(root, review));
 }
+
+export async function discoverUpstreamRepairCommand(root: string, sourceId: string) {
+  idSchema.parse(sourceId);
+  const { discoverUpstreamRepairDiagnostics } = await import("../compiler/upstream-repair-discovery.js");
+  return withWorkspaceOperationLock(root, "compiler", () => discoverUpstreamRepairDiagnostics(root, sourceId));
+}

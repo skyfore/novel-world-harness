@@ -47,6 +47,7 @@ const identitySchema = z.object({
   allowedWrites: z.array(writeSchema).max(128),
   // Host allocates one exact logical ID per dependency slot; no model-chosen IDs.
   allowedCreations: z.array(refSchema.extend({ maxCount: z.literal(1), dependencyOf: text }).strict()).max(128),
+  resolutionAbsences: z.array(z.object({ kind: z.enum(["entity-resolution", "event-resolution"]), id: idSchema, mentionId: idSchema }).strict()).max(128).optional(),
   readableRefs: z.array(upstreamRepairReadableRefSchema).max(256), citableEvidenceRefs: z.array(idSchema).min(1).max(128),
   dependencyEdges: z.array(z.object({ from: text, to: text, purpose: z.enum(["source-evidence", "identity", "quotation", "requirement"]) }).strict()).max(512),
   postconditionIds: z.array(text).min(1).max(128), authorizationRef: text, retryBudgetRef: idSchema,
@@ -60,6 +61,11 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
   for (const values of [plan.requirementIds, plan.predecessorReceiptRefs, plan.sourceScope.segmentIds, plan.citableEvidenceRefs, plan.postconditionIds,
     plan.baselineRefs.map(key), plan.allowedWrites.map(key), plan.allowedCreations.map(key), plan.readableRefs.map(key)]) if (!unique(values)) fail("Duplicate repair plan member");
   if (!plan.allowedWrites.length && !plan.allowedCreations.length) fail("Repair plan has no bounded mutation");
+  if (!unique((plan.resolutionAbsences ?? []).map(ref => `${ref.kind}:${ref.mentionId}`))) fail("Duplicate resolution absence guard");
+  for (const ref of plan.resolutionAbsences ?? []) {
+    if (!plan.allowedCreations.some(slot => slot.kind === ref.kind && slot.id === ref.id)
+      || !plan.baselineRefs.some(base => base.kind === (ref.kind === "entity-resolution" ? "entity-mention" : "event-mention") && base.id === ref.mentionId)) fail("Resolution absence guard lacks its exact creation slot and frozen mention");
+  }
   const annotationSlots = [...plan.allowedWrites, ...plan.allowedCreations].filter(ref => ["entity-mention", "event-mention", "quotation", "discourse-segment"].includes(ref.kind));
   if (!unique(annotationSlots.map(ref => ref.id))) fail("Annotation write slots share a logical ID across types");
   if (plan.citableEvidenceRefs.some(id => !plan.sourceScope.segmentIds.includes(id))) fail("Citable evidence escapes source scope");
@@ -83,6 +89,16 @@ export type UpstreamRepairPlan = z.infer<typeof upstreamRepairPlanSchema>;
 export function freezeUpstreamRepairPlan(input: z.input<typeof identitySchema>): UpstreamRepairPlan {
   const identity = identitySchema.parse(input);
   return upstreamRepairPlanSchema.parse({ ...identity, planHash: contentHash(identity) });
+}
+
+/** Negative dependencies are versioned policy, checked against actual active payloads. */
+export function assertUpstreamResolutionAbsences(plan: UpstreamRepairPlan, payloads: ReadonlyMap<string, unknown>, committedOutputs: ReadonlyMap<string, string> = new Map()) {
+  for (const absence of plan.resolutionAbsences ?? []) for (const [key, payload] of payloads) {
+    if (!key.startsWith(`${absence.kind}:`)) continue;
+    const resolution = payload as { id: string; mentionId?: string; eventMentionIds?: string[] };
+    if (!(absence.kind === "entity-resolution" ? resolution.mentionId === absence.mentionId : resolution.eventMentionIds?.includes(absence.mentionId))) continue;
+    if (resolution.id !== absence.id || committedOutputs.get(key) !== contentHash(payload)) throw new Error(`UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: Resolution absence changed for ${absence.kind}:${absence.mentionId}. Preserve the original plan and existing resolution; stop model retries and do not rotate identities.`);
+  }
 }
 
 function payloadFor(kind: UpstreamRepairKind, raw: unknown) {
@@ -131,6 +147,11 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
   if (!input.citedSegmentIds.length || input.citedSegmentIds.some(id => !plan.citableEvidenceRefs.includes(id))) stop("Evidence is not citable under this plan");
   const next = payloadFor(input.kind, input.payload);
   if (next.id !== input.id || next.sourceId !== plan.sourceScope.sourceId) stop("Payload identity or source escapes plan");
+  const absence = plan.resolutionAbsences?.find(ref => ref.kind === input.kind && ref.id === input.id);
+  if (absence) {
+    const actualMentions = input.kind === "entity-resolution" ? [identityResolutionSchema.parse(next).mentionId] : eventResolutionSchema.parse(next).eventMentionIds;
+    if (actualMentions.length !== 1 || actualMentions[0] !== absence.mentionId) stop("Resolution payload changed its exact absent mention slot");
+  }
   for (const reference of upstreamRepairReferencedKeys(input.kind, next)) {
     if (plan.allowedCreations.some(ref => key(ref) === reference)) {
       if (!plan.dependencyEdges.some(edge => edge.from === key(input) && edge.to === reference)) stop(`Undeclared creation dependency: ${reference}`);

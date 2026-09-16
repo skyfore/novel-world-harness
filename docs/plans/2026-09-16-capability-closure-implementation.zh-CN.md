@@ -461,3 +461,19 @@ reviewHash 绑定 authorizationRef。SEMANTIC_MODULE_REQUIRED 返回 needs-host-
 本段是显式宿主复核输入的自动计划转换，尚未自动发现所有诊断。resolution 与后续 expression/perception/executable 根因的规划策略、P2 完整独立退出证据和 P3–P7 仍待实施。未调用真实 provider 或独立人工评审。
 
 验证：44 项最终定向回归通过；全仓 189 文件、1146 tests 通过（91.80 秒）；服务端、Web、E2E TypeScript、plan-upstream-repair CLI 帮助与 diff whitespace 检查通过。
+
+P2o 已提交为 `c7d60ed`。
+
+## P2p：实际依赖发现、缺失 resolution 规划和负依赖核验
+
+新增 discover-upstream-repairs。读取当前同源 annotations 和 active resolution refs，核验原文字节及 segment layout，报告真正缺失的 speaker mention/entity resolution/event resolution。返回精确 diagnostic、来源 segment 和同源 canonical candidate ID/revision/ref 目录；目录不是身份匹配结论，发现本身不绑定 requirement 或产生授权。已有 unresolved/ambiguous/non-referential 记录不会被当作不存在。
+
+规划器新增 ENTITY_RESOLUTION_MISSING / EVENT_RESOLUTION_MISSING，要求原 mention revision 未变且实际没有 resolution，候选必须明确列出同源 ID 与实际 payload hash。冻结 mention 与候选依赖；只创建一个 resolution，不创建 entity/event。创建 ID 由 source/kind/mention 稳定派生，不随 plan/batch/budget 改名；模型输出必须保持这个槽对应的原 mention。
+
+新增可选 resolutionAbsences 计划约束，兼容读取未声明该约束的旧计划，新缺失 resolution 计划必填。授权、staging、finish/recovery、convergence 原预检及 checkpoint 状态核验均检查实际负依赖：另一个 ID 为同一 mention 建立 resolution 后，旧计划不可再按“缺失”执行。仅原 durable receipt 对应的精确自身输出可在部分提交/恢复中例外通过。约束属于冻结计划与 subject 输入，预算与原历史保持不变。
+
+回归覆盖实体成功决议、事件无法建立匹配时保留 unresolved、稳定槽身份、缺失发现不授予权限、生成计划→原 staging/finish 的实际存储链、已有未知记录不可重复创建、输出 mention 不可偷换，以及后续另一 resolution 使实际预检失败。另验证 checkpoint 接受原自身输出并在 materialize 前拒绝伪造的其他 resolution 状态。没有把结构性缺失消失报告为独立能力满足。
+
+P2 仍需把诊断与独立要求的绑定纳入自动流程、补齐修订类根因策略与完整退出验收；P3–P7 仍保留原范围。未调用真实 provider 或独立人工评审。
+
+验证：全仓 189 文件、1148 tests 通过（93.38 秒）；补充候选引用输出和 checkpoint 负依赖验证后，61 项最终定向回归及最终服务端、Web、E2E TypeScript 检查通过。discover-upstream-repairs CLI 帮助和 diff whitespace 检查通过。

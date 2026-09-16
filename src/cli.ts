@@ -95,6 +95,12 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
   });
+requirementsCommand.command("discover-upstream-repairs").requiredOption("--source <id>", "registered source ID")
+  .description("Discover actual missing source dependencies without guessing identities or granting write authority")
+  .action(async options => {
+    const { discoverUpstreamRepairCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await discoverUpstreamRepairCommand(rootFor({}), options.source), null, 2));
+  });
 requirementsCommand.command("plan-upstream-repair").requiredOption("--review <path>", "typed host-reviewed diagnostic JSON")
   .description("Derive a bounded frozen plan from actual source dependencies; never register or authorize it")
   .action(async options => {

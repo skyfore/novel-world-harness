@@ -11,7 +11,7 @@ import { RequirementLedger, evaluateRequirementSet, sceneCatalogKeys } from "./r
 import { coreRoleDefinitions, assertCoreRoleDefinitionEvidence } from "./core-role-requirement-records.js";
 import { RoleRosterStore } from "./role-roster.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
-import { upstreamRepairPlanSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import { assertUpstreamResolutionAbsences, upstreamRepairPlanSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import type { SceneReviewCatalog } from "../eval/scene-capabilities.js";
 
 export function upstreamRepairHostError(reason: string): Error {
@@ -65,6 +65,7 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   for (const ref of plan.readableRefs) if (!activeRevisions.has(`${ref.kind}:${ref.id}`)) throw upstreamRepairHostError(`Readable dependency is missing: ${ref.kind}:${ref.id}`);
   const annotationKinds = ["entity-mention", "event-mention", "quotation", "discourse-segment"];
   for (const ref of plan.allowedCreations) if ((activeRevisions.has(`${ref.kind}:${ref.id}`) && (!committedOutputs.has(`${ref.kind}:${ref.id}`) || activeRevisions.get(`${ref.kind}:${ref.id}`) !== committedOutputs.get(`${ref.kind}:${ref.id}`))) || (annotationKinds.includes(ref.kind) && annotationKinds.some(kind => kind !== ref.kind && activeRevisions.has(`${kind}:${ref.id}`)))) throw upstreamRepairHostError(`Allocated creation ID is already active: ${ref.kind}:${ref.id}`);
+  assertUpstreamResolutionAbsences(plan, payloads, committedOutputs);
   const receipts = await CompilerFinishReceipts.listRetained(root, sourceId);
   for (const fingerprint of plan.predecessorReceiptRefs) {
     const receipt = receipts.find(item => item.receipt.fingerprint === fingerprint)?.receipt;

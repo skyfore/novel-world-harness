@@ -925,6 +925,41 @@ and obtain a new exact host review; never guess IDs or change a revision hash to
 silence the conflict. An unchanged failed review must stop.
 
 This is a typed review-to-plan converter, not yet automatic discovery of all
-compiler diagnostic classes. Resolution, expression/perception and executable
-repair policies remain unsupported by this converter. Independent requirement
+compiler diagnostic classes. Resolution revision, expression/perception and executable
+repair policies remain unsupported by this converter; missing-resolution creation
+is supported below. Independent requirement
 evaluation and downstream closure checks still determine repair success.
+
+### Missing resolution discovery and negative dependencies
+
+`requirements discover-upstream-repairs --source <id>` takes the compiler lock
+for a consistent read, checks original source bytes/segment layout, then examines
+active typed annotations and resolution refs. It reports missing quotation
+speaker mentions, `ENTITY_RESOLUTION_MISSING` and `EVENT_RESOLUTION_MISSING`.
+An existing unresolved, ambiguous or non-referential resolution is not absent.
+It does not infer quotation boundaries or equate matching names with identity.
+
+Copy `findings[].diagnostic` into the host review and bind the independent
+`requirementId` and explicit evidence scope. For missing resolutions, provide
+`candidates: [{id, revisionHash}]` using the matching kind from
+`candidateRefs[].id` and `candidateRefs[].revisionHash`; `readArguments.ref`
+permits exact artifact inspection. This catalog is not a list of asserted matches.
+An empty candidate list permits a source-grounded unresolved result, not a guessed
+entity/event. Candidate source/revision mismatches require one new corrected host
+review after discovery; unchanged retries and namespace rotation are forbidden.
+
+The planner verifies actual absence and freezes the original mention and every
+explicit candidate revision. The resolution creation ID derives from source,
+kind and mention, so changing a plan, batch or budget cannot rotate the slot.
+It grants no new entity or canonical-event creation. The created resolution must
+name exactly its original mention; it cannot consume a different readable mention.
+
+`resolutionAbsences` is an optional versioned plan constraint for backward reading
+of older plans; new missing-resolution plans always emit it. Preflight and
+checkpoint state validation reject any other active resolution for that mention,
+even if the newly allocated ID remains free. Only the original exact output backed
+by its durable receipt is allowed during partial commit/recovery. An absence
+change preserves the old plan and stops model retries; do not recreate the old
+missing dependency or overwrite the new resolution. A successful unresolved
+resolution removes a structural absence finding but does not satisfy independent
+requirements or clear certification gates.

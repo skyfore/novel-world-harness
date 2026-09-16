@@ -7,6 +7,11 @@ import { idSchema } from "../world/model.js";
 import { worldStorageRoot } from "../world/paths.js";
 import { evaluateSceneCapabilities, evaluateReviewedSceneCapabilities, sceneCapabilitySpecSchema, type SceneReviewCatalog } from "../eval/scene-capabilities.js";
 import { SCENE_REQUIREMENT_EVALUATOR_VERSION } from "../eval/scene-requirements.js";
+import { coreRoleRequirementDefinitionSchema, coreRoleRequirementHistorySchema, coreRoleDefinitions, assertCoreRoleDefinitionEvidence, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
+import { validateRoleRoster, roleRosterSchema, type RoleRoster } from "./role-roster.js";
+import type { StructuralUnit } from "./structure.js";
+import type { PreparedNovelBundle } from "./prepared-cache.js";
+import type { NovelClosureAssessment } from "./certification.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const text = z.string().trim().min(1);
@@ -29,6 +34,8 @@ export type RequirementResult = z.infer<typeof requirementResultSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("definition"), definition: requirementSetSchema }).strict(),
   z.object({ kind: z.literal("evaluation"), result: requirementResultSchema }).strict(),
+  z.object({ kind: z.literal("core-role-definition"), definition: coreRoleRequirementDefinitionSchema }).strict(),
+  z.object({ kind: z.literal("core-role-evaluation"), definitionRevision: hash, subjectSnapshotHash: hash, result: requirementResultSchema }).strict(),
 ]);
 const recordSchema = z.object({
   version: z.literal(1), sourceId: idSchema, sequence: z.number().int().nonnegative(),
@@ -144,12 +151,22 @@ export class RequirementLedger {
     if (cursor) throw new Error("Requirement journal has an invalid root; stop for host review.");
     records.reverse();
     const definitions = new Map<string, RequirementSet>();
+    const coreHistory: CoreRoleRequirementDefinition[] = [];
     for (const record of records) {
       if (record.payload.kind === "definition") {
         const next = record.payload.definition;
         if (next.spec.sourceId !== this.sourceId || next.parentRevision !== (definitions.get(next.id)?.revisionHash ?? null)) throw new Error("Requirement definition lineage mismatch; stop for host review.");
         definitions.set(next.id, next);
-      } else if (definitions.get(record.payload.result.setId)?.revisionHash !== record.payload.result.revisionHash) throw new Error("Requirement evaluation has no active definition; stop for host review.");
+      } else if (record.payload.kind === "evaluation") {
+        if (definitions.get(record.payload.result.setId)?.revisionHash !== record.payload.result.revisionHash) throw new Error("Requirement evaluation has no active definition; stop for host review.");
+      } else if (record.payload.kind === "core-role-definition") {
+        if (record.payload.definition.sourceId !== this.sourceId) throw new Error("Core role definition escapes its source; stop for host review.");
+        coreHistory.push(record.payload.definition);
+        coreRoleRequirementHistorySchema.parse(coreHistory);
+      } else {
+        const active = coreHistory.at(-1);
+        if (!active || record.payload.definitionRevision !== active.revisionHash || record.payload.result.setId !== "core-roles" || record.payload.result.revisionHash !== active.specHash) throw new Error("Core role evaluation has no active definition; stop for host review.");
+      }
     }
     return records;
   }
@@ -158,6 +175,60 @@ export class RequirementLedger {
   }
   async definitionHistory(): Promise<RequirementSet[]> {
     return (await this.history()).flatMap(record => record.payload.kind === "definition" ? [record.payload.definition] : []);
+  }
+  async coreRoleDefinitionHistory(): Promise<CoreRoleRequirementDefinition[]> {
+    return (await this.history()).flatMap(record => record.payload.kind === "core-role-definition" ? [record.payload.definition] : []);
+  }
+  async registerCoreRoles(input: { roster: RoleRoster; units: StructuralUnit[]; scopeDecisionRef: string; scopeChangeReason: string; predecessorRevision?: string; allowScopeReduction?: boolean }, bytes: Uint8Array): Promise<CoreRoleRequirementDefinition> {
+    input = { ...input, roster: roleRosterSchema.parse(input.roster) };
+    const issues = validateRoleRoster(input.roster).filter(issue => !["ROSTER_MAJOR_IDENTITY_UNRESOLVED", "ROSTER_NO_MAJOR_CHARACTERS"].includes(issue.code));
+    if (issues.length) throw new Error(`Core role source review is incomplete: ${issues.map(issue => issue.code).join(", ")}; preserve reviews and stop unchanged retries`);
+    const retainedDefinitions = await this.coreRoleDefinitionHistory(), previous = retainedDefinitions.at(-1);
+    const specHash = contentHash({ definitions: coreRoleDefinitions({ source: { id: this.sourceId } }, input.roster), units: input.units });
+    if (previous?.specHash === specHash) { assertCoreRoleDefinitionEvidence(previous, bytes); return previous; }
+    for (const review of input.roster.reviews) {
+      const retained = retainedDefinitions.flatMap(definition => definition.roster.reviews).find(item => item.runId === review.runId);
+      if (retained && contentHash(retained) !== contentHash(review)) throw new Error("Core role review run was rewritten. Preserve the original review and use fresh independent review runs; do not retry with mutated history.");
+    }
+    if (input.predecessorRevision !== previous?.revisionHash) throw new Error(`Core role predecessor changed. Run nwh requirements inspect --source ${this.sourceId}, copy coreRoleDefinitions[].revisionHash from the last entry, and make one corrected host retry. Stop model retries; do not reset history.`);
+    const nextIds = new Set(coreRoleDefinitions({ source: { id: this.sourceId } }, input.roster).map(item => item.id));
+    const removedRequirementIds = previous ? coreRoleDefinitions({ source: { id: this.sourceId } }, previous.roster).map(item => item.id).filter(id => !nextIds.has(id)).sort() : [];
+    if (removedRequirementIds.length && !input.allowScopeReduction) throw new Error(`Core role scope reduction requires host review of ${removedRequirementIds.join(", ")}. Stop model retries. The host must use nwh requirements register-core-roles --source ${this.sourceId} with the exact --predecessor, --scope-decision and --reason; preserve history and do not retry unchanged.`);
+    const identity = { version: 1 as const, id: "core-roles" as const, sourceId: this.sourceId, sourceSha256: input.roster.sourceSha256,
+      parentRevision: previous?.revisionHash ?? null, specHash, scopeDecisionRef: text.parse(input.scopeDecisionRef), scopeChangeReason: text.parse(input.scopeChangeReason),
+      removedRequirementIds, roster: input.roster, units: input.units };
+    const definition = coreRoleRequirementDefinitionSchema.parse({ ...identity, revisionHash: contentHash(identity) });
+    assertCoreRoleDefinitionEvidence(definition, bytes);
+    await this.publish({ kind: "core-role-definition", definition });
+    return definition;
+  }
+  async recordCoreRoleEvaluation(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): Promise<void> {
+    const definition = (await this.coreRoleDefinitionHistory()).at(-1);
+    if (!definition || bundle.source.id !== this.sourceId || bundle.source.contentSha256 !== definition.sourceSha256 || bundle.compilerSnapshot.coreRoleRequirementDefinitions?.at(-1)?.revisionHash !== definition.revisionHash) throw new Error("Core role evaluation lacks its current frozen definition; stop for host review");
+    const { evaluateCoreRoleCapabilities } = await import("./core-role-capabilities.js");
+    const { preparedSubjectHash } = await import("./certification.js");
+    const subjectSnapshotHash = preparedSubjectHash(bundle);
+    if (!assessment.coreRoleResult) throw new Error("Core role evaluation result is missing; evaluate the frozen candidate before recording, never submit model success as a result");
+    if (!assessment.roster || assessment.subjectSnapshotHash !== subjectSnapshotHash || contentHash(assessment.roster) !== contentHash(definition.roster)) throw new Error("Core role evaluation subject is stale; re-evaluate the current candidate, do not replay model writes");
+    const result = evaluateCoreRoleCapabilities(bundle, assessment.roster, assessment.playability, subjectSnapshotHash);
+    if (result.revisionHash !== definition.specHash || contentHash(result) !== contentHash(assessment.coreRoleResult)) throw new Error("Core role evaluation differs from its frozen deterministic result; stop for host review");
+    const payload = { kind: "core-role-evaluation" as const, definitionRevision: definition.revisionHash, subjectSnapshotHash, result };
+    const previous = (await this.history()).findLast(record => record.payload.kind === "core-role-evaluation");
+    if (!previous || contentHash(previous.payload) !== contentHash(payload)) await this.publish(payload);
+  }
+  async assertCoreRolesRestorable(input: readonly CoreRoleRequirementDefinition[], bytes?: Uint8Array): Promise<void> {
+    const incoming = coreRoleRequirementHistorySchema.parse(input), current = await this.coreRoleDefinitionHistory();
+    if (current.some((definition, index) => definition.revisionHash !== incoming[index]?.revisionHash)) throw new Error("Core role restore would forget current obligations; use an isolated workspace, never reset the ledger");
+    for (const definition of incoming) {
+      if (definition.sourceId !== this.sourceId) throw new Error("Core role restore source mismatch");
+      if (!bytes) throw new Error("Core role restore requires immutable source bytes");
+      assertCoreRoleDefinitionEvidence(definition, bytes);
+    }
+  }
+  async restoreCoreRoles(input: readonly CoreRoleRequirementDefinition[], bytes?: Uint8Array): Promise<void> {
+    await this.assertCoreRolesRestorable(input, bytes);
+    const current = await this.coreRoleDefinitionHistory();
+    for (const definition of input.slice(current.length)) await this.publish({ kind: "core-role-definition", definition });
   }
   private async publish(payload: z.infer<typeof payloadSchema>): Promise<void> {
     const history = await this.history(), last = history.at(-1);

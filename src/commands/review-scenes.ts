@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { registerSourceRequirements, settleSourceRequirements } from "../compiler/requirement-service.js";
 import { RequirementLedger } from "../compiler/requirement-ledger.js";
+import { registerReviewedCoreRoles } from "../compiler/core-role-requirement-service.js";
+import { loadCurrentRoleRoster } from "../compiler/role-roster-tools.js";
 import { sceneCapabilitySpecSchema, evaluateSceneCapabilities, type SceneReviewCatalog } from "../eval/scene-capabilities.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
@@ -57,5 +59,11 @@ export async function reviewScenesCommand(root: string, specFile: string, regist
 
 export async function inspectRequirementsCommand(root: string, sourceId: string) {
   const ledger = new RequirementLedger(root, sourceId);
-  console.log(JSON.stringify({ definitions: await ledger.definitions(), history: await ledger.history() }, null, 2));
+  console.log(JSON.stringify({ definitions: await ledger.definitions(), coreRoleDefinitions: await ledger.coreRoleDefinitionHistory(), history: await ledger.history() }, null, 2));
+}
+
+export async function registerCoreRoleRequirementsCommand(root: string, sourceId: string, decision: { predecessorRevision?: string; scopeDecisionRef: string; scopeChangeReason: string }) {
+  const result = await withWorkspaceOperationLock(root, "compiler", async () => registerReviewedCoreRoles(root, await loadCurrentRoleRoster(root, sourceId), decision));
+  if (!result) throw new Error("Core role registration requires two complete source reviews; preserve partial review work and do not retry unchanged");
+  console.log(JSON.stringify(result, null, 2));
 }

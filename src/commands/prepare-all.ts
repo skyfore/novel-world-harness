@@ -1,4 +1,5 @@
 import { assertReconciliationDeferralsReviewed } from "../compiler/reconciliation-review-ledger.js";
+import { RequirementLedger } from "../compiler/requirement-ledger.js";
 import { settleSourceRequirements } from "../compiler/requirement-service.js";
 import fs from "node:fs/promises";
 import { contentHash } from "../world/canonical.js";
@@ -530,6 +531,8 @@ export async function prepareAllCommand(
     }
     options.signal?.throwIfAborted();
     const evaluated = await preparedCache.inspectCandidate(inspection.source!);
+    const roleLedger = new RequirementLedger(root, sourceId);
+    if ((await roleLedger.coreRoleDefinitionHistory()).length) await roleLedger.recordCoreRoleEvaluation(evaluated.bundle, evaluated.assessment);
     report(`Entry probes: ${evaluated.assessment.playability?.readyTotal ?? 0}/${evaluated.assessment.playability?.majorTotal ?? 0} major roles ready.`);
     if (!evaluated.assessment.fullNovelReady && !options.candidateOnly) throw new Error(`WORLD_CLOSURE_BLOCKED: ${evaluated.assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
     if (options.candidateOnly && evaluated.assessment.issues.length) report(`Candidate diagnostics: ${evaluated.assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);

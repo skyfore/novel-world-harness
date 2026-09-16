@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
+import { RequirementLedger } from "../src/compiler/requirement-ledger.js";
 import { RoleRosterStore } from "../src/compiler/role-roster.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { withNwhToolRecovery } from "../src/agent/tool-recovery.js";
@@ -17,7 +18,7 @@ import { validateAssessmentRevision } from "../src/compiler/certification.js";
 import { loadCurrentRoleRoster } from "../src/compiler/role-roster-tools.js";
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
 
 it("requires full source reading and the real finish handshake before persisting a role review", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-roster-tools-")); roots.push(root);
@@ -69,4 +70,37 @@ it("freezes independent development expectations and rechecks unknowns despite f
   const legacy = structuredClone(candidate.bundle);
   legacy.compilerSnapshot.roleRoster = roster;
   expect(validateAssessmentRevision(legacy, forged).join()).toContain("ROSTER_DEVELOPMENT_EXPECTATION_UNKNOWN");
+});
+
+
+it("recovers role requirement registration after finish persisted the second review but the ledger write failed", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-role-ledger-recovery-")); roots.push(root);
+  const fixture = await createEvidenceFixture(root, "Hero waits.\n");
+  await ensureSourceStructure(root, fixture.source);
+  await new CanonicalModelStore(root).putEntity({ id: "hero", canonicalName: "Hero", kind: "character", aliases: [], evidence: fixture.evidence("Hero") });
+  for (const index of [1, 2]) {
+    const batchId = `role-roster-${fixture.source.id}-independent-${index}`;
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([], batchId, fixture.source.id);
+    const call = (name: string, input: unknown) => toolset.tools.find(tool => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as ExtensionContext);
+    const roster = JSON.parse(((await call("read_role_roster", { offset: 0 })).content[0] as { text: string }).text);
+    const page = JSON.parse(((await call("read_roster_source_page", { page: 0 })).content[0] as { text: string }).text);
+    await call("propose_role_roster_review", { subjectHash: roster.subjectHash, entries: [{ candidateId: roster.candidates[0].id,
+      importance: "major", rationale: "Central actor", basisUnitIds: page.unitIds,
+      developmentExpectation: { kind: "unknown", rationale: "Insufficient development evidence", basisUnitIds: page.unitIds },
+    }] });
+    if (index === 2) vi.spyOn(RequirementLedger.prototype, "registerCoreRoles").mockRejectedValueOnce(new Error("simulated ledger publication interruption"));
+    const finish = call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent full source review" });
+    if (index === 1) await finish;
+    else {
+      await expect(finish).rejects.toThrow("simulated ledger publication interruption");
+      expect((await new RoleRosterStore(root).read(fixture.source.id))!.reviews).toHaveLength(2);
+      expect(await new RequirementLedger(root, fixture.source.id).coreRoleDefinitionHistory()).toEqual([]);
+      await expect(recoverCompilerFinish(root, fixture.source.id, batchId)).resolves.toBe(true);
+      await expect(recoverCompilerFinish(root, fixture.source.id, batchId)).resolves.toBe(true);
+    }
+  }
+  const history = await new RequirementLedger(root, fixture.source.id).coreRoleDefinitionHistory();
+  expect(history).toHaveLength(1);
+  expect(history[0]!.roster.reviews).toHaveLength(2);
 });

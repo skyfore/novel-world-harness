@@ -1,3 +1,4 @@
+import { coreRoleRequirementHistorySchema, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import { RequirementLedger, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
 import { captureReconciliationObligations, assertReconciliationObligationsRestorable, restoreReconciliationObligations, reconciliationObligationSnapshotSchema, type ReconciliationObligationSnapshot } from "./reconciliation-review-ledger.js";
@@ -134,6 +135,7 @@ const preparedCanonicalSchema = z.object({
 
 const preparedCompilerSnapshotSchema = z.object({
   requirementDefinitions: requirementDefinitionHistorySchema.optional(),
+  coreRoleRequirementDefinitions: coreRoleRequirementHistorySchema.optional(),
   reconciliationObligations: reconciliationObligationSnapshotSchema.optional(),
   evidenceBindings: z.array(evidenceAssertionBindingSnapshotSchema),
   structure: sourceStructureManifestSchema,
@@ -855,6 +857,7 @@ export class PreparedNovelCache {
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).definitionHistory();
+    const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).coreRoleDefinitionHistory();
     const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, source.id);
     const bundle = preparedNovelBundleSchema.parse({
       version: 4,
@@ -878,6 +881,7 @@ export class PreparedNovelCache {
       canonical: preparedCanonical,
       compilerSnapshot: {
         ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
+        ...(coreRoleRequirementDefinitions.length ? { coreRoleRequirementDefinitions } : {}),
         ...(reconciliationObligations.length ? { reconciliationObligations } : {}),
         evidenceBindings: evidenceBindings.sort((left, right) =>
           left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
@@ -1057,6 +1061,7 @@ export class PreparedNovelCache {
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
     roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
     requirementDefinitions?: RequirementSet[];
+    coreRoleRequirementDefinitions?: CoreRoleRequirementDefinition[];
     reconciliationObligations?: ReconciliationObligationSnapshot;
   }> {
     const sourceId = bundle.source.id;
@@ -1080,9 +1085,11 @@ export class PreparedNovelCache {
       new SourceAccountingStore(this.workspaceRoot).read(sourceId),
     ]);
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).definitionHistory();
+    const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).coreRoleDefinitionHistory();
     const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, sourceId);
     return {
       ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
+      ...(coreRoleRequirementDefinitions.length ? { coreRoleRequirementDefinitions } : {}),
       ...(reconciliationObligations.length ? { reconciliationObligations } : {}),
       evidenceBindings: evidenceBindings.sort((left, right) =>
         left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
@@ -1098,6 +1105,10 @@ export class PreparedNovelCache {
   private async materialize(bundle: PreparedNovelBundle, exact: boolean): Promise<void> {
     const sourceId = bundle.source.id;
     await new RequirementLedger(this.workspaceRoot, sourceId).assertRestorable(bundle.compilerSnapshot.requirementDefinitions ?? []);
+    const coreDefinitions = bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [];
+    const coreSource = coreDefinitions.length ? await WorkspaceStore.openReadOnly(this.workspaceRoot).getSource(sourceId) : null;
+    const coreBytes = coreSource ? await readSourceMaterial(this.workspaceRoot, coreSource) : undefined;
+    await new RequirementLedger(this.workspaceRoot, sourceId).assertCoreRolesRestorable(coreDefinitions, coreBytes);
     await assertReconciliationObligationsRestorable(this.workspaceRoot, sourceId, bundle.compilerSnapshot.reconciliationObligations ?? []);
     const workspace = await WorkspaceStore.create(this.workspaceRoot);
     await assertPreparedCompilerSnapshotEvidence(this.workspaceRoot, bundle);
@@ -1166,6 +1177,7 @@ export class PreparedNovelCache {
     for (const possibility of bundle.canonical.possibilities) await possibilities.put(possibility);
     const snapshot = bundle.compilerSnapshot;
     await new RequirementLedger(this.workspaceRoot, sourceId).restore(snapshot.requirementDefinitions ?? []);
+    await new RequirementLedger(this.workspaceRoot, sourceId).restoreCoreRoles(snapshot.coreRoleRequirementDefinitions ?? [], coreBytes);
     await restoreReconciliationObligations(this.workspaceRoot, sourceId, snapshot.reconciliationObligations ?? []);
     await new SourceStructureStore(this.workspaceRoot).write(snapshot.structure);
     await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.annotations);

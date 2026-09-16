@@ -14,6 +14,7 @@ import { buildPreparedClosure, closureGraphSchema } from "./closure.js";
 import { buildRoleRoster, majorRoleCandidates, roleRosterSchema, validateRoleRoster, validateRoleDevelopmentExpectations } from "./role-roster.js";
 import { entryDriverWitnessIssues } from "./entry-driver-probe.js";
 import { evaluateCoreRoleCapabilities, coreRoleResultIssues } from "./core-role-capabilities.js";
+import { assertCoreRoleDefinitionEvidence, coreRoleDefinitionBindingIssues } from "./core-role-requirement-records.js";
 import { playabilityManifestSchema, probeMajorRoleEntries } from "./playability.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { NovelPlayQualityStore, novelPlayQualitySchema, validateNovelPlayQuality } from "../eval/novel-play-quality.js";
@@ -50,13 +51,15 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));
   const snapshot = bundle.compilerSnapshot;
   const requirementSets = activeRequirementSets(snapshot.requirementDefinitions ?? []);
+  const coreDefinitions = snapshot.coreRoleRequirementDefinitions ?? [];
   const requirementResults: z.infer<typeof requirementResultSchema>[] = [];
-  if (requirementSets.length) {
+  if (requirementSets.length || coreDefinitions.length) {
     try {
       const source = await WorkspaceStore.openReadOnly(root).getSource(bundle.source.id);
       if (!source || source.contentSha256 !== bundle.source.contentSha256) throw new Error("Frozen requirement source is not registered at the same revision");
       const bytes = await new SourceMaterialStore().read(source);
       if (!bytes) throw new Error("Immutable source bytes unavailable for requirement evaluation");
+      for (const definition of coreDefinitions) assertCoreRoleDefinitionEvidence(definition, bytes);
       for (const set of requirementSets) {
         if (set.spec.sourceId !== source.id || set.spec.sourceSha256 !== source.contentSha256) throw new Error("Frozen requirement source scope mismatch");
         requirementResults.push(evaluateRequirementSet(set, bytes, frozenSceneCatalog(bundle)));
@@ -80,6 +83,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   let coreRoleResult: NovelClosureAssessment["coreRoleResult"];
   try {
     if (roster) coreRoleResult = evaluateCoreRoleCapabilities(bundle, roster, playability, subjectSnapshotHash);
+    issues.push(...coreRoleDefinitionBindingIssues(coreDefinitions, { sourceId: bundle.source.id, sourceSha256: bundle.source.contentSha256, roster, specHash: coreRoleResult?.revisionHash }).map(message => ({ code: "CORE_ROLE_DEFINITION_NOT_CERTIFIED", message })));
     issues.push(...coreRoleResultIssues(bundle, roster, playability, subjectSnapshotHash, coreRoleResult).map(message => ({ code: "CORE_ROLE_REQUIREMENT_NOT_CERTIFIED", message })));
   } catch (error) { issues.push({ code: "CORE_ROLE_REQUIREMENTS_BLOCKED", message: String(error) }); }
   const quality = await new NovelPlayQualityStore(root).read(subjectSnapshotHash);
@@ -100,6 +104,8 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
 
 export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): string[] {
   const issues: string[] = [];
+  issues.push(...coreRoleDefinitionBindingIssues(bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], { sourceId: bundle.source.id,
+    sourceSha256: bundle.source.contentSha256, roster: assessment.roster, specHash: assessment.coreRoleResult?.revisionHash }));
   issues.push(...coreRoleResultIssues(bundle, assessment.roster, assessment.playability, assessment.subjectSnapshotHash, assessment.coreRoleResult));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256));
   issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));

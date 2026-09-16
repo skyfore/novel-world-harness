@@ -329,3 +329,28 @@ reviews or recast unknown as stable to bypass the gate. Completing the semantic
 requirement or migrating historical reviews needs a host-controlled review
 revision with preserved history; the current role-review tool does not grant
 that mutation capability.
+
+
+### Core-role requirement registration and finish recovery
+
+After the second independent role review commits, the host registers its complete
+definition in the source requirement ledger. If publication fails after the
+review was saved, preserve the finish receipt and use host finish recovery; do
+not resubmit the single-use model proposal. Recovery rechecks the saved review
+and idempotently completes registration. A corrupt ledger or missing head stops
+for host repair; never delete history or switch namespaces to bypass it.
+
+If a revision removes existing role requirements, stop model retries. The host
+can register the already reviewed scope with
+`nwh requirements register-core-roles --source <id> --predecessor <hash> --scope-decision <ref> --reason <text>`.
+For a stale predecessor, run `nwh requirements inspect --source <id>`, copy
+`revisionHash` from the last `coreRoleDefinitions` entry, and make at most one
+corrected host retry. This records an explicit scope decision and removed IDs;
+it neither erases prior requirements nor marks them satisfied. Rewriting a
+retained review run is forbidden. New independent reviews require new run IDs;
+this command does not itself grant a model permission to replace reviews.
+
+Candidate evaluation is deterministic and tied to its frozen definition, source
+bytes and subject hash. Missing or stale inputs require host re-evaluation, not
+replaying model writes. Restoring a candidate that would discard current
+definitions stops before world materialization; preserve the current ledger.

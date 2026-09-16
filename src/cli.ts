@@ -10,7 +10,7 @@ import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
 import { reviewAccountingObligation } from "./compiler/accounting-review.js";
 import { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
-import { reviewScenesCommand, inspectRequirementsCommand } from "./commands/review-scenes.js";
+import { reviewScenesCommand, inspectRequirementsCommand, registerCoreRoleRequirementsCommand } from "./commands/review-scenes.js";
 import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
 import { resumeCommand } from "./commands/resume.js";
 import { playCommand } from "./commands/play.js";
@@ -86,9 +86,16 @@ program.command("review-scenes").requiredOption("--spec <path>", "independent so
     if (options.predecessor && !options.register) throw new Error("--predecessor requires --register; do not retry unchanged.");
     await reviewScenesCommand(rootFor({}), options.spec, options.register ? { id: options.register, predecessorRevision: options.predecessor } : undefined);
   });
-program.command("requirements").description("Inspect persistent capability definitions and evaluation history")
-  .command("inspect").requiredOption("--source <id>", "registered source ID")
+const requirementsCommand = program.command("requirements").description("Inspect persistent capability definitions and evaluation history");
+requirementsCommand.command("inspect").requiredOption("--source <id>", "registered source ID")
   .action(async options => inspectRequirementsCommand(rootFor({}), options.source));
+requirementsCommand.command("register-core-roles").requiredOption("--source <id>", "registered source ID")
+  .option("--predecessor <hash>", "last coreRoleDefinitions[].revisionHash from requirements inspect")
+  .requiredOption("--scope-decision <ref>", "host audit reference for this independent source-review revision")
+  .requiredOption("--reason <text>", "explicit reason for changes, including any removed role requirements")
+  .action(async options => registerCoreRoleRequirementsCommand(rootFor({}), options.source, {
+    predecessorRevision: options.predecessor, scopeDecisionRef: options.scopeDecision, scopeChangeReason: options.reason,
+  }));
 compilerObligations.command("inspect").requiredOption("--source <id>", "registered source ID").requiredOption("--batch <id>", "exact compiler batch ID")
   .action((options) => {
     const journal = new CompilerProposalObligations(rootFor({}), options.source, options.batch);

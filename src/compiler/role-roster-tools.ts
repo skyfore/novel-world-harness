@@ -8,6 +8,7 @@ import { CanonicalModelStore } from "../world/canonical-model.js";
 import { SourceAnnotationStore } from "./annotations.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
 import { SourceStructureStore, baseStructuralUnits } from "./structure.js";
+import { registerReviewedCoreRoles } from "./core-role-requirement-service.js";
 import { buildRoleRoster, RoleRosterStore, roleRosterEntrySchema, roleRosterReviewSchema, roleDevelopmentExpectationSchema, validateRosterReview, type RoleRoster, type RoleRosterReview } from "./role-roster.js";
 
 export const ROLE_ROSTER_TOOL_NAMES = ["read_role_roster", "read_roster_source_page", "propose_role_roster_review"] as const;
@@ -104,9 +105,11 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       const saved = current.roster.reviews.find((review) => review.runId === pending!.runId);
       if (saved) {
         if (!isDeepStrictEqual(saved, pending)) throw new Error("Compiler finish requires host review: persisted role review differs from the prepared finish. Stop model retries.");
+        await registerReviewedCoreRoles(root, current);
         return;
       }
-      await new RoleRosterStore(root).review(current.roster, pending);
+      const roster = await new RoleRosterStore(root).review(current.roster, pending);
+      await registerReviewedCoreRoles(root, { ...current, roster });
     },
     reset() { snapshot = undefined; pages = []; visited.clear(); pending = undefined; },
   };

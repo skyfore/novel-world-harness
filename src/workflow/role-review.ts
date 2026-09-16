@@ -3,6 +3,7 @@ import { compileCommand, type CompileCommandOptions } from "../commands/compile.
 import { COMPILER_TOOL_NAMES } from "../compiler/proposal-tools.js";
 import { loadCurrentRoleRoster, ROLE_ROSTER_TOOL_NAMES } from "../compiler/role-roster-tools.js";
 import { validateRoleRoster } from "../compiler/role-roster.js";
+import { registerReviewedCoreRoles } from "../compiler/core-role-requirement-service.js";
 
 export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "prompt" | "compilerBatchId"> & { sourceId: string }, compile = compileCommand): Promise<void> {
   let { roster } = await loadCurrentRoleRoster(options.root, options.sourceId);
@@ -18,6 +19,7 @@ export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "pro
     ({ roster } = await loadCurrentRoleRoster(options.root, options.sourceId));
     if (roster.subjectHash !== subjectHash || roster.reviews.length !== reviewCount + 1) throw new Error("ROSTER_REVIEW_NOT_COMMITTED: the review did not finish against unchanged source identity. Stop and inspect compiler diagnostics; do not repeat unchanged work.");
   }
+  await registerReviewedCoreRoles(options.root, await loadCurrentRoleRoster(options.root, options.sourceId));
   const issues = validateRoleRoster(roster);
   if (issues.length) throw new Error(`WORLD_CLOSURE_BLOCKED: ${issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
 }

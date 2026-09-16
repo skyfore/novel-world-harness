@@ -6,7 +6,7 @@ import { compareStoryTime } from "../world/time.js";
 import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, type EvidenceRef } from "../world/model.js";
 import { baseStructuralUnits } from "./structure.js";
 import { majorRoleCandidates, reviewedRoleDevelopmentRequirements, validateRoleRoster, type RoleRoster, type RoleDevelopmentExpectation } from "./role-roster.js";
-import { assessSemanticRequirements, type RequirementObservation, type SemanticRequirement } from "./semantic-requirements.js";
+import { assessSemanticRequirements, type RequirementObservation } from "./semantic-requirements.js";
 import { requirementResultSchema, type RequirementResult } from "./requirement-ledger.js";
 import { entryDriverWitnessIssues } from "./entry-driver-probe.js";
 import { deriveCharacterEntrySeed } from "../world/entry-context.js";
@@ -15,24 +15,8 @@ import type { PlayabilityManifest } from "./playability.js";
 
 export const CORE_ROLE_EVALUATOR_VERSION = "core-role-capabilities-v1";
 
-/** Independent source review supplies the denominator; accepted models never shrink it. */
-export function coreRoleDefinitions(bundle: PreparedNovelBundle, roster: RoleRoster): SemanticRequirement[] {
-  const evidenceRefs = roster.unitIds.map(id => `source-unit:${id}`);
-  const common = { sourceId: bundle.source.id, evidenceRefs };
-  const definitions: SemanticRequirement[] = [{ ...common, id: "core-roles:source-review", targetRef: `source:${bundle.source.id}`,
-    capability: "role-denominator", stage: "source-review", expectation: { kind: "two-independent-full-source-reviews", rosterHash: contentHash(roster) }, dependsOn: [] }];
-  const development = reviewedRoleDevelopmentRequirements(roster);
-  for (const role of majorRoleCandidates(roster)) {
-    const targetRef = role.entityId ? `character:${role.entityId}` : `unresolved-role:${role.id}`;
-    definitions.push({ ...common, id: `${role.id}:ontology`, targetRef, capability: "ontology", stage: "ontology",
-      expectation: { kind: "character-ontology", version: CHARACTER_ONTOLOGY_VERSION }, dependsOn: ["core-roles:source-review"] });
-    definitions.push({ ...common, id: `${role.id}:development`, targetRef, capability: "development", stage: "executable",
-      expectation: { kind: "source-reviewed-development", review: development.find(item => item.candidateId === role.id)! }, dependsOn: [`${role.id}:ontology`] });
-    definitions.push({ ...common, id: `${role.id}:opening-driver`, targetRef, capability: "opening-driver", stage: "executable",
-      expectation: { kind: "committed-autonomy-at-first-physical-entry", excludedActorId: role.entityId ?? null }, dependsOn: ["core-roles:source-review"] });
-  }
-  return definitions;
-}
+export { coreRoleDefinitions } from "./core-role-requirement-records.js";
+import { coreRoleDefinitions } from "./core-role-requirement-records.js";
 
 /** Host evaluation over frozen canonical inputs. Requires the normal source/evidence verification gates as well. */
 export function evaluateCoreRoleCapabilities(bundle: PreparedNovelBundle, roster: RoleRoster, playability: PlayabilityManifest | null, subjectSnapshotHash: string): RequirementResult {

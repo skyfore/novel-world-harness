@@ -174,3 +174,20 @@ it("freezes requirements in real candidate snapshots, checks certificates and pr
   expect(contentHash(candidate.bundle)).toBe(oldHash);
   expect(await f.canon.listEvents()).toEqual([f.event]);
 });
+
+it("transports the complete scene journal, resumes a prefix import and rejects lost evaluations or bad source bytes", async () => {
+  const f = await setup(); await f.register(); await settleSourceRequirements(f.root, f.sourceId);
+  const frozen = await f.ledger.history();
+  const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-scene-journal-import-")); roots.push(cloneRoot);
+  const clone = new RequirementLedger(cloneRoot, f.sourceId);
+  await expect(clone.restoreJournal(frozen, Buffer.from("Different source bytes"))).rejects.toThrow("SCENE_REVIEW_SOURCE_MISMATCH");
+  expect(await clone.history()).toEqual([]);
+  await clone.restoreJournal(frozen.slice(0, 1), f.bytes);
+  await clone.restoreJournal(frozen, f.bytes);
+  await clone.restoreJournal(frozen, f.bytes);
+  expect(await new RequirementLedger(cloneRoot, f.sourceId).history()).toEqual(frozen);
+  await f.canon.putEvent({ ...f.event, observedOutcome: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.alive", value: false }] } });
+  await settleSourceRequirements(f.root, f.sourceId);
+  await expect(f.ledger.restoreJournal(frozen, f.bytes)).rejects.toThrow("discard or rewrite current audit history");
+  expect((await f.ledger.history()).filter(record => record.payload.kind === "evaluation")).toHaveLength(2);
+});

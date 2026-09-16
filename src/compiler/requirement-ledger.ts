@@ -49,7 +49,7 @@ const recordSchema = z.object({
 }).strict().superRefine(({ hash: recordedHash, ...identity }, ctx) => {
   if (contentHash(identity) !== recordedHash) ctx.addIssue({ code: "custom", message: "Requirement journal hash mismatch" });
 });
-type LedgerRecord = z.infer<typeof recordSchema>;
+export type LedgerRecord = z.infer<typeof recordSchema>;
 const headSchema = z.object({ version: z.literal(1), sourceId: idSchema, sequence: z.number().int().nonnegative(), hash }).strict();
 
 /** Frozen input only. Evaluations are derived, never part of their own subject hash. */
@@ -156,42 +156,22 @@ export class RequirementLedger {
     }
     if (cursor) throw new Error("Requirement journal has an invalid root; stop for host review.");
     records.reverse();
-    const definitions = new Map<string, RequirementSet>();
-    const coreHistory: CoreRoleRequirementDefinition[] = [];
-    const evaluations = new Map<string, Extract<LedgerRecord["payload"], { kind: "core-role-evaluation" }>>();
-    const attempts = new Map<string, CompilerFinishReceipt>();
-    const settlementKeys = new Set<string>();
-    for (const record of records) {
-      if (record.payload.kind === "definition") {
-        const next = record.payload.definition;
-        if (next.spec.sourceId !== this.sourceId || next.parentRevision !== (definitions.get(next.id)?.revisionHash ?? null)) throw new Error("Requirement definition lineage mismatch; stop for host review.");
-        definitions.set(next.id, next);
-      } else if (record.payload.kind === "evaluation") {
-        if (definitions.get(record.payload.result.setId)?.revisionHash !== record.payload.result.revisionHash) throw new Error("Requirement evaluation has no active definition; stop for host review.");
-      } else if (record.payload.kind === "core-role-definition") {
-        if (record.payload.definition.sourceId !== this.sourceId) throw new Error("Core role definition escapes its source; stop for host review.");
-        coreHistory.push(record.payload.definition);
-        coreRoleRequirementHistorySchema.parse(coreHistory);
-      } else if (record.payload.kind === "core-role-attempt") {
-        assertCoreRoleAttemptDefinition(record.payload.receipt, coreHistory, this.sourceId);
-        attempts.set(record.payload.receipt.fingerprint, record.payload.receipt);
-      } else if (record.payload.kind === "core-role-invalidation") {
-        if (!evaluations.has(record.payload.evaluationRef)) throw new Error("Role invalidation has no retained evaluation; stop for host review");
-      } else if (record.payload.kind === "core-role-attempt-evaluation") {
-        const payload = record.payload, evaluation = evaluations.get(payload.evaluationRef);
-        const attempt = attempts.get(payload.receiptFingerprint)?.identity.requirementAttempts?.find(item => item.requirementId === payload.result.id && item.definitionHash === payload.result.definitionHash);
-        const key = contentHash({ receiptFingerprint: payload.receiptFingerprint, requirementId: payload.result.id, definitionHash: payload.result.definitionHash, subjectSnapshotHash: payload.subjectSnapshotHash });
-        if (!evaluation || !attempt || attempt.definitionRevision !== payload.definitionRevision || evaluation.subjectSnapshotHash !== payload.subjectSnapshotHash
-          || payload.settlementKey !== key || settlementKeys.has(key)
-          || (payload.result.state !== "stale" && contentHash(evaluation.result.requirements.find(item => item.id === payload.result.id)) !== contentHash(payload.result))) throw new Error("Role attempt settlement has invalid immutable references; stop for host review");
-        settlementKeys.add(key);
-      } else {
-        const active = coreHistory.at(-1);
-        if (!active || record.payload.definitionRevision !== active.revisionHash || record.payload.result.setId !== "core-roles" || record.payload.result.revisionHash !== active.specHash) throw new Error("Core role evaluation has no active definition; stop for host review.");
-        evaluations.set(contentHash(record.payload), record.payload);
-      }
+    return requirementJournalSchema.parse(records);
+  }
+  async assertJournalRestorable(input: readonly LedgerRecord[], bytes?: Uint8Array): Promise<void> {
+    const incoming = requirementJournalSchema.parse(input), current = await this.history();
+    if (current.some((record, index) => record.hash !== incoming[index]?.hash)) throw new Error("Requirement journal restore would discard or rewrite current audit history; preserve the journal and stop for host review");
+    if (incoming.some(record => record.sourceId !== this.sourceId)) throw new Error("Requirement journal restore source mismatch; stop for host review");
+    if (incoming.length && !bytes) throw new Error("Requirement journal restore needs immutable source bytes; stop for host storage review");
+    for (const record of incoming) {
+      if (record.payload.kind === "core-role-definition") assertCoreRoleDefinitionEvidence(record.payload.definition, bytes!);
+      if (record.payload.kind === "definition") evaluateRequirementSet(record.payload.definition, bytes!, Object.fromEntries(sceneCatalogKeys.map(key => [key, new Map()])) as SceneReviewCatalog);
     }
-    return records;
+  }
+  async restoreJournal(input: readonly LedgerRecord[], bytes?: Uint8Array): Promise<void> {
+    await this.assertJournalRestorable(input, bytes);
+    const current = await this.history();
+    for (const record of input.slice(current.length)) await this.publish(record.payload);
   }
   async definitions(): Promise<RequirementSet[]> {
     return activeRequirementSets(await this.definitionHistory());
@@ -397,6 +377,82 @@ export function coreRoleAttemptHistoryIssues(receipts: readonly CompilerFinishRe
     if (receipt.state !== "completed" || !receipt.identity.requirementAttempts) continue;
     try { assertCoreRoleAttemptDefinition(receipt, definitions, sourceId); }
     catch { issues.push(`CORE_ROLE_ATTEMPT_DEFINITION_MISMATCH: ${receipt.fingerprint}`); }
+  }
+  return issues;
+}
+
+/** Complete audit history, excluded from the semantic subject hash. */
+export const requirementJournalSchema = z.array(recordSchema).superRefine((records, ctx) => {
+  try {
+    const sourceId = records[0]?.sourceId ?? "";
+    for (const [index, record] of records.entries()) {
+      if (record.sourceId !== sourceId || record.sequence !== index || record.predecessorHash !== (records[index - 1]?.hash ?? null)) throw new Error("Requirement journal source or predecessor chain mismatch");
+      if (index && contentHash(record.payload) === contentHash(records[index - 1]!.payload)) throw new Error("Requirement journal repeats an adjacent published payload");
+    }
+    const definitions = new Map<string, RequirementSet>();
+    const coreHistory: CoreRoleRequirementDefinition[] = [];
+    const evaluations = new Map<string, Extract<LedgerRecord["payload"], { kind: "core-role-evaluation" }>>();
+    const attempts = new Map<string, CompilerFinishReceipt>();
+    const settlementKeys = new Set<string>();
+    for (const record of records) {
+      if (record.payload.kind === "definition") {
+        const next = record.payload.definition;
+        if (next.spec.sourceId !== sourceId || next.parentRevision !== (definitions.get(next.id)?.revisionHash ?? null)) throw new Error("Requirement definition lineage mismatch; stop for host review.");
+        definitions.set(next.id, next);
+      } else if (record.payload.kind === "evaluation") {
+        if (definitions.get(record.payload.result.setId)?.revisionHash !== record.payload.result.revisionHash) throw new Error("Requirement evaluation has no active definition; stop for host review.");
+      } else if (record.payload.kind === "core-role-definition") {
+        if (record.payload.definition.sourceId !== sourceId) throw new Error("Core role definition escapes its source; stop for host review.");
+        coreHistory.push(record.payload.definition);
+        coreRoleRequirementHistorySchema.parse(coreHistory);
+      } else if (record.payload.kind === "core-role-attempt") {
+        assertCoreRoleAttemptDefinition(record.payload.receipt, coreHistory, sourceId);
+        if (attempts.has(record.payload.receipt.fingerprint)) throw new Error("Requirement journal repeats an immutable attempt");
+        attempts.set(record.payload.receipt.fingerprint, record.payload.receipt);
+      } else if (record.payload.kind === "core-role-invalidation") {
+        if (!evaluations.has(record.payload.evaluationRef)) throw new Error("Role invalidation has no retained evaluation; stop for host review");
+      } else if (record.payload.kind === "core-role-attempt-evaluation") {
+        const payload = record.payload, evaluation = evaluations.get(payload.evaluationRef);
+        const attempt = attempts.get(payload.receiptFingerprint)?.identity.requirementAttempts?.find(item => item.requirementId === payload.result.id && item.definitionHash === payload.result.definitionHash);
+        const key = contentHash({ receiptFingerprint: payload.receiptFingerprint, requirementId: payload.result.id, definitionHash: payload.result.definitionHash, subjectSnapshotHash: payload.subjectSnapshotHash });
+        if (!evaluation || !attempt || attempt.definitionRevision !== payload.definitionRevision || evaluation.subjectSnapshotHash !== payload.subjectSnapshotHash
+          || payload.settlementKey !== key || settlementKeys.has(key)
+          || (payload.result.state !== "stale" && contentHash(evaluation.result.requirements.find(item => item.id === payload.result.id)) !== contentHash(payload.result))) throw new Error("Role attempt settlement has invalid immutable references; stop for host review");
+        settlementKeys.add(key);
+      } else {
+        const active = coreHistory.at(-1);
+        if (!active || record.payload.definitionRevision !== active.revisionHash || record.payload.result.setId !== "core-roles" || record.payload.result.revisionHash !== active.specHash) throw new Error("Core role evaluation has no active definition; stop for host review.");
+        const expected = coreRoleDefinitions({ source: { id: sourceId } }, active.roster).map(item => ({ id: item.id, definitionHash: contentHash(item) }));
+        const actual = record.payload.result.requirements.map(item => ({ id: item.id, definitionHash: item.definitionHash }));
+        if (contentHash(expected.sort((a, b) => a.id.localeCompare(b.id))) !== contentHash(actual.sort((a, b) => a.id.localeCompare(b.id)))) throw new Error("Historical core role evaluation definition inventory mismatch");
+        evaluations.set(contentHash(record.payload), record.payload);
+      }
+    }
+  } catch (error) { ctx.addIssue({ code: "custom", message: String(error) }); }
+});
+
+export function requirementSnapshotInputs<T extends { requirementJournal?: LedgerRecord[] }>(snapshot: T): Omit<T, "requirementJournal"> {
+  const { requirementJournal: _history, ...inputs } = snapshot;
+  return inputs;
+}
+
+export function requirementJournalBindingIssues(snapshot: {
+  requirementJournal?: LedgerRecord[]; requirementDefinitions?: RequirementSet[]; coreRoleRequirementDefinitions?: CoreRoleRequirementDefinition[];
+  reconciliationObligations?: { receipt: CompilerFinishReceipt }[];
+}, sourceId: string, sourceSha256: string, requireHistory = false): string[] {
+  if (!snapshot.requirementJournal) return requireHistory && (snapshot.requirementDefinitions?.length || snapshot.coreRoleRequirementDefinitions?.length) ? ["REQUIREMENT_JOURNAL_MISSING"] : []; // Historical bundles predate full journal transport.
+  const parsed = requirementJournalSchema.safeParse(snapshot.requirementJournal);
+  if (!parsed.success) return ["REQUIREMENT_JOURNAL_INVALID"];
+  const history = parsed.data, issues: string[] = [];
+  if (history.some(record => record.sourceId !== sourceId)) issues.push("REQUIREMENT_JOURNAL_SOURCE_MISMATCH");
+  const scenes = history.flatMap(record => record.payload.kind === "definition" ? [record.payload.definition] : []);
+  const roles = history.flatMap(record => record.payload.kind === "core-role-definition" ? [record.payload.definition] : []);
+  if (contentHash(scenes) !== contentHash(snapshot.requirementDefinitions ?? []) || contentHash(roles) !== contentHash(snapshot.coreRoleRequirementDefinitions ?? [])) issues.push("REQUIREMENT_JOURNAL_DEFINITIONS_MISMATCH");
+  if (scenes.some(set => set.spec.sourceSha256 !== sourceSha256) || roles.some(definition => definition.sourceSha256 !== sourceSha256)) issues.push("REQUIREMENT_JOURNAL_SOURCE_MISMATCH");
+  for (const record of history) {
+    if (record.payload.kind !== "core-role-attempt") continue;
+    const retained = record.payload.receipt;
+    if (!(snapshot.reconciliationObligations ?? []).some(item => contentHash(item.receipt) === contentHash(retained))) issues.push("REQUIREMENT_JOURNAL_RECEIPT_MISSING");
   }
   return issues;
 }

@@ -1,6 +1,6 @@
 import { coreRoleRequirementHistorySchema, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
-import { RequirementLedger, coreRoleAttemptHistoryIssues, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
+import { RequirementLedger, requirementJournalSchema, requirementJournalBindingIssues, requirementSnapshotInputs, type LedgerRecord, coreRoleAttemptHistoryIssues, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
 import { captureReconciliationObligations, assertReconciliationObligationsRestorable, restoreReconciliationObligations, reconciliationObligationSnapshotSchema, type ReconciliationObligationSnapshot } from "./reconciliation-review-ledger.js";
 import { eventExecutionSchema } from "../world/event-execution.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
@@ -134,6 +134,7 @@ const preparedCanonicalSchema = z.object({
 }).strict();
 
 const preparedCompilerSnapshotSchema = z.object({
+  requirementJournal: requirementJournalSchema.optional(),
   requirementDefinitions: requirementDefinitionHistorySchema.optional(),
   coreRoleRequirementDefinitions: coreRoleRequirementHistorySchema.optional(),
   reconciliationObligations: reconciliationObligationSnapshotSchema.optional(),
@@ -180,6 +181,8 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     throw new Error("Prepared bundle chapter split plan does not match its source identity.");
   }
   const snapshot = bundle.compilerSnapshot;
+  const journalIssues = requirementJournalBindingIssues(snapshot, sourceId, bundle.source.contentSha256);
+  if (journalIssues.length) throw new Error(journalIssues.join("; "));
   const attemptIssues = coreRoleAttemptHistoryIssues((snapshot.reconciliationObligations ?? []).map(item => item.receipt), snapshot.coreRoleRequirementDefinitions ?? [], sourceId);
   if (attemptIssues.length) throw new Error(attemptIssues.join("; "));
   if (snapshot.roleRoster && (snapshot.roleRoster.sourceId !== sourceId || snapshot.roleRoster.sourceSha256 !== bundle.source.contentSha256)) throw new Error("Prepared role roster escapes its source identity");
@@ -858,6 +861,7 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(source.id),
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
+    const requirementJournal = await new RequirementLedger(this.workspaceRoot, source.id).history();
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).definitionHistory();
     const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).coreRoleDefinitionHistory();
     const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, source.id);
@@ -882,6 +886,7 @@ export class PreparedNovelCache {
         .sort(),
       canonical: preparedCanonical,
       compilerSnapshot: {
+        ...(requirementJournal.length ? { requirementJournal } : {}),
         ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
         ...(coreRoleRequirementDefinitions.length ? { coreRoleRequirementDefinitions } : {}),
         ...(reconciliationObligations.length ? { reconciliationObligations } : {}),
@@ -1048,7 +1053,7 @@ export class PreparedNovelCache {
     if (!currentInitialForSource || canonicalJson(currentInitialForSource) !== canonicalJson(bundle.canonical.initialWorld)) {
       return "initial world differs";
     }
-    if (canonicalJson(currentCompilerSnapshot) !== canonicalJson(bundle.compilerSnapshot)) {
+    if (canonicalJson(requirementSnapshotInputs(currentCompilerSnapshot)) !== canonicalJson(requirementSnapshotInputs(bundle.compilerSnapshot))) {
       return "source observations, identity resolutions, accounting, or exact evidence bindings differ";
     }
     return null;
@@ -1062,6 +1067,7 @@ export class PreparedNovelCache {
     eventResolutions: Awaited<ReturnType<EventResolutionStore["list"]>>;
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
     roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
+    requirementJournal?: LedgerRecord[];
     requirementDefinitions?: RequirementSet[];
     coreRoleRequirementDefinitions?: CoreRoleRequirementDefinition[];
     reconciliationObligations?: ReconciliationObligationSnapshot;
@@ -1086,10 +1092,12 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(sourceId),
       new SourceAccountingStore(this.workspaceRoot).read(sourceId),
     ]);
+    const requirementJournal = await new RequirementLedger(this.workspaceRoot, sourceId).history();
     const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).definitionHistory();
     const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).coreRoleDefinitionHistory();
     const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, sourceId);
     return {
+      ...(requirementJournal.length ? { requirementJournal } : {}),
       ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
       ...(coreRoleRequirementDefinitions.length ? { coreRoleRequirementDefinitions } : {}),
       ...(reconciliationObligations.length ? { reconciliationObligations } : {}),
@@ -1108,9 +1116,10 @@ export class PreparedNovelCache {
     const sourceId = bundle.source.id;
     await new RequirementLedger(this.workspaceRoot, sourceId).assertRestorable(bundle.compilerSnapshot.requirementDefinitions ?? []);
     const coreDefinitions = bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [];
-    const coreSource = coreDefinitions.length ? await WorkspaceStore.openReadOnly(this.workspaceRoot).getSource(sourceId) : null;
+    const coreSource = (coreDefinitions.length || bundle.compilerSnapshot.requirementJournal?.length) ? await WorkspaceStore.openReadOnly(this.workspaceRoot).getSource(sourceId) : null;
     const coreBytes = coreSource ? await readSourceMaterial(this.workspaceRoot, coreSource) : undefined;
     await new RequirementLedger(this.workspaceRoot, sourceId).assertCoreRolesRestorable(coreDefinitions, coreBytes);
+    await new RequirementLedger(this.workspaceRoot, sourceId).assertJournalRestorable(bundle.compilerSnapshot.requirementJournal ?? [], coreBytes);
     await new RequirementLedger(this.workspaceRoot, sourceId).assertCoreRoleAttemptsRestorable((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), coreDefinitions);
     await assertReconciliationObligationsRestorable(this.workspaceRoot, sourceId, bundle.compilerSnapshot.reconciliationObligations ?? []);
     const workspace = await WorkspaceStore.create(this.workspaceRoot);
@@ -1179,6 +1188,7 @@ export class PreparedNovelCache {
     for (const model of bundle.canonical.models) await actors.putModel(model);
     for (const possibility of bundle.canonical.possibilities) await possibilities.put(possibility);
     const snapshot = bundle.compilerSnapshot;
+    if (snapshot.requirementJournal) await new RequirementLedger(this.workspaceRoot, sourceId).restoreJournal(snapshot.requirementJournal, coreBytes);
     await new RequirementLedger(this.workspaceRoot, sourceId).restore(snapshot.requirementDefinitions ?? []);
     await new RequirementLedger(this.workspaceRoot, sourceId).restoreCoreRoles(snapshot.coreRoleRequirementDefinitions ?? [], coreBytes);
     await restoreReconciliationObligations(this.workspaceRoot, sourceId, snapshot.reconciliationObligations ?? []);

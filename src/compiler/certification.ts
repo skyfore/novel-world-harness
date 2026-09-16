@@ -1,4 +1,4 @@
-import { coreRoleAttemptHistoryIssues } from "./requirement-ledger.js";
+import { coreRoleAttemptHistoryIssues, requirementJournalBindingIssues, requirementSnapshotInputs } from "./requirement-ledger.js";
 import fs from "node:fs/promises";
 import { activeRequirementSets, evaluateRequirementSet, requirementResultSchema, requirementResultIssues } from "./requirement-ledger.js";
 import { reconciliationObligationIssues } from "./reconciliation-review-ledger.js";
@@ -41,7 +41,7 @@ export type NovelClosureAssessment = z.infer<typeof novelClosureAssessmentSchema
 
 /** Derived outputs are excluded so the snapshot, probes and certificate never form a hash cycle. */
 export function preparedSubjectHash(bundle: Pick<PreparedNovelBundle, "version" | "source" | "canonical" | "compilerSnapshot" | "compilerFingerprint" | "segmenterVersion" | "batchIds" | "chapterSplitPlan">): string {
-  return contentHash({ version: bundle.version, source: bundle.source, canonical: bundle.canonical, compilerSnapshot: bundle.compilerSnapshot,
+  return contentHash({ version: bundle.version, source: bundle.source, canonical: bundle.canonical, compilerSnapshot: requirementSnapshotInputs(bundle.compilerSnapshot),
     compilerFingerprint: bundle.compilerFingerprint ?? null, segmenterVersion: bundle.segmenterVersion, batchIds: [...bundle.batchIds].sort(), chapterSplitPlan: bundle.chapterSplitPlan ?? null });
 }
 
@@ -49,6 +49,7 @@ export function preparedSubjectHash(bundle: Pick<PreparedNovelBundle, "version" 
 export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle): Promise<NovelClosureAssessment> {
   const subjectSnapshotHash = preparedSubjectHash(bundle), closure = buildPreparedClosure(bundle);
   const issues = [...closure.issues, ...validateFrozenAccounting(bundle)];
+  issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true).map(message => ({ code: "REQUIREMENT_JOURNAL_INVALID", message })));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));
   issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id).map(message => ({ code: "CORE_ROLE_ATTEMPT_DEFINITION_MISMATCH", message })));
   const snapshot = bundle.compilerSnapshot;
@@ -111,6 +112,7 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
   issues.push(...coreRoleResultIssues(bundle, assessment.roster, assessment.playability, assessment.subjectSnapshotHash, assessment.coreRoleResult));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256));
   issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id));
+  issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true));
   issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));
   if (bundle.compilerSnapshot.roleRoster) issues.push(...validateRoleDevelopmentExpectations(bundle.compilerSnapshot.roleRoster).map(issue => `${issue.code}: ${issue.path}`));
   if (preparedSubjectHash(bundle) !== assessment.subjectSnapshotHash) issues.push("ENTRY_CUT_STALE: prepared inputs changed after entry evaluation");

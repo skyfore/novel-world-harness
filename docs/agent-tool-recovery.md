@@ -399,3 +399,24 @@ different dependency evidence, stop for host storage/dependency review; do not
 retry unchanged, delete the old result or replay the original proposal. These
 records observe current postconditions; they do not claim that a particular
 model attempt caused a capability to become satisfied.
+
+
+### Frozen requirement journals
+
+New prepared candidates carry the complete `compilerSnapshot.requirementJournal`
+chain, including definitions, attempts, evaluations, invalidations and attempt
+settlements. Restore validates original source bytes, the source-scoped sequence,
+record hashes, predecessor links and referenced definitions/evaluations before
+world materialization. Current local history must be a prefix of the incoming
+chain. A missing, divergent or truncated chain stops for host review; preserve
+the journal and candidate, never reset the head, discard later records or replay
+model writes. An interrupted import can resume from its verified prefix.
+
+The journal is audit evidence, not an evaluator input. Its addition changes the
+immutable bundle hash but not the semantic subject hash. Current certification
+still recomputes capability results from frozen world inputs; a historical
+`satisfied` entry never grants current satisfaction. Historical bundles without
+a journal remain readable. If they have independent requirement definitions,
+current certification requires a fresh candidate with retained history; missing
+historical evaluations must not be fabricated. Such a legacy bundle cannot
+restore over an existing local journal by silently dropping its audit history.

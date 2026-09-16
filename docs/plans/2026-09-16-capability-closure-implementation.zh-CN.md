@@ -11,7 +11,8 @@
 | P1b 逐能力报告与批次尝试 | `fb4c738`，新 reconciliation 计划冻结 ontology/development/driver 项；finish v2 绑定计划与报告；逐要求保留 deferral | 已提交；1040 项测试与类型检查通过 |
 | P1c 归档与快照中的义务保留 | `e9976cf`，当前/历史 finish 统一读取、历史宿主复核、候选认证和恢复前置检查 | 实现完成；1044 项测试与类型检查通过；本记录随该段提交 |
 | P1d 独立角色发展预期 | `db1d006`，版本化原文审阅、稳定/变化/未知、双审冲突保留、认证未知门 | 实现完成；1048 项测试及类型检查通过，尚不代表角色语义结算完成 |
-| P1e 真实入口自主驱动 | 排除玩家的引擎提交探针、冻结事件/效果凭据、认证检查 | 实现完成；1056 项测试及类型检查通过，P1 整体仍未完成 |
+| P1e 真实入口自主驱动 | `5ac8844`，排除玩家的引擎提交探针、冻结事件/效果凭据、认证检查 | 实现完成；1056 项测试及类型检查通过，P1 整体仍未完成 |
+| P1f 核心角色逐能力评估 | 独立分母、本体精确绑定、发展运行时探针、认证重评 | 实现完成；1066 项测试及类型检查通过，持久角色定义/尝试接线仍未完成 |
 | P1 后续完整结算 | 核心角色的独立要求分母、上述结构性修复要求与统一 ledger/evaluator 的消费连接、跨 reparse 的完整义务恢复 | 未完成；P1 整体仍进行中 |
 | P2–P7 | 受限修复、语义获知、本体、文学/工作集、自主推进、完整体验验收 | 未完成 |
 
@@ -92,3 +93,20 @@ finish identity v2 保存计划 hash 和要求列表，原始 input 冻结子报
 尚未完成的 P1 项保持不变：把角色 ontology/development/driver 的独立定义、尝试与实际结果统一接入持久 requirement ledger，以及历史角色审阅的保留式修订。P2–P7 仍未完成。
 
 本段验证：`pnpm test --maxWorkers=2` 的 181 文件、1056 tests 全部通过（72.61 秒）；`pnpm check` 和 `git diff --check` 通过。9 项入口测试覆盖 NPC/环境/到期 process 的实际提交，以及静态目标、玩家行动、未满足条件、死亡 NPC、同值写入、未来 canon、坏效果 hash/进展指针和过期 cut。未调用真实模型，未进行 P7 人工体验验收。
+
+
+## P1f：逐角色能力评估
+
+新增 `core-role-capabilities.ts`，复用 `SemanticRequirement`、五种 RequirementState、依赖结算及 `RequirementResult` schema。独立名单确定 source-review 分母和每个角色的 ontology/development/opening-driver 三个稳定 ID。遗漏角色也有自己的三项要求；未解析身份只阻塞该角色的能力，不抹掉其他角色已经证明的能力。全局发布仍保留既有 roster 完整性门。
+
+ontology 要求当前 character-v1 模型、支持的 disposition、有效实体/事件/目标绑定，以及匹配当前模型 hash 的精确证据断言。仅有 goal 或旧 traits 数字不满足本体。development 对每位独立审阅者的每条预期分别匹配维度、方向、相同上下文和前后原文单元；触发事件也必须与 episode 的证据重叠。然后调用生产 `resolveCharacterOntology` 检查触发前、完整触发后、缺一个触发、只有 world truth 没有 actor experience，以及声明的 reversal；不把未来 canon 当成该角色已经经历的事实。既有先前事件按确定时间或因果祖先构造探针上下文，不能用全书未来事件凑齐条件。
+
+长期发展必须体现在稳定 disposition 的变化上。独立 no-development/稳定预期允许 appraisal 和临时情境倾向；更改稳定基线的 episode、时间有效性或旧 trait/bias 阶段偏移不能在稳定预期下直接通过。驱动项单独消费 P1e 的实际提交凭据，不以 ontology 或 development 的成功代替。任一 canonical/证据绑定/subject/引擎版本改变，旧结果都不能直接复用。
+
+候选 readiness 保存 `coreRoleResult`；认证从冻结名单、模型、精确绑定和入口输入重算每项结果，拒绝缺项、旧结果与伪造 satisfied。旧候选没有这个结果时不具备新的核心角色能力证据。此模块评估运行时后置条件与已验证的原文绑定，不替代整本书的独立语义支持、场景执行及真人质量评审门。
+
+本段尚未把角色定义修订与 reconciliation attempts 接入追加式 requirement ledger。角色结果当前随冻结候选保存；跨 reparse 的独立角色定义历史、宿主保留式复核修订、converge 后持久结算仍是下一段工作，不能将 P1f 当作 P1 全部完成。P2–P7 保持未完成。
+
+本段最终测试：`pnpm test --maxWorkers=2` 的 182 文件、1066 tests 全部通过（74.54 秒）。新增 10 项核心角色评估测试覆盖完整逐项满足、driver 成功而角色模型缺失、错误方向/前后原文/触发事件/上下文、未经历事件、缺失 episode、临时状态不能冒充长期发展、稳定角色无需虚构成长、遗漏角色保留、精确断言作用域、旧绑定以及伪造结果。P7 的真实模型和独立人工体验未执行。
+
+本段 `pnpm check`（服务端、Web、E2E TypeScript）与 `git diff --check` 也全部通过。

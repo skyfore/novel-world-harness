@@ -13,6 +13,7 @@ import { worldStorageRoot } from "../world/paths.js";
 import { buildPreparedClosure, closureGraphSchema } from "./closure.js";
 import { buildRoleRoster, majorRoleCandidates, roleRosterSchema, validateRoleRoster, validateRoleDevelopmentExpectations } from "./role-roster.js";
 import { entryDriverWitnessIssues } from "./entry-driver-probe.js";
+import { evaluateCoreRoleCapabilities, coreRoleResultIssues } from "./core-role-capabilities.js";
 import { playabilityManifestSchema, probeMajorRoleEntries } from "./playability.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { NovelPlayQualityStore, novelPlayQualitySchema, validateNovelPlayQuality } from "../eval/novel-play-quality.js";
@@ -31,6 +32,7 @@ export const novelClosureAssessmentSchema = z.object({
   quality: novelPlayQualitySchema.nullable(),
   supportAssessments: z.array(supportAssessmentSchema), sceneContracts: z.array(sceneExecutionContractSchema),
   requirementResults: z.array(requirementResultSchema).optional(),
+  coreRoleResult: requirementResultSchema.optional(),
   issues: z.array(validationIssueSchema),
 }).strict();
 export type NovelClosureAssessment = z.infer<typeof novelClosureAssessmentSchema>;
@@ -75,6 +77,11 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   } catch (error) {
     issues.push({ code: "ROSTER_ASSESSMENT_BLOCKED", message: error instanceof Error ? error.message : String(error) });
   }
+  let coreRoleResult: NovelClosureAssessment["coreRoleResult"];
+  try {
+    if (roster) coreRoleResult = evaluateCoreRoleCapabilities(bundle, roster, playability, subjectSnapshotHash);
+    issues.push(...coreRoleResultIssues(bundle, roster, playability, subjectSnapshotHash, coreRoleResult).map(message => ({ code: "CORE_ROLE_REQUIREMENT_NOT_CERTIFIED", message })));
+  } catch (error) { issues.push({ code: "CORE_ROLE_REQUIREMENTS_BLOCKED", message: String(error) }); }
   const quality = await new NovelPlayQualityStore(root).read(subjectSnapshotHash);
   const support = assessSemanticSupport(bundle, quality?.supportReviews), scenes = buildSceneExecutionContracts(bundle, roster);
   issues.push(...support.issues, ...scenes.issues);
@@ -85,6 +92,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   const assessment = novelClosureAssessmentSchema.parse({ version: 1, sourceId: bundle.source.id, sourceSha256: bundle.source.contentSha256, subjectSnapshotHash,
     engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION, closure, roster, playability, entryReady, fullNovelReady: entryReady && qualityIssues.length === 0, quality, supportAssessments: support.assessments, sceneContracts: scenes.contracts,
     ...(requirementSets.length ? { requirementResults } : {}),
+    ...(coreRoleResult ? { coreRoleResult } : {}),
     issues: [...new Map(issues.map((issue) => [`${issue.code}/${issue.path ?? ""}/${issue.message}`, issue])).values()] });
   await new NovelClosureStore(root).write(assessment);
   return assessment;
@@ -92,6 +100,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
 
 export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): string[] {
   const issues: string[] = [];
+  issues.push(...coreRoleResultIssues(bundle, assessment.roster, assessment.playability, assessment.subjectSnapshotHash, assessment.coreRoleResult));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256));
   issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));
   if (bundle.compilerSnapshot.roleRoster) issues.push(...validateRoleDevelopmentExpectations(bundle.compilerSnapshot.roleRoster).map(issue => `${issue.code}: ${issue.path}`));

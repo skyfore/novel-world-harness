@@ -376,3 +376,26 @@ attempt without rerunning model writes. A bad plan, source, dependency or
 definition must stop for host review, never be replaced with a guessed ID.
 Historical snapshot import validates the original scope and preserves attempts;
 it does not require old dependencies to be current and does not settle them.
+
+
+### Post-convergence role settlement
+
+`prepare-all` now completes the two independent role reviews before opening
+semantic repair plans. The internal opening-only rollback path still stops
+before this stage. A source review that does not commit stops unchanged model
+retries; it cannot be bypassed by generating a repair under an empty scope.
+
+After a repair shard converges, the host evaluates its canonical candidate and
+retains per-attempt settlements keyed by receipt fingerprint, requirement ID,
+definition hash and subject hash. A crash after the main evaluation was appended
+requires only host settlement recovery; no model writes are replayed. Pending
+proposals and unfinished source batches prevent candidate evaluation. A changed
+subject invalidates the previous evaluation even when the new role roster cannot
+yet be certified; preserve the reviews and stop for host source-review repair.
+
+Superseded definition or proposal revisions yield `stale` for that historical
+attempt, never a rewritten old success. If the same settlement key produces
+different dependency evidence, stop for host storage/dependency review; do not
+retry unchanged, delete the old result or replay the original proposal. These
+records observe current postconditions; they do not claim that a particular
+model attempt caused a capability to become satisfied.

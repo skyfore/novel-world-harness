@@ -1,3 +1,4 @@
+import { settleCoreRoleRequirements } from "../compiler/core-role-requirement-service.js";
 import { assertReconciliationDeferralsReviewed } from "../compiler/reconciliation-review-ledger.js";
 import { RequirementLedger } from "../compiler/requirement-ledger.js";
 import { settleSourceRequirements } from "../compiler/requirement-service.js";
@@ -397,6 +398,18 @@ export async function prepareAllCommand(
     return inspection;
   }
 
+  if (!cacheVerified) {
+    report("Reviewing the independent major-character roster before planning semantic repairs.");
+    try { await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
+      ...(options.model ? { model: options.model } : {}), signal: options.signal,
+      onStatus: options.onStatus, onModelText: options.onModelText, onModelThinking: options.onModelThinking,
+      onModelToolCall: options.onModelToolCall, onModelToolResult: options.onModelToolResult, onModelEvent: options.onModelEvent,
+    }, dependencies.compileInitialWorld); } catch (error) {
+      if (!options.candidateOnly || !(error instanceof Error) || !error.message.startsWith("WORLD_CLOSURE_BLOCKED:")) throw error;
+      report(error.message);
+    }
+  }
+
   if (
     inspection.audit
     && !options.reconciliationFocus
@@ -520,15 +533,6 @@ export async function prepareAllCommand(
   if (requirements.issues.length) throw new Error(`Registered capability requirements block publication: ${requirements.issues.join("; ")}. Inspect nwh requirements inspect --source ${sourceId}; preserve unresolved requirements and stop for host source review. Do not rotate namespaces or retry unchanged.`);
 
   if (["create-branch", "ready"].includes(inspection.stage) && !cacheVerified) {
-    report("Reviewing the independent major-character roster before candidate certification.");
-    try { await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
-      ...(options.model ? { model: options.model } : {}), signal: options.signal,
-      onStatus: options.onStatus, onModelText: options.onModelText, onModelThinking: options.onModelThinking,
-      onModelToolCall: options.onModelToolCall, onModelToolResult: options.onModelToolResult, onModelEvent: options.onModelEvent,
-    }, dependencies.compileInitialWorld); } catch (error) {
-      if (!options.candidateOnly || !(error instanceof Error) || !error.message.startsWith("WORLD_CLOSURE_BLOCKED:")) throw error;
-      report(error.message);
-    }
     options.signal?.throwIfAborted();
     const evaluated = await preparedCache.inspectCandidate(inspection.source!);
     const roleLedger = new RequirementLedger(root, sourceId);
@@ -644,6 +648,8 @@ async function runWorldReconciliationPass(input: {
     onModelEvent: input.options.onModelEvent,
   });
   await convergeForPreparation(input.root, input.sourceId, input.dependencies.converge, input.report);
+  const roleSettlement = await settleCoreRoleRequirements(input.root, input.sourceId, input.options.cacheRoot);
+  if (roleSettlement) input.report(`Core role requirements evaluated after convergence: ${roleSettlement.assessment.coreRoleResult?.requirements.filter(item => item.state === "satisfied").length ?? 0}/${roleSettlement.assessment.coreRoleResult?.requirements.length ?? 0} satisfied.`);
   const batchId = `reconcile-${input.sourceId}-${input.mode}-${input.options.reparseRunId ?? "v3"}-${input.iteration}`;
   const targets = await reconciliationReviewTargets(input.root, input.sourceId, batchId);
   if (targets !== undefined) {

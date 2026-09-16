@@ -34,6 +34,9 @@ export const requirementResultSchema = z.object({
 }).strict();
 export type RequirementResult = z.infer<typeof requirementResultSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("core-role-invalidation"), evaluationRef: hash, nextSubjectSnapshotHash: hash, reason: text }).strict(),
+  z.object({ kind: z.literal("core-role-attempt-evaluation"), settlementKey: hash, receiptFingerprint: hash, definitionRevision: hash,
+    subjectSnapshotHash: hash, evaluationRef: hash, result: requirementResultSchema.shape.requirements.element }).strict(),
   z.object({ kind: z.literal("core-role-attempt"), receipt: compilerFinishReceiptSchema }).strict(),
   z.object({ kind: z.literal("definition"), definition: requirementSetSchema }).strict(),
   z.object({ kind: z.literal("evaluation"), result: requirementResultSchema }).strict(),
@@ -123,7 +126,7 @@ export function requirementResultIssues(setsInput: readonly RequirementSet[], re
  */
 export class RequirementLedger {
   private readonly directory: string;
-  constructor(root: string, readonly sourceId: string) {
+  constructor(private readonly root: string, readonly sourceId: string) {
     this.directory = path.join(worldStorageRoot(root), "compiler", "requirements", idSchema.parse(sourceId));
   }
   private async readHead() {
@@ -155,6 +158,9 @@ export class RequirementLedger {
     records.reverse();
     const definitions = new Map<string, RequirementSet>();
     const coreHistory: CoreRoleRequirementDefinition[] = [];
+    const evaluations = new Map<string, Extract<LedgerRecord["payload"], { kind: "core-role-evaluation" }>>();
+    const attempts = new Map<string, CompilerFinishReceipt>();
+    const settlementKeys = new Set<string>();
     for (const record of records) {
       if (record.payload.kind === "definition") {
         const next = record.payload.definition;
@@ -168,9 +174,21 @@ export class RequirementLedger {
         coreRoleRequirementHistorySchema.parse(coreHistory);
       } else if (record.payload.kind === "core-role-attempt") {
         assertCoreRoleAttemptDefinition(record.payload.receipt, coreHistory, this.sourceId);
+        attempts.set(record.payload.receipt.fingerprint, record.payload.receipt);
+      } else if (record.payload.kind === "core-role-invalidation") {
+        if (!evaluations.has(record.payload.evaluationRef)) throw new Error("Role invalidation has no retained evaluation; stop for host review");
+      } else if (record.payload.kind === "core-role-attempt-evaluation") {
+        const payload = record.payload, evaluation = evaluations.get(payload.evaluationRef);
+        const attempt = attempts.get(payload.receiptFingerprint)?.identity.requirementAttempts?.find(item => item.requirementId === payload.result.id && item.definitionHash === payload.result.definitionHash);
+        const key = contentHash({ receiptFingerprint: payload.receiptFingerprint, requirementId: payload.result.id, definitionHash: payload.result.definitionHash, subjectSnapshotHash: payload.subjectSnapshotHash });
+        if (!evaluation || !attempt || attempt.definitionRevision !== payload.definitionRevision || evaluation.subjectSnapshotHash !== payload.subjectSnapshotHash
+          || payload.settlementKey !== key || settlementKeys.has(key)
+          || (payload.result.state !== "stale" && contentHash(evaluation.result.requirements.find(item => item.id === payload.result.id)) !== contentHash(payload.result))) throw new Error("Role attempt settlement has invalid immutable references; stop for host review");
+        settlementKeys.add(key);
       } else {
         const active = coreHistory.at(-1);
         if (!active || record.payload.definitionRevision !== active.revisionHash || record.payload.result.setId !== "core-roles" || record.payload.result.revisionHash !== active.specHash) throw new Error("Core role evaluation has no active definition; stop for host review.");
+        evaluations.set(contentHash(record.payload), record.payload);
       }
     }
     return records;
@@ -222,6 +240,15 @@ export class RequirementLedger {
     if (history.some(record => record.payload.kind === "core-role-attempt" && record.payload.receipt.fingerprint === receipt.fingerprint)) return;
     await this.publish({ kind: "core-role-attempt", receipt });
   }
+  async invalidateCoreRoleEvaluation(nextSubjectSnapshotHash: string): Promise<void> {
+    hash.parse(nextSubjectSnapshotHash);
+    const history = await this.history(), previous = history.findLast(record => record.payload.kind === "core-role-evaluation");
+    if (!previous || previous.payload.kind !== "core-role-evaluation" || previous.payload.subjectSnapshotHash === nextSubjectSnapshotHash) return;
+    const evaluationRef = contentHash(previous.payload);
+    if (history.some(record => record.payload.kind === "core-role-invalidation" && record.payload.evaluationRef === evaluationRef && record.payload.nextSubjectSnapshotHash === nextSubjectSnapshotHash)) return;
+    await this.publish({ kind: "core-role-invalidation", evaluationRef, nextSubjectSnapshotHash,
+      reason: "Frozen subject changed; retain the previous evaluation as historical evidence only" });
+  }
   async recordCoreRoleEvaluation(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): Promise<void> {
     const definition = (await this.coreRoleDefinitionHistory()).at(-1);
     if (!definition || bundle.source.id !== this.sourceId || bundle.source.contentSha256 !== definition.sourceSha256 || bundle.compilerSnapshot.coreRoleRequirementDefinitions?.at(-1)?.revisionHash !== definition.revisionHash) throw new Error("Core role evaluation lacks its current frozen definition; stop for host review");
@@ -234,7 +261,49 @@ export class RequirementLedger {
     if (result.revisionHash !== definition.specHash || contentHash(result) !== contentHash(assessment.coreRoleResult)) throw new Error("Core role evaluation differs from its frozen deterministic result; stop for host review");
     const payload = { kind: "core-role-evaluation" as const, definitionRevision: definition.revisionHash, subjectSnapshotHash, result };
     const previous = (await this.history()).findLast(record => record.payload.kind === "core-role-evaluation");
-    if (!previous || contentHash(previous.payload) !== contentHash(payload)) await this.publish(payload);
+    if (!previous || contentHash(previous.payload) !== contentHash(payload)) {
+      await this.invalidateCoreRoleEvaluation(subjectSnapshotHash);
+      await this.publish(payload);
+    }
+    await this.settleCoreRoleAttempts(bundle, payload);
+  }
+  private async settleCoreRoleAttempts(bundle: PreparedNovelBundle, evaluation: Extract<LedgerRecord["payload"], { kind: "core-role-evaluation" }>): Promise<void> {
+    const history = await this.history();
+    const settled = new Map(history.flatMap(record => record.payload.kind === "core-role-attempt-evaluation" ? [[record.payload.settlementKey, record.payload] as const] : []));
+    const { ProposalStore } = await import("../world/canonical-model.js");
+    const proposals = new ProposalStore(this.root), active = new Map<string, boolean>();
+    for (const record of history) {
+      if (record.payload.kind !== "core-role-attempt") continue;
+      const receipt = record.payload.receipt;
+      for (const attempt of receipt.identity.requirementAttempts ?? []) {
+        const result = evaluation.result.requirements.find(item => item.id === attempt.requirementId);
+        const diagnostics: string[] = [];
+        if (attempt.definitionRevision !== evaluation.definitionRevision || result?.definitionHash !== attempt.definitionHash) diagnostics.push("ATTEMPT_REQUIREMENT_REVISION_STALE");
+        for (const ref of attempt.proposalRefs) {
+          const key = contentHash(ref);
+          if (!active.has(key)) {
+            try {
+              const envelope = await proposals.readEnvelope("accepted", ref.proposalId);
+              const catalog = envelope.kind === "character-model" ? bundle.canonical.models : envelope.kind === "character-goal" ? bundle.canonical.goals : [];
+              active.set(key, contentHash(envelope) === ref.hash && catalog.some(item => contentHash(item) === contentHash(envelope.payload)));
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+              active.set(key, false);
+            }
+          }
+          if (!active.get(key)) diagnostics.push(`ATTEMPT_DEPENDENCY_NOT_ACTIVE: ${ref.proposalId}`);
+        }
+        const settledResult = diagnostics.length ? { id: attempt.requirementId, definitionHash: attempt.definitionHash, state: "stale" as const, diagnostics, blockedBy: [] } : result!;
+        const settlementKey = contentHash({ receiptFingerprint: receipt.fingerprint, requirementId: attempt.requirementId, definitionHash: attempt.definitionHash, subjectSnapshotHash: evaluation.subjectSnapshotHash });
+        const payload = { kind: "core-role-attempt-evaluation" as const, settlementKey, receiptFingerprint: receipt.fingerprint, definitionRevision: attempt.definitionRevision,
+          subjectSnapshotHash: evaluation.subjectSnapshotHash, evaluationRef: contentHash(evaluation), result: settledResult };
+        if (settled.has(settlementKey)) {
+          if (contentHash(settled.get(settlementKey)) !== contentHash(payload)) throw new Error("Role attempt settlement dependencies changed for the same frozen subject; stop for host review, never replay model writes");
+          continue;
+        }
+        await this.publish(payload);
+      }
+    }
   }
   async assertCoreRolesRestorable(input: readonly CoreRoleRequirementDefinition[], bytes?: Uint8Array): Promise<void> {
     const incoming = coreRoleRequirementHistorySchema.parse(input), current = await this.coreRoleDefinitionHistory();

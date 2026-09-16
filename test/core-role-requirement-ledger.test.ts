@@ -1,12 +1,18 @@
+import { ActorModelStore, characterGoalSchema } from "../src/world/actors.js";
+import { settleCoreRoleRequirements } from "../src/compiler/core-role-requirement-service.js";
+import { coreRoleAttemptScope, coreRoleAttemptReports } from "../src/compiler/requirement-attempts.js";
+import { compilerFinishReceiptSchema, CompilerFinishReceipts } from "../src/compiler/finish-receipts.js";
+import { SegmentStore } from "../src/compiler/segments.js";
+import { COMPILER_PIPELINE_VERSION } from "../src/compiler/batch-progress.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { RequirementLedger } from "../src/compiler/requirement-ledger.js";
 import { buildRoleRoster, RoleRosterStore, roleRosterSchema } from "../src/compiler/role-roster.js";
 import { baseStructuralUnits, ensureSourceStructure } from "../src/compiler/structure.js";
-import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
@@ -14,7 +20,7 @@ import { contentHash } from "../src/world/canonical.js";
 import { validateAssessmentRevision } from "../src/compiler/certification.js";
 
 const roots: string[] = [];
-afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-core-role-ledger-")); roots.push(root);
   const source = await createEvidenceFixture(root, "Ada waits. Bo watches.");
@@ -109,4 +115,83 @@ it("freezes definitions in real candidates, records exact evaluations idempotent
   const before = contentHash(await f.canon.listEntities());
   await expect(cache.restoreCompilerCheckpoint(f.source.source, archive.bundleHash!)).rejects.toThrow("forget current obligations");
   expect(contentHash(await f.canon.listEntities())).toBe(before);
+});
+
+it("recovers post-convergence settlement without replay and retains invalidation and per-attempt stale revisions", async () => {
+  const f = await fixture(), definition = await f.register();
+  await new InitialWorldStore(f.root).put({ version: 1, evidence: f.source.evidence("Ada waits."), participantPresence: [{ entityId: "ada", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.alive", value: true }, { op: "set", entityId: "ada", field: "character.plan", value: "wait" }] } });
+  const batches = await prepareCompilerBatches(f.root, f.source.source);
+  await new CompilerBatchStore(f.root).replaceCompleted(f.source.source.id, batches.map(batch => batch.id));
+  const scope = coreRoleAttemptScope(definition);
+  const requirements = [{ id: "character:ada:ontology", target: "character:ada", capability: "ontology" as const }, { id: "character:ada:opening-driver", target: "character:ada", capability: "opening-driver" as const }];
+  const reports = [{ target: "character:ada", disposition: "capability-gap" as const, summary: "Both capabilities remain unproven", evidence_segment_ids: [f.source.segmentId], requirement_reviews: requirements.map(item => ({ requirementId: item.id, disposition: "capability-gap" as const, summary: "No supported repair" })) }];
+  const identity = { version: 2, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId: f.source.source.id, sourceSha256: f.source.source.contentSha256, batchId: "historical-repair",
+    requirementScope: { planHash: contentHash("original-plan"), requirements, coreRoleScope: scope }, requirementAttempts: coreRoleAttemptReports({ batchId: "historical-repair", scope, requirements, reviews: reports }),
+    input: { outcome: "no-artifacts", reviewed_segments: [], summary: "Retained completed source review", target_reviews: reports }, segments: (await new SegmentStore(f.root).readManifest(f.source.source.id))!.segments, dependencies: [], metadata: {},
+  };
+  const receipt = compilerFinishReceiptSchema.parse({ identity, fingerprint: contentHash(identity), state: "completed", preparedAt: "2026-09-16T00:00:00Z", completedAt: "2026-09-16T00:00:01Z" });
+  await CompilerFinishReceipts.retainSnapshot(f.root, f.source.source.id, receipt);
+  const interrupted = vi.spyOn(RequirementLedger.prototype as unknown as { settleCoreRoleAttempts(): Promise<void> }, "settleCoreRoleAttempts").mockRejectedValueOnce(new Error("simulated interruption after evaluation"));
+  const settle = () => settleCoreRoleRequirements(f.root, f.source.source.id, path.join(f.root, "cache"));
+  await expect(settle()).rejects.toThrow("simulated interruption after evaluation");
+  expect((await f.ledger.history()).filter(record => record.payload.kind === "core-role-evaluation")).toHaveLength(1);
+  expect((await f.ledger.history()).filter(record => record.payload.kind === "core-role-attempt-evaluation")).toHaveLength(0);
+  interrupted.mockRestore();
+  const first = await settle(); await settle();
+  let history = await f.ledger.history();
+  expect(history.filter(record => record.payload.kind === "core-role-evaluation")).toHaveLength(1);
+  expect(history.filter(record => record.payload.kind === "core-role-attempt-evaluation")).toHaveLength(2);
+  const settlements = history.flatMap(record => record.payload.kind === "core-role-attempt-evaluation" ? [record.payload] : []);
+  expect(settlements.every(item => item.result.state !== "satisfied" && item.subjectSnapshotHash === first!.assessment.subjectSnapshotHash)).toBe(true);
+  const initialStore = new InitialWorldStore(f.root), initial = (await initialStore.get())!;
+  await initialStore.put({ ...initial, delta: { version: 1, operations: [...initial.delta.operations.filter(operation => operation.op !== "set" || operation.field !== "character.plan"), { op: "set", entityId: "ada", field: "character.plan", value: "watch" }] } });
+  const changed = await settle();
+  expect(changed!.assessment.subjectSnapshotHash).not.toBe(first!.assessment.subjectSnapshotHash);
+  history = await f.ledger.history();
+  expect(history.filter(record => record.payload.kind === "core-role-invalidation")).toHaveLength(1);
+  expect(history.filter(record => record.payload.kind === "core-role-attempt-evaluation")).toHaveLength(4);
+  const revised = structuredClone(f.roster); revised.reviews.forEach(review => { review.runId += "-new"; });
+  await f.register(revised, definition.revisionHash); await new RoleRosterStore(f.root).write(revised);
+  const latest = await settle();
+  const stale = (await f.ledger.history()).flatMap(record => record.payload.kind === "core-role-attempt-evaluation" && record.payload.subjectSnapshotHash === latest!.assessment.subjectSnapshotHash ? [record.payload.result] : []);
+  expect(stale).toHaveLength(2);
+  expect(stale.every(result => result.state === "stale" && result.diagnostics.includes("ATTEMPT_REQUIREMENT_REVISION_STALE"))).toBe(true);
+  const ada = await f.canon.getEntity("ada"); await f.canon.putEntity({ ...ada, aliases: ["Changed source identity inventory"] });
+  await expect(settle()).rejects.toThrow("evaluation subject is stale");
+  const afterIdentityChange = await f.ledger.history();
+  expect(afterIdentityChange.filter(record => record.payload.kind === "core-role-invalidation")).toHaveLength(3);
+  expect(afterIdentityChange.filter(record => record.payload.kind === "core-role-evaluation")).toHaveLength(3);
+  await expect(settle()).rejects.toThrow("evaluation subject is stale");
+  expect((await f.ledger.history()).filter(record => record.payload.kind === "core-role-invalidation")).toHaveLength(3);
+});
+
+it("settles only accepted active proposal revisions and marks superseded work stale", async () => {
+  const f = await fixture(), definition = await f.register();
+  await new InitialWorldStore(f.root).put({ version: 1, evidence: f.source.evidence("Ada waits."), participantPresence: [{ entityId: "ada", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.alive", value: true }, { op: "set", entityId: "ada", field: "character.plan", value: "wait" }] } });
+  const batches = await prepareCompilerBatches(f.root, f.source.source);
+  await new CompilerBatchStore(f.root).replaceCompleted(f.source.source.id, batches.map(batch => batch.id));
+  const goal = characterGoalSchema.parse({ id: "ada-action", actorId: "ada", description: "Wait", priority: 1, requiresKnowledge: [], evidence: f.source.evidence("Ada waits."), candidateAction: { title: "Wait", preconditions: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.plan", value: "wait longer" }] } } });
+  const proposals = new ProposalStore(f.root), actors = new ActorModelStore(f.root);
+  await proposals.writePending({ id: "driver-proposal", kind: "character-goal", schemaVersion: 1, payload: goal, evidence: goal.evidence, generatedBy: { worker: "fixture", compilerBatchId: "driver-repair" }, createdAt: "2026-09-16T00:00:00Z" }, characterGoalSchema);
+  const ref = { store: "world" as const, proposalId: "driver-proposal", hash: contentHash(await proposals.readEnvelope("pending", "driver-proposal")) };
+  const scope = coreRoleAttemptScope(definition), requirements = [{ id: "character:ada:opening-driver", target: "character:ada", capability: "opening-driver" as const }];
+  const reviews = [{ target: "character:ada", disposition: "proposed" as const, summary: "Attempted driver", evidence_segment_ids: [f.source.segmentId], requirement_reviews: [{ requirementId: requirements[0]!.id, disposition: "proposed" as const, summary: "Typed action attempt" }] }];
+  const identity = { version: 2, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId: f.source.source.id, sourceSha256: f.source.source.contentSha256, batchId: "driver-repair", requirementScope: { planHash: contentHash("driver-plan"), requirements, coreRoleScope: scope },
+    requirementAttempts: coreRoleAttemptReports({ batchId: "driver-repair", scope, requirements, reviews }).map(attempt => ({ ...attempt, proposalRefs: [ref] })), input: { outcome: "complete", reviewed_segments: [], summary: "Driver proposal finish", target_reviews: reviews }, segments: await new SegmentStore(f.root).list(f.source.source.id), dependencies: [ref], metadata: {} };
+  const receipt = compilerFinishReceiptSchema.parse({ identity, fingerprint: contentHash(identity), state: "completed", preparedAt: "2026-09-16T00:00:00Z", completedAt: "2026-09-16T00:00:01Z" });
+  await CompilerFinishReceipts.retainSnapshot(f.root, f.source.source.id, receipt);
+  const settle = () => settleCoreRoleRequirements(f.root, f.source.source.id, path.join(f.root, "cache"));
+  await expect(settle()).rejects.toThrow("still pending");
+  expect((await f.ledger.history()).filter(record => record.payload.kind === "core-role-evaluation")).toHaveLength(0);
+  // Storage-level fixture for the accepted revision; real convergence is covered separately.
+  await actors.putGoal(goal); await proposals.transition(ref.proposalId, "pending", "accepted");
+  const first = await settle();
+  const results = () => f.ledger.history().then(history => history.flatMap(record => record.payload.kind === "core-role-attempt-evaluation" ? [record.payload] : []));
+  expect((await results())[0]!.result.state).not.toBe("stale");
+  expect((await results())[0]!.result.state).not.toBe("satisfied"); // Focal actor's goal is not an autonomous entry driver.
+  await actors.putGoal({ ...goal, description: "Revised current goal" });
+  const second = await settle();
+  expect(second!.assessment.subjectSnapshotHash).not.toBe(first!.assessment.subjectSnapshotHash);
+  expect((await results()).at(-1)!.result).toMatchObject({ state: "stale", diagnostics: ["ATTEMPT_DEPENDENCY_NOT_ACTIVE: driver-proposal"] });
+  expect((await results())[0]!.result.state).not.toBe("stale");
 });

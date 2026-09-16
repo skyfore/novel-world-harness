@@ -1,3 +1,4 @@
+import * as roleReview from "../src/workflow/role-review.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { useOfflinePreparationBoundary } from "./helpers/offline-preparation.js";
 useOfflinePreparationBoundary();
@@ -70,7 +71,9 @@ describe("prepare-all command", () => {
       narrativeGraphNavigable: false,
     });
     expect(before.consistency.unconditionalRootEvents).toHaveLength(9);
+    const reviewRoles = vi.mocked(roleReview.reviewNovelRoles);
     const compileInitialWorld = vi.fn(async (options) => {
+      expect(reviewRoles).toHaveBeenCalledTimes(1);
       expect(options.compilerBatchId).toContain("-graph-adjudication-");
       if (resolveGraph) {
         const event = (await canon.listEvents()).find((event) => event.id === "event-9")!;

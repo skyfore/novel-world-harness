@@ -140,3 +140,20 @@ finish v2 增加宿主生成的 requirementAttempts，保存独立 definition ha
 范围限制：首次 prepare-all 的独立双审当前仍位于最终候选阶段，尚须前移到修复计划之前，才能使首次修复也绑定独立范围。converge 后逐角色评估与 stale 事件、receipt/definition/subject 结算幂等键，以及旧审阅的保留式重新双审仍待实施。本段只记录尝试，不将其当作能力满足或 P1 完成。P2–P7 和真实模型/人工体验验收仍未完成。
 
 本段验证：`pnpm test --maxWorkers=2` 的 184 文件、1073 tests 通过（75.78 秒）；服务端、Web、E2E TypeScript 检查与 `git diff --check` 通过。真实 finish 回归覆盖只修静态 goal 的逐项缺口、完成后账本失败的恢复、重复补齐、归档重启、计划复用、修订后拒绝重放、缺定义认证诊断、历史导入及恢复前拒绝遗失尝试；独立匹配测试验证按角色及能力选择提案、禁止 satisfied 和禁止猜测范围。未调用真实 provider，未进行人工体验验收。
+
+
+P1h 已提交为 `fcbafcc`。
+
+## P1i：前置双审与修复后的逐项结算
+
+prepare-all 在初始世界准备完成后、任何语义修复计划创建之前执行两份独立来源审阅。内部 stopAfterInitialWorld 回滚路径仍停在原边界。真实工具测试执行两次读取、单次提案和 finish 握手，确认首次修复 prompt 已冻结双审的独立范围；没有使用跳过审阅的测试替身来证明这一行为。
+
+每个语义修复 shard 完成 converge 与坏提案隔离后，从当前 canonical 构造冻结候选并评估角色能力。候选仍拒绝 pending 世界/观察/解析/核算提案和未完成的来源批次。评估记录之后追加每个尝试的结算，幂等键绑定原 receipt fingerprint、requirement ID、definition hash 和 subject hash，结算引用同一账本中已有的完整角色评估。原本无提案的 unsupported/capability-gap 报告也有逐项实际结果，但不把该模型报告当作成功证据。
+
+提案关联核验 accepted envelope hash 以及冻结 canonical 中的实际 payload；旧定义、未 active 或已被替换的提案记录 stale，原结果保留。候选改变时追加旧评估的失效事件，然后写新结果。来源身份变化导致旧双审无法直接复用时，先保留旧结果失效，再停止要求宿主复核，不默认为仍可认证。相同冻结 subject 的同一结算键若出现不同依赖结果会停止宿主检查，不删除旧记录或重放提案。
+
+故障注入覆盖主评估已写入、逐项结算未完成时中断；恢复只补齐缺失结算，重复运行不增加记录。测试也覆盖初始世界有效 revision 改变、独立要求修订、身份变动无法认证、pending 提案拒绝，以及已接受但后被替换的 goal 变 stale。结算是当前后置条件的观察，不宣称某次模型工作单独造成满足。
+
+本段仍不构成 P1 全部完成：完整评估/失效/结算历史的 frozen snapshot 引用与恢复、旧审阅的保留式重新双审、以及来源其他写入入口的失效观察仍需补齐。P2–P7 尚未完成；真实 provider 和独立人工体验验收尚未执行。
+
+验证：全量 185 文件、1075 tests 通过（76.81 秒），服务端、Web、E2E TypeScript 检查通过。随后新增提案 active revision 的存储级回归，角色账本 6 项测试全部通过；该新增测试使用直接存储布置 accepted 状态，不冒称它验证了真实 converge。真实 prepare-all 顺序测试和既有 converge 回归共同验证各自边界。

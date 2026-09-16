@@ -549,3 +549,17 @@ P2t 已提交为 `d8ca239`。
 此段补齐结构路径 guard，不代表 P2 完整退出验收。evidence-binding 表示、核心角色自动绑定及修订类策略等仍待落实；P3–P7 仍在原目标范围。未调用真实 provider 或人工体验评价。
 
 验证：全仓 190 文件、1159 tests 通过（90.41 秒）；最终预检只读取声明结构依赖的调整后，52 项定向测试及服务端、Web、E2E TypeScript 检查通过；diff whitespace 检查通过。
+
+P2u 已提交为 `bf461a9`。
+
+## P2v：引语修复到原获知要求结算的串联验收
+
+新增 upstream-repair-acceptance.test.ts。两段独立原创 note-reading 场景改变角色名称、句序并加入无关角色；在写入候选世界工件之前，从原文字节冻结阅读前后及 believes 状态预期。测试通过真实宿主 planner、授权 ledger、typed staging、原 finish、converge、source requirement settlement 和 upstream evaluation 串联验证。
+
+截短 quotation 无法支持 proposition 的精确 /object/value 证据；原 attribution/event 草案首先由正常 commit validator 阻断。宿主修复完整引语后，同一批下游草案以原 ID 和完整原 envelope 提交，独立要求保持原 ID/分母并由未满足转为满足，原 repair 最终 evaluated。检查非授权 quotation 字段不变，未通过重写 attribution、改变 acquisitionMode 或替换 proposition 绕过证据。
+
+每段原文另有仍然截短的反例：提交与 finish 成功不等于能力通过，下游原草案继续 pending，要求继续未满足，修复 ledger 保持 finished 且不能产生 evaluated。此处主动验证修复后重新结算，而不是以工具成功返回作为效果证明。
+
+本段为确定性工程验收；原 canonical 背景为测试夹具，不是 fresh model compile，fixture review 不冒充独立人工体验评价。尚未覆盖缺 mention 的完整串联验收、所有角色/修订根因或 P2 全部退出条件；P3–P7 仍待落实。没有真实 provider 调用或人工体验验收证据。
+
+验证：全仓 191 文件、1163 tests 通过（94.35 秒）；最终反例具备完整背景并明确断言 pending 下游导致 candidate 拒绝，4 项定向测试通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

@@ -1074,3 +1074,19 @@ model invocation. Use same-source `requirements inspect-upstream`, copy
 `plans[].plan.planHash`, and supply the original host review through the explicit
 prepare-all flags once. Do not retry unchanged, infer review from model output,
 or reset the authorization/session budget.
+
+### Structural discourse dependency guards
+
+Bound upstream plans retain structural discourse as `structural-discourse`, a
+read-only kind distinct from writable `discourse-segment` annotations. When a
+closure path includes both representations of one discourse ID, retain both
+revision guards. The original source structure manifest supplies the structural
+payload; annotations cannot stand in for it. This adds no model mutation tool.
+
+Missing, changed or wrong-source structural state stops preflight before a new
+model attempt. Preserve the original plan, budget and pending proposals. Resolve
+the host dependency and regenerate `bind-upstream-repairs`; copy its current
+`subjectSnapshotHash`, `closureHash` and `discovery.findings[].findingId` for one
+corrected host request. Do not remove the structural baseline, substitute the
+annotation revision, or retry the old plan unchanged. Portable checkpoints retain
+and validate the same structural payload before restoring repair authority.

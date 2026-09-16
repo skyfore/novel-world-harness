@@ -1591,6 +1591,7 @@ async function assertPreparedCompilerSnapshotEvidence(
     for (const item of snapshot.entityResolutions) payloads.set(`entity-resolution:${item.id}`, item);
     for (const item of snapshot.eventResolutions) payloads.set(`event-resolution:${item.id}`, item);
     for (const segment of manifest.segments) payloads.set(`source-segment:${segment.id}`, segment);
+    for (const segment of snapshot.structure.discourseSegments) payloads.set(`structural-discourse:${segment.id}`, segment);
     for (const binding of snapshot.evidenceBindings) for (const assertion of binding.assertions) payloads.set(`evidence-assertion:${assertion.id}`, assertion);
     await assertUpstreamRepairCheckpointState(snapshot.upstreamRepairCheckpoint!, snapshot.upstreamRepairJournal ?? [], source.id, source.contentSha256, bytes, payloads);
   }

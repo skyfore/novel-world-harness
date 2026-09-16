@@ -361,10 +361,24 @@ it("refuses stray batch proposals and stale baselines before freezing finish aut
   expect((await f.ledger.history()).some(record => record.payload.kind === "finish-frozen")).toBe(false);
 });
 
-async function frozenQuotationFinish(freeze = true) {
+async function addStructuralGuard(f: Awaited<ReturnType<typeof fixture>>) {
+  const { SourceStructureStore, ensureSourceStructure } = await import("../src/compiler/structure.js");
+  const structure = await ensureSourceStructure(f.root, f.source.source);
+  const discourse = { version: 1 as const, id: "reviewed-frame", sourceId: f.sourceId, kind: "frame" as const,
+    anchors: [f.annotation.anchor], evidenceAssertionIds: [], proposedBy: "human" as const, confidence: 1 };
+  await new SourceStructureStore(f.root).write({ ...structure, discourseSegments: [discourse] });
+  const ref = { kind: "structural-discourse" as const, id: discourse.id, revisionHash: contentHash(discourse) };
+  f.plan = freezeUpstreamRepairPlan({ ...f.identity, baselineRefs: [...f.identity.baselineRefs, ref],
+    readableRefs: [...f.identity.readableRefs, { kind: ref.kind, id: ref.id }] });
+  return { structure, discourse };
+}
+
+async function frozenQuotationFinish(freeze = true, structural = false) {
   const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
   const { prepareUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
-  const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  const f = await fixture();
+  if (structural) await addStructuralGuard(f);
+  await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
   await stageUpstreamRepair(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, { proposal_id: "repair-proposal", annotation_id: "quote-one", selector: { segment_id: f.source.segmentId, exact: "Wait." }, mode: "direct", addressee_mention_ids: [], attribution_confidence: 1 });
   const finishInput = { outcome: "complete" as const, reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed" as const, summary: "Reviewed" }], summary: "Bounded repair" };
   const intent = freeze ? await prepareUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash, finishInput) : undefined;
@@ -455,7 +469,7 @@ it.each(["staged", "frozen", "partial", "completed", "finished", "converged", "e
   const { InitialWorldStore } = await import("../src/world/initial.js");
   const { CompilerBatchStore, prepareCompilerBatches } = await import("../src/compiler/batches.js");
   const { assertUpstreamRepairCheckpoint } = await import("../src/compiler/upstream-repair-checkpoint.js");
-  const f = await frozenQuotationFinish(point !== "staged");
+  const f = await frozenQuotationFinish(point !== "staged", true);
   const entity = { id: "ada", kind: "character" as const, canonicalName: "Ada", aliases: [], evidence: f.source.evidence("Ada") };
   await new CanonicalModelStore(f.root).putEntity(entity);
   await new InitialWorldStore(f.root).put({ version: 1, evidence: f.source.evidence("Ada"), participantPresence: [{ entityId: "ada", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.alive", value: true }, { op: "set", entityId: "ada", field: "character.plan", value: "wait" }] } });
@@ -1017,6 +1031,31 @@ it("binds regenerated findings to unresolved scene obligations through actual ca
   await expect(verifyUpstreamRepairPlan(f.root, bound.plan)).rejects.toThrow("Active dependency changed: canonical-event:waiting");
   await expect(f.ledger.register(bound.plan)).rejects.toThrow("Active dependency changed");
   expect(await f.ledger.history()).toEqual([]);
+
+  // A structural frame and a Pi discourse annotation are separate revisions,
+  // even when the closure explicitly connects their shared discourse identity.
+  await canonical.putEvent(event);
+  const { discourse } = await addStructuralGuard(f);
+  await f.write({ ...f.annotation, speakerMentionId: "missing-speaker", sceneId: discourse.id }, "framed-quotation");
+  const annotations = new SourceAnnotationStore(f.root);
+  const { entityMentionSchema } = await import("../src/compiler/annotations.js");
+  const mention = entityMentionSchema.parse({ version: 1, id: "frame-viewpoint", sourceId: f.sourceId, annotationType: "entity-mention",
+    anchor: textAnchorForByteRange(f.sourceId, Buffer.from('Ada told Bo, "Wait." Nothing changes.'), 0, 3), surface: "Ada", form: "proper", kindCandidates: ["character"], confidence: 1, derivation: f.annotation.derivation });
+  const observation = { version: 1 as const, id: discourse.id, sourceId: f.sourceId, annotationType: "discourse-segment" as const,
+    kind: "summary" as const, anchors: [f.annotation.anchor], viewpointMentionId: mention.id, confidence: 1, derivation: f.annotation.derivation };
+  for (const payload of [mention, observation]) {
+    const id = `insert-${payload.id}`;
+    await annotations.stage(f.sourceId, { version: 1, id, annotationType: payload.annotationType, payload, generatedBy: { worker: "fixture" }, createdAt: "2026-09-16T00:00:00Z" });
+    await annotations.commitProposals(f.sourceId, [id]);
+  }
+  const framed = await bindUpstreamRepairRequirements(f.root, f.sourceId);
+  const finding = framed.discovery.findings.find(item => item.diagnostic.mentionId === mention.id)!;
+  const framedPlan = await planBoundUpstreamRepair(f.root, { ...request, subjectSnapshotHash: framed.subjectSnapshotHash,
+    closureHash: framed.closureHash, findingIds: [finding.findingId] });
+  expect(framedPlan.plan.baselineRefs).toContainEqual({ kind: "structural-discourse", id: discourse.id, revisionHash: contentHash(discourse) });
+  expect(framedPlan.plan.baselineRefs).toContainEqual({ kind: "discourse-segment", id: observation.id, revisionHash: contentHash(observation) });
+  expect(framedPlan.plan.allowedCreations.map(item => item.kind)).toEqual(["entity-resolution"]);
+  await verifyUpstreamRepairPlan(f.root, framedPlan.plan);
 });
 
 it("preparation resumes original finish without staging and requires host review before a new model turn", async () => {
@@ -1081,4 +1120,18 @@ it("default preparation routes retained authorization before ordinary compilatio
   expect(compileSource).not.toHaveBeenCalled();
   await f.ledger.stop(f.plan.planHash, "original host failure");
   await expect(pendingAuthorizedUpstreamRepairs(f.root, f.sourceId)).rejects.toThrow("is stopped");
+});
+
+
+it.each(["confidence", "missing"])("stops structural discourse dependency %s changes before a model attempt", async change => {
+  const { SourceStructureStore } = await import("../src/compiler/structure.js");
+  const f = await fixture(), { structure, discourse } = await addStructuralGuard(f);
+  const verified = await verifyUpstreamRepairPlan(f.root, f.plan);
+  expect(verified.payloads.get(`structural-discourse:${discourse.id}`)).toEqual(discourse);
+  expect(() => freezeUpstreamRepairPlan({ ...f.plan, allowedWrites: [{ kind: "structural-discourse", id: discourse.id, pointers: ["/confidence"] }] })).toThrow();
+  await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  await new SourceStructureStore(f.root).write({ ...structure, discourseSegments: change === "missing" ? [] : [{ ...discourse, confidence: 0.5 }] });
+  await expect(f.ledger.startAttempt(f.plan.planHash, f.input)).rejects.toThrow("Active dependency changed: structural-discourse:reviewed-frame");
+  expect((await f.ledger.inspect()).attempts).toEqual([]);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("needs-host-review");
 });

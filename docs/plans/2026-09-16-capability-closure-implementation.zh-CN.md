@@ -537,3 +537,15 @@ P2s 已提交为 `92c2100`。
 本段只补齐既有授权任务的默认续跑。新根因的自动规划/授权策略、核心角色和未支持路径/修订策略、P2 完整退出验收、P3–P7 仍未完成。没有真实 provider 或人工体验验收证据。
 
 验证：67 项定向测试通过；最终全仓 190 文件、1157 tests 通过（92.28 秒）；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P2t 已提交为 `d8ca239`。
+
+## P2u：结构 discourse 的独立只读依赖校验
+
+新增 structural-discourse 只读引用。bound planner 根据实际 structure manifest 区分结构 discourse 与 Pi discourse-segment annotation，分别冻结同 ID 工件的 revision；预检从原 source/hash 的结构清单读取，checkpoint 校验从原 frozen structure 读取。既有六类 typed 写权限不扩展。
+
+新增真实 event→attribution→quotation→structural discourse→annotation discourse→viewpoint mention 的未满足要求绑定用例，验证缺失 resolution 的修复计划保留两种 discourse baseline。两条负例验证结构 revision 变更或删除在模型 attempt 前停止，结构工件不能放入 allowedWrites。原七种 staging/finish/converge/evaluate 状态的跨工作区恢复用例均加入结构 baseline，检验 portable checkpoint 不丢失依赖。
+
+此段补齐结构路径 guard，不代表 P2 完整退出验收。evidence-binding 表示、核心角色自动绑定及修订类策略等仍待落实；P3–P7 仍在原目标范围。未调用真实 provider 或人工体验评价。
+
+验证：全仓 190 文件、1159 tests 通过（90.41 秒）；最终预检只读取声明结构依赖的调整后，52 项定向测试及服务端、Web、E2E TypeScript 检查通过；diff whitespace 检查通过。

@@ -1,3 +1,4 @@
+import { SourceStructureStore } from "./structure.js";
 import crypto from "node:crypto";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
@@ -51,6 +52,9 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   if (!manifest || contentHash(manifest) !== contentHash(await segmentSource(root, source))) throw upstreamRepairHostError("Source segment layout is missing or stale");
   if (plan.sourceScope.segmentIds.some(id => !manifest.segments.some(segment => segment.id === id))) throw upstreamRepairHostError("Plan segment is outside the immutable source layout");
   const payloads = new Map<string, unknown>();
+  const structure = plan.readableRefs.some(ref => ref.kind === "structural-discourse")
+    ? await new SourceStructureStore(root).read(sourceId) : null;
+  if (structure?.sourceId === sourceId && structure.sourceSha256 === source.contentSha256) for (const item of structure.discourseSegments) payloads.set(`structural-discourse:${item.id}`, item);
   for (const item of await new SourceAnnotationStore(root).list(sourceId)) payloads.set(`${item.annotationType}:${item.id}`, item);
   for (const item of await new EntityResolutionStore(root).list(sourceId)) payloads.set(`entity-resolution:${item.id}`, item);
   for (const item of await new EventResolutionStore(root).list(sourceId)) payloads.set(`event-resolution:${item.id}`, item);

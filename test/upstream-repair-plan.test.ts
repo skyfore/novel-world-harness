@@ -65,6 +65,7 @@ it("allows creation only at the exact host allocated fresh dependency slot", () 
   expect(() => assertUpstreamRepairMutation(plan, creation)).not.toThrow();
   expect(() => assertUpstreamRepairMutation(plan, { ...creation, id: "extra", payload: { ...creation.payload, id: "extra" } })).toThrow("allocated dependency slot");
   expect(() => assertUpstreamRepairMutation(plan, { ...creation, activeRevisions: new Map([...input.activeRevisions, ["quotation:new-quote", contentHash("existing")]]) })).toThrow("fresh");
+  expect(() => assertUpstreamRepairMutation(plan, { ...creation, activeRevisions: new Map([...input.activeRevisions, ["entity-mention:new-quote", contentHash("existing other annotation type")]]) })).toThrow("fresh");
   expect(() => freezeUpstreamRepairPlan({ ...identity, allowedCreations: [{ kind: "quotation", id: "new-quote", maxCount: 1, dependencyOf: "missing" }] })).toThrow("slot");
   const allocatedSpeaker = freezeUpstreamRepairPlan({ ...identity, allowedWrites: [{ ...identity.allowedWrites[0]!, pointers: ["/anchor", "/speakerMentionId"] }],
     allowedCreations: [{ kind: "entity-mention", id: "new-speaker", maxCount: 1, dependencyOf: identity.requirementIds[0]! }],

@@ -60,6 +60,8 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
   for (const values of [plan.requirementIds, plan.predecessorReceiptRefs, plan.sourceScope.segmentIds, plan.citableEvidenceRefs, plan.postconditionIds,
     plan.baselineRefs.map(key), plan.allowedWrites.map(key), plan.allowedCreations.map(key), plan.readableRefs.map(key)]) if (!unique(values)) fail("Duplicate repair plan member");
   if (!plan.allowedWrites.length && !plan.allowedCreations.length) fail("Repair plan has no bounded mutation");
+  const annotationSlots = [...plan.allowedWrites, ...plan.allowedCreations].filter(ref => ["entity-mention", "event-mention", "quotation", "discourse-segment"].includes(ref.kind));
+  if (!unique(annotationSlots.map(ref => ref.id))) fail("Annotation write slots share a logical ID across types");
   if (plan.citableEvidenceRefs.some(id => !plan.sourceScope.segmentIds.includes(id))) fail("Citable evidence escapes source scope");
   if (plan.postconditionIds.length !== plan.requirementIds.length || plan.postconditionIds.some(id => !plan.requirementIds.includes(id))) fail("Repair postconditions must preserve the selected requirement denominator");
   for (const write of plan.allowedWrites) if (!plan.baselineRefs.some(ref => key(ref) === key(write))) fail("Repair write lacks immutable baseline");
@@ -139,7 +141,9 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
   if (contentHash(next.derivation) !== contentHash(input.hostDerivation) || next.derivation.runId !== plan.batchId || next.derivation.compilerBatchId !== plan.batchId) stop("Derivation differs from host batch provenance");
   const target = key(input);
   if (input.baseline === null) {
-    if (!plan.allowedCreations.some(ref => key(ref) === target) || input.activeRevisions.has(target)) stop("Creation is not a fresh host allocated dependency slot");
+    const annotationKinds = ["entity-mention", "event-mention", "quotation", "discourse-segment"];
+    const exists = input.activeRevisions.has(target) || (annotationKinds.includes(input.kind) && annotationKinds.some(kind => input.activeRevisions.has(`${kind}:${input.id}`)));
+    if (!plan.allowedCreations.some(ref => key(ref) === target) || exists) stop("Creation is not a fresh host allocated dependency slot");
     return;
   }
   const write = plan.allowedWrites.find(ref => key(ref) === target);

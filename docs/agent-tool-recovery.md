@@ -558,3 +558,35 @@ unchanged. A changed dependency requires host re-planning linked to the retained
 predecessor. No agent tool is exposed by this module. When the executor is wired,
 its narrow tools must still use `withNwhToolRecovery`, exact same-source discovery
 instructions and the existing evidence, proposal-obligation and finish checks.
+
+### Persisted upstream repair authorization and failure budget
+
+`UpstreamRepairLedger` is a compiler-lock-owned host API. Registration verifies
+actual immutable source bytes, deterministic segment layout, active independent
+requirement definitions, readable artifacts, baseline revisions and retained
+completed predecessor receipt identities. Authorization and every attempt
+reservation repeat this preflight. A changed dependency stops the retained plan;
+restoring the old artifact does not reopen it. Role definitions whose source
+review scope is currently being revised are not active repair authority.
+
+Inspect retained records with `nwh requirements inspect-upstream --source
+<exact-id>`. Copy `plans[].plan.planHash` and `attempts[].attemptRef` exactly for
+host recovery. A reserved attempt with no recorded outcome must be recovered
+before any new model call. Failure recovery records the real diagnostic against
+that original attempt, including after a host stop; it cannot rewrite the first
+diagnostic. Permit at most one materially corrected retry with the same proposal
+ID. Two failures exhaust the shared budget for each stable requirement ID and
+derive `needs-host-review`. Plan, batch and retryBudgetRef changes do not reset
+that count. There is no budget-reset API.
+
+Overlapping successor plans must name the latest retained predecessor, preserve
+all earlier stops and prove a changed shared dependency revision or independent
+requirement revision. Reordering references is not a dependency change. A new
+plan retains the previous requirement failure counts. Missing/corrupt journal
+records or a missing head with retained records stop for host storage repair;
+never initialize a new budget or delete the retained directory.
+
+This stage does not expose model execution. Successful staging, typed proposal
+integration, finish authorization/recovery and candidate snapshot preservation
+must be implemented before these host records can authorize an executing model
+session. Existing tool recovery and evidence checks must remain in that path.

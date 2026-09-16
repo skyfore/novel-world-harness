@@ -89,6 +89,12 @@ program.command("review-scenes").requiredOption("--spec <path>", "independent so
 const requirementsCommand = program.command("requirements").description("Inspect persistent capability definitions and evaluation history");
 requirementsCommand.command("inspect").requiredOption("--source <id>", "registered source ID")
   .action(async options => inspectRequirementsCommand(rootFor({}), options.source));
+requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", "registered source ID")
+  .description("Read retained upstream repair plans and attempts without authorizing or retrying them")
+  .action(async options => {
+    const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
+    console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
+  });
 requirementsCommand.command("refresh").requiredOption("--source <id>", "registered source ID")
   .description("Observe current requirement validity without replaying proposals or granting role satisfaction")
   .action(async options => {

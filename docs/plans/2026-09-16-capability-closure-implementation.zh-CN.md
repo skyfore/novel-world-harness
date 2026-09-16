@@ -247,3 +247,19 @@ P1n 已提交为 `dfb6ad8`。
 15 项测试覆盖引语截断扩展、身份决议绑定、数组位移权限、转义 pointer、越权字段、来源/要求/依赖修订冲突、引用越界、伪造 hash、循环、分母缩减、任意新 ID 和未声明的新建依赖。服务端、Web、E2E TypeScript 检查通过。本段没有接入模型工具或执行写入；原文字节校验仍由现有证据验证器负责，测试证明的是计划和纯校验边界。
 
 P2 尚未完成：必须继续接入持久授权状态与跨会话预算、现有窄提案工具、finish 授权回执和恢复、converge 后基线复核及逐项评估，才可执行缺 mention/quotation 的上游修复。P1 整体验收映射及 P3–P7 保持待完成。未运行真实 provider 或人工体验验收。
+
+P2a 已提交为 `70d78b6`。
+
+## P2b：宿主持久授权、预检与跨会话失败预算
+
+新增 upstream-repair-preflight，从真实工作区读取并验证原文字节、deterministic segment 布局、当前独立要求定义、可读 artifact、全部 baseline revision 和 retained completed 前驱回执身份。角色定义若已进入新审阅轮次，不再以旧名单授予修复权限。授权与每次预留尝试前都重验；基线变化将原计划保留为 needs-host-review。
+
+新增同源追加式哈希账本，保存 planned、authorized、attempt-started、attempt-failed、needs-host-review 事件；不可变 record 文件和原子 head 更新复用本地文件架构。读者验证 source、序号、前驱、内容 hash 及完整状态转移。缺 head 但保留 record 时拒绝初始化，避免预算丢失。注册与授权重放幂等；旧失败诊断不得重写。
+
+尝试先预留再执行，未有结果时禁止开始另一模型调用。首次失败后只允许相同 proposal ID 的一次实质纠正；每个稳定 requirement ID 的累计两次失败使计划停止。计数跨 plan/batch/retryBudgetRef 保留，缩小或合并计划仍按重叠 requirement 计算。新计划要求所有重叠前驱停止、链接最近前驱并有真实共享依赖 revision 或要求 revision 变化；重排 baseline 不能伪装变化，新的计划也不能清零预算。暂未提供预算重置权限。
+
+新增只读 requirements inspect-upstream，供宿主检查 plans[].plan.planHash、attempts[].attemptRef 及原始链。校验还补上 annotation 各类型共享逻辑 ID 命名空间的碰撞，不能用另一 annotationType 把已存在对象当作新建槽。
+
+测试使用真实原文、来源定义与已提交 quotation，验证注册/授权、预留后重启、一次纠正、错误引用、身份轮换、两次失败停止、关联新计划不重置预算、真实依赖变化、损坏链和缺 head。当前仍无模型执行入口；成功 staging、窄工具接线、finish 授权、候选快照与恢复链尚未落地，不宣称 P2 完成。P1 完整验收映射及 P3–P7 保持待完成；未调用真实 provider 或人工体验评价。
+
+验证：全量 188 文件、1105 tests 通过（79.41 秒）；服务端、Web、E2E TypeScript 检查、diff whitespace 检查和 inspect-upstream CLI 帮助入口通过。

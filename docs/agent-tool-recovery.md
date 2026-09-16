@@ -1257,3 +1257,29 @@ pressure. Traces retain the matched candidate hash, whose frontier entry include
 the instance references. This host proof is not a new model-write field or an
 actor knowledge grant. Engine 0.10.0 freezes the policy; incompatible histories
 retain the existing stop/migration protocol.
+
+### Effective norm scope at settlement
+
+`effective-norm-scope-v7` separates an unresolved norm instance (`status: active`)
+from a template that is effective at the current cut. Scope predicates and each
+exception use three-valued conjunction. An unknown exception is not proven absent;
+an unknown higher-priority overrider prevents enforcing the lower norm. Known
+inactive scope remains inactive even when another condition is unknown. The shared
+resolver feeds automatic outcomes, due candidates, and norm settlement validation.
+Instances are preserved while inactive/unknown/overridden; absence of a due
+candidate never means the obligation was satisfied or deleted.
+
+`NORM_SCOPE_NOT_ACTIVE` rejects satisfaction/violation outside proven effective
+scope. Preserve the instance and branch head. Stop unchanged retries; do not
+substitute IDs, erase exceptions, or invent enabling facts. Reevaluate after a
+source-supported scope change is committed normally; unknown scope requires host
+review. Settlement uses action-time state before the action's effects, in both
+commit validation and replay. Changing scope in the same proposal does not
+retroactively enable or exempt that action. Reparation remains validation of a
+historical violation and is not an assertion that its original scope still holds.
+
+`NORM_DEADLINE_NOT_DUE` rejects `deadline-expired` without a due elapsed obligation
+at the action cut. Do not change the reason/ID to bypass it or repeat unchanged;
+establish time through normal committed events before reevaluation. Engine 0.11.0
+freezes the reducer change, including full replay and initial projection validation;
+keep incompatible histories intact and follow the existing version stop protocol.

@@ -804,6 +804,7 @@ export class WorldEngine {
         });
       }
       try {
+        const stateBeforeDelta = advanceTemporalState(state, postState.logicalTime, context.stateSchema, context.entities);
         let stagedNorms = projection.norms;
         let proposedNormDelta: NormDelta | undefined;
         if (parsed.proposedNorms) {
@@ -828,9 +829,9 @@ export class WorldEngine {
             normativeRuleIds: new Set([...context.rules.values()].filter(isNormativeWorldRule).map((rule) => rule.id)),
             ...(parsed.action ? { action: parsed.action } : {}),
             postState,
+            beforeState: stateBeforeDelta,
           }, provisionalProvenance);
         }
-        const stateBeforeDelta = advanceTemporalState(state, postState.logicalTime, context.stateSchema, context.entities);
         const automatic = deriveAutomaticNormDelta({
           branchId: parsed.branchId,
           parentCommitId: head,
@@ -859,6 +860,7 @@ export class WorldEngine {
             normativeRuleIds: new Set([...context.rules.values()].filter(isNormativeWorldRule).map((rule) => rule.id)),
             ...(parsed.action ? { action: parsed.action } : {}),
             postState,
+            beforeState: stateBeforeDelta,
           }, provisionalProvenance);
         }
       } catch (error) {

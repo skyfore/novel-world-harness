@@ -16,7 +16,7 @@ import type {
   StoryTime,
   WorldState,
 } from "./model.js";
-import { dueNormInstances, type NormTemplate } from "./norm-ontology.js";
+import { dueNormInstances, resolveEffectiveNormTemplates, type NormTemplate } from "./norm-ontology.js";
 import type { NormState } from "./norm-effects.js";
 import { dueProcessInstances, processOwnerEntityIds, type ProcessTemplate } from "./process-ontology.js";
 import type { ProcessState } from "./process-effects.js";
@@ -305,7 +305,8 @@ export function deriveDuePossibilities(input: {
   const possibilities: Possibility[] = [];
   for (const norm of dueNormInstances(input.norms, elapsedDays)) {
     const template = input.normTemplates.get(norm.templateId);
-    if (!template) continue;
+    if (!template || !resolveEffectiveNormTemplates(input.normTemplates.values(), input.state, norm.subjectActorId)
+      .some(item => item.template.id === template.id)) continue;
     const id = `due-norm-${contentHash({ normId: norm.id, dueAt: norm.dueAtElapsedDays }).slice(0, 24)}`;
     possibilities.push({
       id,

@@ -269,6 +269,7 @@ export class ProjectionService {
             throw new Error("Non-genesis committed event has no certified material progress");
           }
           const provenance: EffectProvenance = { commitId: entry.id, eventId: event.eventId, eventHash };
+          const stateBeforeEffects = state;
           if (effects.delta.operations.length) {
             state = applyStateDelta(state, effects.delta, context.stateSchema, context.entities, context.rules);
           }
@@ -310,6 +311,7 @@ export class ProjectionService {
                 .map((rule) => rule.id)),
               ...(event.action ? { action: event.action } : {}),
               postState: state,
+              beforeState: entry.commit.parentCommitId ? stateBeforeEffects : state,
             }, provenance);
           }
 

@@ -719,3 +719,21 @@ runtime 将自己派生、正常 schema 验证后的到期候选交给 frontier�
 初轮新增机制测试被 schema 拒绝：domain-module provenance 不允许同时挂 novel evidence。按源文夹具改为 source-pattern 并提供可引用的 canonical premise 后，28 项定向通过；未放宽验证器。
 
 最终验证：全仓 198 文件、1203 tests 通过（97.40 秒）；28 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。
+
+P6f 已提交为 `c4b4be7`。
+
+## P4a：规范有效范围、未知例外与提交/重放一致性
+
+复核发现 resolveEffectiveNormTemplates 把 unknown 例外当作“不适用”，而 dueNormInstances 和显式 satisfy/violate 只检查未结算生命周期。本段增加确定性的派生范围解析：effective/inactive/unknown/overridden，不增加持久 norm 状态；适用条件、例外使用三值合取，unknown 的高优先级覆盖者也不能被当成不存在。已知 false 的范围不被其他 unknown 条件改成有效。
+
+自动规范效果、宿主到期候选和规范 reducer 共用该解析。未证明范围有效时，不生成到期候选，显式满足/违反均拒绝且原实例仍为 active；这表示义务未结算，不是仍可执行。重新进入已证明有效范围后可恢复正常到期处理。deadline-expired 另外要求当前 elapsed cut 已达到 obligation 的真实期限，不能提前声明违约。
+
+commit 与 projection reducer 同时传递时间已推进、行动效果尚未应用的 beforeState。行动本身改变位置或豁免条件不能回溯改变该行动适用的规范；反之，在原本不适用处同一个 proposal 写入适用事实也不能同时结算旧规范。Genesis/scene seed 沿既有 postState 路径验证；历史违约的 reparation 保持原独立验证，不要求旧范围持续有效。
+
+两段原创场景分别为 Ada 在门口、Neri 在港口的限期登记离岗义务，并有明确的豁免和紧急覆盖条款。测试实际创建实例、fork 六种离场/豁免/覆盖/unknown 场景、推进时钟，核验 frontier、直接 satisfy/violate 拒绝、原 head 与实例不变；同事件写事实企图绕过也拒绝。回到有效范围后实际调度提交违约。另以合法绑定的离岗移动 schema 验证行动改变位置但仍按行动前范围满足义务，禁用 checkpoint 的全重放结果相同。
+
+策略升为 effective-norm-scope-v7，engine 0.11.0；旧 host-world-pressure-v6 snapshot 可读，旧 engine history 明确拒绝不兼容解释。P4 暂时失能、远程渠道/照片、身份及统一时间余项仍待完成；P3 表达/感知/获知纵向链、P5 工作集和 P7 外部验收也未完成。
+
+初轮新测试的 localRef 未使用 local- 前缀，被 schema 正确拒绝；随后离场 ad-hoc 行动因缺少绑定机制被 ACTOR_EFFECT_REQUIRES_MECHANISM 拒绝。按既有引用与动作契约补齐夹具，不放宽引擎边界，13 项定向通过。
+
+最终验证：全仓 199 文件、1205 tests 通过（98.88 秒），包含最终同事件绕过与 false/unknown 合取补充；此前 13 项定向通过；服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。

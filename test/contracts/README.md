@@ -18,7 +18,7 @@ pnpm test
 pnpm check
 ```
 
-`content-support.native.mjs` tests field-level containment, alternative evidence, conjunctive anchors, source isolation, invalid byte ranges, and invariance under ordering/offset changes. Containment is not natural-language entailment; immutable source verification remains the caller's responsibility.
+`content-support.native.mjs` imports `src/world/expression-content-support.ts` directly, the dependency-free production kernel. `src/compiler/content-support.ts` is now an ESM compatibility re-export with a build-time `.js` specifier; Node type stripping does not resolve that specifier to `.ts`. The Vitest integration suite covers that compatibility entry point. The native suite tests field-level containment, alternative evidence, conjunctive anchors, source isolation, invalid byte ranges, and invariance under ordering/offset changes. Containment is not natural-language entailment; immutable source verification remains the caller's responsibility.
 
 `semantic-requirements.native.mjs` tests missing observations, independent expectations, partial completion, unmapped concepts, fingerprint invalidation, scope/identity checks, dependency ordering/cycles and bounded diagnostic repair plans. An assessment is not a publication certificate or mutation permit.
 

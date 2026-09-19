@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessQuotationContentSupport as assess } from '../../src/compiler/content-support.ts';
+import { assessQuotationContentSupport as assess } from '../../src/world/expression-content-support.ts';
 
 const span = (startByte = 0, endByte = 10, sourceId = 'source') => ({ sourceId, startByte, endByte });
 const evidence = (jsonPointer, anchors = [span()], extra = {}) => ({

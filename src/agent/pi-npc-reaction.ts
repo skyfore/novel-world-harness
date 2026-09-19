@@ -1,3 +1,4 @@
+import { ModelRequestBudget } from "./model-request-budget.js";
 import { copyActorOutcome } from "../world/actor-outcome.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
@@ -136,11 +137,13 @@ export function createPiNpcReactionReasoner(options: PiNpcReactionReasonerOption
       ...(message.speaker ? { speaker: message.speaker } : {}),
     })));
 
+    const requestBudget = new ModelRequestBudget();
     const runAttempt = async (attempt: 1 | 2) => {
       const actorAccess = createActorAccess();
       const messageAccess = createMessageAccess();
       const capture = createNpcReactionCaptureTool(input.actorContext.writableStateFields.map((field) => field.key));
       const session = await PiAgentSession.create({
+        requestBudget,
         workspace,
         ...(options.profile ? { profile: options.profile } : {}),
         ...(options.model ? { model: options.model } : {}),
@@ -154,7 +157,7 @@ export function createPiNpcReactionReasoner(options: PiNpcReactionReasonerOption
           parent: options.trace,
           invocationName: `npc-reaction-attempt-${attempt}`,
           attempt,
-          metadata: { npcName: input.npc.name },
+          metadata: { npcName: input.npc.name, decisionContextManifest: actorAccess.decisionManifest },
           parts: [
             {
               id: `npc-reaction.${attempt}.system-role`,

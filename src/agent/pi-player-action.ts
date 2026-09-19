@@ -1,3 +1,4 @@
+import { ModelRequestBudget } from "./model-request-budget.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
   createPlayerActionModelBoundary,
@@ -111,6 +112,7 @@ export function createPiPlayerActionTranslator(options: PiPlayerActionTranslator
       status: message.worldStatus,
     })));
     const session = await PiAgentSession.create({
+      requestBudget: new ModelRequestBudget(),
       workspace,
       ...(options.profile ? { profile: options.profile } : {}),
       ...(options.model ? { model: options.model } : {}),
@@ -123,6 +125,7 @@ export function createPiPlayerActionTranslator(options: PiPlayerActionTranslator
       ...(options.trace ? { trace: {
         parent: options.trace,
         invocationName: "interpret-player-action",
+        metadata: { decisionContextManifest: actorAccess.decisionManifest },
         parts: [
           {
             id: "player-action.system-role",

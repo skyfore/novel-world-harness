@@ -1,3 +1,4 @@
+import { installModelRequestBudget, type ModelRequestBudget } from "./model-request-budget.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import { createPiHooksExtension } from "./pi-hooks.js";
 import fs from "node:fs/promises";
@@ -76,6 +77,8 @@ export type PiAgentSessionOptions = {
   piAgentDir?: string;
   /** Observation-only trace for one isolated Pi invocation. */
   trace?: PiTraceInvocationInput;
+  /** One caller-owned budget shared by all model steps and protocol retries. */
+  requestBudget?: ModelRequestBudget;
 };
 
 export type PiInteractiveOptions = {
@@ -863,6 +866,7 @@ export class PiAgentSession {
           noTools: "builtin",
           customTools: configuredTools,
         });
+      if (this.options.requestBudget) installModelRequestBudget(created.session.agent, this.options.requestBudget);
       if (this.options.trackLastOpenedSession && created.session.sessionFile) {
         await writeLastOpenedSession(this.options.workspace.root, this.stateDir, created.session.sessionFile);
       }

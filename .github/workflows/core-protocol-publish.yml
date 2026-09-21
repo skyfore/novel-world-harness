@@ -10,7 +10,7 @@ permissions:
 jobs:
   verify:
     if: >-
-      github.repository == 'skyfore/novel-world-harness' && github.event.head_commit.message == 'fix(ci): quote one-shot delivery condition and preserve exact baseline'
+      github.repository == 'skyfore/novel-world-harness' && github.event.head_commit.message == 'fix(ci): verify bounded integration tests before core delivery'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.19.0'
-      - name: Reconstruct only the fixed hash-pinned patch
+      - name: Reconstruct only the fixed hash-pinned patches
         env:
           READ_TOKEN: ${{ github.token }}
         run: |
@@ -30,26 +30,30 @@ jobs:
           test "$(git diff --name-only b6bab030a55515f4f7a6a64cd71b001bb348726f HEAD)" = .github/workflows/core-protocol-publish.yml
           python3 - <<'PY'
           import base64, hashlib, json, lzma, os, pathlib, urllib.request
-          chunks = ['c895a64e0ced41c59838e6976bfc8b1f0afb0506', 'd5fd62a4c49c6aea742a105155f71d396b561e19', 'd8da3f33c6e918d9644bc3f703edb61a9318ad86', '571c92c06175937c2fa8dd4ac8b97d1e85c1eda7']
-          compressed = bytearray()
-          for sha in chunks:
-              request = urllib.request.Request('https://api.github.com/repos/skyfore/novel-world-harness/git/blobs/' + sha, headers={'Authorization': 'Bearer ' + os.environ['READ_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'})
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  record = json.load(response)
-              assert record['encoding'] == 'base64' and record['sha'] == sha
-              data = base64.b64decode(record['content'])
-              assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == sha
-              compressed.extend(data)
-          patch = lzma.decompress(compressed)
-          assert hashlib.sha256(patch).hexdigest() == '7b374ab7ea669f2c95e66db9d825fe139cb2e04cf412a29d678181ff62d7f624'
-          pathlib.Path(os.environ['RUNNER_TEMP'], 'core.patch').write_bytes(patch)
+          packages = [
+              ('core.patch', ['c895a64e0ced41c59838e6976bfc8b1f0afb0506', 'd5fd62a4c49c6aea742a105155f71d396b561e19', 'd8da3f33c6e918d9644bc3f703edb61a9318ad86', '571c92c06175937c2fa8dd4ac8b97d1e85c1eda7'], '7b374ab7ea669f2c95e66db9d825fe139cb2e04cf412a29d678181ff62d7f624'),
+              ('integration.patch', ['4f993e2558905ccbab2e17aaf739ca93d9b61b52'], 'f8d59ab85f3dafe519e0d7eff227a7162409b48a65eb87795f2f144b63ddd8f2'),
+          ]
+          for name, chunks, expected in packages:
+              compressed = bytearray()
+              for sha in chunks:
+                  request = urllib.request.Request('https://api.github.com/repos/skyfore/novel-world-harness/git/blobs/' + sha, headers={'Authorization': 'Bearer ' + os.environ['READ_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'})
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      record = json.load(response)
+                  assert record['encoding'] == 'base64' and record['sha'] == sha
+                  data = base64.b64decode(record['content'])
+                  assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == sha
+                  compressed.extend(data)
+              patch = lzma.decompress(compressed)
+              assert hashlib.sha256(patch).hexdigest() == expected
+              pathlib.Path(os.environ['RUNNER_TEMP'], name).write_bytes(patch)
           PY
           git config user.name 'NWH verified delivery'
           git config user.email 'nwh-delivery@users.noreply.github.com'
-          git am "$RUNNER_TEMP/core.patch"
+          git am "$RUNNER_TEMP/core.patch" "$RUNNER_TEMP/integration.patch"
           git rm .github/workflows/core-protocol-publish.yml
           git commit -m 'chore(ci): remove completed one-shot core protocol delivery'
-          test "$(git rev-parse HEAD^{tree})" = f686f1024601f026e30cbc13564f4f284013ed65
+          test "$(git rev-parse HEAD^{tree})" = 42173b07357a679d1fb025aebe783dbeace52751
           echo "NWH_HOME=$RUNNER_TEMP/nwh-core-verification" >> "$GITHUB_ENV"
       - run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - run: pnpm install --frozen-lockfile
@@ -61,11 +65,11 @@ jobs:
         run: |
           set -euo pipefail
           git diff --exit-code
-          test "$(git rev-parse HEAD^{tree})" = f686f1024601f026e30cbc13564f4f284013ed65
+          test "$(git rev-parse HEAD^{tree})" = 42173b07357a679d1fb025aebe783dbeace52751
           git bundle create "$RUNNER_TEMP/core-verified.bundle" b6bab030a55515f4f7a6a64cd71b001bb348726f..HEAD
           python3 - <<'PY'
           import json, os, pathlib, subprocess
-          result = {'base': 'b6bab030a55515f4f7a6a64cd71b001bb348726f', 'trigger': os.environ['GITHUB_SHA'], 'head': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(), 'tree': 'f686f1024601f026e30cbc13564f4f284013ed65', 'native': 'passed', 'types': 'passed', 'vitest': 'passed', 'build': 'passed'}
+          result = {'base': 'b6bab030a55515f4f7a6a64cd71b001bb348726f', 'trigger': os.environ['GITHUB_SHA'], 'head': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(), 'tree': '42173b07357a679d1fb025aebe783dbeace52751', 'native': 'passed', 'types': 'passed', 'vitest': 'passed', 'build': 'passed'}
           pathlib.Path(os.environ['RUNNER_TEMP'], 'core-verified.json').write_text(json.dumps(result))
           PY
       - uses: actions/upload-artifact@v4
@@ -99,7 +103,7 @@ jobs:
           git bundle verify "$RUNNER_TEMP/verified/core-verified.bundle"
           git fetch "$RUNNER_TEMP/verified/core-verified.bundle" HEAD
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD^{tree})" = f686f1024601f026e30cbc13564f4f284013ed65
+          test "$(git rev-parse HEAD^{tree})" = 42173b07357a679d1fb025aebe783dbeace52751
           git merge-base --is-ancestor "$GITHUB_SHA" HEAD
           test ! -e .github/workflows/core-protocol-publish.yml
           python3 - <<'PY'
@@ -108,7 +112,7 @@ jobs:
           assert manifest['base'] == 'b6bab030a55515f4f7a6a64cd71b001bb348726f'
           assert manifest['trigger'] == os.environ['GITHUB_SHA']
           assert manifest['head'] == subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
-          assert manifest['tree'] == 'f686f1024601f026e30cbc13564f4f284013ed65'
+          assert manifest['tree'] == '42173b07357a679d1fb025aebe783dbeace52751'
           assert all(manifest[k] == 'passed' for k in ['native','types','vitest','build'])
           PY
       - name: Fast-forward only the unchanged requested branch

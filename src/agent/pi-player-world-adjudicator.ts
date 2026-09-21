@@ -1,3 +1,4 @@
+import { ModelRequestBudget } from "./model-request-budget.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
   createPlayerActionModelBoundary,
@@ -47,6 +48,7 @@ export function createPiPlayerWorldAdjudicator(
   options: PiPlayerWorldAdjudicatorOptions,
 ): PlayerWorldAdjudicator {
   return async (input) => {
+    const requestBudget = new ModelRequestBudget();
     options.signal?.throwIfAborted();
     options.onStatus?.("世界正在推演行动后果…");
     const workspace = await LocalFileWorkspace.create(options.root);
@@ -120,6 +122,7 @@ export function createPiPlayerWorldAdjudicator(
         status: message.worldStatus,
       })));
       const session = await PiAgentSession.create({
+        requestBudget,
         workspace,
         ...(options.profile ? { profile: options.profile } : {}),
         ...(options.model ? { model: options.model } : {}),

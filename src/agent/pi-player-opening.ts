@@ -1,3 +1,4 @@
+import { ModelRequestBudget } from "./model-request-budget.js";
 import { assertLockedUtteranceIds, narrationBlocksSchema, renderNarrationBlocks, type NarrationBlocks } from "../world/utterance-rendering.js";
 import type { LlmProfile } from "../config/schema.js";
 import type { AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -84,6 +85,7 @@ export function finalizePlayerSceneChoices(choices: readonly PlayerSceneChoice[]
 
 export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOptions): PlayerOpeningNarrator {
   return async (suppliedFrame, purpose, observer, relatedMessages) => {
+    const requestBudget = new ModelRequestBudget();
     const frame: Readonly<PlayerSceneNarratorFrame> = structuredClone(purpose === "opening" || !suppliedFrame.readerPrelude
       ? suppliedFrame
       : frameWithout(suppliedFrame, ["readerPrelude"]) as PlayerSceneNarratorFrame);
@@ -108,6 +110,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
     }): Promise<string> => {
       observer?.signal?.throwIfAborted();
       const session = await PiAgentSession.create({
+        requestBudget,
         workspace,
         ...(options.profile ? { profile: options.profile } : {}),
         ...(options.model ? { model: options.model } : {}),

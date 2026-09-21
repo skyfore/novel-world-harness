@@ -1,3 +1,4 @@
+import { withPlayModelBudget } from "../runtime/play-model-budget.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "./player-action.js";
 import { buildActorScopedActionContext, PlayerTurnService } from "./player-action.js";
@@ -327,13 +328,13 @@ export async function performPlayTurn(options: PerformPlayTurnOptions): Promise<
     accepted: undefined as boolean | undefined,
     degraded: undefined as boolean | undefined,
   };
-  return currentRuntimeHooks().run("play.turn", "performPlayTurn", metadata, async () => {
+  return withPlayModelBudget(() => currentRuntimeHooks().run("play.turn", "performPlayTurn", metadata, async () => {
     const outcome = await performPlayTurnInternal(options);
     metadata.accepted = outcome.result.accepted;
     metadata.degraded = Boolean(outcome.backgroundError || outcome.worldResponseError || outcome.canonicalRecoveryError
       || outcome.npcResponseError || outcome.conversationError || outcome.auditError || outcome.repairHintError);
     return outcome;
-  });
+  }));
 }
 
 async function performPlayTurnInternal(options: PerformPlayTurnOptions): Promise<PlayTurnOutcome> {

@@ -497,3 +497,6 @@ export { utteranceExpressionSchema, validateUtteranceExpression, validateUtteran
 export { perceptionObservationSchema, validatePerceptionObservation, validatePerceptionObservationEvidence, PERCEPTION_OBSERVATION_VERSION, type PerceptionObservation } from "./world/perception-observation.js";
 
 export { acquisitionSchema, validateAcquisition, validateAcquisitionEvidence, ACQUISITION_VERSION, type Acquisition } from "./world/acquisition.js";
+
+export { withPlayModelBudget, currentPlayModelBudget, PLAY_MODEL_REQUEST_LIMITS } from "./runtime/play-model-budget.js";
+export { ModelRequestBudget, ModelRequestBudgetError, type ModelRequestLimits } from "./runtime/model-request-budget.js";

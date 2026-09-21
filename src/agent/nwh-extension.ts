@@ -1,3 +1,4 @@
+import { withPlayModelBudget } from "../runtime/play-model-budget.js";
 import { currentRuntimeHooks, hookError } from "../runtime/hooks.js";
 import { withCommandHooks } from "./pi-hooks.js";
 import { INITIAL_WORLD_INPUT_GUIDANCE } from "../compiler/initial-world-preflight.js";
@@ -1092,7 +1093,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         await previous.promise;
       }
       const controller = new AbortController();
-      const promise = runPlayerScene(ctx, selection, purpose, controller, turnResolution, fallbackChoices, runtimeContext);
+      const promise = withPlayModelBudget(() => runPlayerScene(ctx, selection, purpose, controller, turnResolution, fallbackChoices, runtimeContext));
       const active = { controller, promise };
       activePlayerScene = active;
       let choices: PresentedPlayerChoice[] = [];
@@ -1172,7 +1173,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         affordanceId?: string;
       } = {},
     ): Promise<void> => {
-      return currentRuntimeHooks().run("user.input", "play.input", { workspaceRoot: workspace.root, sessionId: ctx.sessionManager?.getSessionId?.() }, async () => {
+      return withPlayModelBudget(() => currentRuntimeHooks().run("user.input", "play.input", { workspaceRoot: workspace.root, sessionId: ctx.sessionManager?.getSessionId?.() }, async () => {
         if (shuttingDown) return;
         const selection = selectedPlay ?? await activatePlayer(ctx);
         if (!selection) return;
@@ -1351,7 +1352,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ctx.ui.notify(`NPC response stopped: ${outcome.npcResponseError}`, "warning");
         }
         await narratePlayerScene(ctx, selectedPlay, "turn", undefined, [], outcome.result.contextSupplement);
-      });
+      }), { newScope: true });
     };
 
     const offerPlayerChoices = async (

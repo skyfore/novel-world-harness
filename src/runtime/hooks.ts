@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
 export type RuntimeHookType = "command" | "user.input" | "llm.response" | "tool" | "session.turn" | "llm.prompt"
-  | "compiler.batches" | "compilation" | "play.turn" | "play.response";
+  | "compiler.batches" | "compilation" | "play.turn" | "play.response" | "model.budget";
 export type RuntimeHookStatus = "succeeded" | "failed" | "cancelled";
 export type RuntimeHookMetadata = Readonly<Record<string, string | number | boolean | undefined>>;
 export type RuntimeHookEvent = Readonly<{

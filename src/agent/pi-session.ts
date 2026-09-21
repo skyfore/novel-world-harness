@@ -1,3 +1,4 @@
+import { currentPlayModelBudget } from "../runtime/play-model-budget.js";
 import { installModelRequestBudget, type ModelRequestBudget } from "./model-request-budget.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import { createPiHooksExtension } from "./pi-hooks.js";
@@ -605,6 +606,7 @@ export class PiAgentSession {
     runtime: ModelRuntime,
     model: NonNullable<ReturnType<ModelRuntime["getModel"]>> | undefined,
     private readonly trace?: PiTraceInvocation,
+    private readonly requestBudgets: readonly ModelRequestBudget[] = [],
   ) {
     this.profile = options.profile;
     this.stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
@@ -621,12 +623,15 @@ export class PiAgentSession {
     if (options.sessionId && options.saveSession === false) {
       throw new Error("An explicit session ID cannot be resumed with session persistence disabled.");
     }
+    const inheritedBudget = currentPlayModelBudget()?.budget;
+    const requestBudgets = [...new Set([inheritedBudget, options.requestBudget].filter((value): value is ModelRequestBudget => value !== undefined))];
+    for (const budget of requestBudgets) budget.assertUsable();
     const profile = options.profile ? { ...options.profile } : undefined;
     const stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
     const { runtime, model } = await createModelRuntime(profile, options.piAgentDir);
     const trace = options.trace ? await PiTraceInvocation.start(options.trace) : undefined;
-    const wrapper = new PiAgentSession({ ...options, ...(profile ? { profile } : {}) }, runtime, model, trace);
+    const wrapper = new PiAgentSession({ ...options, ...(profile ? { profile } : {}) }, runtime, model, trace, requestBudgets);
     try {
       await wrapper.initialize(Boolean(options.continueSession));
       return wrapper;
@@ -866,7 +871,7 @@ export class PiAgentSession {
           noTools: "builtin",
           customTools: configuredTools,
         });
-      if (this.options.requestBudget) installModelRequestBudget(created.session.agent, this.options.requestBudget);
+      if (this.requestBudgets.length) installModelRequestBudget(created.session.agent, this.requestBudgets);
       if (this.options.trackLastOpenedSession && created.session.sessionFile) {
         await writeLastOpenedSession(this.options.workspace.root, this.stateDir, created.session.sessionFile);
       }
@@ -895,6 +900,7 @@ export class PiAgentSession {
         this.onThinking?.(event.assistantMessageEvent.delta);
       } else if (event.type === "message_end" && event.message.role === "assistant") {
         this.lastAssistantStopReason = event.message.stopReason;
+        for (const budget of this.requestBudgets) budget.observeUsage(event.message.usage);
       } else if (event.type === "message_end" && event.message.role === "custom" && event.message.display) {
         const rendered = `${event.message.content}\n`;
         this.activeText += rendered;

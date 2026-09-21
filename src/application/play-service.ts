@@ -1,3 +1,4 @@
+import { withPlayModelBudget } from "../runtime/play-model-budget.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -791,7 +792,7 @@ export class PlayApplicationService {
     recorder: TraceRecorder,
     playerMoveId: string,
   ): Promise<PlayOperationResult> {
-    return currentRuntimeHooks().run("user.input", "play.input", { workspaceRoot: this.root, sessionId }, () => this.runPlayerMoveInternal(sessionId, input, context, recorder, playerMoveId));
+    return withPlayModelBudget(() => currentRuntimeHooks().run("user.input", "play.input", { workspaceRoot: this.root, sessionId }, () => this.runPlayerMoveInternal(sessionId, input, context, recorder, playerMoveId)), { newScope: true, id: playerMoveId });
   }
 
   private async runPlayerMoveInternal(
@@ -1116,7 +1117,7 @@ export class PlayApplicationService {
     turnResolution?: PlayerTurnResolution,
     runtimeContext?: RuntimeContextSupplement,
   ): Promise<NarrationOutcome> {
-    return currentRuntimeHooks().run("play.response", "play.narrate", { workspaceRoot: this.root, sessionId: session.id, branchId: session.branchId, purpose }, () => this.narrateInternal(session, purpose, context, narrator, recorder, traceContext, playerMoveId, turnResolution, runtimeContext));
+    return withPlayModelBudget(() => currentRuntimeHooks().run("play.response", "play.narrate", { workspaceRoot: this.root, sessionId: session.id, branchId: session.branchId, purpose }, () => this.narrateInternal(session, purpose, context, narrator, recorder, traceContext, playerMoveId, turnResolution, runtimeContext)));
   }
 
   private async narrateInternal(

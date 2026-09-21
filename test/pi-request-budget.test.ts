@@ -1,3 +1,4 @@
+import { withPlayModelBudget } from "../src/runtime/play-model-budget.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -26,6 +27,28 @@ function agent(session: PiAgentSession) {
 }
 
 describe("Pi request budget integration", () => {
+  it("inherits the host turn gate despite a fresh local budget and rejects before creating another session", async () => {
+    const directory = await root();
+    const budget = new ModelRequestBudget({ maxModelCalls: 2, maxRequestBytes: 200, maxTotalPayloadBytes: 300 });
+    await withPlayModelBudget(async () => {
+      const session = await PiAgentSession.create({
+        workspace: await LocalFileWorkspace.create(directory),
+        runtimeDir: path.join(directory, "runtime"), piAgentDir: path.join(directory, "pi"),
+        saveSession: false, includeLocalTools: false, includeNwhExtension: false,
+        requestBudget: new ModelRequestBudget(),
+      });
+      try {
+        const model = {} as Parameters<NonNullable<AgentSession["agent"]["onPayload"]>>[1];
+        await expect(agent(session).onPayload!({ large: "x".repeat(300) }, model)).rejects.toThrow(ModelRequestBudgetError);
+        await expect(PiAgentSession.create({
+          workspace: await LocalFileWorkspace.create(directory), saveSession: false,
+          runtimeDir: path.join(directory, "must-not-exist"), requestBudget: new ModelRequestBudget(),
+        })).rejects.toThrow(ModelRequestBudgetError);
+        await expect(fs.stat(path.join(directory, "must-not-exist"))).rejects.toMatchObject({ code: "ENOENT" });
+      } finally { await session.dispose(); }
+    }, { budget });
+  });
+
   it("installs the guard on real Pi callbacks and preserves it across host session reset", async () => {
     const directory = await root();
     const budget = new ModelRequestBudget({ maxModelCalls: 2, maxRequestBytes: 200, maxTotalPayloadBytes: 300 });

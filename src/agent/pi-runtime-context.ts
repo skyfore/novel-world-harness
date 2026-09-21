@@ -1,3 +1,4 @@
+import { ModelRequestBudget } from "./model-request-budget.js";
 import type { LlmProfile } from "../config/schema.js";
 import { promptJson } from "../util/prompt-data.js";
 import { observeCommittedEvent } from "../world/actor-visible.js";
@@ -66,6 +67,7 @@ Authority and security:
  */
 export function createPiRuntimeContextResolver(options: PiRuntimeContextResolverOptions): RuntimeContextResolver {
   return async (input) => {
+    const requestBudget = new ModelRequestBudget();
     options.signal?.throwIfAborted();
     let corpus: RuntimeSourceCorpus;
     try {
@@ -83,6 +85,7 @@ export function createPiRuntimeContextResolver(options: PiRuntimeContextResolver
       const sourceAccess = createRuntimeSourceEvidenceAccess(corpus);
       const capture = createRuntimeContextProposalCaptureTool();
       const session = await PiAgentSession.create({
+        requestBudget,
         workspace,
         ...(options.profile ? { profile: options.profile } : {}),
         ...(options.model ? { model: options.model } : {}),

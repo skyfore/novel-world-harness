@@ -1,3 +1,4 @@
+import { withPlayModelBudget } from "../runtime/play-model-budget.js";
 import { activeGoalPressures } from "./goal-pressure.js";
 import { z } from "zod";
 import { actorProposalCandidateSchema, type ActorCandidateSource, type ActorProposalCandidate, type ActorProposalSource } from "./actors.js";
@@ -279,6 +280,10 @@ export class WorldRuntime {
   }
 
   async move(input: MoveInput): Promise<MoveResult> {
+    return withPlayModelBudget(() => this.moveInternal(input));
+  }
+
+  private async moveInternal(input: MoveInput): Promise<MoveResult> {
     const previousHead = await this.engine.branches.readHead(input.branchId);
     let currentHead = previousHead;
     const committedEvents: string[] = [];

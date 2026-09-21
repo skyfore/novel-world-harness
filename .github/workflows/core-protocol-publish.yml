@@ -1,6 +1,5 @@
-# One-shot delivery of four reviewed local commits. No arbitrary input or force push.
-# Verification has read-only permissions. The publish job executes no project code.
-# Successful output removes this workflow from the branch.
+# Fixed-input delivery. Verification is read-only; publication executes no project code.
+# The tested tree removes this workflow. Never force-push over concurrent work.
 name: core-protocol-publish-c1-c3
 on:
   push:
@@ -10,7 +9,8 @@ permissions:
   contents: read
 jobs:
   verify:
-    if: github.repository == 'skyfore/novel-world-harness' && github.event.head_commit.message == 'chore(ci): verify and publish fixed core protocol patch C1-C3'
+    if: >-
+      github.repository == 'skyfore/novel-world-harness' && github.event.head_commit.message == 'fix(ci): quote one-shot delivery condition and preserve exact baseline'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -20,14 +20,14 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.19.0
-      - name: Verify exact baseline and reconstruct hash-pinned patch
+          node-version: '22.19.0'
+      - name: Reconstruct only the fixed hash-pinned patch
         env:
           READ_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = b6bab030a55515f4f7a6a64cd71b001bb348726f
-          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = .github/workflows/core-protocol-publish.yml
+          git merge-base --is-ancestor b6bab030a55515f4f7a6a64cd71b001bb348726f HEAD
+          test "$(git diff --name-only b6bab030a55515f4f7a6a64cd71b001bb348726f HEAD)" = .github/workflows/core-protocol-publish.yml
           python3 - <<'PY'
           import base64, hashlib, json, lzma, os, pathlib, urllib.request
           chunks = ['c895a64e0ced41c59838e6976bfc8b1f0afb0506', 'd5fd62a4c49c6aea742a105155f71d396b561e19', 'd8da3f33c6e918d9644bc3f703edb61a9318ad86', '571c92c06175937c2fa8dd4ac8b97d1e85c1eda7']
@@ -57,7 +57,7 @@ jobs:
       - run: pnpm run check
       - run: pnpm test
       - run: pnpm run build
-      - name: Freeze tested Git objects and result metadata
+      - name: Freeze tested Git objects
         run: |
           set -euo pipefail
           git diff --exit-code
@@ -65,8 +65,8 @@ jobs:
           git bundle create "$RUNNER_TEMP/core-verified.bundle" b6bab030a55515f4f7a6a64cd71b001bb348726f..HEAD
           python3 - <<'PY'
           import json, os, pathlib, subprocess
-          value = {'base': 'b6bab030a55515f4f7a6a64cd71b001bb348726f', 'trigger': os.environ['GITHUB_SHA'], 'head': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(), 'tree': 'f686f1024601f026e30cbc13564f4f284013ed65', 'native': 'passed', 'types': 'passed', 'vitest': 'passed', 'build': 'passed'}
-          pathlib.Path(os.environ['RUNNER_TEMP'], 'core-verified.json').write_text(json.dumps(value))
+          result = {'base': 'b6bab030a55515f4f7a6a64cd71b001bb348726f', 'trigger': os.environ['GITHUB_SHA'], 'head': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(), 'tree': 'f686f1024601f026e30cbc13564f4f284013ed65', 'native': 'passed', 'types': 'passed', 'vitest': 'passed', 'build': 'passed'}
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'core-verified.json').write_text(json.dumps(result))
           PY
       - uses: actions/upload-artifact@v4
         with:

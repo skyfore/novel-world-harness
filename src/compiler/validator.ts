@@ -1,3 +1,4 @@
+import { validateIdentityName } from "../world/actor-recognition.js";
 import { validateProcessRecoveryEvidence } from "../world/event-execution.js";
 import { validateIncapacityEvidence } from "../world/process-capacity.js";
 import { acquisitionSchema, validateAcquisitionOperation, validateAcquisition, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
@@ -374,6 +375,7 @@ export class CompilerValidator {
     events: ReadonlyMap<string, CanonicalEvent>,
     errors: ValidationIssue[],
   ): void {
+    errors.push(...validateIdentityName(proposition.relationId, proposition.object.kind === "literal" ? proposition.object.value : undefined));
     if (!proposition.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Proposition ${proposition.id} has no source evidence`, "evidence"));
     if (!entities.has(proposition.subjectEntityId)) {
       errors.push(issue("UNKNOWN_PROPOSITION_SUBJECT", `Proposition subject ${proposition.subjectEntityId} is not canonical`, "subjectEntityId"));
@@ -432,6 +434,7 @@ export class CompilerValidator {
   }
 
   private validateClaim(claim: Claim, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
+    errors.push(...validateIdentityName(claim.predicate, claim.object));
     if (!entities.has(claim.subject)) errors.push(issue("UNKNOWN_SUBJECT", `Claim subject ${claim.subject} is not canonical`, "subject"));
     if (claim.speaker && !entities.has(claim.speaker)) errors.push(issue("UNKNOWN_SPEAKER", `Claim speaker ${claim.speaker} is not canonical`, "speaker"));
     if (isMetaKnowledgePredicate(claim.predicate)) {

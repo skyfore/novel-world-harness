@@ -77,12 +77,12 @@ async function fixture() {
     ownedEntityState: {},
     knowledge: [],
     presentEntities: [
-      { id: "hero", kind: "character", name: "Hero" },
-      { id: "alice", kind: "character", name: "Alice" },
+      { id: "hero", kind: "character", name: "Hero", nameAuthority: "self" },
+      { id: "alice", kind: "character", name: "Alice", nameAuthority: "acquired", knownNames: ["Alice"] },
     ],
     referenceableEntities: [
-      { id: "hero", kind: "character", name: "Hero" },
-      { id: "alice", kind: "character", name: "Alice" },
+      { id: "hero", kind: "character", name: "Hero", nameAuthority: "self" },
+      { id: "alice", kind: "character", name: "Alice", nameAuthority: "acquired", knownNames: ["Alice"] },
     ],
     writableEntityIds: ["hero"],
     writableStateFields: DEFAULT_STATE_FIELDS.filter((field) => field.appliesTo.includes("character")),

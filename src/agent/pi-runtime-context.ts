@@ -218,7 +218,7 @@ export async function admitRuntimeContextProposal(
     ...actorContext.presentEntities,
   ].map((entity) => [entity.id, entity.name]));
   const knownIdentityIds = new Set(
-    [...actorEntityNames].filter(([, name]) => !/^Unidentified\s/iu.test(name)).map(([id]) => id),
+    actorContext.referenceableEntities.filter(entity => entity.nameAuthority === "self" || entity.nameAuthority === "acquired").map(entity => entity.id),
   );
   knownIdentityIds.add(input.actorId);
   const referenceableIds = new Set(actorContext.referenceableEntities.map((entity) => entity.id));
@@ -389,6 +389,7 @@ function admittedArtifactFacts(input: {
   if (input.artifact.kind === "entity") {
     const entity = input.artifact.payload as Entity;
     const knownIdentity = input.knownIdentityIds.has(entity.id);
+    const utteredName = utteranceEntityLabel(input.utterance, entity);
     const turnReference = !knownIdentity
       && input.referenceableIds.has(entity.id)
       && (
@@ -397,14 +398,14 @@ function admittedArtifactFacts(input: {
         || input.need.domain === "relationship"
         || input.need.domain === "artifact-provenance"
       )
-      && utteranceNamesEntity(input.utterance, entity);
+      && utteredName !== undefined;
     if (!knownIdentity && !turnReference) return [];
-    const aliases = entity.aliases.length ? `；别名：${entity.aliases.join("、")}` : "";
+    const actorName = input.actorEntityNames.get(entity.id) ?? "已知对象";
     return [{
       fact: {
         summary: turnReference
-          ? `仅为解释本次输入：玩家所说的“${entity.canonicalName}”指向当前角色已经能感知或指代、但未因此获得姓名知识的${entity.kind}。`
-          : `${entity.canonicalName}是当前角色可指认的${entity.kind}${aliases}。`,
+          ? `仅为解释本次输入：玩家所说的“${utteredName}”指向当前角色已经能感知或指代、但未因此获得姓名知识的${entity.kind}。`
+          : `${actorName}是当前角色可指认的${entity.kind}。`,
         authority: "committed-world",
         basis: [ref],
       },
@@ -417,7 +418,7 @@ function admittedArtifactFacts(input: {
     if (!input.knownClaimIds.has(claim.id)) return [];
     return [{
       fact: {
-        summary: claimSummary(claim, input.corpus.bundle.canonical.entities),
+        summary: claimSummary(claim, input.actorEntityNames),
         authority: "committed-world",
         basis: [ref],
       },
@@ -439,7 +440,7 @@ function admittedArtifactFacts(input: {
     }];
     return [{
       fact: {
-        summary: canonical.readerSummary ?? observation.summary,
+        summary: observation.summary,
         authority: "committed-world",
         basis: [ref],
       },
@@ -462,17 +463,16 @@ function admittedArtifactFacts(input: {
   return [];
 }
 
-function claimSummary(claim: Claim, entities: readonly Entity[]): string {
-  const names = new Map(entities.map((entity) => [entity.id, entity.canonicalName]));
+function claimSummary(claim: Claim, names: ReadonlyMap<string, string>): string {
   const object = typeof claim.object === "string" && names.has(claim.object)
     ? names.get(claim.object)
     : claim.object;
   return `${names.get(claim.subject) ?? "已知对象"}${claim.predicate}${formatObject(object)}。`;
 }
 
-function utteranceNamesEntity(utterance: string, entity: Entity): boolean {
+function utteranceEntityLabel(utterance: string, entity: Entity): string | undefined {
   const normalized = utterance.normalize("NFKC").toLowerCase();
-  return [entity.canonicalName, ...entity.aliases].some((name) => {
+  return [entity.canonicalName, ...entity.aliases].find((name) => {
     const candidate = name.normalize("NFKC").trim().toLowerCase();
     if (Array.from(candidate).length < 2) return false;
     if (!/[\p{Script=Latin}\p{Number}]/u.test(candidate)) return normalized.includes(candidate);

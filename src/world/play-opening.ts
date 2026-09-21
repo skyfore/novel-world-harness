@@ -346,9 +346,9 @@ export async function buildPlayOpeningFrame(
     // compiler and world model; a missing style excerpt must not hide an
     // otherwise valid committed scene from the player.
   }
-  const resolvedAct = playerNarrativeResolvedAct(messageHistory, history, context.entities, actorId, referenceableIds);
   const playContinuity = playerNarrativePlayContinuity(messageHistory);
   const referenceableNames = new Map(scoped.referenceableEntities.map((entity) => [entity.id, entity.name]));
+  const resolvedAct = playerNarrativeResolvedAct(messageHistory, history, referenceableNames, actorId);
   const visibleOntology = development.model
     ? modelVisibleCharacterOntology(development.model, (entityId) => referenceableNames.get(entityId))
     : undefined;
@@ -578,9 +578,8 @@ export function playerSceneModelFrame(
 function playerNarrativeResolvedAct(
   messages: readonly PlayConversationMessage[],
   history: Awaited<ReturnType<typeof committedHistory>>,
-  entities: ReadonlyMap<string, { canonicalName: string }>,
+  entityNames: ReadonlyMap<string, string>,
   actorId: string,
-  referenceableIds: ReadonlySet<string>,
 ): PlayerNarrativeResolvedAct | undefined {
   const message = [...messages].reverse().find((entry) => entry.role === "player");
   if (!message || message.status === "rendered") return undefined;
@@ -594,16 +593,8 @@ function playerNarrativeResolvedAct(
   }))].slice(0, 12);
   const lockedUtterances = turnHistory.flatMap(({ event }) => (event.spokenUtterances ?? []).flatMap((utterance, utteranceIndex) => {
     if (utterance.speakerId !== actorId && !utterance.addresseeIds.includes(actorId)) return [];
-    const speaker = utterance.speakerId === actorId
-      ? entities.get(actorId)?.canonicalName ?? "你"
-      : referenceableIds.has(utterance.speakerId)
-        ? entities.get(utterance.speakerId)?.canonicalName ?? "在场人物"
-        : "在场人物";
-    const addressees = utterance.addresseeIds.map((entityId) => entityId === actorId
-      ? entities.get(actorId)?.canonicalName ?? "你"
-      : referenceableIds.has(entityId)
-        ? entities.get(entityId)?.canonicalName ?? "在场人物"
-        : "在场人物");
+    const speaker = entityNames.get(utterance.speakerId) ?? "在场人物";
+    const addressees = utterance.addresseeIds.map((entityId) => entityNames.get(entityId) ?? "在场人物");
     return [{ utteranceId: committedUtteranceId(event.eventId, utteranceIndex), speaker, addressees, text: utterance.content, mode: "verbatim" as const }];
   }));
   // PlayerTurnInput already caps live acts at 20k characters. Retain that

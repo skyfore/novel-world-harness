@@ -39,3 +39,15 @@ Pi 创建会话前检查继承预算；每次实际模型 step 和经过 Pi 扩�
 因实际入口／重放解释发生变化，pipeline 提升至 45、engine 至 0.22.0；旧语义／执行检查点需重验，旧分支由既有版本门明确拒绝不兼容解释，不改写原快照。
 
 验证：服务端类型检查通过；时间关系、入口、历史获知、失能过程和晚角色入口的 6 文件／27 项测试通过。新增两个改名场景及间接矛盾、数轴隔离、contested、自由文本 offset、零长度与 overlap 反例。尚未把定向结果当作全仓最终结果。
+
+## C3：实体引用与角色已获称谓分离
+
+角色上下文不再因位置、物品归属、关系端点或普通 claim 引用而展示 canonicalName。当前角色自身保留所选身份名；其他实体从该角色当前已理解且未拒绝的 `identity-name`／`identity-alias` literal claim 投影称谓。该关系名符合现有 relationId 的 ASCII ID 语法，不另造无法与 Proposition/Acquisition 配对的冒号关系。知晓假名不等于知道真名；多个相冲突主称谓保留 ambiguous 状态，不能最后写入者胜出。未获称谓者仍可用稳定实体身份和匿名展示标签参与合法行动。
+
+生产上下文附带 nameAuthority／knownNames；Runtime source consultation 不再用 Unidentified 字符串前缀推断权限，也不把已知别名升级为全局真名或暴露所有 aliases。玩家自己输入的一个称谓只形成该输入的 turn-reference，输出采用实际命中的称谓而非全局 canonicalName。已知 claim 的摘要使用角色可见称谓；已发生事件使用角色实际 observation 而非全知 readerSummary。锁定台词的 speaker/addressee 展示同样使用角色投影，不因 ID 可引用而泄露真名。编译 prompt 明确要求名称 claim 与独立 Acquisition；compiler 与分支语义 reducer 拒绝该保留词汇的非 literal/空/过长值。
+
+此实现保护结构化称谓和上述补证／台词标签路径，不宣称任意自然语言 observation 已经获得完整语义泄漏证明。原文、实际已提交台词和当前输入不会被全局字符串替换。旧缺名称证据的事实不会迁移成新的识别证据。pipeline 46、engine 0.23.0，沿用既有不兼容版本门。
+
+验证：6 文件／65 项定向测试通过；最后对保留词汇语法与预算 hook 的 2 文件／8 项通过，服务端类型检查通过。两个独立称谓场景通过真实分支提交、获知、冲突、遗忘、重新打开与 fork，验证旁观者隔离和假名不泄真名。新增测试初稿用了不合法汉字 ID 及不存在的 engine fork API，已改用合法稳定 ID 与现有 WorldRuntime.forkBranch；没有修改生产 ID 或 fork 限制。原测试依赖名称来定位 opaque handle 的部分改用宿主编码函数，保留原解码／权限断言；应匿名的旧标签预期已更新。
+
+C1/C2 后首轮全仓为 210 文件通过、1 文件失败，共 1270 项通过、1 项失败；失败仅为新增 model.budget hook 后旧测试的事件总数断言。现分别断言原 play.turn 唯一成功和新增预算事件唯一成功，定向已通过。后续全仓结果仍需按最终 tree 再记录。

@@ -478,8 +478,8 @@ describe("actor-scoped player action context", () => {
     const entities = boundary.context.referenceableEntities as Array<{ id: string; name: string }>;
     const claims = boundary.context.knowledge as Array<{ claimId: string }>;
     const actorHandle = boundary.context.actorId as string;
-    const hallHandle = entities.find((entity) => entity.name === "Hall")!.id;
-    const campHandle = entities.find((entity) => entity.name === "Camp")!.id;
+    const hallHandle = boundary.encodeEntityId("hall");
+    const campHandle = boundary.encodeEntityId("camp");
     const decoded = boundary.decodeCandidate({
       title: "Hero walks from the Hall to Camp",
       action: { ...hallCampWalkAction, footprint: { reads: [{ entityId: actorHandle, field: "character.location" }], writes: [{ entityId: actorHandle, field: "character.location" }], resources: [] } },
@@ -551,12 +551,12 @@ describe("actor-scoped player action context", () => {
     expect(revealed.report.accepted).toBe(true);
     const scoped = await buildActorScopedActionContext(engine, "hero", revealed.newHead);
     expect(scoped.ownedEntityState["silver-key"]?.["artifact.custodian"]).toBe("villain");
-    expect(scoped.referenceableEntities).toContainEqual(expect.objectContaining({ id: "villain", name: "Hidden Villain" }));
+    expect(scoped.referenceableEntities).toContainEqual(expect.objectContaining({ id: "villain", nameAuthority: "unidentified", name: expect.stringMatching(/^Unidentified/) }));
 
-    const model = createPlayerActionModelBoundary(scoped).context;
+    const namedBoundary = createPlayerActionModelBoundary(scoped);
+    const model = namedBoundary.context;
     const owned = model.ownedEntityState as Record<string, Record<string, unknown>>;
-    const silverKeyHandle = (model.referenceableEntities as Array<{ id: string; name: string }>)
-      .find((entity) => entity.name === "银钥")!.id;
+    const silverKeyHandle = namedBoundary.encodeEntityId("silver-key");
     expect(owned[silverKeyHandle]?.["artifact.custodian"]).toMatch(/^entity-\d{3}$/);
     expect(JSON.stringify(model)).not.toContain('"artifact.custodian":"villain"');
   });
@@ -886,7 +886,7 @@ describe("PlayerTurnService", () => {
     const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "我去藏书楼。" });
 
     expect(result.accepted).toBe(true);
-    expect(observedContext?.referenceableEntities).toContainEqual(expect.objectContaining({ id: "library", name: "Library" }));
+    expect(observedContext?.referenceableEntities).toContainEqual(expect.objectContaining({ id: "library", nameAuthority: "unidentified" }));
     expect(observedContext?.referenceableEntities.map((entity) => entity.id)).not.toContain("narrator");
     expect(observedContext?.writableEntityIds).not.toContain("library");
     expect(observedContext).not.toHaveProperty("worldState");

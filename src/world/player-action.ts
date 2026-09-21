@@ -1,3 +1,4 @@
+import { projectActorEntityNames } from "./actor-recognition.js";
 import { actorOutcomeShape, copyActorOutcome, hasActorOutcome, mapActorOutcome, validateActorOutcomeScope } from "./actor-outcome.js";
 import { z } from "zod";
 import { commitKnowledgeAwareAction, validateActionKnowledge, type KnowledgeAwareAction } from "./action-gate.js";
@@ -304,6 +305,8 @@ const actorScopedEntitySchema = z
     id: idSchema,
     kind: entityKindSchema,
     name: z.string().min(1),
+    nameAuthority: z.enum(["self", "acquired", "unidentified", "ambiguous"]).optional(),
+    knownNames: z.array(z.string().min(1).max(400)).optional(),
   })
   .strict();
 
@@ -854,7 +857,6 @@ export async function buildActorScopedActionContext(
     committedHistory(engine, commitId),
   ]);
   const referenceable = new Set<EntityId>([actorId]);
-  const knownIdentities = new Set<EntityId>([actorId]);
   const present = new Set<EntityId>([actorId]);
   const writable = new Set<EntityId>([actorId]);
   const ownedEntityState: Record<EntityId, Record<string, StateValue>> = {};
@@ -875,20 +877,19 @@ export async function buildActorScopedActionContext(
     referenceable.add(participant);
   }
 
-  addStateEntityReferences(referenceable, selfState, context.stateSchema, context.entities, effectiveSourceId, knownIdentities);
-  addStateEntityReferences(referenceable, sceneLocationState, context.stateSchema, context.entities, effectiveSourceId, knownIdentities);
+  addStateEntityReferences(referenceable, selfState, context.stateSchema, context.entities, effectiveSourceId);
+  addStateEntityReferences(referenceable, sceneLocationState, context.stateSchema, context.entities, effectiveSourceId);
 
   for (const entry of visibleKnowledge) {
-    if (entry.fact.sourceActorId) addExistingEntity(referenceable, entry.fact.sourceActorId, context.entities, effectiveSourceId, knownIdentities);
+    if (entry.fact.sourceActorId) addExistingEntity(referenceable, entry.fact.sourceActorId, context.entities, effectiveSourceId);
     if (!entry.claim) continue;
-    addExistingEntity(referenceable, entry.claim.subject, context.entities, effectiveSourceId, knownIdentities);
-    if (entry.claim.speaker) addExistingEntity(referenceable, entry.claim.speaker, context.entities, effectiveSourceId, knownIdentities);
+    addExistingEntity(referenceable, entry.claim.subject, context.entities, effectiveSourceId);
+    if (entry.claim.speaker) addExistingEntity(referenceable, entry.claim.speaker, context.entities, effectiveSourceId);
     addClaimObjectEntities(
       referenceable,
       sourceSafeClaimObject(entry.claim.object, context.entities, effectiveSourceId),
       context.entities,
       effectiveSourceId,
-      knownIdentities,
     );
   }
 
@@ -896,13 +897,12 @@ export async function buildActorScopedActionContext(
     if (!evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId)) continue;
     if (entity.kind === "artifact" && worldState.values[entity.id]?.["artifact.owner"] === actorId) {
       referenceable.add(entity.id);
-      knownIdentities.add(entity.id);
       writable.add(entity.id);
       const projected = sourceSafeVisibleState(projectActorVisibleState(
         worldState.values[entity.id] ?? {}, context.stateSchema, "owner"),
       context.stateSchema, context.entities, effectiveSourceId);
       ownedEntityState[entity.id] = projected;
-      addStateEntityReferences(referenceable, projected, context.stateSchema, context.entities, effectiveSourceId, knownIdentities);
+      addStateEntityReferences(referenceable, projected, context.stateSchema, context.entities, effectiveSourceId);
       continue;
     }
     if (entity.kind === "relationship") {
@@ -920,23 +920,15 @@ export async function buildActorScopedActionContext(
         relationshipState ?? {}, context.stateSchema, "owner"),
       context.stateSchema, context.entities, effectiveSourceId);
       ownedEntityState[entity.id] = projected;
-      addStateEntityReferences(referenceable, projected, context.stateSchema, context.entities, effectiveSourceId, knownIdentities);
-      if (typeof from === "string") addExistingEntity(referenceable, from, context.entities, effectiveSourceId, knownIdentities);
-      if (typeof to === "string") addExistingEntity(referenceable, to, context.entities, effectiveSourceId, knownIdentities);
+      addStateEntityReferences(referenceable, projected, context.stateSchema, context.entities, effectiveSourceId);
+      if (typeof from === "string") addExistingEntity(referenceable, from, context.entities, effectiveSourceId);
+      if (typeof to === "string") addExistingEntity(referenceable, to, context.entities, effectiveSourceId);
     }
   }
 
-  const anonymousCounts = new Map<Entity["kind"], number>();
-  const referenceableEntities = [...referenceable]
+  const referenceableEntities = projectActorEntityNames(actorId, [...referenceable]
     .map((id) => context.entities.get(id))
-    .filter((entity): entity is NonNullable<typeof entity> => Boolean(entity))
-    .sort((left, right) => left.id.localeCompare(right.id))
-    .map((entity) => {
-      if (knownIdentities.has(entity.id)) return { id: entity.id, kind: entity.kind, name: entity.canonicalName };
-      const ordinal = (anonymousCounts.get(entity.kind) ?? 0) + 1;
-      anonymousCounts.set(entity.kind, ordinal);
-      return { id: entity.id, kind: entity.kind, name: `Unidentified ${entity.kind} ${ordinal}` };
-    });
+    .filter((entity): entity is Entity => Boolean(entity)), visibleKnowledge);
   const presentEntities = referenceableEntities.filter((entity) => present.has(entity.id));
   const knownClaimIds = new Set(visibleKnowledge
     .filter((entry) => isActionableKnowledge(entry.fact))
@@ -2656,13 +2648,11 @@ function addExistingEntity(
   value: unknown,
   entities: ReadonlyMap<EntityId, Entity>,
   sourceId?: string,
-  knownIdentities?: Set<EntityId>,
 ): void {
   if (typeof value !== "string") return;
   const entity = entities.get(value);
   if (entity && evidenceBelongsExclusivelyToSource(entity.evidence, sourceId)) {
     target.add(value);
-    knownIdentities?.add(value);
   }
 }
 
@@ -2748,21 +2738,20 @@ function addClaimObjectEntities(
   value: unknown,
   entities: ReadonlyMap<EntityId, Entity>,
   sourceId?: string,
-  knownIdentities?: Set<EntityId>,
   depth = 0,
 ): void {
   if (typeof value === "string") {
-    addExistingEntity(target, value, entities, sourceId, knownIdentities);
+    addExistingEntity(target, value, entities, sourceId);
     return;
   }
   if (depth >= 8) return;
   if (Array.isArray(value)) {
-    for (const item of value) addClaimObjectEntities(target, item, entities, sourceId, knownIdentities, depth + 1);
+    for (const item of value) addClaimObjectEntities(target, item, entities, sourceId, depth + 1);
     return;
   }
   if (!value || typeof value !== "object") return;
   for (const item of Object.values(value as Record<string, unknown>)) {
-    addClaimObjectEntities(target, item, entities, sourceId, knownIdentities, depth + 1);
+    addClaimObjectEntities(target, item, entities, sourceId, depth + 1);
   }
 }
 
@@ -2772,14 +2761,13 @@ function addStateEntityReferences(
   stateSchema: { get(field: string): StateFieldSpec },
   entities: ReadonlyMap<EntityId, Entity>,
   sourceId?: string,
-  knownIdentities?: Set<EntityId>,
 ): void {
   for (const [field, value] of Object.entries(values)) {
     const spec = stateSchema.get(field);
     if (spec.valueType === "entity-ref") {
-      addExistingEntity(target, value, entities, sourceId, knownIdentities);
+      addExistingEntity(target, value, entities, sourceId);
     } else if (spec.valueType === "entity-ref-set" && Array.isArray(value)) {
-      for (const item of value) addExistingEntity(target, item, entities, sourceId, knownIdentities);
+      for (const item of value) addExistingEntity(target, item, entities, sourceId);
     }
   }
 }

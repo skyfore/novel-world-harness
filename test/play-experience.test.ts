@@ -134,8 +134,10 @@ describe("play experience catalog", () => {
       },
     }));
 
-    expect(hookEvents).toHaveLength(1);
-    expect(hookEvents[0]).toMatchObject({ type: "play.turn", status: "succeeded", metadata: { accepted: true, branchId: "main" } });
+    expect(hookEvents.filter(event => event.type === "play.turn")).toHaveLength(1);
+    expect(hookEvents.find(event => event.type === "play.turn")).toMatchObject({ type: "play.turn", status: "succeeded", metadata: { accepted: true, branchId: "main" } });
+    expect(hookEvents.filter(event => event.type === "model.budget")).toHaveLength(1);
+    expect(hookEvents.find(event => event.type === "model.budget")).toMatchObject({ status: "succeeded", metadata: { modelCalls: 0 } });
     expect(outcome.result.accepted).toBe(true);
     expect(outcome.result.contextBefore.referenceableEntities.map((entity) => entity.id)).not.toContain("interview-letter");
     expect(outcome.result.contextBefore.knowledge).toEqual([]);

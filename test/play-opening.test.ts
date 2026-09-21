@@ -354,7 +354,7 @@ describe("player opening narration", () => {
       lockedUtterances: [{
         utteranceId: `${event.eventId}:0`,
         speaker: "福贵",
-        addressees: ["见证人"],
+        addressees: ["Unidentified character 1"],
         text: "门外是谁？",
         mode: "verbatim",
       }],

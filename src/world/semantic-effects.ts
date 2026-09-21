@@ -1,3 +1,4 @@
+import { validateIdentityName } from "./actor-recognition.js";
 import type {
   BranchSemanticDelta,
   BranchSemanticOperation,
@@ -267,6 +268,8 @@ export function applyBranchSemanticDelta(
   for (const operation of delta.operations) {
     switch (operation.op) {
       case "record-proposition": {
+        const nameIssues = validateIdentityName(operation.proposition.relationId, operation.proposition.object.kind === "literal" ? operation.proposition.object.value : undefined);
+        if (nameIssues.length) throw new Error(nameIssues.map(issue => issue.message).join("; "));
         const proposition = operation.proposition;
         assertUnusedId(proposition.id, output.propositions, context.canonicalPropositionIds, "proposition");
         requireEntity(context.entities, proposition.subjectEntityId, "Proposition subject");

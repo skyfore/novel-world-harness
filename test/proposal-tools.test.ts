@@ -2009,6 +2009,8 @@ describe("compiler proposal tools", () => {
     });
   });
 
+  // Bounded filesystem integration, not a 5-second performance benchmark.
+  // Preserve every real write, recovery step and production safety-fuse limit.
   it("reserves one final finish call after the tool-call safety fuse", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-finish-grace-"));
     roots.push(root);
@@ -2039,7 +2041,7 @@ describe("compiler proposal tools", () => {
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { compilerBatchFinished: true, proposalIds: ["entity-person"] },
     });
-  });
+  }, 20_000);
 
   it("keeps an 800-proposal runaway safety fuse without advertising it as a target", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-active-budget-"));

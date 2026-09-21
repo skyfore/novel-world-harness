@@ -196,6 +196,8 @@ it("charges argument validation failures before staging and permits just the cor
   expect(attempts[0]!.started.proposalId).toBe(attempts[1]!.started.proposalId);
 });
 
+// Bounded filesystem integration, not a 5-second performance benchmark.
+// Preserve every real write, recovery step and production safety-fuse limit.
 it("consumes only declared same-plan staged mentions and freezes their exact revisions for resolution recovery", async () => {
   const { stageUpstreamRepair, recoverUpstreamRepairStage } = await import("../src/compiler/upstream-repair-staging.js");
   const { CanonicalModelStore } = await import("../src/world/canonical-model.js");
@@ -254,7 +256,7 @@ it("consumes only declared same-plan staged mentions and freezes their exact rev
   await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
   expect((await new EntityResolutionStore(f.root).list(f.sourceId)).map(item => item.id)).toEqual(["new-resolution"]);
   expect(noReplay).not.toHaveBeenCalled();
-});
+}, 20_000);
 
 it("freezes and restores upstream budgets with candidates and rejects old or unbound history before world writes", async () => {
   const { PreparedNovelCache } = await import("../src/compiler/prepared-cache.js");

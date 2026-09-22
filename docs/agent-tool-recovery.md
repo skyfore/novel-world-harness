@@ -987,7 +987,7 @@ assessment that omitted these dependencies cannot silently remain valid.
 Copy the exact binding's `requirementSetHash` and `requirementId` into a host
 review only after inspecting its diagnostic and path. Regenerate after subject
 changes; a path proves dependency, not that this repair will satisfy a capability.
-`unboundFindingIds` and `coreRoleBinding: requires-host-review` must remain explicit.
+`unboundFindingIds` and `coreRoleBlockers` must remain explicit.
 Do not assign them by matching names or shared text, and do not treat a structural
 repair as a new requirement evaluation. An unfreezable candidate requires resolving
 its original pending host work; preserve diagnostics and do not replay models.
@@ -1020,8 +1020,7 @@ stop for host review; never drop path guards or substitute guessed requirements.
 Evidence-binding nodes and structural discourse objects without matching readable
 artifacts are not silently flattened to their source text. Existing direct host
 review planning remains necessary for independently reviewed quotation extensions;
-discovery does not infer those expected anchors. Core-role binding is still a
-separate host-review scope. The output remains diagnostic-only: register and
+discovery does not infer those expected anchors. Core-role bindings now use the frozen independently reviewed definition: ontology/development start from the exact character model, and opening-driver starts from the verified physical entry or a non-focal physically present actor goal. Entry guards and every typed path node are frozen; shared source text grants no binding. Unknown entry time retains its original diagnostic in coreRoleBlockers and grants no driver binding. The output remains diagnostic-only: register and
 authorize the exact `plan` through the normal lifecycle, then independently evaluate
 actual capability results after finish/convergence.
 
@@ -1450,3 +1449,37 @@ it is not permission to substitute source order or elapsed zero. Exact opening
 pre-event seed even when its absolute story time is unknown. A later source
 checkpoint can use a reviewed history reference, but an opening that recursively
 requires itself cannot be reconstructed and must stop.
+
+### Versioned resolution repair (2026-09-22)
+
+The host planner accepts `ENTITY_RESOLUTION_REVISION` and
+`EVENT_RESOLUTION_REVISION` for one existing decision over one exact mention.
+Same-source `requirements discover-upstream-repairs` returns unresolved/ambiguous
+revision findings. Copy `findings[].diagnostic` unchanged, including `mentionId`,
+`revisionHash`, `resolutionId`, and `resolutionHash`; select candidates only from
+`candidateRefs[].id` and `candidateRefs[].revisionHash` of the matching kind.
+Resolved decisions may be revised only through an explicit host diagnostic review;
+discovery does not infer that a resolved identity is wrong.
+
+The plan allocates one deterministic successor ID and freezes its predecessor and
+mention scope in `resolutionRevisions`. Use the returned `allowedCreations[].id`
+as `resolution_id`; set `supersedes_resolution_id` (entity) or the one-element
+`supersedes_resolution_ids` (event) to the frozen predecessor. Do not overwrite
+an old ID or omit the predecessor. Unknown and ambiguous decisions remain in the
+original baseline and immutable resolution history; a revision is not proof that
+an identity became known. Event split/merge and unsupported semantic modules have
+no registered policy: preserve the diagnostic and stop for host review, without
+model retry or namespace rotation.
+
+Changed hashes require one regenerated host review after copying the exact
+same-source fields. Scope/authorization/budget/finish failures require stopping,
+not a corrected model retry. Existing predecessor-plan authorization, durable
+budgets, narrow tools, finish validation and independent postcondition evaluation
+remain mandatory. Recovery may use the frozen predecessor payload only from the
+original durable finish intent and only alongside its exact active successor;
+competing decisions or missing baseline evidence stop recovery. Readonly recovered
+predecessor revisions are audit evidence, never active identity decisions.
+
+Quotation anchor-extension plans also freeze unchanged existing speaker and
+addressee mentions. Missing mention dependencies still require their separately
+allocated creation slots; an anchor extension does not authorize identity edits.

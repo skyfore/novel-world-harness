@@ -27,6 +27,7 @@ export async function verifyUpstreamRepairConvergence(root: string, sourceId: st
   const verified = await verifyUpstreamRepairPlan(root, current.plan, outputs);
   const refs = new Map(current.plan.baselineRefs.map(ref => [`${ref.kind}:${ref.id}`, { kind: ref.kind, id: ref.id }]));
   for (const proposal of current.finishIntent.proposals) refs.set(`${proposal.artifactKind}:${proposal.artifactId}`, { kind: proposal.artifactKind, id: proposal.artifactId });
+  for (const revision of current.plan.resolutionRevisions ?? []) refs.delete(`${revision.kind}:${revision.predecessorId}`);
   const activeRevisions = [...refs].sort(([a], [b]) => a.localeCompare(b)).map(([key, ref]) => ({ ...ref, revisionHash: verified.activeRevisions.get(key)! }));
   return { receiptFingerprint: receipt.fingerprint, activeRevisions };
 }

@@ -10,7 +10,7 @@ import { SegmentStore, segmentSource } from "./segments.js";
 import { upstreamRepairHostError } from "./upstream-repair-preflight.js";
 import { textAnchorForByteRange } from "./text-anchors.js";
 
-/** Structural absence only. No inferred quotation boundaries, identity match or requirement satisfaction. */
+/** Structural gaps and retained unresolved decisions; never infer identity or satisfaction. */
 export async function discoverUpstreamRepairDiagnostics(root: string, sourceId: string) {
   const source = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
   if (!source) throw upstreamRepairHostError("Discovery source is missing; use the registered source ID, never guess a storage path");
@@ -29,6 +29,14 @@ export async function discoverUpstreamRepairDiagnostics(root: string, sourceId: 
     } else if (annotation.annotationType === "event-mention" && !events.some(item => item.eventMentionIds.includes(annotation.id))) {
       diagnostic = { code: "EVENT_RESOLUTION_MISSING" as const, mentionId: annotation.id, revisionHash: contentHash(annotation) };
     }
+    if (!diagnostic && annotation.annotationType === "entity-mention") {
+      const prior = entities.find(item => item.mentionId === annotation.id && ["ambiguous", "unresolved", "misidentified"].includes(item.status));
+      if (prior) diagnostic = { code: "ENTITY_RESOLUTION_REVISION" as const, mentionId: annotation.id, revisionHash: contentHash(annotation), resolutionId: prior.id, resolutionHash: contentHash(prior) };
+    }
+    if (!diagnostic && annotation.annotationType === "event-mention") {
+      const prior = events.find(item => item.eventMentionIds.length === 1 && item.eventMentionIds[0] === annotation.id && ["ambiguous", "unresolved"].includes(item.status));
+      if (prior) diagnostic = { code: "EVENT_RESOLUTION_REVISION" as const, mentionId: annotation.id, revisionHash: contentHash(annotation), resolutionId: prior.id, resolutionHash: contentHash(prior) };
+    }
     if (!diagnostic) continue;
     const anchors = annotation.annotationType === "event-mention" ? [annotation.triggerAnchor, ...annotation.extentAnchors]
       : annotation.annotationType === "discourse-segment" ? annotation.anchors : [annotation.anchor];
@@ -40,5 +48,5 @@ export async function discoverUpstreamRepairDiagnostics(root: string, sourceId: 
     candidateRefs: records.filter(item => item.status === "canonical" && ["entity", "canonical-event"].includes(item.kind))
       .map(item => ({ kind: item.kind, id: item.logicalId, revisionHash: contentHash(item.payload), readArguments: { ref: item.ref } })),
     findings: findings.sort((a, b) => a.findingId.localeCompare(b.findingId)),
-    recovery: "Copy findings[].diagnostic exactly into a host review, bind its independent requirementId and explicit source scope; resolution candidates require the exact candidateRefs[].id and candidateRefs[].revisionHash for the correct kind; readArguments.ref permits original artifact inspection. Discovery never authorizes a repair or guesses identity. Existing unresolved resolutions require separate host review, not duplicate creation." };
+    recovery: "Copy findings[].diagnostic exactly into a host review, bind its independent requirementId and explicit source scope; resolution candidates require the exact candidateRefs[].id and candidateRefs[].revisionHash for the correct kind; readArguments.ref permits original artifact inspection. Discovery never authorizes a repair or guesses identity. Revision findings require explicit host review; copy diagnostic.resolutionId and resolutionHash exactly. Preserve unresolved/ambiguous history through a single superseding version; do not duplicate or infer a resolved identity." };
 }

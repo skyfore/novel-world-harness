@@ -1,3 +1,5 @@
+import { UpstreamRepairLedger } from "../src/compiler/upstream-repair-ledger.js";
+import { repairForEvent } from "./helpers/upstream-repair.js";
 import { deriveCharacterEntrySeed } from "../src/world/entry-context.js";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -54,12 +56,25 @@ async function setup(scene: typeof scenes[number]) {
   return { root, source, canon, anchor, mention, perception, resolution, event, payload, input, operation, initial };
 }
 
-it.each(scenes)("grounds perception across compile, rebuild and runtime cut: $actor", async scene => {
-  const { root, source, canon, perception, input, operation, initial, event } = await setup(scene);
+it.each(scenes.flatMap(scene => [false, true].map(repair => ({ ...scene, repair }))))("repair=$repair grounds perception across compile, rebuild and runtime cut: $actor", async scene => {
+  const { root, source, canon, perception, input, operation: legacyOperation, initial, event, resolution } = await setup(scene);
+  const operation = scene.repair ? { ...legacyOperation, acquisitionId: "seen-closure", status: "believes" as const } : legacyOperation;
+  if (scene.repair) {
+    const prior = eventResolutionSchema.parse({ ...resolution, status: "unresolved", canonicalEventId: undefined, relation: undefined, candidates: [] });
+    await new EventResolutionStore(root).replaceCurrent(source.source.id, [prior]);
+    await repairForEvent({ root, sourceId: source.source.id, sourceSha256: source.source.contentSha256, segmentId: source.segmentId, bytes: Buffer.from(`${scene.sentence}\n${scene.report}`), event,
+      diagnostic: { code: "EVENT_RESOLUTION_REVISION", mentionId: perception.id, revisionHash: contentHash(perception), resolutionId: prior.id, resolutionHash: contentHash(prior), candidates: [{ id: event.id, revisionHash: contentHash(event) }] },
+      proposal: slot => ({ proposal_id: "repair-perception-resolution", resolution_id: slot.id, event_mention_ids: [perception.id], status: "resolved", canonical_event_id: event.id, relation: "coreference",
+        candidates: [{ canonical_event_id: event.id, relation: "coreference", confidence: 1, basis_event_mention_ids: [perception.id], evidence_assertion_ids: [], rationale: "Original explicit perception" }], supersedes_resolution_ids: [prior.id], rationale: "Reviewed original occurrence" }) });
+  }
   const toolset = createCompilerProposalToolset(root); await toolset.beginBatch([], "sense", source.source.id);
   const propose = toolset.tools.find(item => item.name === "propose_perception_observation")!;
   await expect(propose.execute("missing", { ...input, evidence_selectors: input.evidence_selectors.slice(1) } as never, undefined, undefined, {} as never)).rejects.toThrow("PERCEPTION_EVIDENCE_MISSING");
   await propose.execute("grounded", input as never, undefined, undefined, {} as never);
+  if (scene.repair) {
+    const fields = ["/actorId", "/canonicalEventId", "/cut", "/claimId", "/propositionId", "/basis/mode", "/basis/perceptionId", "/reception/received", "/reception/understood", "/reception/belief"];
+    await toolset.tools.find(item => item.name === "propose_acquisition")!.execute("acquire", { proposal_id: "seen-closure", payload: { ontologyVersion: "acquisition-v1", id: "seen-closure", actorId: "observer", canonicalEventId: event.id, cut: "event-end", claimId: "closed-claim", propositionId: "closed", basis: { mode: "observed", perceptionId: "perception" }, reception: { received: true, understood: true, belief: "accepted" } }, evidence_segment_ids: [source.segmentId], evidence_selectors: fields.map(target_path => ({ segment_id: source.segmentId, exact: scene.sentence, target_path, relation: "supports", strength: "explicit" })) } as never, undefined, undefined, {} as never);
+  }
   await toolset.tools.find(item => item.name === "finish_compiler_batch")!.execute("finish", { outcome: "complete", reviewed_segments: [], summary: "One directly grounded perception" } as never, undefined, undefined, {} as never);
   expect((await convergeWorldProposals(root, source.source.id)).canonical.blocked).toEqual([]);
   const observation = (await canon.listPerceptionObservations())[0]!;
@@ -78,7 +93,7 @@ it.each(scenes)("grounds perception across compile, rebuild and runtime cut: $ac
   const contextStore = new WorldContextStore(cloneRoot), context = await contextStore.captureCurrent(cloneSource.source.id), engine = new WorldEngine(cloneRoot, context);
   const head = await engine.createBranch("main", "Before closing", initial, undefined, undefined, undefined, [], {}, { realizesCanonicalEventIds: [] });
   const equalOutcome = { ...initial, operations: initial.operations.map(item => item.field === "location.open" ? { ...item, value: false } : item) };
-  await expect(engine.createBranch("equal-state", "State does not prove perception", equalOutcome, { version: 1, operations: [operation] })).rejects.toThrow("PERCEPTION_CUT_NOT_CURRENT");
+  await expect(engine.createBranch("equal-state", "State does not prove perception", equalOutcome, { version: 1, operations: [operation] })).rejects.toThrow(scene.repair ? "ACQUISITION_CUT_NOT_CURRENT" : "PERCEPTION_CUT_NOT_CURRENT");
   const runtime = new WorldRuntime(engine, () => []); await runtime.forkBranch("main", head, "unchanged", "Before perception");
   const unlocated = await engine.createBranch("unlocated", "Observer location unresolved", { ...initial, operations: initial.operations.filter(item => item.field !== "character.location") }, undefined, undefined, undefined, [], {}, { realizesCanonicalEventIds: [] });
   await runtime.forkBranch("unlocated", unlocated, "absent", "Unresolved access fork");
@@ -88,12 +103,17 @@ it.each(scenes)("grounds perception across compile, rebuild and runtime cut: $ac
   expect((await engine.commitProposal({ ...proposal, branchId: "absent", expectedParentCommit: unlocated } as never)).report.errors.some(item => item.code === "PERCEPTION_ACCESS_NOT_PROVEN")).toBe(true);
   const accepted = await engine.commitProposal(proposal as never);
   expect(accepted.report.errors).toEqual([]);
-  expect((await engine.projections.project(accepted.newHead, { fresh: true, useCheckpoints: false })).knowledge.actors.observer?.["closed-claim"]).toMatchObject({ perceptionId: observation.id, status: "knows" });
+  expect((await engine.projections.project(accepted.newHead, { fresh: true, useCheckpoints: false })).knowledge.actors.observer?.["closed-claim"]).toMatchObject({ perceptionId: observation.id, status: scene.repair ? "believes" : "knows" });
   expect((await engine.projections.project(head, { fresh: true, useCheckpoints: false })).knowledge.actors.observer?.["closed-claim"]).toBeUndefined();
-  expect((await engine.commitProposal({ ...proposal, expectedParentCommit: accepted.newHead, possibilityId: undefined } as never)).report.errors.some(item => item.code === "PERCEPTION_CUT_NOT_CURRENT")).toBe(true);
+  expect((await engine.commitProposal({ ...proposal, expectedParentCommit: accepted.newHead, possibilityId: undefined } as never)).report.errors.some(item => ["PERCEPTION_CUT_NOT_CURRENT", "ACQUISITION_CUT_NOT_CURRENT"].includes(item.code))).toBe(true);
   const bindings = new EvidenceAssertionStore(root);
   await bindings.replaceForArtifact("perception-observation", observation.id, contentHash(observation), []);
   await expect(cache.candidateSnapshot(source.source)).rejects.toThrow("Perception observation evidence");
+  if (scene.repair) {
+    const repair = (await new UpstreamRepairLedger(root, source.source.id).inspect()).plans[0]!;
+    expect(repair.plan.requirementIds).toEqual(["occurrence:state-effect"]);
+    expect(repair.evaluation).toBeUndefined(); // A source fix cannot certify an unfreezable downstream candidate.
+  }
   expect((await contextStore.load(context.canonicalSnapshotHash!)).perceptionObservations?.get(observation.id)).toEqual(observation);
 });
 

@@ -953,7 +953,7 @@ it.each(["entity", "event"] as const)("discovers missing %s resolution and deriv
   await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
   const stored = kind === "entity" ? await new EntityResolutionStore(f.root).list(f.sourceId) : await new EventResolutionStore(f.root).list(f.sourceId);
   expect(stored[0]!.status).toBe(kind === "entity" ? "resolved" : "unresolved");
-  expect((await discoverUpstreamRepairDiagnostics(f.root, f.sourceId)).findings).toEqual([]);
+  expect((await discoverUpstreamRepairDiagnostics(f.root, f.sourceId)).findings).toHaveLength(kind === "entity" ? 0 : 1);
   await expect(planUpstreamRepair(f.root, review)).rejects.toThrow("Resolution already exists");
   expect((await f.ledger.inspect()).plans[0]!.state).toBe("finished"); // No inferred satisfaction.
   const { assertUpstreamRepairMutation } = await import("../src/compiler/upstream-repair-plan.js");
@@ -1136,4 +1136,135 @@ it.each(["confidence", "missing"])("stops structural discourse dependency %s cha
   await expect(f.ledger.startAttempt(f.plan.planHash, f.input)).rejects.toThrow("Active dependency changed: structural-discourse:reviewed-frame");
   expect((await f.ledger.inspect()).attempts).toEqual([]);
   expect((await f.ledger.inspect()).plans[0]!.state).toBe("needs-host-review");
+});
+
+it.each([{ kind: "entity", ambiguous: false }, { kind: "event", ambiguous: false }, { kind: "entity", ambiguous: true }] as const)("revises an existing $kind decision (ambiguous=$ambiguous) with an exact successor and recovers its retained baseline", async ({ kind, ambiguous }) => {
+  const { discoverUpstreamRepairDiagnostics } = await import("../src/compiler/upstream-repair-discovery.js");
+  const { planUpstreamRepair } = await import("../src/compiler/upstream-repair-planner.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { entityMentionSchema, eventMentionSchema } = await import("../src/compiler/annotations.js");
+  const { CanonicalModelStore } = await import("../src/world/canonical-model.js");
+  const { EntityResolutionStore } = await import("../src/compiler/entity-resolution.js");
+  const { EventResolutionStore } = await import("../src/compiler/event-resolution.js");
+  const f = await fixture(), bytes = Buffer.from('Ada said, "Wait." Nothing changes.');
+  const entity = { id: "ada", kind: "character" as const, canonicalName: "Ada", aliases: [], evidence: f.source.evidence("Ada") };
+  await new CanonicalModelStore(f.root).putEntity(entity);
+  const mention = kind === "entity"
+    ? entityMentionSchema.parse({ version: 1, id: "source-person", sourceId: f.sourceId, annotationType: "entity-mention", anchor: textAnchorForByteRange(f.sourceId, bytes, 0, 3), surface: "Ada", form: "proper", kindCandidates: ["character"], confidence: 1, derivation: f.annotation.derivation })
+    : eventMentionSchema.parse({ version: 1, id: "source-action", sourceId: f.sourceId, annotationType: "event-mention", triggerAnchor: textAnchorForByteRange(f.sourceId, bytes, 4, 8), trigger: "said", extentAnchors: [textAnchorForByteRange(f.sourceId, bytes, 0, 17)], eventTypeCandidates: ["communication"], participantMentionIds: [], salience: "supporting", confidence: 1, derivation: f.annotation.derivation });
+  const annotations = new SourceAnnotationStore(f.root);
+  await annotations.stage(f.sourceId, { version: 1, id: "source-mention", annotationType: mention.annotationType, payload: mention, generatedBy: { worker: "fixture" }, createdAt: "2026-09-16T00:00:00Z" });
+  await annotations.commitProposals(f.sourceId, ["source-mention"]);
+  if (ambiguous) await new CanonicalModelStore(f.root).putEntity({ ...entity, id: "other-ada" });
+  const prior = kind === "entity"
+    ? { version: 1, id: "prior-resolution", sourceId: f.sourceId, mentionId: mention.id, status: ambiguous ? "ambiguous" : "unresolved", candidates: ambiguous ? [entity.id, "other-ada"].map(entityId => ({ entityId, confidence: 0.5, basisMentionIds: [mention.id], evidenceAssertionIds: [], rationale: "Source identity remains ambiguous" })) : [], rationale: "Identity remains unknown", derivation: { ...f.annotation.derivation, ontologyVersion: "entity-resolution-v1" } }
+    : { version: 1, id: "prior-resolution", sourceId: f.sourceId, eventMentionIds: [mention.id], status: "unresolved", candidates: [], supersedesResolutionIds: [], rationale: "Event remains unknown", derivation: { ...f.annotation.derivation, ontologyVersion: "event-resolution-v1" } };
+  const store = kind === "entity" ? new EntityResolutionStore(f.root) : new EventResolutionStore(f.root);
+  await store.replaceCurrent(f.sourceId, [prior] as never);
+  const discovery = await discoverUpstreamRepairDiagnostics(f.root, f.sourceId);
+  expect(discovery.authority).toBe("diagnostic-only");
+  expect(discovery.findings).toHaveLength(1);
+  expect(discovery.findings[0]!.sourceSegmentIds).toEqual([f.source.segmentId]);
+  expect(await f.ledger.history()).toEqual([]);
+  const review = { version: 1, sourceId: f.sourceId, sourceSha256: f.source.source.contentSha256, planId: "resolution-plan", batchId: "resolution-batch", requirementSetHash: f.plan.requirementSetHash,
+    requirementIds: f.plan.requirementIds, predecessorReceiptRefs: [], segmentIds: [f.source.segmentId], citableEvidenceRefs: [f.source.segmentId], authorizationRef: "source-resolution-review", retryBudgetRef: "resolution-budget",
+    diagnostics: [{ ...discovery.findings[0]!.diagnostic, requirementId: f.plan.requirementIds[0]!, candidates: kind === "entity" ? [{ id: entity.id, revisionHash: contentHash(entity) }] : [] }] };
+  const plan = (await planUpstreamRepair(f.root, review)).plan!, slot = plan.allowedCreations[0]!;
+  expect(plan.allowedWrites).toEqual([]);
+  expect(slot.kind).toBe(`${kind}-resolution`);
+  expect((await planUpstreamRepair(f.root, { ...review, planId: "another-plan", batchId: "another-batch", retryBudgetRef: "another-budget" })).plan!.allowedCreations[0]!.id).toBe(slot.id);
+  await expect(planUpstreamRepair(f.root, { ...review, diagnostics: [{ ...review.diagnostics[0], resolutionHash: "0".repeat(64) }] })).rejects.toThrow("predecessor changed");
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  const input = kind === "entity"
+    ? { proposal_id: "resolution-result", resolution_id: slot.id, mention_id: mention.id, status: "resolved", entity_id: entity.id, candidates: [{ entity_id: entity.id, confidence: 1, basis_mention_ids: [mention.id], evidence_assertion_ids: [], rationale: "Exact original named mention" }], rationale: "Reviewed identity", supersedes_resolution_id: prior.id }
+    : { proposal_id: "resolution-result", resolution_id: slot.id, event_mention_ids: [mention.id], status: "unresolved", candidates: [], supersedes_resolution_ids: [prior.id], rationale: "Source does not establish a canonical event match" };
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, slot, input);
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Original mention reviewed" }], summary: "Bounded resolution result" });
+  const prototype = kind === "entity" ? EntityResolutionStore.prototype : EventResolutionStore.prototype;
+  const commit = prototype.commitProposals;
+  const interrupted = vi.spyOn(prototype, "commitProposals").mockImplementationOnce(async function (this: typeof store, ...args) {
+    await commit.apply(this as never, args);
+    throw new Error("interrupted after successor commitment");
+  });
+  await expect(executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash)).rejects.toThrow("interrupted after successor commitment");
+  interrupted.mockRestore();
+  await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
+  await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
+  const stored = kind === "entity" ? await new EntityResolutionStore(f.root).list(f.sourceId) : await new EventResolutionStore(f.root).list(f.sourceId);
+  expect(stored[0]!.status).toBe(kind === "entity" ? "resolved" : "unresolved");
+  expect(stored[0]!.id).not.toBe(prior.id);
+  await expect(planUpstreamRepair(f.root, review)).rejects.toThrow("predecessor changed");
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("finished"); // No inferred satisfaction.
+  const { assertUpstreamRepairMutation } = await import("../src/compiler/upstream-repair-plan.js");
+  expect(() => assertUpstreamRepairMutation(plan, { kind: slot.kind, id: slot.id,
+    payload: kind === "entity" ? { ...stored[0], mentionId: "different-mention" } : { ...stored[0], eventMentionIds: ["different-mention"] }, baseline: null,
+    activeRevisions: new Map(plan.baselineRefs.map(ref => [`${ref.kind}:${ref.id}`, ref.revisionHash])), sourceSha256: plan.sourceScope.sourceSha256,
+    requirementSetHash: plan.requirementSetHash, citedSegmentIds: [f.source.segmentId], hostDerivation: stored[0]!.derivation,
+  })).toThrow("predecessor or mention scope");
+  const outputs = new Map([[`${slot.kind}:${slot.id}`, contentHash(stored[0])]]);
+  const verified = await verifyUpstreamRepairPlan(f.root, plan, outputs);
+  expect(verified.payloads.get(`${slot.kind}:${prior.id}`)).toEqual(prior);
+  const { captureUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointState } = await import("../src/compiler/upstream-repair-checkpoint.js");
+  const checkpoint = (await captureUpstreamRepairCheckpoint(f.root, f.sourceId))!;
+  const actual = new Map(verified.payloads); actual.delete(`${slot.kind}:${prior.id}`);
+  await assertUpstreamRepairCheckpointState(checkpoint, await f.ledger.history(), f.sourceId, f.source.source.contentSha256, bytes, actual);
+  const { verifyUpstreamRepairConvergence } = await import("../src/compiler/upstream-repair-convergence.js");
+  expect((await verifyUpstreamRepairConvergence(f.root, f.sourceId, plan.planHash)).activeRevisions).not.toContainEqual({ kind: slot.kind, id: prior.id, revisionHash: contentHash(prior) });
+  expect(verified.activeRevisions.has(`${slot.kind}:${prior.id}`)).toBe(false);
+  expect((await f.ledger.inspect()).attempts).toHaveLength(1);
+});
+
+it.each(['Ada told Bo, "Wait." Nothing changes.', 'Ada cannot identify the caller. Bo repeats: "Wait." Nothing changes.'])("binds independent core obligations through frozen models and physical entry: %s", async text => {
+  const f = await fixture(text);
+  const { CanonicalModelStore } = await import("../src/world/canonical-model.js");
+  const { ActorModelStore } = await import("../src/world/actors.js");
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { buildRoleRoster, RoleRosterStore, roleRosterSchema } = await import("../src/compiler/role-roster.js");
+  const { ensureSourceStructure, baseStructuralUnits } = await import("../src/compiler/structure.js");
+  const { RequirementLedger } = await import("../src/compiler/requirement-ledger.js");
+  const { CompilerBatchStore, prepareCompilerBatches } = await import("../src/compiler/batches.js");
+  const { bindUpstreamRepairRequirements } = await import("../src/compiler/upstream-repair-binding.js");
+  const { planBoundUpstreamRepair } = await import("../src/compiler/upstream-repair-bound-plan.js");
+  const canon = new CanonicalModelStore(f.root);
+  const entities = ["Ada", "Bo"].map(name => ({ id: name.toLowerCase(), kind: "character" as const, canonicalName: name, aliases: [], evidence: f.source.evidence(name) }));
+  const structure = await ensureSourceStructure(f.root, f.source.source);
+  const roster = buildRoleRoster({ sourceId: f.sourceId, sourceSha256: f.source.source.contentSha256, unitIds: structure.baseUnitIds, entities, annotations: [], resolutions: [] });
+  roster.reviews = ["first-review", "second-review"].map(runId => ({ version: 2, runId, subjectHash: roster.subjectHash, reviewedUnitIds: roster.unitIds, missingMajorCharacters: [],
+    entries: roster.candidates.map(role => ({ candidateId: role.id, importance: role.entityId === "bo" ? "major" : "incidental", rationale: "Independent source review", basisUnitIds: roster.unitIds,
+      developmentExpectation: { kind: "unknown", rationale: "No lasting development is established", basisUnitIds: roster.unitIds } })) }));
+  const normalized = roleRosterSchema.parse(roster), ledger = new RequirementLedger(f.root, f.sourceId);
+  const definition = await ledger.registerCoreRoles({ roster: normalized, units: baseStructuralUnits(structure), scopeDecisionRef: "independent-role-review", scopeChangeReason: "Freeze obligations before models" }, Buffer.from(text));
+  await new RoleRosterStore(f.root).write(normalized);
+  for (const entity of entities) await canon.putEntity(entity);
+  await f.write({ ...f.annotation, speakerMentionId: "missing-speaker" }, "typed-speaker-gap");
+  await canon.putProposition({ id: "content", subjectEntityId: "bo", relationId: "wait", object: { kind: "literal", value: true }, polarity: "positive", modality: "asserted", evidence: f.source.evidence("Wait.") });
+  await canon.putAttribution({ id: "report", propositionId: "content", holderKind: "character", holderEntityId: "ada", attitude: "asserts", certainty: 1, quotationIds: [f.annotation.id], evidence: f.source.evidence("Wait.") });
+  await canon.putClaim({ id: "claim", subject: "bo", predicate: "wait", object: true, epistemicType: "character-claim", evidence: f.source.evidence("Wait.") });
+  const knowledge = { version: 1 as const, operations: [{ op: "learn" as const, actorId: "bo", claimId: "claim", propositionId: "content", attributionId: "report", acquisitionMode: "told" as const, sourceActorId: "ada", status: "heard" as const, confidence: 1 }] };
+  await canon.putEvent({ id: "waiting", title: "Source warning", participants: ["ada", "bo"], participantPresence: [{ entityId: "ada", mode: "physical" }, { entityId: "bo", mode: "physical" }], storyTime: { kind: "ordinal", label: "next day", orderHint: 1 }, preconditions: [], observedOutcome: { version: 1, operations: [] }, observedKnowledge: knowledge, causalParents: [], confidence: 1, evidence: f.source.evidence(text) });
+  await new ActorModelStore(f.root).putModel({ actorId: "bo", traits: {}, decisionBiases: {}, developmentPhases: [{ id: "reviewed-phase", label: "Explicit dependency under review", activation: { afterCanonicalEventIds: ["waiting"], afterExperiencedCanonicalEventIds: [], requiresKnowledge: [], preconditions: [] }, traitModifiers: {}, decisionBiasModifiers: {}, evidence: f.source.evidence(text) }], evidence: f.source.evidence("Bo") });
+  for (const actorId of ["ada", "bo"]) await new ActorModelStore(f.root).putGoal({ id: `goal-${actorId}`, actorId, description: "Await the later occurrence", priority: 1, requiresKnowledge: [], activation: { preconditions: [], afterCanonicalEventIds: ["waiting"] }, evidence: f.source.evidence(text) });
+  const initial = new InitialWorldStore(f.root);
+  await initial.put({ version: 1, checkpoint: { mode: "chronological", rationale: "Opening precedes the later event", storyTime: { kind: "ordinal", label: "opening", orderHint: 0 } }, delta: { version: 1, operations: [{ op: "set", entityId: "bo", field: "character.alive", value: true }, { op: "set", entityId: "bo", field: "character.plan", value: "wait" }] }, knowledge, participantPresence: [{ entityId: "bo", mode: "physical" }, { entityId: "ada", mode: "physical" }], evidence: f.source.evidence(text) });
+  await new CompilerBatchStore(f.root).replaceCompleted(f.sourceId, (await prepareCompilerBatches(f.root, f.source.source)).map(item => item.id));
+  const result = await bindUpstreamRepairRequirements(f.root, f.sourceId);
+  expect(result.coreRoleBlockers).toEqual([]);
+  const coreBindings = result.bindings.filter(item => item.requirementSetHash === definition.revisionHash);
+  expect([...new Set(coreBindings.map(item => item.requirementId.split(":").at(-1)))].sort()).toEqual(["development", "ontology", "opening-driver"]);
+  expect(coreBindings.filter(item => item.path[0]?.kind === "goal").map(item => item.path[0]!.id)).toEqual(["goal-ada"]);
+  expect(coreBindings.find(item => item.path[0]?.kind === "goal")!.guards).toEqual([expect.objectContaining({ kind: "initial", id: f.sourceId })]);
+  expect(coreBindings.every(item => item.targetRef === "character:bo" && item.state !== "satisfied")).toBe(true);
+  expect(coreBindings.find(item => item.requirementId.endsWith(":development"))!.path.map(item => item.kind)).toEqual(["model", "event", "attribution", "annotation"]);
+  const request = { version: 1, sourceId: f.sourceId, subjectSnapshotHash: result.subjectSnapshotHash, closureHash: result.closureHash, requirementSetHash: definition.revisionHash,
+    findingIds: [coreBindings[0]!.findingId], planId: "core-repair", batchId: "core-repair", authorizationRef: "core-review", retryBudgetRef: "core-budget", segmentIds: [f.source.segmentId], citableEvidenceRefs: [f.source.segmentId], predecessorReceiptRefs: [] };
+  const { plan } = await planBoundUpstreamRepair(f.root, request);
+  expect(plan.baselineRefs.map(item => item.kind)).toContain("initial-world");
+  expect(plan.baselineRefs.map(item => item.kind)).toContain("character-model");
+  await verifyUpstreamRepairPlan(f.root, plan);
+  await new ActorModelStore(f.root).putModel({ actorId: "bo", traits: {}, decisionBiases: {}, evidence: f.source.evidence("Bo") });
+  await expect(verifyUpstreamRepairPlan(f.root, plan)).rejects.toThrow("Active dependency changed");
+  const changed = await bindUpstreamRepairRequirements(f.root, f.sourceId);
+  expect([...new Set(changed.bindings.filter(item => item.requirementSetHash === definition.revisionHash).map(item => item.requirementId.split(":").at(-1)))]).toEqual(["opening-driver"]);
+  expect(await f.ledger.history()).toEqual([]);
 });

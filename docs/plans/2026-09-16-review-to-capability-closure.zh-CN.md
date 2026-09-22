@@ -1,5 +1,7 @@
 # Review 落地设计：能力结算、受限修复与角色体验
 
+当前实现与退出状态请查 [2026-09-22 P1/P2/P6 退出审计](../reviews/2026-09-22-p1-p2-p6-exit-audit.zh-CN.md) 与 [分段实施记录的当前进度入口](2026-09-16-capability-closure-implementation.zh-CN.md)。本文保留设计基线；下述“尚未实施”指方案编写时，不是当前分支状态。§8 的原始验收要求继续有效。
+
 状态：技术方案，尚未实施下述新增契约。核查分支 `codex/compiler-recovery-fixes`，基线 `bdf79b848d2dc363c0fcd1252b5cacec94561219`。本次 `git pull --ff-only` 成功，HEAD 与远端跟踪分支一致。
 
 本文将两份 review 与当前实现对齐，并明确下一批可执行工作。继承 [证据优先世界模型方案](2026-09-16-evidence-first-world-model.zh-CN.md) 的 D1–D9；其中 T0–T3 的实际范围以源码和本次验证为准。本文补齐它尚未展开的持久结算、执行协议、文学表达、上下文和推进策略。历史报告保留其原基线，不改写为当前实现结论。

@@ -1,3 +1,5 @@
+import { UpstreamRepairLedger } from "../src/compiler/upstream-repair-ledger.js";
+import { repairForEvent } from "./helpers/upstream-repair.js";
 import { executeSceneEvent } from "../src/compiler/scene-state.js";
 import { deriveCharacterEntrySeed } from "../src/world/entry-context.js";
 import { acquisitionCatalog, acquisitionSchema, validateAcquisition, validateAcquisitionOperation, hydrateAcquisition } from "../src/world/acquisition.js";
@@ -57,8 +59,16 @@ async function setup(scene: typeof scenes[number]) {
   return { root, source, canon, anchor, mentions, quotation, proposition, event, expression, paths, operation };
 }
 
-it.each(scenes)("freezes recipient experience through compile, rebuild, memory, inference and replay: $speaker", async scene => {
+it.each(scenes.flatMap(scene => [false, true].map(repair => ({ ...scene, repair }))))("repair=$repair freezes recipient experience through compile, rebuild, memory, inference and replay: $speaker", async scene => {
   const { root, source, canon, event, expression, quotation, proposition, paths, operation } = await setup(scene);
+  if (scene.repair) {
+    const annotations = new SourceAnnotationStore(root), shortened = { ...quotation, anchor: textAnchorForByteRange(source.source.id, Buffer.from(scene.text), quotation.anchor.startByte, quotation.anchor.startByte + Buffer.byteLength([...scene.quote][0]!)) };
+    await annotations.replaceCurrent(source.source.id, (await annotations.list(source.source.id)).map(item => item.id === quotation.id ? shortened : item));
+    await repairForEvent({ root, sourceId: source.source.id, sourceSha256: source.source.contentSha256, segmentId: source.segmentId, bytes: Buffer.from(scene.text), event,
+      diagnostic: { code: "QUOTATION_ANCHOR_INCOMPLETE", quotationId: quotation.id, revisionHash: contentHash(shortened), expectedAnchor: quotation.anchor },
+      proposal: () => ({ proposal_id: "repair-quotation", annotation_id: quotation.id, selector: { segment_id: source.segmentId, exact: scene.quote, occurrence: 1 }, mode: "direct", speaker_mention_id: "mention-speaker", addressee_mention_ids: ["mention-listener"], attribution_confidence: 1 }) });
+    expect(quotationSchema.parse(await annotations.read(source.source.id, quotation.id)).anchor).toEqual(quotation.anchor);
+  }
   const toolset = createCompilerProposalToolset(root); await toolset.beginBatch([], "acquisitions", source.source.id);
   const invoke = (name: string, input: unknown) => toolset.tools.find(tool => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
   const { evidence: _canonicalEvidence, ...canonicalPayload } = event;
@@ -178,6 +188,11 @@ it.each(scenes)("freezes recipient experience through compile, rebuild, memory, 
   expect(buildPreparedClosure(staleBundle).issues.some(issue => issue.code === "CLOSURE_REVISION_MISMATCH")).toBe(true);
   await new EvidenceAssertionStore(root).replaceForArtifact("acquisition", stored.id, contentHash(stored), []);
   await expect(cache.candidateSnapshot(source.source)).rejects.toThrow("Acquisition evidence");
+  if (scene.repair) {
+    const repair = (await new UpstreamRepairLedger(root, source.source.id).inspect()).plans[0]!;
+    expect(repair.plan.requirementIds).toEqual(["occurrence:state-effect"]);
+    expect(repair.evaluation).toBeUndefined(); // A source fix cannot certify an unfreezable downstream candidate.
+  }
   expect((await contexts.load(context.canonicalSnapshotHash!)).acquisitions?.get(stored.id)).toEqual(stored);
   const unverified = createCompilerProposalToolset(root); await unverified.beginBatch([], "unverified-new", source.source.id);
   const { evidence: _eventEvidence, ...eventPayload } = event;

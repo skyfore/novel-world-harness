@@ -37,7 +37,7 @@ export async function planBoundUpstreamRepair(root: string, raw: unknown) {
       if (selection) throw upstreamRepairHostError("Mention creation does not accept canonical resolution candidate selections");
       for (const binding of selected) diagnostics.push({ ...finding.diagnostic, requirementId: binding.requirementId });
     } else {
-      const kind = finding.diagnostic.code === "ENTITY_RESOLUTION_MISSING" ? "entity" : "canonical-event";
+      const kind = finding.diagnostic.code.startsWith("ENTITY_") ? "entity" : "canonical-event";
       const candidates = (selection?.candidateIds ?? []).map(id => {
         const actual = current.discovery.candidateRefs.find(item => item.kind === kind && item.id === id);
         if (!actual) throw upstreamRepairHostError("Resolution candidate is outside the discovered source/kind; copy discovery.candidateRefs[].id for the exact kind, without guessing");
@@ -55,11 +55,11 @@ export async function planBoundUpstreamRepair(root: string, raw: unknown) {
   const baselines = new Map(result.plan.baselineRefs.map(ref => [`${ref.kind}:${ref.id}`, ref]));
   const annotations = await new SourceAnnotationStore(root).list(request.sourceId);
   const structure = await new SourceStructureStore(root).read(request.sourceId);
-  const kinds: Record<string, string> = { event: "canonical-event", action: "action-schema", norm: "norm-template", process: "process-template", rule: "world-rule",
+  const kinds: Record<string, string> = { initial: "initial-world", event: "canonical-event", action: "action-schema", norm: "norm-template", process: "process-template", rule: "world-rule",
     participation: "event-participation", spatial: "spatial-relation", scene: "scene-occurrence", frame: "event-frame", constraint: "action-constraint", goal: "character-goal", model: "character-model", discourse: "discourse-segment" };
-  for (const binding of bindings) for (const node of binding.path) {
+  for (const binding of bindings) for (const node of [...binding.path, ...(binding.guards ?? [])]) {
     const kind = node.kind === "discourse" && structure?.discourseSegments.some(item => item.id === node.id) ? "structural-discourse" : node.kind === "annotation" ? annotations.find(item => item.id === node.id)?.annotationType : kinds[node.kind] ?? node.kind;
-    const parsed = upstreamRepairReadableRefSchema.safeParse({ kind, id: node.id });
+    const parsed = upstreamRepairReadableRefSchema.safeParse({ kind, id: node.kind === "initial" ? "singleton" : node.id });
     if (!parsed.success) throw upstreamRepairHostError(`Dependency path ${node.kind}/${node.id} has no registered readable baseline representation; stop for host review rather than dropping the path guard`);
     const ref = { ...parsed.data, revisionHash: node.revisionHash };
     const previous = baselines.get(`${ref.kind}:${ref.id}`);

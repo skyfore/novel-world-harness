@@ -12,7 +12,7 @@ import { RequirementLedger, evaluateRequirementSet, sceneCatalogKeys } from "./r
 import { coreRoleDefinitions, assertCoreRoleDefinitionEvidence } from "./core-role-requirement-records.js";
 import { RoleRosterStore } from "./role-roster.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
-import { assertUpstreamResolutionAbsences, upstreamRepairPlanSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import { recoverUpstreamResolutionBaselines, assertUpstreamResolutionAbsences, upstreamRepairPlanSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import type { SceneReviewCatalog } from "../eval/scene-capabilities.js";
 
 export function upstreamRepairHostError(reason: string): Error {
@@ -22,6 +22,7 @@ export function upstreamRepairHostError(reason: string): Error {
 /** Read actual source-local host state under the compiler lock; no caller-supplied revision claims. */
 export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepairPlan, committedOutputs: ReadonlyMap<string, string> = new Map(), restoringReceipt?: import("./finish-receipts.js").CompilerFinishReceipt) {
   const plan = upstreamRepairPlanSchema.parse(raw), sourceId = plan.sourceScope.sourceId;
+  let recoveryBaselines: NonNullable<import("./finish-receipts.js").CompilerFinishReceipt["identity"]["upstreamRepairIntent"]>["baselines"] = [];
   if (committedOutputs.size) {
     const active = await new CompilerFinishReceipts(root, sourceId, plan.batchId).read();
     const retained = restoringReceipt && (await CompilerFinishReceipts.listRetained(root, sourceId)).find(item => contentHash(item.receipt) === contentHash(restoringReceipt))?.receipt;
@@ -29,6 +30,7 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
     const intent = receipt?.identity.upstreamRepairIntent;
     if (!intent || intent.planHash !== plan.planHash || committedOutputs.size !== intent.proposals.length
       || intent.proposals.some(item => committedOutputs.get(`${item.artifactKind}:${item.artifactId}`) !== item.payloadHash)) throw upstreamRepairHostError("Recovery revisions lack the exact durable upstream finish receipt");
+    recoveryBaselines = intent.baselines;
   }
   const source = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
   if (!source) throw upstreamRepairHostError("Registered source is missing");
@@ -65,8 +67,11 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
     for (const assertion of record.evidenceAssertions) payloads.set(`evidence-assertion:${assertion.id}`, assertion);
   }
   const activeRevisions = new Map([...payloads].map(([key, value]) => [key, contentHash(value)]));
-  for (const ref of plan.baselineRefs) if (activeRevisions.get(`${ref.kind}:${ref.id}`) !== ref.revisionHash && (!committedOutputs.has(`${ref.kind}:${ref.id}`) || activeRevisions.get(`${ref.kind}:${ref.id}`) !== committedOutputs.get(`${ref.kind}:${ref.id}`))) throw upstreamRepairHostError(`Active dependency changed: ${ref.kind}:${ref.id}`);
-  for (const ref of plan.readableRefs) if (!activeRevisions.has(`${ref.kind}:${ref.id}`)) throw upstreamRepairHostError(`Readable dependency is missing: ${ref.kind}:${ref.id}`);
+  // Retained predecessor payloads are readable audit evidence, never active decisions.
+  recoverUpstreamResolutionBaselines(plan, payloads, committedOutputs, recoveryBaselines);
+  const baselineRevisions = new Map([...payloads].map(([key, value]) => [key, contentHash(value)]));
+  for (const ref of plan.baselineRefs) if (baselineRevisions.get(`${ref.kind}:${ref.id}`) !== ref.revisionHash && (!committedOutputs.has(`${ref.kind}:${ref.id}`) || activeRevisions.get(`${ref.kind}:${ref.id}`) !== committedOutputs.get(`${ref.kind}:${ref.id}`))) throw upstreamRepairHostError(`Active dependency changed: ${ref.kind}:${ref.id}`);
+  for (const ref of plan.readableRefs) if (!baselineRevisions.has(`${ref.kind}:${ref.id}`)) throw upstreamRepairHostError(`Readable dependency is missing: ${ref.kind}:${ref.id}`);
   const annotationKinds = ["entity-mention", "event-mention", "quotation", "discourse-segment"];
   for (const ref of plan.allowedCreations) if ((activeRevisions.has(`${ref.kind}:${ref.id}`) && (!committedOutputs.has(`${ref.kind}:${ref.id}`) || activeRevisions.get(`${ref.kind}:${ref.id}`) !== committedOutputs.get(`${ref.kind}:${ref.id}`))) || (annotationKinds.includes(ref.kind) && annotationKinds.some(kind => kind !== ref.kind && activeRevisions.has(`${kind}:${ref.id}`)))) throw upstreamRepairHostError(`Allocated creation ID is already active: ${ref.kind}:${ref.id}`);
   assertUpstreamResolutionAbsences(plan, payloads, committedOutputs);

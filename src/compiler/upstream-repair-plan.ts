@@ -18,7 +18,7 @@ const fields: Record<UpstreamRepairKind, readonly string[]> = {
   "event-resolution": ["eventMentionIds", "status", "canonicalEventId", "relation", "candidates", "supersedesResolutionIds", "rationale"],
 };
 const refSchema = z.object({ kind: upstreamRepairKindSchema, id: idSchema }).strict();
-export const upstreamRepairReadableRefSchema = z.object({ kind: z.enum([...upstreamRepairKindSchema.options, "entity", "canonical-event", "proposition", "attribution", "claim", "event-participation", "event-relation", "scene-occurrence", "event-frame", "spatial-relation", "action-schema", "event-execution", "action-constraint", "norm-template", "process-template", "world-rule", "character-goal", "character-model", "possibility", "source-segment", "evidence-assertion", "structural-discourse", "semantic-effect", "utterance-expression", "perception-observation", "acquisition"]), id: idSchema }).strict();
+export const upstreamRepairReadableRefSchema = z.object({ kind: z.enum([...upstreamRepairKindSchema.options, "entity", "canonical-event", "proposition", "attribution", "claim", "event-participation", "event-relation", "scene-occurrence", "event-frame", "spatial-relation", "action-schema", "event-execution", "action-constraint", "norm-template", "process-template", "world-rule", "character-goal", "character-model", "possibility", "initial-world", "source-segment", "evidence-assertion", "structural-discourse", "semantic-effect", "utterance-expression", "perception-observation", "acquisition"]), id: idSchema }).strict();
 const key = (ref: { kind: string; id: string }) => `${ref.kind}:${ref.id}`;
 const unique = <T>(values: T[]) => new Set(values).size === values.length;
 
@@ -48,6 +48,8 @@ const identitySchema = z.object({
   // Host allocates one exact logical ID per dependency slot; no model-chosen IDs.
   allowedCreations: z.array(refSchema.extend({ maxCount: z.literal(1), dependencyOf: text }).strict()).max(128),
   resolutionAbsences: z.array(z.object({ kind: z.enum(["entity-resolution", "event-resolution"]), id: idSchema, mentionId: idSchema }).strict()).max(128).optional(),
+  resolutionRevisions: z.array(z.object({ kind: z.enum(["entity-resolution", "event-resolution"]), id: idSchema,
+    predecessorId: idSchema, mentionIds: z.array(idSchema).min(1).max(128) }).strict()).max(128).optional(),
   readableRefs: z.array(upstreamRepairReadableRefSchema).max(256), citableEvidenceRefs: z.array(idSchema).min(1).max(128),
   dependencyEdges: z.array(z.object({ from: text, to: text, purpose: z.enum(["source-evidence", "identity", "quotation", "requirement"]) }).strict()).max(512),
   postconditionIds: z.array(text).min(1).max(128), authorizationRef: text, retryBudgetRef: idSchema,
@@ -66,6 +68,13 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
     if (!plan.allowedCreations.some(slot => slot.kind === ref.kind && slot.id === ref.id)
       || !plan.baselineRefs.some(base => base.kind === (ref.kind === "entity-resolution" ? "entity-mention" : "event-mention") && base.id === ref.mentionId)) fail("Resolution absence guard lacks its exact creation slot and frozen mention");
   }
+  for (const ref of plan.resolutionRevisions ?? []) {
+    if (ref.id === ref.predecessorId || !unique(ref.mentionIds)
+      || !plan.allowedCreations.some(slot => key(slot) === key(ref))
+      || !plan.baselineRefs.some(base => base.kind === ref.kind && base.id === ref.predecessorId)
+      || ref.mentionIds.some(id => !plan.baselineRefs.some(base => base.kind === (ref.kind === "entity-resolution" ? "entity-mention" : "event-mention") && base.id === id))) fail("Resolution revision lacks frozen predecessor, mentions or fresh successor slot");
+  }
+  if (!unique((plan.resolutionRevisions ?? []).map(key)) || !unique((plan.resolutionRevisions ?? []).flatMap(ref => ref.mentionIds.map(id => `${ref.kind}:${id}`)))) fail("Duplicate resolution revision scope");
   const annotationSlots = [...plan.allowedWrites, ...plan.allowedCreations].filter(ref => ["entity-mention", "event-mention", "quotation", "discourse-segment"].includes(ref.kind));
   if (!unique(annotationSlots.map(ref => ref.id))) fail("Annotation write slots share a logical ID across types");
   if (plan.citableEvidenceRefs.some(id => !plan.sourceScope.segmentIds.includes(id))) fail("Citable evidence escapes source scope");
@@ -152,6 +161,13 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
     const actualMentions = input.kind === "entity-resolution" ? [identityResolutionSchema.parse(next).mentionId] : eventResolutionSchema.parse(next).eventMentionIds;
     if (actualMentions.length !== 1 || actualMentions[0] !== absence.mentionId) stop("Resolution payload changed its exact absent mention slot");
   }
+  const revision = plan.resolutionRevisions?.find(ref => key(ref) === key(input));
+  if (revision) {
+    const actual = input.kind === "entity-resolution" ? identityResolutionSchema.parse(next) : eventResolutionSchema.parse(next);
+    const mentions = "mentionId" in actual ? [actual.mentionId] : actual.eventMentionIds;
+    const predecessors = "mentionId" in actual ? [actual.supersedesResolutionId] : actual.supersedesResolutionIds;
+    if (contentHash([...mentions].sort()) !== contentHash([...revision.mentionIds].sort()) || contentHash(predecessors) !== contentHash([revision.predecessorId])) stop("Resolution revision changed its predecessor or mention scope");
+  }
   for (const reference of upstreamRepairReferencedKeys(input.kind, next)) {
     if (plan.allowedCreations.some(ref => key(ref) === reference)) {
       if (!plan.dependencyEdges.some(edge => edge.from === key(input) && edge.to === reference)) stop(`Undeclared creation dependency: ${reference}`);
@@ -177,5 +193,28 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
     if (field === "derivation") continue; // Independently checked against host provenance above.
     if (JSON.stringify(before[field]) === JSON.stringify(after[field])) continue;
     if (!allowed.some(tokens => tokens.length === 1 && tokens[0] === field)) stop(`Unauthorized field difference: /${field}`);
+  }
+}
+
+/** Recover superseded baseline evidence only from the original durable finish intent. */
+export function recoverUpstreamResolutionBaselines(plan: UpstreamRepairPlan, payloads: Map<string, unknown>,
+  outputs: ReadonlyMap<string, string>, baselines: readonly { kind: string; id: string; revisionHash: string; payload: unknown }[]) {
+  for (const revision of plan.resolutionRevisions ?? []) {
+    const priorKey = `${revision.kind}:${revision.predecessorId}`, nextKey = key(revision);
+    const expected = plan.baselineRefs.find(ref => key(ref) === priorKey)!;
+    const next = payloads.get(nextKey);
+    if (next && outputs.get(nextKey) === contentHash(next)) {
+      const original = baselines.find(ref => `${ref.kind}:${ref.id}` === priorKey);
+      if (!original || original.revisionHash !== expected.revisionHash || contentHash(original.payload) !== expected.revisionHash) throw new Error("UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: Missing original resolution baseline; stop retries and preserve receipt");
+      const parsed = payloadFor(revision.kind, next);
+      const predecessors = "mentionId" in parsed ? [parsed.supersedesResolutionId] : "supersedesResolutionIds" in parsed ? parsed.supersedesResolutionIds : [];
+      if (contentHash(predecessors) !== contentHash([revision.predecessorId])) throw new Error("UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: Resolution successor changed; stop retries");
+      for (const [candidateKey, raw] of payloads) {
+        if (!candidateKey.startsWith(`${revision.kind}:`) || candidateKey === nextKey) continue;
+        const candidate = raw as { mentionId?: string; eventMentionIds?: string[] };
+        if (revision.mentionIds.some(id => candidate.mentionId === id || candidate.eventMentionIds?.includes(id))) throw new Error("UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: Competing resolution revision; stop retries");
+      }
+      payloads.set(priorKey, original.payload);
+    }
   }
 }

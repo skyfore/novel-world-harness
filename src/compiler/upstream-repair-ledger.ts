@@ -100,6 +100,7 @@ function project(records: Record[]) {
       if (current.state !== "finished" || !current.finishIntent || finished?.kind !== "finished" || finished.receiptFingerprint !== event.receiptFingerprint) throw upstreamRepairHostError("Convergence lacks its original completed finish");
       const expected = new Map(current.plan.baselineRefs.map(ref => [`${ref.kind}:${ref.id}`, ref.revisionHash]));
       for (const proposal of current.finishIntent.proposals) expected.set(`${proposal.artifactKind}:${proposal.artifactId}`, proposal.payloadHash);
+      for (const revision of current.plan.resolutionRevisions ?? []) expected.delete(`${revision.kind}:${revision.predecessorId}`);
       if (event.activeRevisions.length !== expected.size || new Set(event.activeRevisions.map(ref => `${ref.kind}:${ref.id}`)).size !== expected.size
         || event.activeRevisions.some(ref => expected.get(`${ref.kind}:${ref.id}`) !== ref.revisionHash)) throw upstreamRepairHostError("Convergence revisions differ from authorized outputs and original unchanged baselines");
       current.state = "converged";

@@ -1,4 +1,4 @@
-import { assertUpstreamResolutionAbsences } from "./upstream-repair-plan.js";
+import { recoverUpstreamResolutionBaselines, assertUpstreamResolutionAbsences } from "./upstream-repair-plan.js";
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
 import { SourceAnnotationStore, sourceAnnotationProposalSchema } from "./annotations.js";
@@ -140,9 +140,11 @@ export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRe
     const receipt = checkpoint.activeReceipts.find(item => item.identity.upstreamRepairIntent?.planHash === plan.planHash);
     const outputs = new Map(drafts.map(item => [`${item.store === "annotation" ? item.envelope.payload.annotationType : item.store}:${item.envelope.payload.id}`, item.envelope.payload]));
     assertUpstreamResolutionAbsences(plan, payloads, receipt ? new Map([...outputs].map(([key, value]) => [key, contentHash(value)])) : new Map());
+    const recovered = new Map(payloads);
+    recoverUpstreamResolutionBaselines(plan, recovered, receipt ? new Map([...outputs].map(([key, value]) => [key, contentHash(value)])) : new Map(), current.finishIntent?.baselines ?? []);
     for (const ref of plan.baselineRefs) {
       const key = `${ref.kind}:${ref.id}`, output = outputs.get(key);
-      if (actual.get(key) !== ref.revisionHash && (!receipt || !output || actual.get(key) !== contentHash(output))) throw upstreamRepairHostError(`Checkpoint active baseline changed: ${key}`);
+      if (contentHash(recovered.get(key) ?? null) !== ref.revisionHash && (!receipt || !output || actual.get(key) !== contentHash(output))) throw upstreamRepairHostError(`Checkpoint active baseline changed: ${key}`);
     }
     for (const ref of current.finishIntent?.baselines ?? []) original.set(`${ref.kind}:${ref.id}`, ref.payload);
     for (const ref of plan.allowedCreations) {

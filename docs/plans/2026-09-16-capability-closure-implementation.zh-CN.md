@@ -2,21 +2,21 @@
 
 对应 [Review 落地设计](2026-09-16-review-to-capability-closure.zh-CN.md)。本文件区分每个已提交增量与整个 P1–P7 目标；未完成项不能由局部测试通过推导为完成。
 
-## 当前进度入口（2026-09-22）
+## 当前进度入口（2026-09-24）
 
-当前代码基线为 `8747e34`。逐项退出判定、源码／测试证据和可关闭待办见 [P1/P2/P6 退出审计](../reviews/2026-09-22-p1-p2-p6-exit-audit.zh-CN.md)。下方 P1a–P1f 表及各段是对应提交时的历史记录，其“尚未完成”不能覆盖后续实现。
+历史已提交基线为 `290250c`；其后的工作区增量与文本交互收口现按工作范围整理提交，见 [2026-09-24 收口记录](2026-09-24-current-diff-text-closure.zh-CN.md)。本次只关闭用户指定的当前 diff／文本交互范围，整体 P4/P5/P7 保持开放。逐项退出判定、源码／测试证据和可关闭待办见 [P1/P2/P6 退出审计](../reviews/2026-09-22-p1-p2-p6-exit-audit.zh-CN.md)。下方 P1a–P1f 表及各段是对应提交时的历史记录，其“尚未完成”不能覆盖后续实现。
 
 | 范围 | 当前已落地 | 当前退出状态 |
 | --- | --- | --- |
 | P1a–P1n | 独立定义、逐能力尝试和结算、失效观察、完整历史冻结恢复、旧双审保留式修订 | 本次声明的工程退出范围通过，A1/A6 已结算；通用迁移边界见审计 |
 | P2a–P2w | 授权计划与 DAG、窄工具、持久预算、原 finish 恢复、默认续跑；引语与缺 mention 两类串联 | 最小路径与 A2–A4 登记扩展通过；通用拆并及未知语义修复仍不支持 |
-| P3a–P3f | SemanticEffect、Expression、Perception、Acquisition 与晚入口历史获知 | 分支新获知完整协议、legacy 迁移及退出审计仍开放 |
-| P4a–P4h + C2/C3 | 规范／规则时间范围、失能与恢复、晚入口原时钟、跨事件约束、已获称谓隔离 | 远程渠道／照片、完整生命周期及时间依赖范围仍开放 |
-| P5a + C1 | 已提交台词块、可见决策依赖包、完整请求与宿主回合预算 | 精确候选依赖图、文学引用索引与原著表达绑定仍开放 |
+| P3a–P3g | SemanticEffect、Expression、Perception、Acquisition、晚入口历史与分支获知；显式证据迁移候选 | 本次定界工程项已验收；见 P3 退出账，未自动迁移用户旧数据 |
+| P4a–P4h + C2/C3 | 规范／规则时间范围、失能与恢复、晚入口原时钟、跨事件约束、已获称谓隔离 | 主体档案、表象权限、远程入口、语音和文本交互已接通；远程视觉、完整生命周期及时间依赖全消费者仍开放 |
+| P5a + C1 + 后续增量 | 已提交台词块、决策依赖与宿主作用域、完整请求预算、精确可见文学引用索引 | 原著条件话语及精确文本块已实现；完整候选／叙述退出矩阵仍开放 |
 | P6a–P6f | 合法性先于排序、替代行动、入口驱动、活动目标／宿主到期压力 | A5 两来源完整 runtime/fork/resume/replay 验收通过 |
 | P7 | 工程夹具和评测基础设施 | 真实 provider 与独立人工体验未完成 |
 
-最新 C1–C3 的实现边界见 [核心协议续做记录](2026-09-21-core-protocol-closure.zh-CN.md)。本次完成第一包及追加授权的 A2–A6 实现／验收；不代表 P3–P5、P7 或通用小说世界系统全部完成。
+最新 C1–C3 的实现边界见 [核心协议续做记录](2026-09-21-core-protocol-closure.zh-CN.md)。第一包及追加授权的 A2–A6 已完成；后续 P3g 的定界实现与验收见 [P3 退出账](../reviews/2026-09-22-p3-acquisition-exit-audit.zh-CN.md)。P4/P5 扩展、P7 与通用小说世界系统目标仍未全部完成。
 
 ## 历史提交与进度（截至 P1f）
 
@@ -938,3 +938,17 @@ P4h 已提交为 `5042ba9`。
 pipeline 44、engine 0.21.0。该路径要求能从冻结 opening 证明有序历史；递归 opening 基线、无法证明的历史顺序、重述旧 Acquisition 的额外 checkpoint 知识仍明确停止。旧无 Acquisition 记录不自动升为有证明收据；分支临时获知的完整新协议及 P3 整体退出审计仍未完成。其余 P4/P5/P6/P7 保持原目标，未运行真实 provider 或新增独立人工评分。
 
 最终验证：27 项相关定向检查通过；全仓 206 文件、1244 tests 全部通过（109.05 秒），服务端、Web、E2E TypeScript 与 diff whitespace 检查通过。新冻结基线校验发现旧消费 fixture 缺 checkpoint.mode/rationale，已补齐；关系 fixture 的 status 改为 schema 要求的 explicit。未知绝对时间下的同一 opening occurrence 初次被误判 baseline unknown，已按明确事件身份修复并通过反例检查。没有放宽感知或 Acquisition 门禁来使测试通过。
+
+## P3g：分支实际经历与证据约束迁移候选
+
+新增 branch-acquisition-v1，通过同事件 semanticDelta／knowledgeDelta 原子提交，绑定实际原话或观测状态；记忆、推断读取事件前的个人收据。新增角色 experiences opaque 引用、来源误认隔离、checkpoint reducer 版本和冷回放检查。
+
+新增 `nwh migrate-acquisitions`：显式清单指定父候选、事件 hash 和旧操作，逐字段提供独立原文证据；在隔离工作区调用已有窄工具和 finish/converge，生成保留 lineage 的新候选。原 staging、active publication 与运行分支均不改写。缺证据或冲突即停止，未列项不冒充已迁移。
+
+完整模式边界、两来源正反验收及验证结果见 [P3 退出账](../reviews/2026-09-22-p3-acquisition-exit-audit.zh-CN.md)。engine 0.24.0；本次不运行 provider 或人工评分，不自动升级用户小说数据。
+
+## 后续 P5：候选依赖与精确文学引用
+
+实际模型调用绑定 branch/head/actor，世界裁决另绑定候选 hash；候选所需知识和行动合同进入依赖工作集，宿主标识不进入模型数据。文学引用改由 `LiteraryReferenceIndex` 派生：原文 span 必须与已提交明确观察、角色实际台词或 understood Expression 精确相交，不能仅凭可见事件的宽 evidence 读取邻近隐藏原文。索引保存发生／可见性依据并接入叙述，既有原文和事件历史不改写。
+
+完整范围、边界及运行记录见 [剩余工作账](2026-09-22-remaining-capability-work.zh-CN.md)。文学索引基线的全套 216 文件、1308 tests 和三套类型检查通过。后续已实现冻结目标上的原著条件话语候选，贯通提案证据、finish／converge、缓存恢复、角色策略、提交前与重放校验，并通过两来源定向验收；完整 P5 退出矩阵和 P7 仍开放，最新验证结果以剩余工作账为准。

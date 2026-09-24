@@ -1,5 +1,12 @@
 # Implementation status
 
+Current follow-up (2026-09-24): the current diff and text-interaction scope is
+tracked in [the closure record](plans/2026-09-24-current-diff-text-closure.zh-CN.md).
+Engine 0.35.0 / compiler pipeline 50 include channel-bound branch messaging,
+independent read receipts, actor-safe decision dependencies and exact committed
+text rendering. P4/P5 overall exits and P7 external validation remain open.
+The dated baseline below is historical, not verification of the current tree.
+
 Date: 2026-09-02
 
 Verified baseline: `pnpm run check`; `pnpm test` (148 test files, 836 tests
@@ -45,7 +52,7 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 | Source observations | M2 + M3b-1 implemented | Immutable-source paragraph/sentence partition, exact entity/event mention, quotation, and discourse annotations, source-local closure, accounting, audit, batch recovery, and paged retrieval; event mentions carry no truth or canonical-event authority |
 | Entity resolution | M3a implemented | Deterministic source-scoped lexical candidates, explicit resolved/new/ambiguous/unresolved decisions, immutable superseding revisions, unresolved audit queues, and canonical name/alias trace gates |
 | Event resolution | M3b implemented | Source-scoped evidence/title/participant candidates, explicit coreference vs subevent clusters, resolved/new/ambiguous/unresolved decisions, merge/split revisions, major-event coverage, participant trace, and canonical-event commit gates |
-| Proposition, attribution, and knowledge acquisition | M4a implemented | Reusable proposition content is separated from narrator/character/document attitudes; quotation IDs trace holders to resolved speakers, and additive knowledge provenance records proposition, attribution, and acquisition mode without breaking legacy claim-keyed replay |
+| Proposition, attribution, and knowledge acquisition | M4a implemented | Reusable proposition content is separated from narrator/character/document attitudes; quotation IDs trace holders to resolved speakers, and additive knowledge provenance records proposition, attribution, and acquisition mode without breaking legacy claim-keyed replay. Branch experiences now bind to committed events with typed receipt and prior-experience checks; `migrate-acquisitions` archives explicit evidence-backed legacy migrations in an isolated candidate without changing active publication or branch history |
 | Event participation semantics | M4b-1 implemented | Versioned event/entity/semantic-role records keep character presence independent from agency, require a complete lossless projection to legacy `participants`/`participantPresence`, participate in compiler closure and prepared-publication gates, and are pinned in runtime snapshot V5 |
 | Event relation semantics | M4b-2 implemented | Independently evidenced temporal, causal, explanatory, identity/subevent, and narrative-continuation records have deterministic closure, contradiction, cycle, and legacy-projection validation; only non-contested `causes`/`enables` relations project to `causalParents`, and runtime snapshot V6 pins their revisions |
 | Scene/action/executable policy semantics | T4 + T6 + T9 implemented | Canonical scene occurrences, event frames, source-induced action schemas, action constraints, norm templates, and process templates pass source closure, dependency-ordered validation/commit, artifact retrieval, audit, gold evaluation, prepared-revision portability, and selected-reparse invalidation; host domain modules remain a separate provenance lane |
@@ -65,7 +72,7 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 | Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, typed data-gap escalation with at most one frozen-source consultation and one consumer retry, exact bounded continuity, reactive NPC responses, validated immediate developments, bounded post-divergence canonical scaffold recovery, merged model suggestions plus host-preflighted exits, stagnation detection, and an explicit material-progress wait route |
 | Runtime source consultation | Implemented vertical slice | Translation/adjudication may preserve a genuine missing-data result; a fresh isolated specialist can search and fully read only the branch-pinned immutable source units, while host admission excludes future/ambiguous evidence, projects separate translation/adjudication/choice/narrative authority, and records source-only gaps in a non-authoritative compiler inbox |
 | Character embodiment | Implemented vertical slice | Role-before-branch selection, spoiler-free opening setup, reader-only complete prior-event recaps, source-backed first-embodied-scene checkpoints for later roles, actor-scoped perception, sibling entry branches, and durable active resume |
-| Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
+| Model request policy | Shared host safety budgets implemented | Actor-safe dependency packages must fit the configured request boundary; model steps and UTF-8 payload bytes have shared per-operation limits. Provider token/cache/cost reports remain distinct from host byte accounting |
 | Corpus quality | Evaluation denominator implemented; provider quality not established | Three original CC0 Chinese micro-novels pin exact bytes and selected explicit V2 gold across all 13 implemented evaluator layers; no live-provider result or independently reviewed release threshold is claimed |
 
 ## Verified architecture

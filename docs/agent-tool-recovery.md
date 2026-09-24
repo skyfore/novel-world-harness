@@ -1483,3 +1483,168 @@ predecessor revisions are audit evidence, never active identity decisions.
 Quotation anchor-extension plans also freeze unchanged existing speaker and
 addressee mentions. Missing mention dependencies still require their separately
 allocated creation slots; an anchor extension does not authorize identity edits.
+
+## Branch acquisition and legacy migration
+
+A branch `record-acquisition` pairs with one learn at the same committed event. For an opaque prior-experience handle miss, re-read the current isolated prompt and copy `decision.experiences[].acquisitionId` (and its proposition/claim handles); permit one corrected retry only. An absent personal experience, wrong event cut, inaccessible document/observation, cross-actor/branch scope, or receipt mismatch requires stopping and preserving the head and proposal. Never delete acquisition provenance or invent a canonical occurrence.
+
+`nwh migrate-acquisitions` is a host CLI, not a general model write tool. It preserves the real underlying compiler error and the isolated review workspace. A stale event hash, missing original proof, or conflicting legacy provenance requires evidence review before one corrected manifest run. Parent revisions, active publication and branch history remain unchanged; failures do not authorize fabricating source selectors, widening scope, or retry loops.
+
+Decision dependencies are bound to the current host branch/head/actor and, during adjudication, candidate revision. A missing required actor knowledge record or undisclosed action contract stops inference; rebuild the same isolated view rather than searching compiler/global scope. `DECISION_CANDIDATE_CHANGED` requires host reconstruction of the current candidate/context pair before retrying; do not reuse the old manifest or retry unchanged. Dependency-budget failure is not permission to discard prerequisites. Host scope IDs stay in audit metadata, never in actor prompts.
+
+Literary source references require exact actor-admitted text inside verified immutable source evidence. A keyword, a visible participant, or an event-level evidence span alone does not grant access to neighboring prose. Missing/ambiguous visibility proof omits that optional sample; do not widen the source span, use future canon, or guess an occurrence. `LITERARY_REFERENCE_STALE_HEAD` requires rebuilding the intended actor/head lookup; stop unchanged retries and never reuse another branch's index.
+
+Conditional source speech is a frozen character-goal action candidate, not narrator authority. For `GOAL_EXPRESSION_MISSING`, use same-source `find_compiler_artifacts` with kind `utterance-expression`, copy `results[].readArguments.ref` into `read_compiler_artifact.ref`, then its `payload.id` into `expressionCandidates[].expressionId`. Claim misses use kind `claim` and copy `payload.id` into `requiredKnowledgeClaimIds[]`. Inspect the original source selectors for participant, relationship and knowledge requirements; make at most one corrected proposal under the existing successor protocol. Missing source support stops the task; do not erase conditions, invent references, widen source scope or retry unchanged.
+
+`CONDITIONAL_EXPRESSION_*` failures during runtime are host reconstruction failures: preserve the current head, frozen goal and expression revisions. Stop the candidate, rebuild from current branch knowledge and conditions, and do not look up future canon through actor tools. Removing `expressionBinding`, promoting current-event learning to pre-event knowledge, changing the words or forcing canonical realization is not recovery. Replaying invalid committed bindings stops history loading; narration retries never regenerate the action.
+
+### Agency and channel authority
+
+`AGENCY_PROCESS_MISSING` / `AGENCY_ACTION_MISSING` use same-source
+`find_compiler_artifacts` (`process-template` / `action-schema`), copy
+`results[].readArguments.ref` to `read_compiler_artifact.ref`, then the returned
+`payload.id` to the diagnosed `agencyProfile.channels[]` reference. Review the
+source and exact field selectors before one corrected proposal; absent support
+or unavailable discovery means stop, never invent a mechanism or widen scope.
+Preserve an unstaged proposal ID; staged drafts follow the successor protocol.
+
+`AGENCY_NOT_LIVE`, `AGENCY_UNAVAILABLE`, `AGENCY_BODY_REQUIRED` and
+`AGENCY_CHANNEL_UNAVAILABLE` require host reconstruction at the unchanged head.
+Do not retry unchanged, relabel a representation as a body, guess a session,
+start one in the same event to authorize itself, or substitute an audio channel
+for a physical-control mechanism. A narration retry does not repeat the action.
+
+Remote interaction candidates copy only `decision.agency.channels[].id` and
+`processId` handles from their current actor/head into
+`interaction.channelBinding.channelId` and `processId` (or the corresponding
+`action.channelBinding` for physical control). A sender's incoming binding is
+not a recipient capability. Missing candidate dependencies stop inference;
+paused sessions or a trigger that does not match committed speech require host
+reconstruction at the unchanged head, never a guessed session or unchanged
+model retry. Scoped tools cannot discover compiler-only channels.
+
+For compiled conditional speech the host resolves exactly one eligible current
+session after the frozen goal's original gates. Missing or ambiguous sessions
+block the candidate; do not insert a guessed runtime process ID in source goals,
+strip an expression/channel binding, or erase a location/knowledge prerequisite.
+A stale candidate after pause and a replay binding mismatch preserve the head
+and require host reconstruction. A model-authored speech candidate may select
+an explicitly exposed channel handle, but all domain gates still revalidate it.
+
+
+Remote opening entry failures distinguish source repair from host state repair.
+`ENTRY_AGENCY_EVIDENCE_REQUIRED` permits at most one corrected compiler proposal:
+copy the supplied source segment's exact `id` into `evidence_segment_ids` and
+`selector.segment_id`, and support each named remote presence mode and historical
+process operation at the same entry cut. Preserve the failed proposal ID or follow
+the staged successor protocol; never erase the seed, relabel presence, import a
+future session, or retry unchanged. Without original support, stop.
+`ENTRY_AGENCY_UNPROVEN` is host repair only: preserve the head and reconstruct the
+source-backed pre-entry process and knowledge state. Do not retry until that
+state is repaired. A representation or remote mention is not an active channel.
+
+
+Later remote entry uses the same protocol with checkpoint-prefixed selectors.
+For `ENTRY_AGENCY_EVIDENCE_REQUIRED`, also support the named checkpoint actor and
+execution binding's `/actorId` and `/canonicalEventId` links. An inactive proposal
+tool, exhausted budget, circuit breaker or already-consumed sink forbids a retry,
+even when the diagnostic also names a missing entry selector.
+`EVENT_ENTRY_PRESENCE_UNPROVEN` stops for host source/checkpoint review: the
+occurrence and entry must agree on live remote participation. Never relabel a
+picture or mention, change the occurrence to unlock an entry, or import its future
+outcome into the pre-event seed. Preserve the draft and branch head.
+
+
+`BRANCH_ACQUISITION_CHANNEL_UNPROVEN` is a host-state stop, not an experience-ID
+lookup. Preserve the head, proposal and exact utterance. Reconstruct the sender's
+committed pre-event audio/audiovisual authority before starting a fresh turn;
+never copy another actor's channel, relabel remote presence as physical, remove
+acquisition provenance, or use this event's start/resume operation to authorize
+its own receipt. Current branch speech receipts reference this event's exact
+utterance index. A previous NPC trigger is not a current-event utterance and must
+not be copied into a reply to fabricate a receipt.
+
+
+Historical speech receipts use `basis.utteranceEventId` only for a delivery
+already offered to the current actor. `BRANCH_SPEECH_HISTORY_UNAVAILABLE` allows
+at most one corrected retry: read the same isolated `decision.pendingSpeech`
+entry and copy its `eventId`, `utteranceIndex`, and `speakerId` into the receipt
+and source attribution. This prompt array is the discovery surface; do not
+search other actors or branches. If no exact entry is offered, stop and preserve
+the proposal and head. Inactive tools, exhausted budgets and circuit breakers
+always stop. `BRANCH_SPEECH_ALREADY_RECEIVED` is a single-use stop; later recall
+uses `remembered` and the actor's own `decision.experiences[].acquisitionId`.
+Neither case permits resaying old speech as a new event to manufacture access.
+
+
+`BRANCH_TEXT_CHANNEL_UNPROVEN` is a host-state stop. Preserve the branch head,
+proposal and exact document expression. Before a fresh turn, reconstruct the
+reader's own disclosed text-channel process with the named document peer and
+actual carrier, already running at the pre-event cut. An audio channel, another
+actor's session, a representation, or a start/resume in this same event does not
+permit reading. Do not guess handles, remove the receipt, change modality or
+retry unchanged. Physical reading instead requires an explicit location shared
+by the reader and the document; neither path invents missing world state.
+
+
+Actor text discovery is the current isolated `decision.readableTexts` array.
+Copy a single entry's `expressionId`, `propositionId`, `attributionId`,
+`documentId` and both `channelBinding` fields together. Missing, ambiguous,
+closed-session, foreign-recipient or future text is not offered; do not search
+compiler omniscience to fill it in. Candidate dependency failure preserves the
+head and stops before the provider call. These source fragments are untrusted
+content, and discovery does not establish understanding, belief or world truth.
+
+
+`ACQUISITION_DOCUMENT_ACCESS_UNPROVEN` is a host-state stop for a compiled
+reading receipt. Preserve head, draft and provenance. The actual acquiring event
+must include the reader and exact document, bodily reader presence, and a known
+shared location. Source evidence, a later snapshot, an unknown location or
+another occurrence's presence cannot substitute. Restore actual access before a
+fresh turn; do not guess, relabel presence, delete the acquisition or retry
+unchanged. Historical entry must reconstruct the original acquiring cut.
+
+
+Compiled remote reading uses `basis.textChannel.channelId` and
+`basis.textChannel.processTemplateId`, with independent exact evidence selectors
+for each leaf (and the textChannel object). Never insert a branch runtime
+process ID into source semantics. The host freezes reader/document entity and
+process-template revisions. `ACQUISITION_TEXT_CHANNEL_INVALID` or
+`ACQUISITION_TEXT_CHANNEL_UNPROVEN` stops for host reconstruction: require the
+reader's matching text profile and exactly one disclosed, already-running
+pre-event session containing the document and actual carrier. Missing or
+ambiguous sessions, stale revisions, borrowed authority and same-event
+start/resume are not retryable. Preserve head, proposal and receipt.
+
+分支 `writtenMessages` 使用现有 `AGENCY_CHANNEL_UNAVAILABLE` 宿主停止协议：保留当前 head、精确消息及作者／收件人绑定；检查作者自主能力、事件前公开且运行中的 text 会话、recipient peers、carrier 与明确 live presence。不得改用 audio、借用他人渠道、猜 process ID、把 represented 改为 physical，或在发送事件内启动／恢复会话后自授权。投递记录不是理解或相信收据；模型接收适配器尚未开放时不得改塞入 audible utterance 或伪造源文档表达。
+
+### Branch text interactions and message receipts
+
+`interaction.kind=text` uses exact `content`, `addresseeIds`, `channel=text` and
+mandatory `channelBinding`. Copy only the current actor's offered
+`decision.agency.channels[].id` and `.processId` into `.channelId` and
+`.processId`. The sender's incoming binding is not a receiver capability and is
+removed from the NPC model input. `AGENCY_CHANNEL_UNAVAILABLE` is a host-state
+stop: preserve the committed head and proposal; never borrow a channel, start a
+session in the same event to authorize itself, relabel text as speech, or retry
+unchanged. A successful send creates delivery, not recipient knowledge.
+
+For `BRANCH_TEXT_HISTORY_UNAVAILABLE` at a model receipt boundary, re-read only
+this actor's current `decision.pendingMessages` (or its same-snapshot
+`find_actor_context` / `read_actor_context` record). Copy one returned entry's
+`eventId`, `messageIndex`, and `authorId` into the read/branch-message receipt and
+source attribution. Make at most one corrected retry; if no exact entry exists,
+stop. Do not guess an event, use another branch, invent a document or re-send the
+old message. `BRANCH_TEXT_ALREADY_RECEIVED`, inactive tools, exhausted budgets
+and a repeated diagnostic prohibit retry. Recall uses the actor's existing
+`decision.experiences[].acquisitionId` through remembered acquisition instead.
+
+A host NPC trigger mismatch is not a model ID correction opportunity: stop for
+host reconstruction without invoking the reasoner. A paused channel does not
+revoke old delivery; the recipient can record its own reception and independent
+understanding/belief, but sending a reply still requires its own active channel.
+Text narration uses the same ordered committed-content blocks as dialogue, with
+`channel=text` on the locked record. Copy each offered `utteranceId` exactly
+once; never speak written content, replace its whitespace, invent IDs, or repeat
+the player action after a rendering failure. One corrected rendering uses the
+same committed head and content identities; a second failure stops.

@@ -1,9 +1,21 @@
+import { settleCoreRoleRequirements } from "../compiler/core-role-requirement-service.js";
+import { assertReconciliationDeferralsReviewed } from "../compiler/reconciliation-review-ledger.js";
+import { RequirementLedger } from "../compiler/requirement-ledger.js";
+import { settleSourceRequirements } from "../compiler/requirement-service.js";
+import fs from "node:fs/promises";
+import { contentHash } from "../world/canonical.js";
+import { worldStorageRoot } from "../world/paths.js";
+import { reconciliationAuditResults } from "../compiler/reconciliation-review.js";
+import { INITIAL_WORLD_INPUT_GUIDANCE } from "../compiler/initial-world-preflight.js";
 import path from "node:path";
+import { CompilerHostReviewRequiredError, CompilerProposalObligations } from "../compiler/proposal-obligations.js";
+import { CompilerFinishReceipts } from "../compiler/finish-receipts.js";
 import { reviewNovelRoles } from "../workflow/role-review.js";
 import { stdout } from "node:process";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { convergeWorldProposals, quarantineUncommittableProposals, type WorldProposalConvergence } from "../compiler/converge.js";
-import { loadOptionalConfig } from "../config/load.js";
+import { prepareAuthorizedUpstreamRepair, pendingAuthorizedUpstreamRepairs } from "../compiler/upstream-repair-preparation.js";
+import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import { inspectPreparation, resolvePreparationBranchId, type PreparationInspection } from "../workflow/prepare.js";
 import { askUserQuestion, recommendedAnswer, type AskUserQuestion } from "../util/ask-user-question.js";
 import { compileCommand } from "./compile.js";
@@ -18,6 +30,8 @@ import { WorkspaceStore } from "../storage/workspace-store.js";
 import { resolveNovelSource } from "../world/play-experience.js";
 import {
   buildWorldReconciliationPrompt,
+  hasWorldReconciliationTargets,
+  reconciliationReviewTargets,
   MAX_RECONCILIATION_ITERATIONS,
   narrativeGraphRepairIsTargetable,
   narrativeGraphRepairIterations,
@@ -46,11 +60,15 @@ export type PrepareAllCommandOptions = {
   createBranch?: boolean;
   /** Finish compilation and archive the candidate; independent Play certification can follow later. */
   candidateOnly?: boolean;
+  /** Exact already-authorized repair; complete it before ordinary compilation/reconciliation. */
+  upstreamRepairPlan?: string;
+  upstreamRepairFinishFile?: string;
   restoreCache?: boolean;
-  /** Active immutable revision that an enclosing reparse is using as its rollback baseline. */
+  /** Immutable revision that an enclosing reparse/repair is using as its rollback baseline. */
   reparseBaselineBundleHash?: string;
   /** Stable identifier for resumable proposal namespaces inside an enclosing reparse. */
   reparseRunId?: string;
+  reconciliationFocus?: "opening-driver";
   /** Internal recovery mode: establish a validated opening world, then return before semantic repair or branch creation. */
   stopAfterInitialWorld?: boolean;
   signal?: AbortSignal;
@@ -67,6 +85,7 @@ type PrepareAllDependencies = {
   compileSource: typeof compileSourceCommand;
   compileInitialWorld: typeof compileCommand;
   converge: typeof convergeWorldProposals;
+  repairUpstream: typeof prepareAuthorizedUpstreamRepair;
   createBranch: typeof worldCreateCommand;
   ask: AskUserQuestion;
   reparse: (options: ReparseCommandOptions) => Promise<unknown>;
@@ -76,18 +95,20 @@ const defaultDependencies: PrepareAllDependencies = {
   compileSource: compileSourceCommand,
   compileInitialWorld: compileCommand,
   converge: convergeWorldProposals,
+  repairUpstream: prepareAuthorizedUpstreamRepair,
   createBranch: worldCreateCommand,
   ask: askUserQuestion,
   reparse: async (options) => (await import("./reparse.js")).reparseCommand(options),
 };
 
-export const INITIAL_WORLD_PROMPT = `Inspect the selected opening evidence, whole-source evidence retrieval, and existing artifact catalog, then propose one evidence-backed initial world representing one explicit world-time cut, not merely the facts stated in the opening passage. Treat the player as a human who has never read the novel. Add a concise readerSetup and a structured readerContext whose facts establish the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, completed pre-checkpoint beats, the actual holder and direction of relevant attitudes or social pressure, and the immediate unresolved situation. Add an entityGloss for every non-focal character referenced by those facts, explaining who that person is relative to the focal actor and why they matter now. Reader context is presentation-only and never character knowledge. Add one actorObservation for each physically present opening character, limited to that actor's direct checkpoint perception. Include projectionSeed with explicit semantics, processes, norms, activeRuleIds and elapsedDays, including empty channels when source-supported. Use the same complete seed contract on every later major character entry checkpoint. Unknown required past state must be reported as blocked, never filled from a future ending. readerSetup, every readerContext fact summary, entity-gloss relationship/relevance field, immediate-situation summary, and actorObservation summary requires its own exact explicit or strong-inference evidence_selector JSON Pointer; weak inference is not sufficient. Use find_source_evidence/read_source_evidence only to recover context that later discourse establishes as already true at or before the checkpoint; mark it later-discourse-preexisting. Never import the result of the unresolved opening situation, any later development, or later-acquired character knowledge. Set participantPresence explicitly for every character represented at the checkpoint; only bodily co-presence is physical, while mention, memory, dream, remote contact, or representation never establishes an opening role. Separate textual narrator frames, recollections, flashbacks, and lived chronology. Prefer the earliest playable chronological scene when it is present in the supplied evidence; otherwise mark a textual-frame checkpoint. Include checkpoint.mode and rationale, plus storyTime, narrativeLayerId, and beforeCanonicalEventId whenever supported. Never merge old-age frame facts with a younger remembered self. Retrieve exact existing artifact payloads as needed and seed grounded actionable state only for source characters bodily present at this checkpoint, including location, plan, momentum, and actor-known active relationships when supported. Do not create a catalog-wide alive inventory: later characters become playable through separate source-backed checkpoints attached to their first embodied canonical events. Store relationship entity IDs, never counterpart character IDs, in character.relationships. When the opening requires a genuinely missing entity, stage its exact source entity mention and same-finish new-entity resolution as well as the entity proposal; an untraced entity cannot pass the finish barrier. Propose genuinely missing referenced entities or base claims first. Finish the compiler batch explicitly after all proposal calls succeed.`;
+export const INITIAL_WORLD_PROMPT = `Inspect the selected opening evidence, whole-source evidence retrieval, and existing artifact catalog, then propose one evidence-backed initial world representing one explicit world-time cut, not merely the facts stated in the opening passage. Treat the player as a human who has never read the novel. Add a concise readerSetup and a structured readerContext whose facts establish the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, completed pre-checkpoint beats, the actual holder and direction of relevant attitudes or social pressure, and the immediate unresolved situation. Add an entityGloss for every non-focal character referenced by those facts, explaining who that person is relative to the focal actor and why they matter now. Reader context is presentation-only and never character knowledge. Add one actorObservation for each physically present opening character, limited to that actor's direct checkpoint perception. Include projectionSeed with explicit semantics, processes, norms, activeRuleIds and elapsedDays, including empty channels when source-supported. Use the same complete seed contract on every later major character entry checkpoint. Unknown required past state must be reported as blocked, never filled from a future ending. readerSetup, every readerContext fact summary, entity-gloss relationship/relevance field, immediate-situation summary, and actorObservation summary requires its own exact explicit or strong-inference evidence_selector JSON Pointer; weak inference is not sufficient. Use find_source_evidence/read_source_evidence only to recover context that later discourse establishes as already true at or before the checkpoint; mark it later-discourse-preexisting. Never import the result of the unresolved opening situation, any later development, or later-acquired character knowledge. Set participantPresence explicitly for every character represented at the checkpoint; only bodily co-presence is physical, while mention, memory, dream, remote contact, or representation never establishes an opening role. Separate textual narrator frames, recollections, flashbacks, and lived chronology. Prefer the earliest playable chronological scene when it is present in the supplied evidence; otherwise mark a textual-frame checkpoint. Include checkpoint.mode and rationale, plus storyTime, narrativeLayerId, and beforeCanonicalEventId whenever supported. Never merge old-age frame facts with a younger remembered self. Retrieve exact existing artifact payloads as needed and seed grounded actionable state only for source characters bodily present at this checkpoint, including location, plan, momentum, and actor-known active relationships when supported. Do not create a catalog-wide alive inventory: later characters become playable through separate source-backed checkpoints attached to their first embodied canonical events. Store relationship entity IDs, never counterpart character IDs, in character.relationships. When the opening requires a genuinely missing entity, stage its exact source entity mention and same-finish new-entity resolution as well as the entity proposal; an untraced entity cannot pass the finish barrier. Propose genuinely missing referenced entities or base claims first. Finish the compiler batch explicitly after all proposal calls succeed.` + "\n\n" + INITIAL_WORLD_INPUT_GUIDANCE;
 
 export async function prepareAllCommand(
   options: PrepareAllCommandOptions,
   dependencyOverrides: Partial<PrepareAllDependencies> = {},
 ): Promise<PreparationInspection> {
   options.signal?.throwIfAborted();
+  if (options.upstreamRepairFinishFile && !options.upstreamRepairPlan) throw new Error("--upstream-finish requires --upstream-plan; correct the host selection before retrying.");
   const root = path.resolve(options.root);
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(root, "compiler", () =>
@@ -142,6 +163,24 @@ export async function prepareAllCommand(
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
   sourceId = inspection.source!.id;
+  const upstreamPlans = options.upstreamRepairPlan ? [options.upstreamRepairPlan] : await pendingAuthorizedUpstreamRepairs(root, sourceId);
+  for (const planHash of upstreamPlans) {
+    const config = await loadOptionalConfig(configPath);
+    const input: unknown = options.upstreamRepairFinishFile ? JSON.parse(await fs.readFile(options.upstreamRepairFinishFile, "utf8")) : undefined;
+    const profile = config ? profileForRole(config, "extractor").profile : undefined;
+    report(`Continuing authorized upstream repair ${planHash}.`);
+    const result = await dependencies.repairUpstream(root, sourceId, planHash, input, {
+      ...(profile ? { profile } : {}), ...(options.model ? { model: options.model } : {}), signal: options.signal,
+      onText: options.onModelText, onThinking: options.onModelThinking, onTool: options.onModelToolCall,
+      onToolResult: options.onModelToolResult, onEvent: options.onModelEvent,
+    });
+    report(`Upstream repair ${result.planHash}: ${result.state}; original receipt ${result.receiptFingerprint}.`);
+    for (const issue of result.issues) report(issue);
+    // The active published cache remains immutable; never restore it over this authorized repair.
+    options = { ...options, restoreCache: false };
+    inspection = await inspectPreparation(root, { sourceId, branchId });
+    options.signal?.throwIfAborted();
+  }
   let preferNewBranch = false;
   const refreshDerivedBranchId = async (): Promise<boolean> => {
     if (options.branchId || !inspection.source) return false;
@@ -161,11 +200,28 @@ export async function prepareAllCommand(
   const cachedBeforePreparation = await preparedCache.lookup(inspection.source!);
   if (
     options.reparseBaselineBundleHash
+    && cachedBeforePreparation.bundleHash
     && cachedBeforePreparation.bundleHash !== options.reparseBaselineBundleHash
   ) {
     throw new Error(
       `Cannot finalize reparse against baseline ${options.reparseBaselineBundleHash}: `
       + `active prepared revision is ${cachedBeforePreparation.bundleHash ?? "missing"}.`,
+    );
+  }
+  if (options.reparseBaselineBundleHash && !cachedBeforePreparation.bundleHash) {
+    const baseline = await preparedCache.loadRevision(
+      inspection.source!,
+      options.reparseBaselineBundleHash,
+      { allowIncompatible: true },
+    );
+    if (!baseline) {
+      throw new Error(
+        `Cannot finalize reparse against baseline ${options.reparseBaselineBundleHash}: `
+        + "the immutable baseline revision is missing.",
+      );
+    }
+    report(
+      `No active prepared revision is currently published; finalizing against immutable baseline ${options.reparseBaselineBundleHash}.`,
     );
   }
   if (!options.reparseBaselineBundleHash && cachedBeforePreparation.requiresReparse) {
@@ -325,6 +381,13 @@ export async function prepareAllCommand(
     } catch (error) {
       options.signal?.throwIfAborted();
       report(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}`);
+      // Host-review and interrupted proposal/finish state must survive intact.
+      // Rejection/fallback is never a way to settle a durable compiler failure.
+      const obligations = new CompilerProposalObligations(root, sourceId, openingBatch.id);
+      if (error instanceof CompilerHostReviewRequiredError
+        || /host review|host-repair-required/i.test(error instanceof Error ? error.message : String(error))
+        || obligations.unresolved().length
+        || await new CompilerFinishReceipts(root, sourceId, openingBatch.id).read()) throw error;
       const rejected = await rejectPendingCompilerBatchProposals(root, openingBatch.id);
       if (rejected.length) report(`Rejected ${rejected.length} partial opening-state proposal(s) before fallback.`);
     }
@@ -360,7 +423,23 @@ export async function prepareAllCommand(
     return inspection;
   }
 
-  if (inspection.audit && narrativeGraphRepairIsTargetable(inspection.audit)) {
+  if (!cacheVerified) {
+    report("Reviewing the independent major-character roster before planning semantic repairs.");
+    try { await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
+      ...(options.model ? { model: options.model } : {}), signal: options.signal,
+      onStatus: options.onStatus, onModelText: options.onModelText, onModelThinking: options.onModelThinking,
+      onModelToolCall: options.onModelToolCall, onModelToolResult: options.onModelToolResult, onModelEvent: options.onModelEvent,
+    }, dependencies.compileInitialWorld); } catch (error) {
+      if (!options.candidateOnly || !(error instanceof Error) || !error.message.startsWith("WORLD_CLOSURE_BLOCKED:")) throw error;
+      report(error.message);
+    }
+  }
+
+  if (
+    inspection.audit
+    && !options.reconciliationFocus
+    && narrativeGraphRepairIsTargetable(inspection.audit)
+  ) {
     const plannedIterations = narrativeGraphRepairIterations(inspection.audit);
     const decision = await ask({
       header: "Event graph",
@@ -391,9 +470,15 @@ export async function prepareAllCommand(
       });
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
-    if (inspection.audit?.consistency.narrativeGraphNavigable === false) {
-      throw preparationFailure(inspection);
-    }
+  }
+  if (inspection.audit?.consistency.narrativeGraphNavigable === false) {
+    const canReconcile = semanticRepairIsIsolated(inspection.audit)
+      || (Boolean(options.reparseBaselineBundleHash) && semanticRepairRequiresReparse(inspection.audit));
+    if (!canReconcile) throw preparationFailure(inspection);
+    report(
+      "Narrative-graph adjudication has not reached the publication threshold; "
+      + "continuing with the available semantic repair targets, then rechecking the graph before finalization.",
+    );
   }
 
   if (inspection.audit && semanticRepairIsIsolated(inspection.audit)) {
@@ -435,7 +520,8 @@ export async function prepareAllCommand(
     report(`Whole-novel reparse needs ${plannedIterations} bounded semantic finalization shard(s).`);
     for (
       let iteration = 1;
-      iteration <= plannedIterations && inspection.audit?.consistency.semanticReady === false;
+      iteration <= plannedIterations && inspection.audit
+        && (semanticRepairRequiresReparse(inspection.audit) || semanticRepairIsIsolated(inspection.audit));
       iteration += 1
     ) {
       report(`Running reparse semantic finalization shard ${iteration}/${plannedIterations}.`);
@@ -453,25 +539,37 @@ export async function prepareAllCommand(
       });
       inspection = await inspectPreparation(root, { sourceId, branchId });
       if (
-        inspection.audit?.consistency.semanticReady === false
+        inspection.audit
+        && (inspection.audit.consistency.semanticReady === false || inspection.audit.consistency.causalGraphValid === false)
         && !semanticRepairRequiresReparse(inspection.audit)
         && !semanticRepairIsIsolated(inspection.audit)
       ) throw preparationFailure(inspection);
     }
   }
 
-  if (["create-branch", "ready"].includes(inspection.stage) && !cacheVerified) {
-    report("Reviewing the independent major-character roster before candidate certification.");
-    try { await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
-      ...(options.model ? { model: options.model } : {}), signal: options.signal,
-      onStatus: options.onStatus, onModelText: options.onModelText, onModelThinking: options.onModelThinking,
-      onModelToolCall: options.onModelToolCall, onModelToolResult: options.onModelToolResult, onModelEvent: options.onModelEvent,
-    }, dependencies.compileInitialWorld); } catch (error) {
-      if (!options.candidateOnly || !(error instanceof Error) || !error.message.startsWith("WORLD_CLOSURE_BLOCKED:")) throw error;
-      report(error.message);
+  if (inspection.audit && (
+    inspection.audit.consistency.narrativeGraphNavigable === false
+    || inspection.audit.consistency.causalGraphValid === false
+    || inspection.audit.consistency.semanticReady === false
+  )) throw preparationFailure(inspection);
+
+  await assertReconciliationDeferralsReviewed(root, sourceId);
+  if (["create-branch", "ready"].includes(inspection.stage)) {
+    const { UpstreamRepairLedger } = await import("../compiler/upstream-repair-ledger.js");
+    if ((await new UpstreamRepairLedger(root, sourceId).inspect()).plans.some(item => ["converged", "evaluated"].includes(item.state))) {
+      const { settleUpstreamRepairRequirements } = await import("../compiler/upstream-repair-evaluation.js");
+      const upstream = await settleUpstreamRepairRequirements(root, sourceId);
+      for (const issue of upstream.issues) report(`Upstream requirement: ${issue}`);
     }
+  }
+  const requirements = await settleSourceRequirements(root, sourceId);
+  if (requirements.issues.length) throw new Error(`Registered capability requirements block publication: ${requirements.issues.join("; ")}. Inspect nwh requirements inspect --source ${sourceId}; preserve unresolved requirements and stop for host source review. Do not rotate namespaces or retry unchanged.`);
+
+  if (["create-branch", "ready"].includes(inspection.stage) && !cacheVerified) {
     options.signal?.throwIfAborted();
     const evaluated = await preparedCache.inspectCandidate(inspection.source!);
+    const roleLedger = new RequirementLedger(root, sourceId);
+    if ((await roleLedger.coreRoleDefinitionHistory()).length) await roleLedger.recordCoreRoleEvaluation(evaluated.bundle, evaluated.assessment);
     report(`Entry probes: ${evaluated.assessment.playability?.readyTotal ?? 0}/${evaluated.assessment.playability?.majorTotal ?? 0} major roles ready.`);
     if (!evaluated.assessment.fullNovelReady && !options.candidateOnly) throw new Error(`WORLD_CLOSURE_BLOCKED: ${evaluated.assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
     if (options.candidateOnly && evaluated.assessment.issues.length) report(`Candidate diagnostics: ${evaluated.assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
@@ -537,25 +635,31 @@ async function runWorldReconciliationPass(input: {
   options: PrepareAllCommandOptions;
   dependencies: PrepareAllDependencies;
   report: (message: string) => void;
-}): Promise<void> {
+}): Promise<string[]> {
   const audit = input.inspection.audit;
   if (!audit) throw new Error("Cannot reconcile a world without an audit report.");
-  await input.dependencies.compileInitialWorld({
-    root: input.root,
-    configPath: input.configPath,
-    allowMissingConfig: true,
-    ...(input.options.model ? { model: input.options.model } : {}),
-    saveSession: false,
-    prompt: `${await buildWorldReconciliationPrompt(
+  const prompt = await buildWorldReconciliationPrompt(
       input.root,
       input.sourceId,
       audit,
       input.iteration,
       {
         mode: input.mode,
+        ...(input.options.reconciliationFocus ? { focus: input.options.reconciliationFocus } : {}),
         ...(input.options.reparseRunId ? { proposalIdSuffixTail: input.options.reparseRunId } : {}),
       },
-    )}`,
+    );
+  if (!await hasWorldReconciliationTargets(input.root, input.sourceId, input.mode, input.iteration, input.options.reparseRunId)) {
+    input.report(`Skipping empty ${input.mode} semantic shard ${input.iteration}; publication still requires the full audit.`);
+    return [];
+  }
+  await input.dependencies.compileInitialWorld({
+    root: input.root,
+    configPath: input.configPath,
+    allowMissingConfig: true,
+    ...(input.options.model ? { model: input.options.model } : {}),
+    saveSession: false,
+    prompt,
     compilerBatchId: `reconcile-${input.sourceId}-${input.mode}-${input.options.reparseRunId ?? "v3"}-${input.iteration}`,
     sourceId: input.sourceId,
     includeLocalTools: false,
@@ -577,6 +681,26 @@ async function runWorldReconciliationPass(input: {
     onModelEvent: input.options.onModelEvent,
   });
   await convergeForPreparation(input.root, input.sourceId, input.dependencies.converge, input.report);
+  const roleSettlement = await settleCoreRoleRequirements(input.root, input.sourceId, input.options.cacheRoot);
+  if (roleSettlement) input.report(`Core role requirements evaluated after convergence: ${roleSettlement.assessment.coreRoleResult?.requirements.filter(item => item.state === "satisfied").length ?? 0}/${roleSettlement.assessment.coreRoleResult?.requirements.length ?? 0} satisfied.`);
+  const batchId = `reconcile-${input.sourceId}-${input.mode}-${input.options.reparseRunId ?? "v3"}-${input.iteration}`;
+  const targets = await reconciliationReviewTargets(input.root, input.sourceId, batchId);
+  if (targets !== undefined) {
+    const receipt = await new CompilerFinishReceipts(input.root, input.sourceId, batchId).read();
+    if (!receipt || receipt.state !== "completed") throw new Error("Target review requires a verified completed finish receipt; stop for host review.");
+    const after = await inspectPreparation(input.root, { sourceId: input.sourceId, branchId: input.branchId });
+    if (!after.audit) throw new Error("Target review requires the post-convergence audit; stop for host review.");
+    const results = reconciliationAuditResults(targets, receipt.identity.input.target_reviews ?? [], after.audit);
+    const file = path.join(worldStorageRoot(input.root), "compiler", "reconciliation-reviews", input.sourceId, `${contentHash(batchId)}.json`);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(`${file}.tmp`, JSON.stringify({ version: 1, sourceId: input.sourceId, batchId,
+      finishFingerprint: receipt.fingerprint, auditedAt: new Date().toISOString(), results,
+      interpretation: "A completed receipt records proposal work only. Model deferrals require host review; no-current-audit-finding is not semantic certification. Publication still requires the full audit." }, null, 2));
+    await fs.rename(`${file}.tmp`, file);
+    input.report(`Target audit: ${results.filter(result => result.status === "unresolved").length}/${targets.length} still unresolved; ${results.filter(result => result.hostReviewRequired).length} model deferrals require host review. Ledger: ${file}`);
+    return results.filter(result => result.hostReviewRequired).map(result => `${batchId}:${result.target}`);
+  }
+  return [];
 }
 
 async function convergeForPreparation(
@@ -595,6 +719,8 @@ async function convergeForPreparation(
     },
   });
   printConvergence(result, report);
+  const requirements = await settleSourceRequirements(root, sourceId);
+  for (const issue of requirements.issues) report(issue);
   const quarantined = await quarantineUncommittableProposals(root, result);
   for (const item of quarantined) {
     report(`Rejected uncommittable ${item.kind} proposal ${item.id}; preserved in rejected history.`);
@@ -602,6 +728,8 @@ async function convergeForPreparation(
 }
 
 function printConvergence(result: WorldProposalConvergence, report: (message: string) => void): void {
+  for (const issue of result.upstreamRepairIssues ?? []) report(`Upstream repair: ${issue}`);
+  for (const issue of result.requirementValidityIssues ?? []) report(`Requirement validity: ${issue}`);
   for (const item of result.canonical.accepted) report(`Accepted ${item.kind} proposal ${item.id}.`);
   for (const id of result.possibilities.accepted) report(`Accepted possibility proposal ${id}.`);
   for (const item of result.canonical.blocked) {

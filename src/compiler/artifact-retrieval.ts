@@ -29,6 +29,10 @@ export const COMPILER_ARTIFACT_KINDS = [
   "event-relation",
   "scene-occurrence",
   "event-frame",
+  "semantic-effect",
+  "perception-observation",
+  "acquisition",
+  "utterance-expression",
   "action-schema",
   "event-execution",
   "action-constraint",
@@ -184,6 +188,10 @@ export async function loadCompilerArtifactRecords(
   addCanonical(eventParticipations, "event-participation", (value) => ({ id: value.id, label: `${value.eventId} ${value.role} ${value.entityId}` }));
   addCanonical(eventRelations, "event-relation", (value) => ({ id: value.id, label: `${value.fromEventId} ${value.type} ${value.toEventId}` }));
   addCanonical(sceneOccurrences, "scene-occurrence", (value) => ({ id: value.id, label: `Scene ${value.id}` }));
+  addCanonical(await canon.listSemanticEffects(), "semantic-effect", value => ({ id: value.id, label: `${value.kind}: ${value.subjectEntityId}` }));
+  addCanonical(await canon.listPerceptionObservations(), "perception-observation", value => ({ id: value.id, label: `${value.channel}: ${value.observerId}` }));
+  addCanonical(await canon.listAcquisitions(), "acquisition", value => ({ id: value.id, label: `${value.basis.mode}: ${value.actorId}` }));
+  addCanonical(await canon.listUtteranceExpressions(), "utterance-expression", value => ({ id: value.id, label: `${value.modality}: ${value.speakerId}` }));
   addCanonical(eventFrames, "event-frame", (value) => ({ id: value.id, label: value.name }));
   addCanonical(eventExecutions, "event-execution", (value) => ({ id: value.id, label: `${value.canonicalEventId}: ${value.actorId}` }));
   addCanonical(actionSchemas.filter((value) => value.induction.kind === "source-pattern"), "action-schema", (value) => ({ id: value.id, label: value.name }));
@@ -320,7 +328,7 @@ export function createCompilerArtifactRetrievalTools(
     label: "Find compiler artifacts",
     description: "Search source-scoped canonical and pending artifact semantics. Results are bounded summaries with stable refs and semantic hashes; use read_compiler_artifact for the exact payload.",
     promptSnippet: "Find prior source-scoped compiler artifacts before creating duplicates or revisions",
-    promptGuidelines: ["Use this when the bounded prompt catalog omits an artifact or only shows its identity.", "Never treat artifacts from another source as context."],
+    promptGuidelines: ["Use this when the bounded prompt catalog omits an artifact or only shows its identity.", "Never treat artifacts from another source as context.", "Copy results[].ref verbatim into read_compiler_artifact; logicalId is a domain identity, never a ref construction template. Discovery outside the current citable slice provides context, not citation authority."],
     executionMode: "sequential" as const,
     parameters: findParameters,
     async execute(_id, input, signal) {
@@ -341,6 +349,7 @@ export function createCompilerArtifactRetrievalTools(
         .slice(offset, offset + limit)
         .map((record) => ({
           ref: record.ref,
+          readArguments: { ref: record.ref },
           status: record.status,
           kind: record.kind,
           logicalId: record.logicalId,

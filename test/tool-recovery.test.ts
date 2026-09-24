@@ -10,6 +10,32 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it("requires durable obligation repair before finish and stops exhausted retries", () => {
+    const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Unresolved compiler proposal obligations (persisted across sessions): propose_action_schema proposal_id=schema-1: failed: Exact evidence quote was not found in segment source-1.");
+    expect(advice.steps.join(" ")).toContain("same identity");
+    expect(advice.steps.join(" ")).toContain("stop for host review");
+    expect(buildNwhToolRecoveryAdvice("propose_action_schema", "Compiler proposal obligation requires host review: original and corrected inputs failed.").retryable).toBe(false);
+  });
+  it("fixes accounting review dispositions instead of withdrawing pages or inventing finish offsets", () => {
+    const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Source-unit accounting is incomplete: unit is inside a no-artifacts segment; withdraw proposal page-1. Call find_source_accounting_units with offset=0.");
+    expect(advice.category).toBe("invalid-arguments");
+    expect(advice.steps.join(" ")).toContain("reviewed_segments.disposition");
+    expect(advice.steps.join(" ")).toContain("Retain the accounting pages");
+    expect(advice.steps.join(" ")).toContain("finish_compiler_batch has no offset argument");
+    const missing = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Source-unit accounting is incomplete: unreviewed units. Refetch offset=0.");
+    expect(missing.suggestedCall).toMatchObject({ tool: "find_source_accounting_units", arguments: { offset: 0 } });
+  });
+  it("repairs execution envelopes and discovers real mechanisms without relabeling ad-hoc actions", () => {
+    const message = formatNwhToolError("propose_event_execution", new Error("Validation failed: evidence_segment_ids missing; action requires schema-bound"));
+    expect(message).toContain("Validation failed: evidence_segment_ids missing");
+    expect(message).toContain("never nest evidence_segment_ids/evidence_selectors inside payload");
+    const advice = buildNwhToolRecoveryAdvice("propose_event_execution", "Execution bindings require an explicit compiled mechanism");
+    expect(advice.suggestedCall).toMatchObject({ tool: "find_compiler_artifacts", arguments: { kind: "action-schema" } });
+    expect(advice.steps.join(" ")).toContain("read payload.id into action.schemaId");
+    expect(advice.steps.join(" ")).toContain("never copy an event's ad-hoc action");
+    expect(advice.steps.join(" ")).toContain("Retry once after concrete correction");
+    expect(buildNwhToolRecoveryAdvice("propose_event_execution", "requires schema-bound", { activeToolNames: ["propose_event_execution"] })).toMatchObject({ retryable: false, category: "scope-or-lifecycle" });
+  });
   it("turns a stale read ref into an exact paired-discovery SOP", () => {
     const advice = buildNwhToolRecoveryAdvice(
       "read_compiler_artifact",
@@ -34,6 +60,7 @@ describe("agent tool recovery", () => {
     const advice = buildNwhToolRecoveryAdvice(
       "propose_initial_world",
       `Evidence selector 7 for target_path '/readerSetup' failed: Exact evidence quote was not found in segment ${segmentId}.`,
+      { activeToolNames: ["propose_initial_world", "read_source_evidence"] },
     );
 
     expect(advice).toMatchObject({
@@ -48,6 +75,81 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("evidence_segment_id");
     expect(advice.steps.join(" ")).toContain("do not copy JSON escaping");
     expect(advice.steps.join(" ")).toContain("Retry propose_initial_world once");
+  });
+
+  it("disambiguates repeated source wording without losing annotation identity", () => {
+    const segmentId = "source-1-00009-acde1234";
+    const diagnostic = `Exact evidence quote is ambiguous in segment ${segmentId}: 5 occurrences match. Supply prefix/suffix or a one-based occurrence.`;
+    const advice = buildNwhToolRecoveryAdvice("propose_entity_mention", diagnostic, {
+      activeToolNames: ["propose_entity_mention", "read_source_evidence"],
+    });
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "read_source_evidence",
+        arguments: { ref: `source-segment:${segmentId}`, offset: 0, max_chars: 120_000 },
+      },
+    });
+    const steps = advice.steps.join(" ");
+    expect(steps).toContain("evidence_segment_id");
+    expect(steps).toContain("never from an individual page");
+    expect(steps).toContain("retain the intended logical annotation ID");
+    expect(steps).toContain("Retry propose_entity_mention once");
+    expect(steps).toContain("same diagnostic repeats, stop");
+    expect(formatNwhToolError("propose_entity_mention", new Error(diagnostic))).toContain(diagnostic);
+  });
+
+  it.each([
+    "Exact evidence quote is ambiguous in segment source-1-00009: 2 occurrences match.",
+    "Exact evidence quote was not found in segment source-1-00009.",
+  ])("uses supplied evidence for bounded quote recovery: %s", async (diagnostic) => {
+    const scope = { activeToolNames: ["propose_entity_mention", "finish_compiler_batch"] };
+    const tool = withNwhToolRecovery(defineTool({
+      name: "propose_entity_mention",
+      label: "Propose entity mention",
+      description: "Test the model-facing recovery boundary.",
+      parameters: Type.Object({}),
+      async execute() { throw new Error(diagnostic); },
+    }), () => scope);
+    let failure: Error | undefined;
+    try {
+      await tool.execute("quote-failure", {}, undefined, undefined, {} as ExtensionContext);
+    } catch (error) {
+      failure = error as Error;
+    }
+    expect(failure?.message).toContain(diagnostic);
+    const recovered = recoverNwhToolResult({
+      type: "tool_result",
+      toolName: tool.name,
+      toolCallId: "quote-failure",
+      input: {},
+      content: [{ type: "text", text: failure!.message }],
+      isError: true,
+    }, scope);
+    const advice = buildNwhToolRecoveryAdvice(tool.name, diagnostic, scope);
+    expect(recovered).toMatchObject({ isError: true, details: { nwhToolRecovery: advice } });
+    expect(advice.suggestedCall).toBeUndefined();
+    expect(advice.steps.join(" ")).toContain('complete host-supplied <source-segment id="source-1-00009">');
+    expect(advice.steps.join(" ")).toContain("stop and report the missing evidence");
+    expect(failure?.message).not.toContain("read_source_evidence");
+    expect(advice.steps.join(" ")).toContain("Retry propose_entity_mention once");
+
+    scope.activeToolNames.push("read_source_evidence");
+    await expect(tool.execute("quote-with-retrieval", {}, undefined, undefined, {} as ExtensionContext))
+      .rejects.toThrow("Call read_source_evidence");
+  });
+
+  it("classifies a schema failure without treating echoed proposal text as the diagnostic", () => {
+    const diagnostic = 'Validation failed for tool "propose_canonical_event":\n  - payload.narrativeContext.mode: must be equal to one of the allowed values';
+    const echoed = `${diagnostic}\n\nReceived arguments:\n${JSON.stringify({
+      evidence_segment_ids: ["source-1-00002"],
+      payload: { narrativeContext: { mode: "dream" }, readerSummary: "Unknown identity; offset remains unknown." },
+    })}`;
+    const expected = buildNwhToolRecoveryAdvice("propose_canonical_event", diagnostic);
+    expect(expected.category).toBe("invalid-arguments");
+    expect(buildNwhToolRecoveryAdvice("propose_canonical_event", echoed)).toEqual(expected);
+    expect(formatNwhToolError("propose_canonical_event", new Error(echoed))).toContain(echoed);
   });
 
   it("keeps runtime source-ref recovery inside the frozen consultation scope", () => {
@@ -207,6 +309,105 @@ describe("agent tool recovery", () => {
     });
     expect(representedConflict.steps.join(" ")).toContain("accounting-page-1");
     expect(representedConflict.steps.join(" ")).toContain("Do not guess a unit-to-proposal mapping");
+
+    const noArtifactsConflict = buildNwhToolRecoveryAdvice(
+      "finish_compiler_batch",
+      "Source-unit accounting is incomplete:\n- Source unit sentence-11 is inside a no-artifacts segment and is already host-classified as background-only; withdraw source-accounting proposal 'accounting-page-2'.",
+    );
+    expect(noArtifactsConflict).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+    });
+    expect(noArtifactsConflict.suggestedCall).toBeUndefined();
+    expect(noArtifactsConflict.steps.join(" ")).toContain("Set the named reviewed_segments.disposition fields to proposed");
+  });
+
+  it("keeps recovery metadata consistent when an actionable error is wrapped again", () => {
+    const diagnostic = "Source annotation closure failed:\n- obs-event: participantMentionIds references unknown annotation 'missing-mention'";
+    const toolName = "finish_compiler_batch";
+    const expected = buildNwhToolRecoveryAdvice(toolName, diagnostic);
+    expect(expected.category).toBe("invalid-arguments");
+    const content = [{ type: "text" as const, text: formatNwhToolError(toolName, new Error(diagnostic)) }];
+    const recovered = recoverNwhToolResult({
+      type: "tool_result", toolName, toolCallId: "wrapped-finish", input: {}, content, isError: true,
+    });
+    expect(recovered).toMatchObject({ isError: true, content, details: { nwhToolRecovery: expected } });
+    expect(buildNwhToolRecoveryAdvice(toolName, content[0]!.text)).toEqual(expected);
+  });
+
+  it("returns an actionable exact-name repair while preserving the failed finish status", async () => {
+    const diagnostic = "Canonical entity proposal trace is incomplete:\n- Entity artifact-copper-urn-00012 canonicalName '铜罐' has no resolved source mention.";
+    const tool = withNwhToolRecovery(defineTool({
+      name: "finish_compiler_batch",
+      label: "Finish compiler batch",
+      description: "Exercise failed finish recovery as the model receives it.",
+      parameters: Type.Object({}),
+      async execute() { throw new Error(diagnostic); },
+    }));
+    let failure: Error | undefined;
+    try {
+      await tool.execute("finish-name-trace", {}, undefined, undefined, {} as ExtensionContext);
+    } catch (error) {
+      failure = error as Error;
+    }
+    expect(failure?.message).toContain(diagnostic);
+    const recovered = recoverNwhToolResult({
+      type: "tool_result", toolName: tool.name, toolCallId: "finish-name-trace", input: {},
+      content: [{ type: "text", text: failure!.message }], isError: true,
+    });
+    expect(recovered).toMatchObject({
+      isError: true,
+      details: { nwhToolRecovery: {
+        category: "invalid-arguments", retryable: true,
+        suggestedCall: { tool: "find_source_annotations", arguments: {
+          query: "铜罐", annotation_type: "entity-mention", offset: 0, max_results: 20,
+        } },
+      } },
+    });
+    const advice = buildNwhToolRecoveryAdvice(tool.name, failure!.message);
+    expect(advice.suggestedCall?.arguments).not.toHaveProperty("status");
+    const steps = advice.steps.join(" ");
+    for (const text of ["artifact-copper-urn-00012", "surface === canonicalName", "annotationId, never ref/proposalId",
+      "find_entity_resolution_candidates", "propose_entity_resolution", "new-entity", "all reported sections",
+      "same full diagnostic repeats, stop", "Preserve unrelated valid drafts"]) {
+      expect(steps).toContain(text);
+    }
+    const blocked = buildNwhToolRecoveryAdvice(tool.name, `Compiler batch stopped by its circuit breaker. Reason: ${diagnostic}`);
+    expect(blocked).toMatchObject({ category: "budget-or-circuit-breaker", retryable: false });
+    expect(blocked.suggestedCall).toBeUndefined();
+  });
+
+  it("includes every missing name and keeps discovery arguments within tool limits", () => {
+    const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch",
+      `Canonical entity proposal trace is incomplete:\n- Entity urn canonicalName '${"罐".repeat(501)}' has no resolved source mention.\n- Entity person canonicalName 'O'Brien' has no resolved source mention.\n\nCanonical event proposal trace is incomplete:\n- Missing event dependency.`);
+    expect(advice.suggestedCall?.arguments.query).toBe("*");
+    expect(advice.steps.join(" ")).toContain('person -> "O\'Brien"');
+    expect(advice.retryCondition).toContain("every reported graph/trace section");
+  });
+
+  it("completes participant mention identity selection before retrying finish", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "finish_compiler_batch",
+      "Canonical event proposal trace is incomplete:\n- Canonical event evt-hatchling participant 'artifact-bottle' at participants.4 has no resolved participant mention in its event trace.",
+    );
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_source_annotations",
+        arguments: { query: "*", status: "pending", offset: 0, max_results: 200 },
+      },
+    });
+    const steps = advice.steps.join(" ");
+    expect(steps).toContain("evt-hatchling -> artifact-bottle");
+    expect(steps).toContain("eventMentionIds");
+    expect(steps).toContain("participantMentionIds");
+    expect(steps).toContain("event-mention revision");
+    expect(steps).toContain("add the missing mention ID to participant_mention_ids");
+    expect(steps).toContain("Creating an unreferenced entity mention alone cannot change the event trace");
+    expect(steps).toContain("propose_entity_resolution");
+    expect(steps).toContain("Merely creating the mention or merely calling the finder does not select an identity");
+    expect(steps).toContain("Only after all 1 selected resolution(s) succeed");
   });
 
   it("marks terminate-style retrieval budget results as errors and appends the stop SOP", () => {
@@ -290,4 +491,59 @@ describe("agent tool recovery", () => {
     )).resolves.toEqual({ content: [{ type: "text", text: "ok" }], details: { ok: true } });
     expect(withNwhToolRecovery(successful)).toBe(successful);
   });
+});
+
+it("keeps a failed mention's original identity and stops preview scope or retry violations", () => {
+  const advice = buildNwhToolRecoveryAdvice("propose_entity_mention", "A non-zero entity mention surface must exactly equal selector.exact.");
+  expect(advice.category).toBe("invalid-arguments");
+  expect(advice.steps.join(" ")).toContain("same proposal_id");
+  expect(advice.retryCondition).toContain("One corrected call");
+  expect(buildNwhToolRecoveryAdvice("preview_initial_world", "Initial-world preview requires an active opening or reconciliation batch").retryable).toBe(false);
+  expect(buildNwhToolRecoveryAdvice("preview_initial_world", "Compiler proposal obligation requires host review: opening preview repeated unchanged input").retryable).toBe(false);
+  const invalid = buildNwhToolRecoveryAdvice("preview_initial_world", "Initial-world preview validation failed: missing holderEntityId");
+  expect(invalid.steps.join(" ")).toContain("every reported validation path");
+});
+
+it("routes deterministic commit preview to active-draft repair, including entry checkpoints", () => {
+  const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Deterministic canonical commit preview is incomplete:\n- p: INACTIONABLE_CHARACTER_ENTRY at characterEntryCheckpoints.0.delta.operations: missing location");
+  expect(advice.retryable).toBe(true);
+  expect(advice.steps.join(" ")).toContain("already-staged drafts");
+  expect(advice.steps.join(" ")).toContain("latest active successor");
+  expect(advice.steps.join(" ")).toContain("Leave unrelated active drafts unchanged");
+  expect(advice.steps.join(" ")).not.toContain("Retry finish_compiler_batch once with corrected arguments");
+});
+
+it.each([
+  "Pending proposal p already exists with different content; submit the correction under a new proposal id.",
+  "Proposal p already exists in rejected history; submit a new proposal id.",
+])("requires host adjudication for immutable proposal collision: %s", (message) => {
+  const advice = buildNwhToolRecoveryAdvice("propose_canonical_event", message);
+  expect(advice).toMatchObject({ category: "host-repair-required", retryable: false });
+  expect(advice.steps.join(" ")).toContain("Retain the failed obligation");
+  expect(advice.steps.join(" ")).toContain("find_compiler_artifacts");
+});
+
+it('directs a bare quotation-ID miss to exact-ID discovery rather than neighboring prose', () => {
+  const advice = buildNwhToolRecoveryAdvice('read_source_annotation', "Source annotation ref 'q-eva-interface-click-instruction-00011' was not found in active source 'source'.");
+  expect(advice.suggestedCall).toEqual({ tool: 'find_source_annotations', arguments: { query: 'q-eva-interface-click-instruction-00011', max_results: 20 } });
+  expect(advice.steps.join(' ')).toContain('results[].ref');
+  expect(advice.steps.join(' ')).toContain('at most once');
+});
+
+it("bounds perception recovery and stops stale or unrealized sensory proof", () => {
+  for (const code of ["PERCEPTION_TRACE_REVISION_MISMATCH", "PERCEPTION_QUOTED_REPORT", "PERCEPTION_UNMAPPED", "PERCEPTION_CUT_NOT_CURRENT", "PERCEPTION_ACCESS_NOT_PROVEN"]) {
+    expect(buildNwhToolRecoveryAdvice("propose_perception_observation", code).retryable).toBe(false);
+  }
+  const advice = buildNwhToolRecoveryAdvice("propose_perception_observation", "PERCEPTION_TRACE_MISSING");
+  expect(advice.retryable).toBe(true);
+  expect(advice.steps.join(" ")).toContain("results[].readArguments.ref");
+  expect(advice.steps.join(" ")).toContain("results[].ref");
+  expect(advice.retryCondition).toContain("one corrected retry");
+});
+it("stops unavailable acquisition history and discovers typed dependencies within source scope", () => {
+  for (const code of ["ACQUISITION_REVISION_MISMATCH", "ACQUISITION_DEPENDENCY_CYCLE", "ACQUISITION_PRIOR_NOT_REALIZED", "ACQUISITION_PREMISE_UNAVAILABLE", "ACQUISITION_CUT_NOT_CURRENT"]) expect(buildNwhToolRecoveryAdvice("propose_acquisition", code).retryable).toBe(false);
+  const missing = buildNwhToolRecoveryAdvice("propose_acquisition", "ACQUISITION_DEPENDENCY_MISSING: acquisition/prior");
+  expect(missing.retryable).toBe(true);
+  expect(missing.steps.join(" ")).toContain("results[].readArguments.ref");
+  expect(missing.retryCondition).toContain("one materially corrected retry");
 });

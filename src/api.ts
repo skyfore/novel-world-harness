@@ -1,4 +1,5 @@
 export { auditCompiler, type CompilerAuditReport, type CompilerReadinessState } from "./compiler/audit.js";
+export { WorkspaceOperationLock, withWorkspaceOperationLock, type WorkspaceLockOwner } from "./util/workspace-lock.js";
 export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
 export { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./compiler/boundary-calibration.js";
 export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleSchema, chapterSplitPlanSchema, type ChapterHeadingRule, type ChapterSplitPlan, type ChapterStructureSample } from "./compiler/chapter-split.js";
@@ -415,6 +416,8 @@ export {
 } from "./world/play-session.js";
 export {
   assertPlaySceneNarration,
+  settlePlaySceneNarration,
+  requiresNarrationBlocks,
   buildPlayOpeningFrame,
   readerNarrativePrelude,
   playSceneRequestForEntry,
@@ -478,3 +481,27 @@ export { WebEventBroker, serializeServerSentEvent, type WebEventListener } from 
 export { WebApplicationError, webError } from "./web/errors.js";
 export { createWebHost, isLoopbackHost, type CreateWebHostOptions, type NwhWebHost } from "./web/host.js";
 export { OperationManager, type OperationRunContext, type StartOperationInput } from "./web/operation-manager.js";
+
+export { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
+
+export { RuntimeHooks, runtimeHooks, currentRuntimeHooks, withRuntimeHooks, type RuntimeHook, type RuntimeHookEvent, type RuntimeHookType, type RuntimeHookStatus, type RuntimeHookMetadata, type RuntimeHookFailure } from "./runtime/hooks.js";
+
+export { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, semanticEffectRealizationIssues, SEMANTIC_EFFECT_VERSION, type SemanticEffect } from "./world/semantic-effect.js";
+
+export { committedUtteranceId, narrationBlocksSchema, renderNarrationBlocks, type NarrationBlocks, type LockedUtterance } from "./world/utterance-rendering.js";
+
+export { SCHEDULING_POLICY_VERSION } from "./world/scheduling-policy.js";
+
+export { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, UTTERANCE_EXPRESSION_VERSION, type UtteranceExpression } from "./world/utterance-expression.js";
+
+export { perceptionObservationSchema, validatePerceptionObservation, validatePerceptionObservationEvidence, PERCEPTION_OBSERVATION_VERSION, type PerceptionObservation } from "./world/perception-observation.js";
+
+export { acquisitionSchema, validateAcquisition, validateAcquisitionEvidence, ACQUISITION_VERSION, type Acquisition } from "./world/acquisition.js";
+
+export { withPlayModelBudget, currentPlayModelBudget, PLAY_MODEL_REQUEST_LIMITS } from "./runtime/play-model-budget.js";
+export { ModelRequestBudget, ModelRequestBudgetError, type ModelRequestLimits } from "./runtime/model-request-budget.js";
+
+export { branchAcquisitionSchema, type BranchAcquisition } from "./world/model.js";
+export { migrateLegacyAcquisitions, acquisitionMigrationManifestSchema, type AcquisitionMigrationManifest } from "./compiler/acquisition-migration.js";
+
+export { buildLiteraryReferenceIndex, type LiteraryReferenceIndex, type LiteraryReferenceRecord } from "./world/literary-reference.js";

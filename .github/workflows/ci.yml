@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - "agent/**"
+      - "codex/compiler-recovery-fixes"
 
 permissions:
   contents: read
@@ -20,12 +21,35 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22.19.0"
+      - name: Initialize isolated test workspace
+        run: echo "NWH_HOME=$RUNNER_TEMP/nwh-ci" >> "$GITHUB_ENV"
+      - name: Archive tracked test inputs
+        run: git archive --format=tar HEAD > "$RUNNER_TEMP/nwh-source.tar"
       - run: corepack enable
       - run: corepack prepare pnpm@11.21.0 --activate
       - run: pnpm install --frozen-lockfile
+      - name: Archive resolved toolchain without credentials or runtime state
+        if: github.event_name == 'push' && github.ref == 'refs/heads/codex/compiler-recovery-fixes'
+        run: |
+          tar -czf "$RUNNER_TEMP/nwh-dependencies.tar.gz" node_modules
+          cp "$(command -v node)" "$RUNNER_TEMP/nwh-node"
+      - name: Retain reproducible development inputs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/codex/compiler-recovery-fixes'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nwh-development-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/nwh-source.tar
+            ${{ runner.temp }}/nwh-dependencies.tar.gz
+            ${{ runner.temp }}/nwh-node
+          retention-days: 1
+          if-no-files-found: error
+      - run: pnpm test:semantic-contracts
       - run: pnpm run check
       - run: pnpm test
       - run: pnpm run build

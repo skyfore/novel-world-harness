@@ -1,3 +1,5 @@
+import { currentDecisionScope, decisionScopeHash } from "../world/decision-scope.js";
+import { decisionContextRequirements, DecisionContextBudgetError, type DecisionContextManifest } from "./decision-context.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { canonicalJson } from "../world/canonical.js";
@@ -32,6 +34,8 @@ export type ActorContextAccess = {
   modelContext: Record<string, unknown>;
   coverage: ActorContextCoverage;
   tools: ToolDefinition[];
+  /** Host audit only; no raw world scope or hidden dependency identifiers. */
+  decisionManifest?: DecisionContextManifest;
 };
 
 export type ActorContextAccessOptions = {
@@ -61,19 +65,43 @@ export function createActorContextAccess(
     );
   }
   const maxModelChars = options.maxModelChars ?? MAX_MODEL_CONTEXT_CHARS;
-  const requiredSections = options.requiredSections ?? new Set<string>();
+  const dependencies = decisionContextRequirements(context);
+  const requiredSections = new Set([...(options.requiredSections ?? []), ...(dependencies?.sections ?? [])]);
+  const requiredRefs = new Set(dependencies?.recordRefs ?? []);
+  const isRequired = (entry: ActorContextRecord) => requiredSections.has(entry.section) || requiredRefs.has(entry.ref);
+  const scope = currentDecisionScope();
+  const decisionManifest: DecisionContextManifest | undefined = dependencies ? {
+    ...(scope ? { scope, scopeHash: decisionScopeHash(scope) } : {}),
+    version: dependencies.version, snapshotHash: dependencies.snapshotHash, status: "blocked",
+    requiredRecordRefs: records.filter(isRequired).map((entry) => entry.ref),
+    hostChecksRequired: dependencies.hostChecksRequired, maxModelChars,
+    dependencyEdges: dependencies.dependencyEdges, records: [],
+  } : undefined;
+  const recordDecisions = (selected: ReadonlySet<string>) => {
+    if (decisionManifest) decisionManifest.records = records.map(entry => ({
+      ref: entry.ref, selected: selected.has(entry.ref),
+      reason: requiredSections.has(entry.section) ? "required-section" : requiredRefs.has(entry.ref) ? "required-dependency"
+        : selected.has(entry.ref) ? "optional-ranking" : "omitted-budget",
+      chars: entry.promptChars, utf8Bytes: Buffer.byteLength(promptJson(entry.payload), "utf8"),
+    }));
+  };
+  const budgetFailure = () => {
+    if (decisionManifest) throw new DecisionContextBudgetError(decisionManifest);
+    throw new Error(`Required actor-visible context exceeds the ${maxModelChars}-character model boundary.`);
+  };
   const selected = selectRecords(
     records,
     options.query ?? "",
     options.sectionPriority ?? {},
-    requiredSections,
+    isRequired,
     maxModelChars,
+    Boolean(decisionManifest),
   );
   let { coverage, modelContext } = assembleModelContext(context, records, selected);
   if (promptJson(modelContext).length > maxModelChars) {
     const terms = relevanceTerms(options.query ?? "");
     const optionalSelected = [...records]
-      .filter((entry) => selected.has(entry.ref) && !requiredSections.has(entry.section))
+      .filter((entry) => selected.has(entry.ref) && !isRequired(entry))
       .sort((left, right) => {
         const priority = (options.sectionPriority?.[right.section] ?? 100)
           - (options.sectionPriority?.[left.section] ?? 100);
@@ -87,12 +115,19 @@ export function createActorContextAccess(
       if (promptJson(modelContext).length <= maxModelChars) break;
     }
   }
+  recordDecisions(selected);
   if (promptJson(modelContext).length > maxModelChars) {
-    throw new Error(`Required actor-visible context exceeds the ${maxModelChars}-character model boundary.`);
+    budgetFailure();
+  }
+  if (decisionManifest) {
+    decisionManifest.status = "retained";
+    decisionManifest.modelChars = promptJson(modelContext).length;
+    decisionManifest.modelUtf8Bytes = Buffer.byteLength(promptJson(modelContext), "utf8");
   }
   return {
     modelContext,
     coverage,
+    ...(decisionManifest ? { decisionManifest } : {}),
     tools: createRetrievalTools(records),
   };
 }
@@ -137,8 +172,9 @@ function selectRecords(
   records: readonly ActorContextRecord[],
   query: string,
   priorities: Readonly<Record<string, number>>,
-  requiredSections: ReadonlySet<string>,
+  isRequired: (entry: ActorContextRecord) => boolean,
   maxChars: number,
+  deferRequiredSizeCheck = false,
 ): Set<string> {
   if (!Number.isInteger(maxChars) || maxChars < 4_000 || maxChars > 200_000) {
     throw new Error("Actor model context limit must be an integer between 4000 and 200000 characters.");
@@ -153,9 +189,9 @@ function selectRecords(
   const selected = new Set<string>();
   // Reserve room for coverage metadata and JSON structure.
   let used = 4_000;
-  for (const candidate of records.filter((entry) => requiredSections.has(entry.section))) {
+  for (const candidate of records.filter(isRequired)) {
     const estimated = candidate.section.length + (candidate.key?.length ?? 0) + candidate.promptChars + 32;
-    if (used + estimated > maxChars) {
+    if (used + estimated > maxChars && !deferRequiredSizeCheck) {
       throw new Error(`Required actor-visible section '${candidate.section}' exceeds the ${maxChars}-character model boundary.`);
     }
     selected.add(candidate.ref);

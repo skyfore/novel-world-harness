@@ -235,6 +235,15 @@ describe("actor policy", () => {
 
     expect(result.committedEvents).toEqual([]);
     expect(result.newHead).toBe(player.newHead);
+    await store.putGoal({ id: "rival-listens", actorId: "rival", description: "Rival decides to listen", priority: 1,
+      requiresKnowledge: [], activation: { preconditions: [], afterCanonicalEventIds: [] }, evidence: novelEvidence,
+      candidateAction: { title: "Merely remain alive", preconditions: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: "rival", field: "character.alive", value: true }] } },
+      actionPatterns: [{ title: "Listen carefully", preconditions: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: "rival", field: "character.plan", value: "listen carefully" }] } }],
+    });
+    const response = await runtime.move({ branchId: "main", maxActorCandidates: 1, maxBackgroundCandidates: 0 });
+    expect(response.committedEvents).toHaveLength(1);
+    expect((await engine.projector.project(response.newHead)).values.rival?.["character.plan"]).toBe("listen carefully");
+    expect((await engine.projector.project(player.newHead)).values.rival?.["character.plan"]).toBeUndefined();
   });
 });
 

@@ -1,6 +1,6 @@
 import type { ActionInvocation, CommitId, Entity, EntityId, NormDelta, NormOperation, WorldState } from "./model.js";
 import type { EffectProvenance } from "./semantic-effects.js";
-import { validateNormReparation, type NormTemplate } from "./norm-ontology.js";
+import { resolveNormTemplateScopes, validateNormReparation, type NormTemplate } from "./norm-ontology.js";
 
 type InstantiatedNorm = Extract<NormOperation, { op: "instantiate-norm" }>["norm"];
 
@@ -26,6 +26,8 @@ export type NormReducerContext = {
   normativeRuleIds?: ReadonlySet<string>;
   action?: ActionInvocation;
   postState?: WorldState;
+  /** State at action time, before its effects; seed callers use postState. */
+  beforeState?: WorldState;
 };
 
 export function emptyNormState(atCommit: CommitId): NormState {
@@ -64,6 +66,7 @@ export function applyNormDelta(
       case "satisfy-norm": {
         const norm = requireNorm(output, operation.normId);
         if (norm.status !== "active") throw new Error(`Norm ${norm.id} cannot be satisfied while ${norm.status}`);
+        requireEffectiveScope(norm, context);
         validateAcknowledgement(norm, operation.acknowledgedByActorId, context);
         if (operation.byActorId) {
           requireCharacter(context.entities, operation.byActorId, `Norm ${norm.id} resolver`);
@@ -78,6 +81,14 @@ export function applyNormDelta(
       case "violate-norm": {
         const norm = requireNorm(output, operation.normId);
         if (norm.status !== "active") throw new Error(`Norm ${norm.id} cannot be violated while ${norm.status}`);
+        requireEffectiveScope(norm, context);
+        if (operation.reasonId === "deadline-expired") {
+          const elapsed = (context.beforeState ?? context.postState)?.logicalTime.elapsedDays;
+          if (context.templates.get(norm.templateId)?.modality !== "obligation" || norm.dueAtElapsedDays === undefined
+            || elapsed === undefined || elapsed < norm.dueAtElapsedDays) {
+            throw new Error(`NORM_DEADLINE_NOT_DUE: ${norm.id} has no elapsed deadline at this cut. Stop unchanged retries; preserve the instance and establish time through normal committed events before reevaluation. Do not change the reason or ID to bypass this check.`);
+          }
+        }
         if (operation.byActorId) {
           requireCharacter(context.entities, operation.byActorId, `Norm ${norm.id} violator`);
           if (operation.byActorId !== norm.subjectActorId) throw new Error(`Norm ${norm.id} can only be violated by its subject`);
@@ -128,4 +139,13 @@ function requireCharacter(entities: ReadonlyMap<EntityId, Entity>, entityId: Ent
   const entity = entities.get(entityId);
   if (!entity || entity.kind !== "character") throw new Error(`${label} ${entityId} must be a character`);
   return entity;
+}
+
+function requireEffectiveScope(norm: NormInstance, context: NormReducerContext): void {
+  // Automatically instantiated normative world-rule violations use their own resolver.
+  if (!context.templates.has(norm.templateId)) return;
+  const state = context.beforeState ?? context.postState;
+  const status = state ? resolveNormTemplateScopes(context.templates.values(), state)
+    .find(item => item.template.id === norm.templateId)?.status : "unknown";
+  if (status !== "effective") throw new Error(`NORM_SCOPE_NOT_ACTIVE: ${norm.id} template ${norm.templateId} is ${status}. Preserve the unresolved instance; stop unchanged retries and do not substitute IDs or erase exceptions. Reevaluate only after source-supported scope facts change through normal committed events; unknown scope requires host review.`);
 }

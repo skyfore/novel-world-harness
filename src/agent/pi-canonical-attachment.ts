@@ -1,3 +1,4 @@
+import { ModelRequestBudget } from "./model-request-budget.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
   canonicalAttachmentResolutionSchema,
@@ -40,6 +41,7 @@ export function createPiCanonicalAttachmentResolver(
   options: PiCanonicalAttachmentResolverOptions,
 ): CanonicalAttachmentResolver {
   return async (input) => {
+    const requestBudget = new ModelRequestBudget();
     options.signal?.throwIfAborted();
     options.onStatus?.("世界正在尝试衔接分歧后的事件骨架…");
     const workspace = await LocalFileWorkspace.create(options.root);
@@ -56,6 +58,7 @@ export function createPiCanonicalAttachmentResolver(
     ) => {
       const capture = createCanonicalAttachmentCaptureTool();
       const session = await PiAgentSession.create({
+        requestBudget,
         workspace,
         ...(options.profile ? { profile: options.profile } : {}),
         ...(options.model ? { model: options.model } : {}),

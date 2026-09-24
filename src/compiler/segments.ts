@@ -66,7 +66,7 @@ const MAX_BLOCK_BYTES = 48 * 1024;
 const MAX_BLOCK_PROMPT_CHARS = 48 * 1024;
 export const SEGMENTER_VERSION = 7 as const;
 
-const sourceSegmentSchema = z.object({
+export const sourceSegmentSchema = z.object({
   version: z.literal(1),
   id: idSchema,
   sourceId: idSchema,
@@ -181,9 +181,9 @@ export class SegmentStore {
 export async function segmentSource(
   workspaceRoot: string,
   source: SourceDocument,
-  options: { chapterSplitPlan?: ChapterSplitPlan | null } = {},
+  options: { chapterSplitPlan?: ChapterSplitPlan | null; sourceBytes?: Uint8Array } = {},
 ): Promise<SegmentManifest> {
-  const buffer = await readSourceMaterial(workspaceRoot, source);
+  const buffer = options.sourceBytes ? Buffer.from(options.sourceBytes) : await readSourceMaterial(workspaceRoot, source);
   const sourceSha256 = sha256(buffer);
   if (sourceSha256 !== source.contentSha256) {
     throw new Error(`Source changed since ingest: ${source.sourcePath}; expected ${source.contentSha256}, found ${sourceSha256}`);

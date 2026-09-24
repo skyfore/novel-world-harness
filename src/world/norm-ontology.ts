@@ -18,7 +18,7 @@ import {
   type ValidationIssue,
   type WorldState,
 } from "./model.js";
-import { evaluatePredicate } from "./state.js";
+import { evaluatePredicate, evaluatePredicateTruth } from "./state.js";
 import type { NormInstance, NormState } from "./norm-effects.js";
 import type { EffectiveWorldRule } from "./world-rule-ontology.js";
 
@@ -196,21 +196,38 @@ export function validateNormTemplateCatalog(
 
 export type EffectiveNormTemplate = { template: NormTemplate; subjectActorId: string };
 
-export function resolveEffectiveNormTemplates(
-  templates: Iterable<NormTemplate>,
-  state: WorldState,
-  subjectActorId: string,
-): EffectiveNormTemplate[] {
-  const candidates = [...templates]
-    .filter((template) => template.status === "supported")
-    .filter((template) => template.appliesWhen.every((predicate) => evaluatePredicate(state, predicate)))
-    .filter((template) => !template.exceptions.some((exception) => exception.appliesWhen.every((predicate) => evaluatePredicate(state, predicate))))
-    .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
-  const effective: NormTemplate[] = [];
-  for (const template of candidates) {
-    if (!effective.some((higher) => higher.overridesTemplateIds.includes(template.id))) effective.push(template);
+export type NormScopeResolution = {
+  template: NormTemplate;
+  status: "effective" | "inactive" | "unknown" | "overridden";
+};
+
+/** Scope is derived world data, independent of an instance's unresolved lifecycle. */
+export function resolveNormTemplateScopes(templates: Iterable<NormTemplate>, state: WorldState): NormScopeResolution[] {
+  const conjunction = (predicates: readonly Predicate[]) => {
+    const truths = predicates.map(predicate => evaluatePredicateTruth(state, predicate));
+    return truths.includes("false") ? "false" : truths.includes("unknown") ? "unknown" : "true";
+  };
+  const resolved: NormScopeResolution[] = [];
+  for (const template of [...templates].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))) {
+    const scope = conjunction(template.appliesWhen);
+    const exceptions = template.exceptions.map(exception => conjunction(exception.appliesWhen));
+    let status: NormScopeResolution["status"] = scope === "false" || exceptions.includes("true") ? "inactive"
+      : template.status !== "supported" || scope === "unknown" || exceptions.includes("unknown") ? "unknown" : "effective";
+    if (status !== "inactive") {
+      const overriders = resolved.filter(item => item.template.overridesTemplateIds.includes(template.id));
+      if (overriders.some(item => item.status === "effective")) status = "overridden";
+      else if (overriders.some(item => item.status === "unknown")) status = "unknown";
+    }
+    resolved.push({ template, status });
   }
-  return effective.map((template) => ({ template, subjectActorId }));
+  return resolved;
+}
+
+export function resolveEffectiveNormTemplates(
+  templates: Iterable<NormTemplate>, state: WorldState, subjectActorId: string,
+): EffectiveNormTemplate[] {
+  return resolveNormTemplateScopes(templates, state).filter(item => item.status === "effective")
+    .map(({ template }) => ({ template, subjectActorId }));
 }
 
 export function deriveAutomaticNormDelta(input: {
@@ -242,7 +259,7 @@ export function deriveAutomaticNormDelta(input: {
 
   if (input.actorId) {
     for (const effective of [...input.normativeRules].sort((left, right) => left.id.localeCompare(right.id))) {
-      const violatedRequires = effective.requires.some((predicate) => !evaluatePredicate(input.after, predicate));
+      const violatedRequires = effective.requires.some((predicate) => evaluatePredicateTruth(input.after, predicate) === "false");
       const violatedForbids = effective.forbids.some((predicate) => evaluatePredicate(input.after, predicate));
       if (!violatedRequires && !violatedForbids) continue;
       const normId = `branch-norm-${contentHash({

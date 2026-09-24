@@ -1,3 +1,5 @@
+import * as roleReview from "../src/workflow/role-review.js";
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { useOfflinePreparationBoundary } from "./helpers/offline-preparation.js";
 useOfflinePreparationBoundary();
 import fs from "node:fs/promises";
@@ -7,6 +9,7 @@ import { stdout } from "node:process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { prepareAllCommand } from "../src/commands/prepare-all.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { auditCompiler } from "../src/compiler/audit.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
@@ -28,7 +31,154 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
+async function createRepairRoutingFixture(eventCount: number) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-repair-routing-"));
+  roots.push(root);
+  const fixture = await createEvidenceFixture(root, "Hero waits. After the first step, the bell rings.\n");
+  const batches = await prepareCompilerBatches(root, fixture.source);
+  await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+  const evidence = fixture.evidence("Hero waits.");
+  const canon = new CanonicalModelStore(root);
+  await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+  await new InitialWorldStore(root).put({
+    version: 1,
+    delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+    evidence,
+  });
+  for (let index = 1; index <= eventCount; index += 1) {
+    await canon.putEvent({
+      id: `event-${index}`,
+      title: `Event ${index}`,
+      participants: [],
+      storyTime: { kind: "ordinal", label: `beat ${index}`, orderHint: index },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence,
+      causalParents: [],
+      confidence: 1,
+    });
+  }
+  return { root, fixture, canon, evidence };
+}
+
 describe("prepare-all command", () => {
+  it.each([true, false])("adjudicates a graph one root beyond the threshold and requires resolution=%s", async (resolveGraph) => {
+    const { root, fixture, canon } = await createRepairRoutingFixture(9);
+    const before = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(before.consistency).toMatchObject({
+      semanticReady: null,
+      causalGraphValid: true,
+      narrativeGraphNavigable: false,
+    });
+    expect(before.consistency.unconditionalRootEvents).toHaveLength(9);
+    const reviewRoles = vi.mocked(roleReview.reviewNovelRoles);
+    const compileInitialWorld = vi.fn(async (options) => {
+      expect(reviewRoles).toHaveBeenCalledTimes(1);
+      expect(options.compilerBatchId).toContain("-graph-adjudication-");
+      if (resolveGraph) {
+        const event = (await canon.listEvents()).find((event) => event.id === "event-9")!;
+        await canon.putEvent({ ...event, preconditions: [{ op: "after-step", step: 1 }] });
+      }
+    });
+    const preparation = prepareAllCommand({
+      root,
+      sourceId: fixture.source.id,
+      yes: true,
+      cacheRoot: path.join(root, "prepared-cache"),
+      createBranch: false,
+      onProgress: vi.fn(),
+    }, { compileInitialWorld });
+
+    if (resolveGraph) {
+      await expect(preparation).resolves.toMatchObject({
+        stage: "create-branch",
+        audit: { consistency: { narrativeGraphNavigable: true } },
+      });
+    } else {
+      await expect(preparation).rejects.toThrow("Automatic preparation stopped");
+      await expect(new PreparedNovelCache(root, path.join(root, "prepared-cache")).loadActive(fixture.source))
+        .resolves.toBeNull();
+    }
+    expect(compileInitialWorld).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires a durable finish even when an injected worker repairs the temporal regression", async () => {
+    const { root, fixture, canon, evidence } = await createRepairRoutingFixture(2);
+    const train = (await canon.listEvents()).find((event) => event.id === "event-1")!;
+    await canon.putEvent({ ...train, storyTime: { kind: "ordinal", label: "train arrives", orderHint: 5 } });
+    await canon.putEventRelation({
+      id: "arrival-enables-exam", fromEventId: "event-1", toEventId: "event-2",
+      type: "enables", operationality: "necessary", status: "explicit", confidence: 1,
+      mechanism: "Arrival enables the examination.", evidence,
+    });
+    const before = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(before.consistency.semanticReady).toBeNull();
+    expect(before.consistency.temporalRegressions).toHaveLength(1);
+    const compileInitialWorld = vi.fn(async (options) => {
+      expect(options.compilerBatchId).toContain("-bounded-");
+      const context = JSON.parse(options.prompt.match(/<reconciliation-context>\n([\s\S]+)\n<\/reconciliation-context>/u)![1]);
+      expect(context.repairPlan).toMatchObject({ targetCount: 1, requireAutonomousDriver: false });
+      expect(context.weakEventCandidates).toMatchObject([{ id: "event-2", weaknesses: ["story-time-precedes-causal-parent"] }]);
+      const exam = (await canon.listEvents()).find((event) => event.id === "event-2")!;
+      await canon.putEvent({ ...exam, storyTime: { kind: "ordinal", label: "exam begins", orderHint: 6 } });
+    });
+    await expect(prepareAllCommand({
+      root,
+      sourceId: fixture.source.id,
+      yes: true,
+      cacheRoot: path.join(root, "prepared-cache"),
+      createBranch: false,
+      onProgress: vi.fn(),
+    }, { compileInitialWorld })).rejects.toThrow("Target review requires a verified completed finish receipt");
+    expect((await auditCompiler(root, { sourceId: fixture.source.id })).consistency)
+      .toMatchObject({ causalGraphValid: true, temporalRegressions: [] });
+    expect(compileInitialWorld).toHaveBeenCalledTimes(1);
+  });
+
+  it("finalizes an explicit immutable repair baseline when no revision is active", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-missing-active-"));
+    roots.push(root);
+    vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
+    const fixture = await createEvidenceFixture(root, "# Opening\nHero waits.\n");
+    const cacheRoot = path.join(root, "prepared-cache");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "missing-active-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "missing-active-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        evidence: fixture.evidence("Hero waits."),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await convergeWorldProposals(root, fixture.source.id);
+    const published = await new PreparedNovelCache(root, cacheRoot).publish(fixture.source, {
+      allowSemanticDebtForRollback: true,
+    });
+    await fs.rm(path.join(cacheRoot, published.contentMd5, "active.json"));
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, []);
+
+    await expect(prepareAllCommand({
+      root,
+      sourceId: fixture.source.id,
+      yes: true,
+      cacheRoot,
+      restoreCache: false,
+      acquireLock: false,
+      reparseBaselineBundleHash: published.bundleHash,
+      reparseRunId: "repair-missing-active-test",
+    }, {
+      compileSource: async () => { throw new Error("continued after missing active baseline"); },
+    })).rejects.toThrow("continued after missing active baseline");
+  });
+
   it("routes an incompatible prepared revision through whole-novel reparse and a fresh branch", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-upgrade-"));
     roots.push(root);
@@ -504,7 +654,7 @@ describe("prepare-all command", () => {
           generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
         });
       },
-    })).rejects.toThrow("Automatic preparation stopped at 'repair'");
+    })).rejects.toThrow("Target review requires a verified completed finish receipt");
 
     expect(openingCalls).toBe(1);
     expect(repairCalls).toBeGreaterThan(0);
@@ -610,6 +760,47 @@ describe("prepare-all command", () => {
     );
   });
 
+  it("preserves staged opening drafts and the original failure when the journal is unresolved", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-initial-fallback-"));
+    roots.push(root);
+    vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
+    const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("The world begins quietly."),
+    });
+
+    const result = prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
+      compileSource: async () => { throw new Error("compileSource should not run"); },
+      compileInitialWorld: async (options) => {
+        await new CompilerProposalService(root).submit("initial-world", {
+          proposalId: "partial-model-opening",
+          payload: {
+            version: 1,
+            delta: { version: 1, operations: [] },
+            evidence: fixture.evidence("The world begins quietly."),
+          },
+          generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
+        });
+        new CompilerProposalObligations(root, fixture.source.id, options.compilerBatchId!).record("propose_initial_world", { proposal_id: "failed-opening", payload: {} }, "failed", "invalid opening");
+        throw new Error("original opening failure");
+      },
+      converge: convergeWorldProposals,
+      createBranch: worldCreateCommand,
+    });
+
+    await expect(result).rejects.toThrow("original opening failure");
+    await expect(new CompilerProposalService(root).store.list("pending")).resolves.toContainEqual(
+      expect.objectContaining({ id: "partial-model-opening" }),
+    );
+    await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toEqual([]);
+  });
+
   it("rejects unattended execution unless --yes is explicit", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-nontty-"));
     roots.push(root);
@@ -619,4 +810,28 @@ describe("prepare-all command", () => {
     await expect(prepareAllCommand({ root, sourceId: fixture.source.id, cacheRoot: path.join(root, "prepared-cache") }))
       .rejects.toThrow("Re-run with --yes");
   });
+});
+
+it("routes an explicit authorized upstream repair under the compiler lock before ordinary compilation", async () => {
+  const { WorkspaceOperationLock } = await import("../src/util/workspace-lock.js");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-upstream-")); roots.push(root);
+  const source = await createEvidenceFixture(root, "Ari waits.");
+  const compileSource = vi.fn(async () => {});
+  const repairUpstream = vi.fn(async (actualRoot: string, sourceId: string, planHash: string) => {
+    expect(actualRoot).toBe(root); expect(sourceId).toBe(source.source.id); expect(planHash).toBe("a".repeat(64));
+    expect((await WorkspaceOperationLock.inspect(root)).owner?.pid).toBe(process.pid);
+    throw new Error("original authorized repair requires recovery");
+  });
+  await expect(prepareAllCommand({ root, sourceId: source.source.id, upstreamRepairPlan: "a".repeat(64), yes: true, onProgress: () => {} }, { repairUpstream, compileSource })).rejects.toThrow("original authorized repair requires recovery");
+  expect(repairUpstream).toHaveBeenCalledOnce(); expect(compileSource).not.toHaveBeenCalled();
+  expect((await WorkspaceOperationLock.inspect(root)).owner).toBeUndefined();
+  await expect(prepareAllCommand({ root, upstreamRepairFinishFile: "unused.json", yes: true }, { repairUpstream, compileSource })).rejects.toThrow("requires --upstream-plan");
+  expect(repairUpstream).toHaveBeenCalledOnce();
+  const restore = vi.spyOn(PreparedNovelCache.prototype, "restore");
+  repairUpstream.mockResolvedValueOnce({ planHash: "a".repeat(64), state: "converged", receiptFingerprint: "b".repeat(64), issues: [] } as never);
+  compileSource.mockRejectedValueOnce(new Error("ordinary compilation reached"));
+  await expect(prepareAllCommand({ root, sourceId: source.source.id, upstreamRepairPlan: "a".repeat(64), yes: true, onProgress: () => {} }, { repairUpstream, compileSource })).rejects.toThrow("ordinary compilation reached");
+  expect(compileSource).toHaveBeenCalledOnce();
+  expect(restore).not.toHaveBeenCalled();
+  expect((await WorkspaceOperationLock.inspect(root)).owner).toBeUndefined();
 });

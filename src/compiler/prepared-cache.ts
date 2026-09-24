@@ -1,10 +1,30 @@
-import { eventExecutionSchema } from "../world/event-execution.js";
+import { entryArtifactEvidenceIssues } from "../world/entry-agency.js";
+import { validateIncapacityEvidence } from "../world/process-capacity.js";
+import { acquisitionSchema, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
+import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
+import { perceptionObservationSchema, validatePerceptionObservationEvidence } from "../world/perception-observation.js";
+import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.js";
+import { utteranceExpressionSchema, validateUtteranceExpressionEvidence } from "../world/utterance-expression.js";
+import { validateGoalExpressionEvidence } from "../world/conditional-expression.js";
+import { validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { semanticEffectSchema, validateSemanticEffectEvidence } from "../world/semantic-effect.js";
+import { upstreamRepairCheckpointSchema, captureUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointState, assertUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointRestorable, restoreUpstreamRepairCheckpoint, type UpstreamRepairCheckpoint } from "./upstream-repair-checkpoint.js";
+import { UpstreamRepairLedger, upstreamRepairJournalSchema, type UpstreamRepairRecord } from "./upstream-repair-ledger.js";
+import { upstreamRepairSnapshotIssues } from "./upstream-repair-snapshot.js";
+import { roleReviewResumeIssues } from "./role-review-finish.js";
+import { roleReviewRevisionSchema, type RoleReviewRevision } from "./role-review-revision.js";
+import { coreRoleRequirementHistorySchema, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
+import { currentRuntimeHooks } from "../runtime/hooks.js";
+import { RequirementLedger, requirementJournalSchema, requirementJournalBindingIssues, requirementSnapshotInputs, type LedgerRecord, coreRoleAttemptHistoryIssues, requirementDefinitionHistorySchema, type RequirementSet } from "./requirement-ledger.js";
+import { captureReconciliationObligations, assertReconciliationObligationsRestorable, restoreReconciliationObligations, reconciliationObligationSnapshotSchema, type ReconciliationObligationSnapshot } from "./reconciliation-review-ledger.js";
+import { eventExecutionSchema, validateProcessRecoveryEvidence } from "../world/event-execution.js";
+import { CompilerFinishReceipts } from "./finish-receipts.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { nwhRuntimeDir } from "../agent/runtime-paths.js";
-import { readSourceMaterial, sourceMaterialIdentity } from "../storage/source-material-store.js";
+import { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore } from "../storage/source-material-store.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
@@ -45,7 +65,7 @@ import {
   prepareCompilerBatches,
   type PersistedBatchProgress,
 } from "./batches.js";
-import { SEGMENTER_VERSION } from "./segments.js";
+import { SEGMENTER_VERSION, segmentSource } from "./segments.js";
 import { CompilerValidator, type CanonicalProposalKind, type CompilerValidationCatalog } from "./validator.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { actionConstraintSchema } from "../world/action-constraint.js";
@@ -74,13 +94,13 @@ import { sceneOccurrenceSchema } from "../world/scene-occurrence.js";
 import { eventFrameSchema } from "../world/event-frame.js";
 import { actionSchemaSchema } from "../world/action-ontology.js";
 import { RoleRosterStore, roleRosterSchema } from "./role-roster.js";
-import { assessNovelClosure, assertPreparedReadiness, novelClosureAssessmentSchema } from "./certification.js";
+import { assessNovelClosure, assertPreparedReadiness, novelClosureAssessmentSchema, validateAssessmentRevision } from "./certification.js";
 import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 3;
-export const COMPILER_PROMPT_VERSION = 29;
+export const COMPILER_PROMPT_VERSION = 32;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -116,6 +136,10 @@ const preparedCanonicalSchema = z.object({
   spatialRelations: z.array(spatialRelationSchema),
   sceneOccurrences: z.array(sceneOccurrenceSchema),
   eventFrames: z.array(eventFrameSchema),
+  semanticEffects: z.array(semanticEffectSchema).default([]),
+  perceptionObservations: z.array(perceptionObservationSchema).default([]),
+  acquisitions: z.array(acquisitionSchema).default([]),
+  utteranceExpressions: z.array(utteranceExpressionSchema).default([]),
   actionSchemas: z.array(actionSchemaSchema),
   eventExecutions: z.array(eventExecutionSchema).default([]),
   actionConstraints: z.array(actionConstraintSchema).default([]),
@@ -129,6 +153,13 @@ const preparedCanonicalSchema = z.object({
 }).strict();
 
 const preparedCompilerSnapshotSchema = z.object({
+  upstreamRepairJournal: upstreamRepairJournalSchema.optional(),
+  upstreamRepairCheckpoint: upstreamRepairCheckpointSchema.optional(),
+  requirementJournal: requirementJournalSchema.optional(),
+  coreRoleReviewRevision: roleReviewRevisionSchema.optional(),
+  requirementDefinitions: requirementDefinitionHistorySchema.optional(),
+  coreRoleRequirementDefinitions: coreRoleRequirementHistorySchema.optional(),
+  reconciliationObligations: reconciliationObligationSnapshotSchema.optional(),
   evidenceBindings: z.array(evidenceAssertionBindingSnapshotSchema),
   structure: sourceStructureManifestSchema,
   annotations: z.array(sourceAnnotationSchema),
@@ -172,6 +203,22 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     throw new Error("Prepared bundle chapter split plan does not match its source identity.");
   }
   const snapshot = bundle.compilerSnapshot;
+  const upstreamIssues = upstreamRepairSnapshotIssues(snapshot, sourceId, bundle.source.contentSha256);
+  if (upstreamIssues.length) throw new Error(upstreamIssues.join("; "));
+  assertUpstreamRepairCheckpoint(snapshot.upstreamRepairCheckpoint ?? { version: 1, drafts: [], activeReceipts: [] }, snapshot.upstreamRepairJournal ?? [], sourceId, Boolean(snapshot.upstreamRepairCheckpoint));
+  if (snapshot.upstreamRepairCheckpoint) {
+    for (const receipt of snapshot.upstreamRepairCheckpoint.activeReceipts) if (!snapshot.reconciliationObligations?.some(item => contentHash(item.receipt) === contentHash(receipt))) throw new Error("Upstream checkpoint receipt is missing its retained history");
+    for (const { receipt } of snapshot.reconciliationObligations ?? []) {
+      if (snapshot.upstreamRepairCheckpoint.drafts.some(draft => draft.planHash === receipt.identity.upstreamRepairIntent?.planHash)
+        && !snapshot.upstreamRepairCheckpoint.activeReceipts.some(active => contentHash(active) === contentHash(receipt))) throw new Error("Live upstream checkpoint cannot drop its original finish lifecycle");
+    }
+  }
+  const roleResumeIssues = roleReviewResumeIssues(snapshot.reconciliationObligations ?? [], snapshot.roleRoster, sourceId);
+  if (roleResumeIssues.length) throw new Error(roleResumeIssues.join("; "));
+  const journalIssues = requirementJournalBindingIssues(snapshot, sourceId, bundle.source.contentSha256);
+  if (journalIssues.length) throw new Error(journalIssues.join("; "));
+  const attemptIssues = coreRoleAttemptHistoryIssues((snapshot.reconciliationObligations ?? []).map(item => item.receipt), snapshot.coreRoleRequirementDefinitions ?? [], sourceId);
+  if (attemptIssues.length) throw new Error(attemptIssues.join("; "));
   if (snapshot.roleRoster && (snapshot.roleRoster.sourceId !== sourceId || snapshot.roleRoster.sourceSha256 !== bundle.source.contentSha256)) throw new Error("Prepared role roster escapes its source identity");
   if (snapshot.structure.sourceId !== sourceId
     || snapshot.structure.sourceSha256 !== bundle.source.contentSha256) {
@@ -224,6 +271,10 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     bundle.canonical.spatialRelations,
     bundle.canonical.sceneOccurrences,
     bundle.canonical.eventFrames,
+    bundle.canonical.semanticEffects ?? [],
+    bundle.canonical.perceptionObservations ?? [],
+    bundle.canonical.acquisitions ?? [],
+    bundle.canonical.utteranceExpressions ?? [],
     bundle.canonical.eventExecutions,
     bundle.canonical.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
     bundle.canonical.actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
@@ -464,6 +515,19 @@ export class PreparedNovelCache {
     source: SourceDocument,
     options: { allowSemanticDebtForRollback?: boolean; lineage?: PreparedRevisionLineage } = {},
   ): Promise<PreparedCacheResult> {
+    if (options.allowSemanticDebtForRollback) return this.publishInternal(source, options);
+    const metadata = { workspaceRoot: this.workspaceRoot, sourceId: source.id, bundleHash: undefined as string | undefined };
+    return currentRuntimeHooks().run("compilation", "publish-validated-revision", metadata, async () => {
+      const result = await this.publishInternal(source, options);
+      metadata.bundleHash = result.bundleHash;
+      return result;
+    });
+  }
+
+  private async publishInternal(
+    source: SourceDocument,
+    options: { allowSemanticDebtForRollback?: boolean; lineage?: PreparedRevisionLineage },
+  ): Promise<PreparedCacheResult> {
     if (options.lineage && !await this.loadRevision(source, options.lineage.parentBundleHash, { allowIncompatible: true })) {
       throw new Error(
         `Cannot publish ${options.lineage.operation} lineage: parent prepared revision ${options.lineage.parentBundleHash} was not found.`,
@@ -591,6 +655,33 @@ export class PreparedNovelCache {
     return revisions.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.bundleHash.localeCompare(right.bundleHash));
   }
 
+  /** Inventory existing revisions without migration, activation or running a new closure assessment. */
+  async peekArchivedRevisions(source: SourceDocument) {
+    const material = await new SourceMaterialStore().read(source);
+    if (!material) throw new Error("Archived source is missing; candidate inspection cannot repair source storage.");
+    const identity = sourceMaterialIdentity(material);
+    const active = await this.readActive(identity.contentMd5);
+    let names: string[];
+    try { names = (await fs.readdir(path.join(this.cachePath(identity.contentMd5), "revisions"))).filter((name) => digestSchema.safeParse(name).success); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT" && !active) return []; throw error; }
+    if (active && !names.includes(active.bundleHash)) throw new Error("Active candidate reference points to a missing archived revision.");
+    const revisions = [];
+    for (const bundleHash of names.sort()) {
+      const cached = await this.readDirectory(identity.contentMd5, this.revisionPath(identity.contentMd5, bundleHash));
+      if (!cached || cached.manifest.bundleHash !== bundleHash) throw new Error(`Incomplete or corrupt candidate archive ${bundleHash}.`);
+      assertSourceIdentity(cached.bundle, identity);
+      const assessment = cached.bundle.readiness;
+      const staleReasons = assessment ? validateAssessmentRevision(cached.bundle, assessment) : [];
+      revisions.push({ bundleHash, archivedAt: cached.manifest.createdAt, active: active?.bundleHash === bundleHash,
+        compilerFingerprint: cached.bundle.compilerFingerprint ?? null,
+        closure: { status: !assessment ? "not-run" : staleReasons.length ? "stale" : assessment.closure.issues.length ? "blocked" : "passed",
+          recorded: Boolean(assessment), issueCount: assessment?.closure.issues.length ?? null, staleReasons },
+        entryReady: assessment?.entryReady ?? null, fullNovelReady: assessment?.fullNovelReady ?? null,
+        assessmentIssueCount: assessment?.issues.length ?? null });
+    }
+    return revisions;
+  }
+
   async remove(source: SourceDocument): Promise<boolean> {
     const contentMd5 = source.contentMd5 ?? (await sourceIdentity(this.workspaceRoot, source)).contentMd5;
     const target = this.cachePath(contentMd5);
@@ -698,9 +789,11 @@ export class PreparedNovelCache {
     const proposals = new ProposalStore(this.workspaceRoot);
     const pending = await proposals.list("pending", source.id);
     if (pending.length) throw new Error(`Cannot cache ${source.id}: ${pending.length} source proposal(s) are still pending.`);
+    const upstreamRepairCheckpoint = await captureUpstreamRepairCheckpoint(this.workspaceRoot, source.id);
     const pendingCompilerMetadata = await pendingSourceCompilerMetadataCount(this.workspaceRoot, source.id);
-    if (pendingCompilerMetadata) {
-      throw new Error(`Cannot cache ${source.id}: ${pendingCompilerMetadata} source observation/resolution/accounting proposal(s) are still pending.`);
+    const retainedPending = upstreamRepairCheckpoint?.drafts.filter(item => item.status === "pending").length ?? 0;
+    if (pendingCompilerMetadata !== retainedPending) {
+      throw new Error(`Cannot cache ${source.id}: ${pendingCompilerMetadata - retainedPending} source observation/resolution/accounting proposal(s) lack an exact upstream checkpoint.`);
     }
     // Refresh because the successful opening batch can replace the ingest
     // label with accepted model-derived title metadata while callers retain an
@@ -767,6 +860,10 @@ export class PreparedNovelCache {
       spatialRelations: fromSource(spatialRelations),
       sceneOccurrences: fromSource(sceneOccurrences),
       eventFrames: fromSource(eventFrames),
+      semanticEffects: fromSource(await canonical.listSemanticEffects()),
+      perceptionObservations: fromSource(await canonical.listPerceptionObservations()),
+      acquisitions: fromSource(await canonical.listAcquisitions()),
+      utteranceExpressions: fromSource(await canonical.listUtteranceExpressions()),
       eventExecutions: fromSource(eventExecutions),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module")
         .concat(fromSource(actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"))),
@@ -808,6 +905,12 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(source.id),
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
+    const upstreamRepairJournal = await new UpstreamRepairLedger(this.workspaceRoot, source.id).history();
+    const requirementJournal = await new RequirementLedger(this.workspaceRoot, source.id).history();
+    const coreRoleReviewRevision = (await new RequirementLedger(this.workspaceRoot, source.id).roleReviewRevisions()).at(-1);
+    const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).definitionHistory();
+    const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, source.id).coreRoleDefinitionHistory();
+    const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, source.id);
     const bundle = preparedNovelBundleSchema.parse({
       version: 4,
       source: {
@@ -829,6 +932,13 @@ export class PreparedNovelCache {
         .sort(),
       canonical: preparedCanonical,
       compilerSnapshot: {
+        ...(upstreamRepairCheckpoint ? { upstreamRepairCheckpoint } : {}),
+        ...(upstreamRepairJournal.length ? { upstreamRepairJournal } : {}),
+        ...(requirementJournal.length ? { requirementJournal } : {}),
+        ...(coreRoleReviewRevision ? { coreRoleReviewRevision } : {}),
+        ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
+        ...(coreRoleRequirementDefinitions.length ? { coreRoleRequirementDefinitions } : {}),
+        ...(reconciliationObligations.length ? { reconciliationObligations } : {}),
         evidenceBindings: evidenceBindings.sort((left, right) =>
           left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
         structure,
@@ -881,6 +991,10 @@ export class PreparedNovelCache {
       ["spatial relation", current.spatialRelations, expected.spatialRelations, (item: { id: string }) => item.id],
       ["scene occurrence", current.sceneOccurrences, expected.sceneOccurrences, (item: { id: string }) => item.id],
       ["event frame", current.eventFrames, expected.eventFrames, (item: { id: string }) => item.id],
+      ["semantic effect", current.semanticEffects, expected.semanticEffects, (item: { id: string }) => item.id],
+      ["perception observation", current.perceptionObservations, expected.perceptionObservations, (item: { id: string }) => item.id],
+      ["acquisition", current.acquisitions, expected.acquisitions, (item: { id: string }) => item.id],
+      ["utterance expression", current.utteranceExpressions, expected.utteranceExpressions, (item: { id: string }) => item.id],
       ["action schema", current.actionSchemas, expected.actionSchemas, (item: { id: string }) => item.id],
       ["event execution", current.eventExecutions, expected.eventExecutions, (item: { id: string }) => item.id],
       ["rule", current.rules, expected.rules, (item: { id: string }) => item.id],
@@ -947,6 +1061,10 @@ export class PreparedNovelCache {
       ["spatial relations", fromSource(current.spatialRelations), bundle.canonical.spatialRelations, (item: { id: string }) => item.id],
       ["scene occurrences", fromSource(current.sceneOccurrences), bundle.canonical.sceneOccurrences, (item: { id: string }) => item.id],
       ["event frames", fromSource(current.eventFrames), bundle.canonical.eventFrames, (item: { id: string }) => item.id],
+      ["semantic effects", fromSource(current.semanticEffects), bundle.canonical.semanticEffects ?? [], (item: { id: string }) => item.id],
+      ["perception observations", fromSource(current.perceptionObservations), bundle.canonical.perceptionObservations ?? [], (item: { id: string }) => item.id],
+      ["acquisitions", fromSource(current.acquisitions), bundle.canonical.acquisitions ?? [], (item: { id: string }) => item.id],
+      ["utterance expressions", fromSource(current.utteranceExpressions), bundle.canonical.utteranceExpressions ?? [], (item: { id: string }) => item.id],
       ["event executions", current.eventExecutions.filter((binding) => binding.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.eventExecutions, (item: { id: string }) => item.id],
       ["action schemas", current.actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || schema.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionSchemas, (item: { id: string }) => item.id],
       ["action constraints", current.actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module" || constraint.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionConstraints, (item: { id: string }) => item.id],
@@ -992,7 +1110,7 @@ export class PreparedNovelCache {
     if (!currentInitialForSource || canonicalJson(currentInitialForSource) !== canonicalJson(bundle.canonical.initialWorld)) {
       return "initial world differs";
     }
-    if (canonicalJson(currentCompilerSnapshot) !== canonicalJson(bundle.compilerSnapshot)) {
+    if (canonicalJson(requirementSnapshotInputs(currentCompilerSnapshot)) !== canonicalJson(requirementSnapshotInputs(bundle.compilerSnapshot))) {
       return "source observations, identity resolutions, accounting, or exact evidence bindings differ";
     }
     return null;
@@ -1006,6 +1124,13 @@ export class PreparedNovelCache {
     eventResolutions: Awaited<ReturnType<EventResolutionStore["list"]>>;
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
     roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
+    upstreamRepairJournal?: UpstreamRepairRecord[];
+    upstreamRepairCheckpoint?: UpstreamRepairCheckpoint;
+    requirementJournal?: LedgerRecord[];
+    coreRoleReviewRevision?: RoleReviewRevision;
+    requirementDefinitions?: RequirementSet[];
+    coreRoleRequirementDefinitions?: CoreRoleRequirementDefinition[];
+    reconciliationObligations?: ReconciliationObligationSnapshot;
   }> {
     const sourceId = bundle.source.id;
     const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
@@ -1027,7 +1152,21 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(sourceId),
       new SourceAccountingStore(this.workspaceRoot).read(sourceId),
     ]);
+    const upstreamRepairJournal = await new UpstreamRepairLedger(this.workspaceRoot, sourceId).history();
+    const requirementJournal = await new RequirementLedger(this.workspaceRoot, sourceId).history();
+    const coreRoleReviewRevision = (await new RequirementLedger(this.workspaceRoot, sourceId).roleReviewRevisions()).at(-1);
+    const requirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).definitionHistory();
+    const coreRoleRequirementDefinitions = await new RequirementLedger(this.workspaceRoot, sourceId).coreRoleDefinitionHistory();
+    const reconciliationObligations = await captureReconciliationObligations(this.workspaceRoot, sourceId);
+    const upstreamRepairCheckpoint = await captureUpstreamRepairCheckpoint(this.workspaceRoot, sourceId);
     return {
+      ...(upstreamRepairCheckpoint ? { upstreamRepairCheckpoint } : {}),
+      ...(upstreamRepairJournal.length ? { upstreamRepairJournal } : {}),
+      ...(requirementJournal.length ? { requirementJournal } : {}),
+      ...(coreRoleReviewRevision ? { coreRoleReviewRevision } : {}),
+      ...(requirementDefinitions.length ? { requirementDefinitions } : {}),
+      ...(coreRoleRequirementDefinitions.length ? { coreRoleRequirementDefinitions } : {}),
+      ...(reconciliationObligations.length ? { reconciliationObligations } : {}),
       evidenceBindings: evidenceBindings.sort((left, right) =>
         left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
       structure,
@@ -1041,12 +1180,23 @@ export class PreparedNovelCache {
 
   private async materialize(bundle: PreparedNovelBundle, exact: boolean): Promise<void> {
     const sourceId = bundle.source.id;
+    await assertUpstreamRepairCheckpointRestorable(this.workspaceRoot, sourceId, bundle.compilerSnapshot.upstreamRepairCheckpoint);
+    await new RequirementLedger(this.workspaceRoot, sourceId).assertRestorable(bundle.compilerSnapshot.requirementDefinitions ?? []);
+    const coreDefinitions = bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [];
+    const coreSource = (coreDefinitions.length || bundle.compilerSnapshot.requirementJournal?.length || bundle.compilerSnapshot.upstreamRepairJournal?.length) ? await WorkspaceStore.openReadOnly(this.workspaceRoot).getSource(sourceId) : null;
+    const coreBytes = coreSource ? await readSourceMaterial(this.workspaceRoot, coreSource) : undefined;
+    await new UpstreamRepairLedger(this.workspaceRoot, sourceId).assertRestorable(bundle.compilerSnapshot.upstreamRepairJournal ?? [], coreBytes);
+    await new RequirementLedger(this.workspaceRoot, sourceId).assertCoreRolesRestorable(coreDefinitions, coreBytes);
+    await new RequirementLedger(this.workspaceRoot, sourceId).assertJournalRestorable(bundle.compilerSnapshot.requirementJournal ?? [], coreBytes);
+    await new RequirementLedger(this.workspaceRoot, sourceId).assertCoreRoleAttemptsRestorable((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), coreDefinitions);
+    await assertReconciliationObligationsRestorable(this.workspaceRoot, sourceId, bundle.compilerSnapshot.reconciliationObligations ?? []);
     const workspace = await WorkspaceStore.create(this.workspaceRoot);
     await assertPreparedCompilerSnapshotEvidence(this.workspaceRoot, bundle);
     await assertPreparedInitialWorldEvidence(this.workspaceRoot, bundle);
     if (bundle.source.titleInference) {
       await this.assertTitleInferenceEvidence(bundle);
     }
+    await CompilerFinishReceipts.archiveSource(this.workspaceRoot, sourceId, `Materialize prepared revision ${contentHash(bundle)}; exact=${exact}`);
     await workspace.replaceSourceTitleInference(sourceId, bundle.source.titleInference ?? null);
     const canonical = new CanonicalModelStore(this.workspaceRoot);
     const actors = new ActorModelStore(this.workspaceRoot);
@@ -1075,6 +1225,10 @@ export class PreparedNovelCache {
       await removeMissing(current.spatialRelations, new Set(bundle.canonical.spatialRelations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("spatial-relations", id));
       await removeMissing(current.sceneOccurrences, new Set(bundle.canonical.sceneOccurrences.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("scene-occurrences", id));
       await removeMissing(current.eventFrames, new Set(bundle.canonical.eventFrames.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-frames", id));
+      await removeMissing(current.semanticEffects, new Set((bundle.canonical.semanticEffects ?? []).map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("semantic-effects", id));
+      await removeMissing(current.perceptionObservations, new Set((bundle.canonical.perceptionObservations ?? []).map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("perception-observations", id));
+      await removeMissing(current.acquisitions, new Set((bundle.canonical.acquisitions ?? []).map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("acquisitions", id));
+      await removeMissing(current.utteranceExpressions, new Set((bundle.canonical.utteranceExpressions ?? []).map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("utterance-expressions", id));
       await removeMissing(current.eventExecutions, new Set(bundle.canonical.eventExecutions.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-executions", id));
       await removeMissing(current.actionSchemas, new Set(bundle.canonical.actionSchemas.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-schemas", id));
       await removeMissing(current.actionConstraints, new Set(bundle.canonical.actionConstraints.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-constraints", id));
@@ -1096,6 +1250,10 @@ export class PreparedNovelCache {
     for (const relation of bundle.canonical.spatialRelations) await canonical.putSpatialRelation(relation);
     for (const scene of bundle.canonical.sceneOccurrences) await canonical.putSceneOccurrence(scene);
     for (const frame of bundle.canonical.eventFrames) await canonical.putEventFrame(frame);
+    for (const frame of bundle.canonical.semanticEffects ?? []) await canonical.putSemanticEffect(frame);
+    for (const frame of bundle.canonical.perceptionObservations ?? []) await canonical.putPerceptionObservation(frame);
+    for (const frame of bundle.canonical.acquisitions ?? []) await canonical.putAcquisition(frame);
+    for (const frame of bundle.canonical.utteranceExpressions ?? []) await canonical.putUtteranceExpression(frame);
     for (const binding of bundle.canonical.eventExecutions) await canonical.putEventExecution(binding);
     for (const schema of bundle.canonical.actionSchemas) await canonical.putActionSchema(schema);
     for (const constraint of bundle.canonical.actionConstraints) await canonical.putActionConstraint(constraint);
@@ -1106,6 +1264,14 @@ export class PreparedNovelCache {
     for (const model of bundle.canonical.models) await actors.putModel(model);
     for (const possibility of bundle.canonical.possibilities) await possibilities.put(possibility);
     const snapshot = bundle.compilerSnapshot;
+    if (snapshot.upstreamRepairJournal) await new UpstreamRepairLedger(this.workspaceRoot, sourceId).restore(snapshot.upstreamRepairJournal, coreBytes);
+    if (snapshot.requirementJournal) await new RequirementLedger(this.workspaceRoot, sourceId).restoreJournal(snapshot.requirementJournal, coreBytes);
+    await new RequirementLedger(this.workspaceRoot, sourceId).restore(snapshot.requirementDefinitions ?? []);
+    await new RequirementLedger(this.workspaceRoot, sourceId).restoreCoreRoles(snapshot.coreRoleRequirementDefinitions ?? [], coreBytes);
+    await restoreReconciliationObligations(this.workspaceRoot, sourceId, snapshot.reconciliationObligations ?? []);
+    for (const { receipt } of snapshot.reconciliationObligations ?? []) {
+      if (receipt.state === "completed" && receipt.identity.requirementAttempts) await new RequirementLedger(this.workspaceRoot, sourceId).recordCoreRoleAttempts(receipt);
+    }
     await new SourceStructureStore(this.workspaceRoot).write(snapshot.structure);
     await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.annotations);
     await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.entityResolutions);
@@ -1137,6 +1303,7 @@ export class PreparedNovelCache {
       chapterSplitPlan: bundle.chapterSplitPlan ?? null,
     });
     await new CompilerBatchStore(this.workspaceRoot).replaceCompleted(sourceId, bundle.batchIds);
+    if (snapshot.upstreamRepairCheckpoint) await restoreUpstreamRepairCheckpoint(this.workspaceRoot, sourceId, snapshot.upstreamRepairCheckpoint);
   }
 
   private async assertTitleInferenceEvidence(bundle: PreparedNovelBundle): Promise<void> {
@@ -1283,6 +1450,10 @@ function preparedArtifactDescriptors(canonical: {
   spatialRelations: PreparedCanonical["spatialRelations"];
   sceneOccurrences: PreparedCanonical["sceneOccurrences"];
   eventFrames: PreparedCanonical["eventFrames"];
+  semanticEffects: PreparedCanonical["semanticEffects"];
+  perceptionObservations: PreparedCanonical["perceptionObservations"];
+  acquisitions: PreparedCanonical["acquisitions"];
+  utteranceExpressions: PreparedCanonical["utteranceExpressions"];
   actionSchemas: PreparedCanonical["actionSchemas"];
   eventExecutions: PreparedCanonical["eventExecutions"];
   actionConstraints: PreparedCanonical["actionConstraints"];
@@ -1305,6 +1476,10 @@ function preparedArtifactDescriptors(canonical: {
     ...canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation", id: payload.id, payload })),
     ...canonical.sceneOccurrences.map((payload) => ({ kind: "scene-occurrence", id: payload.id, payload })),
     ...canonical.eventFrames.map((payload) => ({ kind: "event-frame", id: payload.id, payload })),
+    ...(canonical.semanticEffects ?? []).map((payload) => ({ kind: "semantic-effect", id: payload.id, payload })),
+    ...(canonical.perceptionObservations ?? []).map((payload) => ({ kind: "perception-observation", id: payload.id, payload })),
+    ...(canonical.acquisitions ?? []).map((payload) => ({ kind: "acquisition", id: payload.id, payload })),
+    ...(canonical.utteranceExpressions ?? []).map((payload) => ({ kind: "utterance-expression", id: payload.id, payload })),
     ...canonical.eventExecutions.map((payload) => ({ kind: "event-execution", id: payload.id, payload })),
     ...canonical.actionSchemas.map((payload) => ({ kind: "action-schema", id: payload.id, payload })),
     ...canonical.actionConstraints.map((payload) => ({ kind: "action-constraint", id: payload.id, payload })),
@@ -1352,6 +1527,10 @@ async function currentCanonical(workspaceRoot: string) {
     spatialRelations: await canonical.listSpatialRelations(),
     sceneOccurrences: await canonical.listSceneOccurrences(),
     eventFrames: await canonical.listEventFrames(),
+    semanticEffects: await canonical.listSemanticEffects(),
+    perceptionObservations: await canonical.listPerceptionObservations(),
+    acquisitions: await canonical.listAcquisitions(),
+    utteranceExpressions: await canonical.listUtteranceExpressions(),
     actionSchemas: await canonical.listActionSchemas(),
     eventExecutions: await canonical.listEventExecutions(),
     actionConstraints: await canonical.listActionConstraints(),
@@ -1421,7 +1600,7 @@ async function assertPreparedInitialWorldEvidence(
   bundle: PreparedNovelBundle,
 ): Promise<void> {
   const initialWorld = bundle.canonical.initialWorld;
-  if (!initialWorld.readerContext && !initialWorld.actorObservations?.length) return;
+  if (!initialWorld.readerContext && !initialWorld.actorObservations?.length && !(initialWorld.projectionSeed && initialWorld.participantPresence?.some(item => item.mode === "remote"))) return;
   const snapshotBinding = bundle.compilerSnapshot.evidenceBindings.find((candidate) =>
     candidate.artifactKind === "initial-world" && candidate.artifactId === "initial-world");
   const binding = snapshotBinding
@@ -1450,6 +1629,75 @@ async function assertPreparedCompilerSnapshotEvidence(
   const artifacts = new Map(preparedArtifactDescriptors(bundle.canonical)
     .map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const));
   const verifier = new EvidenceVerifier(workspaceRoot);
+  if (bundle.compilerSnapshot.upstreamRepairCheckpoint) {
+    const snapshot = bundle.compilerSnapshot;
+    const source = await WorkspaceStore.openReadOnly(workspaceRoot).getSource(bundle.source.id);
+    if (!source) throw new Error("Upstream checkpoint source is not registered");
+    const bytes = await readSourceMaterial(workspaceRoot, source);
+    const manifest = await segmentSource(workspaceRoot, source, { chapterSplitPlan: bundle.chapterSplitPlan ?? null });
+    const payloads = new Map<string, unknown>();
+    for (const artifact of artifacts.values()) payloads.set(`${artifact.kind}:${artifact.id}`, artifact.payload);
+    for (const annotation of snapshot.annotations) payloads.set(`${annotation.annotationType}:${annotation.id}`, annotation);
+    for (const item of snapshot.entityResolutions) payloads.set(`entity-resolution:${item.id}`, item);
+    for (const item of snapshot.eventResolutions) payloads.set(`event-resolution:${item.id}`, item);
+    for (const segment of manifest.segments) payloads.set(`source-segment:${segment.id}`, segment);
+    for (const segment of snapshot.structure.discourseSegments) payloads.set(`structural-discourse:${segment.id}`, segment);
+    for (const binding of snapshot.evidenceBindings) for (const assertion of binding.assertions) payloads.set(`evidence-assertion:${assertion.id}`, assertion);
+    await assertUpstreamRepairCheckpointState(snapshot.upstreamRepairCheckpoint!, snapshot.upstreamRepairJournal ?? [], source.id, source.contentSha256, bytes, payloads);
+  }
+  for (const expression of bundle.canonical.utteranceExpressions ?? []) {
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "utterance-expression" && item.artifactId === expression.id);
+    const issues = [...validateUtteranceExpressionEvidence(expression, binding?.assertions ?? []),
+      ...await validateUtteranceExpressionTrace(workspaceRoot, expression, {
+        quotations: new Map(bundle.compilerSnapshot.annotations.filter(item => item.annotationType === "quotation").map(item => [item.id, item])),
+        resolutions: new Map(bundle.compilerSnapshot.entityResolutions.map(item => [item.mentionId, item])),
+      })];
+    if (!binding || binding.artifactHash !== contentHash(expression) || issues.length) throw new Error(`Utterance expression exact evidence is incomplete or stale: ${expression.id}: ${issues.map(item => item.message).join("; ")}`);
+  }
+  for (const goal of bundle.canonical.goals) {
+    if (![goal.candidateAction, ...(goal.actionPatterns ?? [])].some(action => action?.expressionCandidates?.length)) continue;
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "character-goal" && item.artifactId === goal.id);
+    const issues = validateGoalExpressionEvidence(goal, binding?.assertions ?? []);
+    if (!binding || binding.artifactHash !== contentHash(goal) || issues.length) throw new Error(`Conditional expression goal evidence is incomplete or stale: ${goal.id}`);
+  }
+  for (const entity of bundle.canonical.entities) {
+    if (!entity.agencyProfile) continue;
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "entity" && item.artifactId === entity.id);
+    if (!binding || binding.artifactHash !== contentHash(entity) || validateAgencyProfileEvidence(entity, binding.assertions).length) throw new Error(`Agency profile exact evidence is incomplete or stale: ${entity.id}`);
+  }
+  for (const [kind, artifacts] of [["canonical-event", bundle.canonical.events], ["event-execution", bundle.canonical.eventExecutions ?? []]] as const) for (const artifact of artifacts) {
+    // Empty assertions identify artifacts requiring remote-entry bindings.
+    if (!entryArtifactEvidenceIssues(kind, artifact, []).length) continue;
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === kind && item.artifactId === artifact.id);
+    if (!binding || binding.artifactHash !== contentHash(artifact) || entryArtifactEvidenceIssues(kind, artifact, binding.assertions).length) throw new Error(`Remote entry exact evidence is incomplete or stale: ${artifact.id}`);
+  }
+  for (const execution of bundle.canonical.eventExecutions ?? []) if (execution.processRecoveries?.length) {
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "event-execution" && item.artifactId === execution.id);
+    if (!binding || binding.artifactHash !== contentHash(execution) || validateProcessRecoveryEvidence(execution, binding.assertions).length) throw new Error(`Process recovery evidence is incomplete or stale: ${execution.id}`);
+  }
+  for (const template of bundle.canonical.processTemplates) {
+    if (!template.incapacity) continue;
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "process-template" && item.artifactId === template.id);
+    const issues = validateIncapacityEvidence(template, binding?.assertions ?? []);
+    if (!binding || binding.artifactHash !== contentHash(template) || issues.length) throw new Error(`Incapacity process evidence is incomplete or stale: ${template.id}`);
+  }
+  for (const acquisition of bundle.canonical.acquisitions ?? []) {
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "acquisition" && item.artifactId === acquisition.id);
+    const issues = validateAcquisitionEvidence(acquisition, binding?.assertions ?? []);
+    if (!binding || binding.artifactHash !== contentHash(acquisition) || issues.length) throw new Error(`Acquisition evidence is incomplete or stale: ${acquisition.id}: ${issues.map(item => item.message).join("; ")}`);
+  }
+  for (const observation of bundle.canonical.perceptionObservations ?? []) {
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "perception-observation" && item.artifactId === observation.id);
+    const issues = [...validatePerceptionObservationEvidence(observation, binding?.assertions ?? []), ...await validatePerceptionObservationTrace(workspaceRoot, observation, {
+      annotations: new Map(bundle.compilerSnapshot.annotations.map(item => [item.id, item])), identities: bundle.compilerSnapshot.entityResolutions, events: bundle.compilerSnapshot.eventResolutions,
+    })];
+    if (!binding || binding.artifactHash !== contentHash(observation) || issues.length) throw new Error(`Perception observation evidence is incomplete or stale: ${observation.id}: ${issues.map(item => item.message).join("; ")}`);
+  }
+  for (const effect of bundle.canonical.semanticEffects ?? []) {
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "semantic-effect" && item.artifactId === effect.id);
+    const issues = validateSemanticEffectEvidence(effect, binding?.assertions ?? []);
+    if (issues.length) throw new Error(`Semantic effect exact evidence is incomplete: ${issues.map(item => item.message).join("; ")}`);
+  }
   for (const binding of bundle.compilerSnapshot.evidenceBindings) {
     const artifact = artifacts.get(`${binding.artifactKind}/${binding.artifactId}`);
     if (!artifact) {
@@ -1536,6 +1784,10 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     spatialRelations: new Map(bundle.canonical.spatialRelations.map((item) => [item.id, item])),
     sceneOccurrences: new Map(bundle.canonical.sceneOccurrences.map((item) => [item.id, item])),
     eventFrames: new Map(bundle.canonical.eventFrames.map((item) => [item.id, item])),
+    semanticEffects: new Map((bundle.canonical.semanticEffects ?? []).map(item => [item.id, item])),
+    perceptionObservations: new Map((bundle.canonical.perceptionObservations ?? []).map(item => [item.id, item])),
+    acquisitions: new Map((bundle.canonical.acquisitions ?? []).map(item => [item.id, item])),
+    utteranceExpressions: new Map((bundle.canonical.utteranceExpressions ?? []).map(item => [item.id, item])),
     actionSchemas: new Map(bundle.canonical.actionSchemas.map((item) => [item.id, item])),
     eventExecutions: new Map(bundle.canonical.eventExecutions.map((item) => [item.id, item])),
     actionConstraints: new Map(bundle.canonical.actionConstraints.map((item) => [item.id, item])),
@@ -1556,6 +1808,10 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     ...bundle.canonical.eventRelations.map((payload) => ({ kind: "event-relation" as const, label: payload.id, payload })),
     ...bundle.canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation" as const, label: payload.id, payload })),
     ...bundle.canonical.eventFrames.map((payload) => ({ kind: "event-frame" as const, label: payload.id, payload })),
+    ...(bundle.canonical.semanticEffects ?? []).map((payload) => ({ kind: "semantic-effect" as const, label: payload.id, payload })),
+    ...(bundle.canonical.perceptionObservations ?? []).map((payload) => ({ kind: "perception-observation" as const, label: payload.id, payload })),
+    ...(bundle.canonical.acquisitions ?? []).map((payload) => ({ kind: "acquisition" as const, label: payload.id, payload })),
+    ...(bundle.canonical.utteranceExpressions ?? []).map((payload) => ({ kind: "utterance-expression" as const, label: payload.id, payload })),
     ...bundle.canonical.eventExecutions.map((payload) => ({ kind: "event-execution" as const, label: payload.id, payload })),
     ...bundle.canonical.actionSchemas.map((payload) => ({ kind: "action-schema" as const, label: payload.id, payload })),
     ...bundle.canonical.actionConstraints.map((payload) => ({ kind: "action-constraint" as const, label: payload.id, payload })),

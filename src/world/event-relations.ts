@@ -1,3 +1,4 @@
+import { TemporalConstraints } from "./temporal-constraints.js";
 import type {
   CanonicalEvent,
   EventRelation,
@@ -77,6 +78,7 @@ export function projectEventRelations(
 export function validateEventRelationCatalog(catalog: EventRelationCatalog): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const relations = [...catalog.relations];
+  issues.push(...new TemporalConstraints(catalog.events, relations).issues);
   const normalized = new Map<string, string>();
   const temporalBefore = new Map<string, string>();
   const temporalOverlap = new Map<string, string>();

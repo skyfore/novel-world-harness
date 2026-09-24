@@ -1,0 +1,31 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import { afterEach, expect, it } from "vitest";
+import { selectOpeningDriverActor } from "../src/compiler/opening-driver.js";
+import { ActorModelStore } from "../src/world/actors.js";
+import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { validateSemanticReconciliationProposalMonotonicity } from "../src/compiler/reconcile-world.js";
+import { createEvidenceFixture } from "./helpers/evidence.js";
+const roots: string[] = [];
+afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
+it("selects the physically present focal actor even if a later protagonist dominates the book", () => {
+  const counts = new Map([["later-protagonist", 100], ["opening-man", 0]]);
+  expect(selectOpeningDriverActor(["opening-man"], "opening-man", counts)).toBe("opening-man");
+  expect(selectOpeningDriverActor(["a", "opening-man"], "opening-man", counts)).toBe("opening-man");
+  expect(selectOpeningDriverActor(["a"], "later-protagonist", counts)).toBe("a");
+  expect(selectOpeningDriverActor([], undefined, counts)).toBeUndefined();
+  expect(selectOpeningDriverActor([], "later-protagonist", counts)).toBeUndefined();
+});
+it("rejects character replacements that silently erase previously established development", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-character-regression-")); roots.push(root);
+  const fixture = await createEvidenceFixture(root, "Hero changes after the battle.");
+  const evidence = fixture.evidence("Hero changes after the battle.");
+  const baseline = { actorId: "hero", traits: {}, decisionBiases: {}, evidence, developmentPhases: [{ id: "after-battle", label: "After battle", activation: { preconditions: [], afterCanonicalEventIds: ["battle"], afterExperiencedCanonicalEventIds: [], requiresKnowledge: [] }, traitModifiers: {}, decisionBiasModifiers: {}, evidence }] };
+  await new ActorModelStore(root).putModel(baseline);
+  const service = new CompilerProposalService(root);
+  await service.submit("character-model", { proposalId: "drops-phase", payload: { actorId: "hero", traits: {}, decisionBiases: {}, evidence }, generatedBy: { worker: "test" } });
+  expect((await validateSemanticReconciliationProposalMonotonicity(root, ["drops-phase"])).join()).toContain("removes established developmentPhases after-battle");
+  await service.submit("character-model", { proposalId: "preserves-phase", payload: { ...baseline }, generatedBy: { worker: "test" } });
+  expect(await validateSemanticReconciliationProposalMonotonicity(root, ["preserves-phase"])).toEqual([]);
+});

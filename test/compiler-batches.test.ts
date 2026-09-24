@@ -27,6 +27,7 @@ import { characterGoalSchema, characterModelSchema } from "../src/world/actors.j
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { EntityResolutionStore } from "../src/compiler/entity-resolution.js";
+import { buildNwhToolRecoveryAdvice, NWH_TOOL_RECOVERY_MARKER } from "../src/agent/tool-recovery.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -143,12 +144,28 @@ describe("compiler batches", () => {
     });
   });
 
+  it("preserves pipeline-33 observations but reopens semantic and executable work for semantic effects", async () => {
+    const { root, source } = await fixture();
+    const store = new CompilerBatchStore(root);
+    const observation = `batch-${source.id}-00001-observation-fixture`;
+    const semantic = `batch-${source.id}-00001-semantic-fixture`;
+    await fs.mkdir(store.root, { recursive: true });
+    await fs.writeFile(path.join(store.root, `${source.id}.json`), JSON.stringify({
+      version: 1, pipelineVersion: 33, sourceId: source.id,
+      completedBatchIds: [observation, semantic, `batch-${source.id}-00001-executable-fixture`], updatedAt: new Date(0).toISOString(),
+    }));
+    expect((await store.read(source.id)).completedBatchIds).toEqual([observation]);
+    expect((await store.readPersisted(source.id))!.completedBatchIds).toHaveLength(3);
+  });
+
   it("requires a clean model stop and an explicit, consistent finish handshake", () => {
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toBeUndefined();
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "no-artifacts" })).toBeUndefined();
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: false })).toContain("explicitly finish");
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("without a valid");
-    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 2, proposalFailed: 1, completionSignaled: true, completionOutcome: "complete" })).toBeUndefined();
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 2, proposalFailed: 1, completionSignaled: true, completionOutcome: "complete" })).toContain("unresolved proposal failures");
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 11, proposalFailed: 3, completionSignaled: true, completionOutcome: "complete",
+      artifactCounts: { world: 0, accounting: 11, annotations: 0, resolutions: 0 } })).toContain("source accounting cannot clear unresolved proposal failures");
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 1, completionSignaled: true, completionOutcome: "no-artifacts" })).toContain("failed");
     expect(compilerBatchFailure({ assistantStopReason: "length", proposalSucceeded: 2, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("length");
   });
@@ -178,7 +195,34 @@ describe("compiler batches", () => {
       completionSignaled: true,
       completionOutcome: "no-artifacts",
     })).toBe(true);
+    expect(isRecoverableCompilerBatchInterruption({
+      assistantStopReason: "stop",
+      proposalSucceeded: 7,
+      proposalFailed: 1,
+      completionSignaled: false,
+    })).toBe(true);
+    expect(isRecoverableCompilerBatchInterruption({
+      assistantStopReason: "stop",
+      proposalSucceeded: 0,
+      proposalFailed: 1,
+      completionSignaled: false,
+    })).toBe(false);
     expect(isRecoverableCompilerBatchInterruption({ ...outcome, blockedReason: "proposal graph remains incomplete" })).toBe(false);
+  });
+
+  it.each(["details", "tagged-text"])("never recovers host review hidden behind successful drafts or a timeout (%s)", (encoding) => {
+    const advice = buildNwhToolRecoveryAdvice("account_source_units", "Compiler proposal obligation requires host review: corrected input failed.");
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "toolResult", toolCallId: "failure", toolName: "account_source_units", isError: true,
+        ...(encoding === "details" ? { details: { nwhToolRecovery: advice } }
+          : { content: [{ type: "text", text: `${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice)}\n</nwh-tool-recovery>` }] }) },
+      { role: "toolResult", toolCallId: "valid", toolName: "propose_entity", isError: false },
+      { role: "assistant", stopReason: "error", errorMessage: "request timed out", content: [] },
+    ]);
+    expect(outcome.proposalSucceeded).toBe(1);
+    expect(compilerBatchFailure(outcome)).toContain("host review");
+    expect(isRecoverableCompilerBatchInterruption(outcome)).toBe(false);
+    expect(isRecoverableCompilerBatchInterruption({ ...outcome, blockedReason: "compiler tool-call safety fuse tripped" })).toBe(false);
   });
 
   it("treats a successful retry of the same proposal id as resolving its earlier tool error", () => {
@@ -241,7 +285,7 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure(outcome)).toContain("failed");
   });
 
-  it("treats a successful complete handshake as authoritative after corrected or abandoned drafts", () => {
+  it("rejects an abandoned failure even after an unrelated successful proposal", () => {
     const outcome = compilerBatchOutcomeFromMessages([
       { role: "assistant", content: [{ type: "toolCall", id: "bad", name: "propose_claim", arguments: { proposal_id: "claim-draft" } }], stopReason: "toolUse" },
       { role: "toolResult", toolCallId: "bad", toolName: "propose_claim", isError: true, content: [] },
@@ -252,7 +296,7 @@ describe("compiler batches", () => {
       { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
     ]);
     expect(outcome.proposalFailed).toBe(1);
-    expect(compilerBatchFailure(outcome)).toBeUndefined();
+    expect(compilerBatchFailure(outcome)).toContain("unresolved proposal failures");
   });
 
   it("counts host-recovered proposals acknowledged only by the finish result", () => {

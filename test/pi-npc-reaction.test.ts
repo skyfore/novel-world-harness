@@ -34,6 +34,7 @@ function input(): NpcReactionReasoningInput {
       selfState: { "character.alive": true, "character.location": "hall-stable-id" },
       ownedEntityState: {},
       knowledge: [],
+    spatialRelations: [],
       presentEntities: [
         { id: "npc-secret-id", kind: "character", name: "Witness" },
         { id: "hero-stable-id", kind: "character", name: "Visitor" },
@@ -70,7 +71,7 @@ function input(): NpcReactionReasoningInput {
 }
 
 describe("Pi NPC reaction reasoner", () => {
-  it("provides latest and on-demand actor-safe context and decodes only opaque handles", async () => {
+  it.each([false, true, "text"] as const)("provides actor-safe context and hides incoming channel IDs (remote=%s)", async remote => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-npc-reaction-"));
     roots.push(root);
     const prompts: string[] = [];
@@ -107,7 +108,10 @@ describe("Pi NPC reaction reasoner", () => {
       } as unknown as PiAgentSession;
     });
 
-    const result = await createPiNpcReactionReasoner({ root })(input());
+    const reasoningInput = input();
+    if (remote && reasoningInput.trigger.interaction.kind === "speech") reasoningInput.trigger.interaction.channelBinding = { channelId: "sender-private-channel", processId: "sender-private-session" };
+    if (remote === "text") reasoningInput.trigger.interaction = { kind: "text", content: "Where did the letter come from?", channel: "text", addresseeIds: ["npc-secret-id"], channelBinding: { channelId: "sender-private-channel", processId: "sender-private-session" } };
+    const result = await createPiNpcReactionReasoner({ root })(reasoningInput);
 
     expect(result).toMatchObject({
       responseKind: "speak",
@@ -124,5 +128,8 @@ describe("Pi NPC reaction reasoner", () => {
     expect(prompts[0]).not.toContain("npc-secret-id");
     expect(prompts[0]).not.toContain("hero-stable-id");
     expect(prompts[0]).not.toContain("hall-stable-id");
+    expect(prompts[0]).not.toContain("sender-private-channel");
+    expect(prompts[0]).not.toContain("sender-private-session");
+    if (remote) expect(prompts[0]).toContain('"delivery":"remote"');
   });
 });

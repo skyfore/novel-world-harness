@@ -140,6 +140,7 @@ export const DEFAULT_STATE_FIELDS: StateFieldSpec[] = [
   { key: "character.relationships", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" },
   { key: "character.obligations", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" },
   { key: "character.inventory", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" },
+  { key: "artifact.location", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", visibility: "owner" },
   { key: "artifact.owner", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", visibility: "public", exclusive: true },
   { key: "artifact.custodian", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", visibility: "owner", exclusive: true },
   { key: "artifact.quantity", appliesTo: ["artifact"], valueType: "number", cardinality: "one", visibility: "owner", minimum: 0 },

@@ -14,6 +14,8 @@ import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { CompilerFinishReceipts } from "../src/compiler/finish-receipts.js";
+import { recoverCompilerFinish } from "../src/compiler/finish-recovery.js";
 
 const roots: string[] = [];
 const context = {} as ExtensionContext;
@@ -357,6 +359,9 @@ describe("entity mention resolution", () => {
       .resolves.toMatchObject({ id: "resolution-zero-later", status: "resolved" });
     await expect(resolutions.listRecoverableBatchProposals(sourceId, originBatch)).resolves.toEqual([]);
 
+    await expect(recoverCompilerFinish(root, sourceId, originBatch)).rejects.toThrow("host review");
+    await new CompilerFinishReceipts(root, sourceId, originBatch).archive("Explicit recompile of a superseded synthetic batch");
+
     const retry = createCompilerProposalToolset(root);
     await retry.beginBatch([fixture.segmentId], originBatch, sourceId);
     await expect(retry.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute(
@@ -671,6 +676,8 @@ describe("entity mention resolution", () => {
     } as never, undefined, undefined, context);
     await finishOnly(later, fixture.segmentId, "Superseded the first resolution in a later batch.");
     await expect(store.listRecoverableBatchProposals(fixture.source.id, firstBatch)).resolves.toEqual([]);
+
+    await new CompilerFinishReceipts(root, fixture.source.id, firstBatch).archive("Explicit migration of this synthetic finished batch");
 
     const interrupted = createCompilerProposalToolset(root);
     await interrupted.beginBatch([fixture.segmentId], firstBatch, fixture.source.id);

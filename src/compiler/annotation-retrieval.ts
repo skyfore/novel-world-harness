@@ -1,6 +1,7 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { canonicalJson, contentHash } from "../world/canonical.js";
+import { EvidenceVerifier } from "./evidence.js";
 import { promptJson } from "../util/prompt-data.js";
 import { assertSafeTextOffset, safeTextPageEnd } from "../util/text-pages.js";
 import {
@@ -29,6 +30,7 @@ type AnnotationRecord = {
   proposalId?: string;
   label: string;
   payload: SourceAnnotation;
+  exactText?: string;
 };
 
 const MAX_ANNOTATION_RECORDS = 100_000;
@@ -64,6 +66,15 @@ export async function loadSourceAnnotationRecords(
   }
   if (records.length > MAX_ANNOTATION_RECORDS) {
     throw new Error(`Source ${sourceId} has ${records.length} observations, exceeding the ${MAX_ANNOTATION_RECORDS}-record safety limit.`);
+  }
+  const verifier = new EvidenceVerifier(workspaceRoot);
+  for (const record of records) {
+    if (record.payload.annotationType !== "quotation") continue;
+    const verified = await verifier.inspectAnchor(record.payload.anchor);
+    if (!verified.valid || verified.excerpt === undefined) {
+      throw new Error(`Source quotation ${record.annotationId} evidence verification failed; stop for host review. Do not retry or use unverified text. ${verified.issues.map(issue => issue.code).join(",")}`);
+    }
+    record.exactText = verified.excerpt;
   }
   return records.sort((left, right) => firstStartByte(left.payload) - firstStartByte(right.payload)
     || left.annotationType.localeCompare(right.annotationType)
@@ -112,7 +123,7 @@ export function createSourceAnnotationRetrievalTools(
       const matches = (await loadSourceAnnotationRecords(workspaceRoot, sourceId))
         .filter((record) => !annotationType || record.annotationType === annotationType)
         .filter((record) => !input.status || record.status === input.status)
-        .filter((record) => needle === "*" || `${record.ref}\n${record.annotationId}\n${record.label}\n${canonicalJson(record.payload)}`
+        .filter((record) => needle === "*" || `${record.ref}\n${record.annotationId}\n${record.label}\n${record.exactText ?? ""}\n${canonicalJson(record.payload)}`
           .normalize("NFKC").toLocaleLowerCase().includes(needle));
       const offset = input.offset ?? 0;
       const limit = input.max_results ?? 20;
@@ -123,6 +134,7 @@ export function createSourceAnnotationRetrievalTools(
         annotationId: record.annotationId,
         ...(record.proposalId ? { proposalId: record.proposalId } : {}),
         label: record.label,
+        readArguments: { ref: record.ref },
         semanticHash: contentHash(record.payload),
         anchors: annotationAnchors(record.payload).map((anchor) => ({
           startByte: anchor.startByte,
@@ -145,7 +157,7 @@ export function createSourceAnnotationRetrievalTools(
   });
 
   const readParameters = Type.Object({
-    ref: Type.String({ minLength: 1, maxLength: 500 }),
+    ref: Type.String({ minLength: 1, maxLength: 500, description: "Copy results[].ref from find_source_annotations, including committed:/pending:. An annotationId is not a read ref." }),
     offset: Type.Optional(Type.Integer({ minimum: 0 })),
     max_chars: Type.Optional(Type.Integer({ minimum: 1_000, maximum: MAX_READ_CHARS })),
   }, { additionalProperties: false });
@@ -172,6 +184,7 @@ export function createSourceAnnotationRetrievalTools(
         annotationId: record.annotationId,
         ...(record.proposalId ? { proposalId: record.proposalId } : {}),
         semanticHash: contentHash(record.payload),
+        ...(record.exactText === undefined ? {} : { exactText: record.exactText }),
         payload: record.payload,
       });
       const offset = input.offset ?? 0;

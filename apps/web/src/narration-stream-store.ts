@@ -5,7 +5,8 @@ type FrameScheduler = (flush: () => void) => void;
 const MAX_LIVE_CHARACTERS = 1_000_000;
 
 /**
- * High-frequency narration deltas live outside React and the query cache.
+ * Host-validated narration text lives outside React and the query cache.
+ * The SSE boundary rejects raw provider drafts before they reach this store.
  * Appends are folded once per animation frame; authoritative completed text
  * still comes from the operation/session HTTP projections.
  */

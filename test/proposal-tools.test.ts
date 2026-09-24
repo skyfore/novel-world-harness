@@ -301,7 +301,7 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(51);
+    expect(tools).toHaveLength(56);
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "propose_proposition",
       "propose_attribution",
@@ -309,6 +309,10 @@ describe("compiler proposal tools", () => {
       "propose_event_relation",
       "propose_scene_occurrence",
       "propose_event_frame",
+      "propose_semantic_effect",
+      "propose_utterance_expression",
+      "propose_perception_observation",
+      "propose_acquisition",
       "propose_event_execution",
       "propose_action_schema",
       "propose_action_constraint",
@@ -1570,11 +1574,8 @@ describe("compiler proposal tools", () => {
       causalParents: [],
       confidence: 1,
     };
-    const prepared = tool.prepareArguments?.({
-      proposal_id: "event-key",
-      payload,
-      evidence_segment_ids: [fixture.segmentId],
-    });
+    const prepared = { proposal_id: "event-key", payload, evidence_segment_ids: [fixture.segmentId] };
+    expect(() => tool.prepareArguments?.(prepared)).toThrow("Validation failed");
     expect(Compile(tool.parameters).Check(prepared)).toBe(false);
     await expect(tool.execute("call-invalid-field", prepared as never, undefined, undefined, {} as ExtensionContext))
       .rejects.toThrow("Unsupported compiler state field 'owner'");
@@ -2008,6 +2009,8 @@ describe("compiler proposal tools", () => {
     });
   });
 
+  // Bounded filesystem integration, not a 5-second performance benchmark.
+  // Preserve every real write, recovery step and production safety-fuse limit.
   it("reserves one final finish call after the tool-call safety fuse", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-finish-grace-"));
     roots.push(root);
@@ -2038,7 +2041,7 @@ describe("compiler proposal tools", () => {
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { compilerBatchFinished: true, proposalIds: ["entity-person"] },
     });
-  });
+  }, 20_000);
 
   it("keeps an 800-proposal runaway safety fuse without advertising it as a target", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-active-budget-"));
@@ -2461,6 +2464,9 @@ describe("compiler proposal tools", () => {
       causalParents: [],
       confidence: 1,
     });
+    // This test repairs an existing legacy event; new acquisitions are tested
+    // separately and must use the typed Acquisition proposal path.
+    await new CanonicalModelStore(root).putEvent({ ...eventPayload("alice"), evidence: fixture.evidence('Alice told Bob, "the gate is open."') });
     await tool("propose_canonical_event").execute("wrong-addressee", {
       proposal_id: "wrong-addressee-event-proposal",
       payload: eventPayload("alice"),
@@ -2478,6 +2484,8 @@ describe("compiler proposal tools", () => {
       proposal_id: "wrong-addressee-event-proposal",
       reason: "Alice is the speaker; Bob is the resolved addressee.",
     } as never, undefined, undefined, context);
+    await new CanonicalModelStore(root).removeCurrent("events", "alice-hears-gate-open");
+    await new CanonicalModelStore(root).putEvent({ ...eventPayload("bob"), evidence: fixture.evidence('Alice told Bob, "the gate is open."') });
     await tool("propose_canonical_event").execute("correct-addressee", {
       proposal_id: "bob-hears-event-proposal",
       payload: eventPayload("bob"),

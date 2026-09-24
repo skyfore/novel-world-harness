@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { COMPILER_PIPELINE_VERSION, CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
@@ -183,7 +183,7 @@ describe("explicit prepared-novel reparsing", () => {
     await convergeWorldProposals(root, fixture.source.id);
     await fs.writeFile(path.join(batchStore.root, `${fixture.source.id}.json`), `${JSON.stringify({
       version: 1,
-      pipelineVersion: COMPILER_PIPELINE_VERSION - 1,
+      pipelineVersion: 33, // Explicit legacy executable-accounting boundary, independent of the current version.
       sourceId: fixture.source.id,
       completedBatchIds: batches.map((candidate) => candidate.id),
       updatedAt: new Date(0).toISOString(),
@@ -371,7 +371,7 @@ describe("explicit prepared-novel reparsing", () => {
     await fs.mkdir(batchStore.root, { recursive: true });
     await fs.writeFile(path.join(batchStore.root, `${fixture.source.id}.json`), `${JSON.stringify({
       version: 1,
-      pipelineVersion: COMPILER_PIPELINE_VERSION - 1,
+      pipelineVersion: 33, // Explicit legacy executable-accounting boundary, independent of the current version.
       sourceId: fixture.source.id,
       completedBatchIds: [],
       updatedAt: new Date(0).toISOString(),

@@ -71,6 +71,7 @@ export async function projectActorScene(
       && !evidenceBelongsExclusivelyToSource(entry.event.evidence, effectiveSourceId)) continue;
     const actorLocationWrite = finalLocationWrite(entry.delta, actorId);
     const progressScene = entry.event.participants.includes(actorId)
+      && (entry.event.actorId === actorId || physicallyPresentCharacters(entry.event).has(actorId))
       ? entry.event.progressCertificate.sceneTransition
       : undefined;
     const boundary = actorLocationWrite !== undefined
@@ -115,7 +116,7 @@ export async function projectActorScene(
     removeCharactersWhoMovedAway(entry.delta, actorId, locationId, present);
     if (!entry.event.participants.includes(actorId)) continue;
     const physicalParticipants = physicallyPresentCharacters(entry.event);
-    for (const participantId of physicalParticipants) {
+    for (const participantId of physicalParticipants.has(actorId) ? physicalParticipants : []) {
       const entity = context.entities.get(participantId);
       if (!entity || entity.kind !== "character" || !evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId)) continue;
       if (isProvenRemote(state.values, actorId, participantId)) continue;
@@ -129,7 +130,7 @@ export async function projectActorScene(
     if (!observation) continue;
     const visibleParticipantIds = entry.event.participants.filter((participantId) => {
       if (participantId === actorId) return true;
-      if (!physicalParticipants.has(participantId)) return false;
+      if (!physicalParticipants.has(actorId) || !physicalParticipants.has(participantId)) return false;
       const participant = context.entities.get(participantId);
       return participant?.kind === "character"
         && evidenceBelongsExclusivelyToSource(participant.evidence, effectiveSourceId)

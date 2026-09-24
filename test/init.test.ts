@@ -52,9 +52,14 @@ describe("init command", () => {
 
     await execFileAsync(process.execPath, ["--import", "tsx", "src/cli.ts", "init", "--root", root], {
       cwd: path.resolve(import.meta.dirname, ".."),
+      // Loading the source CLI includes the full command graph on a cold CI worker.
+      // Bound and kill the child before Vitest cleanup, rather than leaving it
+      // running after the default unit-test timeout. This is not a startup benchmark.
+      timeout: 20_000,
+      killSignal: "SIGKILL",
     });
 
     await expect(fs.readFile(path.join(root, "novel-harness.yaml"), "utf8")).resolves.toContain(path.basename(root));
     await expect(fs.readFile(path.join(root, "NWH.md"), "utf8")).resolves.toContain("Novel World Harness workspace");
-  });
+  }, 30_000);
 });

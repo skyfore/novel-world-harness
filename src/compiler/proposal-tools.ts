@@ -1,6 +1,21 @@
+import { acquisitionInputSchema } from "../world/acquisition.js";
+import { hydrateAcquisitionInput } from "./acquisition-input.js";
+import { perceptionObservationInputSchema, hydratePerceptionObservationInput, loadPerceptionTraceCatalog, validatePerceptionObservationProposalTrace } from "./perception-observation-trace.js";
+import { utteranceExpressionInputSchema, hydrateUtteranceExpressionInput } from "./utterance-expression-input.js";
+import { validateUtteranceExpressionProposalTrace } from "./utterance-expression-trace.js";
+import { UpstreamRepairFinishValidationError } from "./upstream-repair-finish-intent.js";
+import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
+import { reconciliationReviewIssues } from "./reconciliation-review.js";
+import { readKnowledgeRepairPlan, knowledgeRepairScopeIssues } from "./knowledge-repair.js";
+import { validateToolArguments } from "@earendil-works/pi-ai";
+import { CompilerProposalObligations } from "./proposal-obligations.js";
+import { initialWorldInputIssues, INITIAL_WORLD_INPUT_GUIDANCE } from "./initial-world-preflight.js";
+import { initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
+import { CompilerAccountingPages } from "./accounting-pages.js";
 import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import crypto from "node:crypto";
+import { readPriorStageAccountingCoverage, type AccountingCoverage } from "./accounting-coverage.js";
 import { isDeepStrictEqual } from "node:util";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
@@ -41,6 +56,7 @@ import {
   type ChapterSplitPlan,
 } from "./chapter-split.js";
 import { EvidenceVerifier } from "./evidence.js";
+import { CompilerFinishReceipts, finishHostError } from "./finish-receipts.js";
 import {
   jsonPointerExists,
   modelEvidenceSelectorsSchema,
@@ -108,8 +124,11 @@ import {
   COMPILER_TOOL_CALL_SAFETY_FUSE,
 } from "./limits.js";
 import {
+  reconciliationReviewScope,
   graphAdjudicationIterationFromBatchId,
+  semanticReconciliationBatchFromBatchId,
   validateGraphAdjudicationProposalScope,
+  validateSemanticReconciliationProposalMonotonicity,
 } from "./reconcile-world.js";
 
 function proposalResult(
@@ -128,19 +147,23 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   proposition: { name: "propose_proposition", label: "Propose proposition", description: "Submit evidence-backed semantic content. Acceptance records the content but never makes it world truth; events, state deltas, and rules retain that authority." },
   attribution: { name: "propose_attribution", label: "Propose attribution", description: "Submit who asserts, believes, reports, denies, or questions a proposition, citing quotation IDs when discourse supplies it. Holder identity must trace through quotation-speaker resolution. The attitude remains separate from content and world truth." },
   claim: { name: "propose_claim", label: "Propose claim", description: "Submit an evidence-backed base-world claim candidate. Character knowledge or ignorance is never a claim predicate; represent learning only in a KnowledgeDelta. This does not commit canonical truth." },
-  "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Later canon remains a candidate until runtime commitment." },
+  "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Every new learn operation requires acquisitionId with independent receipt, understanding and belief evidence; use propose_acquisition within scope. Existing unchanged legacy operations remain readable but do not become verified. Later canon remains a candidate until runtime commitment." },
   "event-participation": { name: "propose_event_participation", label: "Propose event participation", description: "Submit one evidence-backed semantic role for an entity in a canonical event as part of a complete same-finish inventory. Role and character scene-presence are independent; accepting this record does not create or execute the event." },
   "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Typed operationality is authoritative at runtime; narrative sequence and legacy causalParents never imply causation." },
   "scene-occurrence": { name: "propose_scene_occurrence", label: "Propose scene occurrence", description: "Submit one evidence-backed canonical scene occurrence with discourse segments, event membership, location, viewpoint, physical presence, story interval, and entry/exit conditions. It describes source canon and never activates a future runtime scene." },
+  "semantic-effect": { name: "propose_semantic_effect", label: "Propose semantic effect", description: "Propose source-grounded typed meaning for one occurrence and subject, with exact support for every semantic field. Unmapped meaning is retained but never executed. Mapped state-change requires an existing validated action execution; do not invent mechanisms or durations." },
+  "perception-observation": { name: "propose_perception_observation", label: "Propose perception observation", description: "Propose source-grounded perception at a specific event cut, with observer/event mention IDs, a typed phenomenon, channel, exact access conditions and field evidence. The host freezes original annotation/resolution revisions. Unmapped perception is retained but cannot grant observed knowledge. A quotation or later report is not direct perception." },
+  "acquisition": { name: "propose_acquisition", label: "Propose acquisition", description: "Propose independently evidenced receipt, understanding and belief at an acquiring event cut. Use typed expression/perception or this actor's prior acquisition references. Remote read uses basis.textChannel with the reader’s stable channelId/processTemplateId, each with its own exact evidence selector; never put a runtime process ID in source semantics. Host freezes actor/document/template revisions, and execution requires a unique pre-event session. Host freezes exact dependency revisions; compiler knowledge is not branch experience. Never relabel reports, invent premises, merge receipt with belief, or assert world truth." },
+  "utterance-expression": { name: "propose_utterance_expression", label: "Propose utterance expression", description: "Propose one source-grounded expression occurrence. Freeze exact quotation and proposition revisions, preserve ordered separate raw-byte fragments, speaker/addressees/event, and provide this expression’s own exact evidence for every semantic field. Evidence from another occurrence cannot substitute. This never asserts proposition truth." },
   "event-frame": { name: "propose_event_frame", label: "Propose event frame", description: "Submit one reusable evidence-backed event frame with typed semantic roles, kind/cardinality constraints, and temporal shape. A frame classifies occurrences; it is not itself an event or world change." },
-  "event-execution": { name: "propose_event_execution", label: "Propose event execution binding", description: "Bind an existing canonical occurrence to an action mechanism and/or a complete character entryCheckpoint. An action requires typed agency and exact effects; an entry-only binding requires embodied presence and never grants action authority. Complete entryCheckpoint includes projectionSeed for semantic, norm, process, active rules and elapsed time; create it after its referenced templates. Never rewrite the original occurrence or copy its outcome into a pre-event entry." },
+  "event-execution": { name: "propose_event_execution", label: "Propose event execution binding", description: "Bind an existing canonical occurrence to an action mechanism and/or a complete character entryCheckpoint. An action requires typed agency and exact effects; an entry-only binding requires bodily presence or an evidenced active remote channel and never grants action authority. Remote entry needs an autonomous profile, matching remote occurrence participation, a complete prior process seed, disclosed mechanisms and exact selectors for /actorId, /canonicalEventId, /entryCheckpoint/actorId, each remote presence mode and each historical process operation. Complete entryCheckpoint includes projectionSeed for semantic, norm, process, active rules and elapsed time; create it after its referenced templates. Never rewrite the original occurrence or copy its outcome into a pre-event entry." },
   "action-schema": { name: "propose_action_schema", label: "Propose action schema", description: "Submit a source-induced reusable action schema only when at least two canonical events support the pattern. Declare role and parameter binding, preconditions, typed effects, and a strict effect envelope; a single occurrence must remain ad hoc, and domain modules are host-managed. Declare visibility explicitly: supportingEventIds are induction evidence, never actor experience prerequisites; knowledge visibility requires exact knownByClaimIds." },
   "action-constraint": { name: "propose_action_constraint", label: "Propose action constraint", description: "Submit a source-induced capability or action restriction with explicit before/after clauses, exceptions, priority, visibility, and override edges. It constrains matching actions only after validation; domain constraints are host-managed." },
   "norm-template": { name: "propose_norm_template", label: "Propose norm template", description: "Submit an evidence-backed obligation, prohibition, or permission template with authority, applicability, exceptions, deadlines, reparations, visibility, and defeasible overrides. A template does not instantiate a branch norm by itself." },
   "process-template": { name: "propose_process_template", label: "Propose process template", description: "Submit an evidence-backed multi-phase process pattern with owner roles, legal transitions, cadence, outcomes, visibility, and supporting canonical events. Declare actorControls for actor progression: actionPattern, phase/outcome bounds, per-turn maximumAdvance, minimumElapsedDays, requiresBefore and requiresAfter over actor/owner-role bindings. Without controls actors can only accept a zero-progress job; onDue is host-driven. A template does not start a branch process by itself." },
   "spatial-relation": { name: "propose_spatial_relation", label: "Propose spatial relation", description: "Submit one exact-evidence-backed contains, adjacency, or traversable-route relation. Adjacency never implies passage; route activation, visibility, direction, and duration remain explicit." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a world-rule-v2 candidate with typed kind/scope, explicit authority and jurisdiction, per-clause modality/evidence, exceptions, visibility, defeasibility, and explicit priority overrides. Engine invariants cannot be modified through this tool." },
-  "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed plus structured unread-reader context and physically present actors' direct Genesis observations." },
+  "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed plus structured unread-reader context and bodily or verified live-channel actors' source-supported Genesis observations. Remote entry needs an autonomous agencyProfile and complete pre-entry process seed; exact selectors must support remote presence and every process operation." },
   "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
   "character-model": { name: "propose_character_model", label: "Propose character model", description: "Submit an evidence-backed actor policy with registered dispositions, appraisals, development, directed relationship stances, typed obligations, and relationship changes. It never grants omniscient knowledge or makes policy world truth." },
   "state-delta": { name: "propose_state_delta", label: "Propose state delta", description: "Submit a deterministic state-delta candidate for later validation. This never moves a branch head." },
@@ -168,6 +191,7 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "propose_entity_resolution",
   "propose_event_resolution",
   "find_source_accounting_units",
+  "preview_initial_world",
   "account_source_units",
   "withdraw_compiler_proposal",
   "replace_boundary_proposal",
@@ -230,6 +254,10 @@ const SEMANTIC_STAGE_PROPOSAL_TOOLS: Record<CompilerSemanticStage, ReadonlySet<s
     "propose_event_relation",
     "propose_scene_occurrence",
     "propose_event_frame",
+    "propose_semantic_effect",
+    "propose_perception_observation",
+    "propose_acquisition",
+    "propose_utterance_expression",
   ]),
   executable: new Set([
     "propose_event_execution",
@@ -248,6 +276,7 @@ const SEMANTIC_STAGE_PROPOSAL_TOOLS: Record<CompilerSemanticStage, ReadonlySet<s
 };
 
 const ALL_SEMANTIC_STAGE_RESTRICTED_TOOLS = new Set([
+  "preview_initial_world",
   "propose_novel_title",
   ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
   ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
@@ -338,9 +367,9 @@ export function prepareProposalToolArguments(
 function proposalToolParameters(kind: CompilerProposalKind) {
   const inputSchema = z.object({
     proposal_id: idSchema,
-    payload: compilerProposalSchemas[kind],
+    payload: kind === "acquisition" ? acquisitionInputSchema : kind === "perception-observation" ? perceptionObservationInputSchema : kind === "utterance-expression" ? utteranceExpressionInputSchema : compilerProposalSchemas[kind],
   }).strict();
-  const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(inputSchema);
+  const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(inputSchema, { io: "input" });
   removeModelWritableEvidence(jsonSchema);
   const properties = jsonSchema.properties as Record<string, unknown>;
   properties.evidence_segment_ids = {
@@ -361,6 +390,18 @@ function proposalToolParameters(kind: CompilerProposalKind) {
   };
   jsonSchema.required = [...new Set([...(jsonSchema.required ?? []), "evidence_segment_ids"])];
   constrainCompilerStateFields(jsonSchema);
+  if (kind === "initial-world") {
+    const payload = properties.payload as Record<string, any>;
+    payload.description = INITIAL_WORLD_INPUT_GUIDANCE;
+    const facts = payload.properties.readerContext.properties.facts;
+    facts.allOf = ["focal-identity", "time-place", "causal-premise", "actor-stance", "immediate-pressure"].map(kind => ({
+      contains: { type: "object", properties: { kind: { const: kind } }, required: ["kind"] },
+    }));
+    facts.items.allOf = [
+      { anyOf: [{ not: { properties: { kind: { const: "actor-stance" } }, required: ["kind"] } }, { required: ["holderEntityId", "stance"] }] },
+      { anyOf: [{ not: { properties: { kind: { const: "social-stakes" } }, required: ["kind"] } }, { required: ["holderEntityId"] }] },
+    ];
+  }
   return Type.Unsafe<ProposalToolInput>(jsonSchema as TSchema);
 }
 
@@ -968,6 +1009,7 @@ function safeTextSuffix(text: string, maxChars: number): string {
 export function createCompilerProposalToolset(
   workspaceRoot: string,
   generatedBy: { provider?: string; model?: string } = {},
+  hostOptions: { recoverPreparedFinish?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown) => Promise<void> } } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
@@ -981,21 +1023,20 @@ export function createCompilerProposalToolset(
   const successfulEntityResolutionProposalIds = new Set<string>();
   const successfulEventResolutionProposalIds = new Set<string>();
   const successfulAccountingProposalIds = new Set<string>();
-  const issuedAccountingPages = new Map<string, {
-    sourceId: string;
-    compilerBatchId: string;
-    unitIds: string[];
-  }>();
   const peekedDirections = new Set<"previous" | "next">();
   let expectedSegmentIds: string[] = [];
   let boundedSliceSegments: SourceSegment[] = [];
   let validatedSourceSegments: SourceSegment[] = [];
   let compilerBatchId: string | undefined;
   let activeSourceId: string | undefined;
+  let managedUpstream = false;
+  let batchReady = true;
   let activeBoundaryCalibration: BoundaryCalibrationRequest | undefined;
   let pendingChapterSplitPlan: ChapterSplitPlan | undefined;
   let pendingNovelTitleProposal: SourceTitleProposal | undefined;
   let finished = false;
+  let finishFrozen = false;
+  let priorStageCoverage: Promise<AccountingCoverage> | undefined;
   const roleRosterTools = createRoleRosterTools(workspaceRoot, () => ({ sourceId: activeSourceId, batchId: compilerBatchId, finished }));
   let circuitBreak: { reason: string; failureCount: number } | undefined;
   let totalFinishFailures = 0;
@@ -1024,6 +1065,7 @@ export function createCompilerProposalToolset(
     return circuitBreakResult(reason, totalFinishFailures);
   };
   const failFinish = (reason: string) => {
+    if (hostOptions.upstreamFinish) throw new UpstreamRepairFinishValidationError(reason);
     totalFinishFailures += 1;
     consecutiveFinishFailures += 1;
     const identicalFailures = (finishFailureCounts.get(reason) ?? 0) + 1;
@@ -1172,6 +1214,7 @@ export function createCompilerProposalToolset(
     assertSemanticStageAuthority(worker);
     if (!activeSourceId) throw new Error("Source annotations require an active source-scoped compiler batch.");
     assertAnnotationProposalSlot(proposalId);
+    await hostOptions.upstreamRepair?.beforeStage(annotation.annotationType, annotation.id, annotation);
     await annotationStore.stage(activeSourceId, {
       version: 1,
       id: proposalId,
@@ -1215,6 +1258,9 @@ export function createCompilerProposalToolset(
     let payload = kind === "state-delta"
       ? input.payload
       : injectHostEvidence(kind, input.payload, evidence);
+    if (kind === "utterance-expression") payload = await hydrateUtteranceExpressionInput(workspaceRoot, activeSourceId!, input.payload, evidence, [...successfulProposalIds], [...successfulAnnotationProposalIds], resolveObservationSelector);
+    if (kind === "perception-observation") payload = hydratePerceptionObservationInput(input.payload, evidence, await loadPerceptionTraceCatalog(workspaceRoot, activeSourceId!, [...successfulAnnotationProposalIds], [...successfulEntityResolutionProposalIds], [...successfulEventResolutionProposalIds]));
+    if (kind === "acquisition") payload = await hydrateAcquisitionInput(workspaceRoot, input.payload, evidence, [...successfulProposalIds]);
     const selectors = input.evidence_selectors === undefined
       ? []
       : modelEvidenceSelectorsSchema.parse(input.evidence_selectors);
@@ -1223,28 +1269,28 @@ export function createCompilerProposalToolset(
     const evidenceAssertions: EvidenceAssertion[] = [];
     const supportingSemanticEvidence: LocatedSemanticEvidence[] = [];
     const counterEvidence: LocatedSemanticEvidence[] = [];
+    const selectorIssues: string[] = [];
     for (let index = 0; index < selectors.length; index += 1) {
       const selector = selectors[index]!;
       const segment = segmentById.get(selector.segment_id);
       if (!segment) {
-        throw new Error(
-          `Evidence selector ${index + 1} references ${selector.segment_id}, which is not present in evidence_segment_ids.`,
-        );
+        selectorIssues.push(`Evidence selector ${index + 1} references ${selector.segment_id}, which is not present in evidence_segment_ids.`);
+        continue;
       }
       if (evidencePointerTargetsEvidence(selector.target_path)) {
-        throw new Error(`Evidence selector target_path '${selector.target_path}' cannot target host-owned evidence fields.`);
+        selectorIssues.push(`Evidence selector ${index + 1} target_path '${selector.target_path}' cannot target host-owned evidence fields.`);
+        continue;
       }
-      if (!jsonPointerExists(input.payload, selector.target_path)) {
-        throw new Error(`Evidence selector target_path '${selector.target_path}' does not exist in the proposal payload.`);
+      if (!jsonPointerExists(kind === "utterance-expression" ? payload : input.payload, selector.target_path)) {
+        selectorIssues.push(`Evidence selector ${index + 1} target_path '${selector.target_path}' does not exist in the proposal payload.`);
+        continue;
       }
       let anchor: Awaited<ReturnType<typeof resolveTextAnchor>>;
       try {
         anchor = await resolveTextAnchor(workspaceRoot, segment, selector);
       } catch (error) {
-        throw new Error(
-          `Evidence selector ${index + 1} for target_path '${selector.target_path}' failed: ${error instanceof Error ? error.message : String(error)}`,
-          error instanceof Error ? { cause: error } : undefined,
-        );
+        selectorIssues.push(`Evidence selector ${index + 1} for target_path '${selector.target_path}' failed: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
       }
       const exactReference = evidenceRefSchema.parse({
           span: {
@@ -1298,6 +1344,7 @@ export function createCompilerProposalToolset(
         },
       }));
     }
+    if (selectorIssues.length) throw new Error(selectorIssues.join("\n"));
     if (kind === "event-relation" && counterEvidence.length) {
       payload = {
         ...(payload as Record<string, unknown>),
@@ -1667,7 +1714,12 @@ export function createCompilerProposalToolset(
         // later recovery, newly available exact semantics deterministically
         // supersede only the overlapping decisions; the immutable proposal
         // remains history and every still-unrepresented decision is replayed.
-        if (proposalStatus === "accepted" && nowRepresented) return [];
+        const inheritedRepresentation = unit !== undefined && semanticCoverage.inheritedSpans.some((span) =>
+          span.sourceId === structure.sourceId && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
+        // A migrated, interrupted batch can still have pending classifications
+        // from before cross-stage coverage existed. Preserve those immutable
+        // drafts but project the verified prior evidence over their decisions.
+        if (nowRepresented && (proposalStatus === "accepted" || inheritedRepresentation)) return [];
         return [{ ...decision, proposalId: proposal.id }];
       }));
   };
@@ -1706,6 +1758,7 @@ export function createCompilerProposalToolset(
   const readProspectiveSemanticCoverage = async (): Promise<{
     assertions: EvidenceAssertion[];
     annotations: Array<{ id: string; anchors: ReturnType<typeof annotationAnchors> }>;
+    inheritedSpans: ReturnType<typeof annotationAnchors>;
   }> => {
     const assertions: EvidenceAssertion[] = [];
     for (const proposalId of [...successfulProposalIds].sort()) {
@@ -1716,7 +1769,15 @@ export function createCompilerProposalToolset(
       id: annotationId,
       anchors: annotationAnchors(annotation),
     }));
-    return { assertions, annotations };
+    priorStageCoverage ??= activeSourceId && compilerBatchId
+      ? readPriorStageAccountingCoverage(workspaceRoot, activeSourceId, compilerBatchId, boundedSliceSegments)
+      : Promise.resolve({ assertions: [], annotations: [] });
+    const inherited = await priorStageCoverage;
+    return {
+      assertions: [...inherited.assertions, ...assertions],
+      annotations: [...inherited.annotations, ...annotations],
+      inheritedSpans: [...inherited.assertions.flatMap((item) => item.anchors), ...inherited.annotations.flatMap((item) => item.anchors)],
+    };
   };
 
   const assertOrdinaryAccountingBatch = () => {
@@ -1736,6 +1797,7 @@ export function createCompilerProposalToolset(
     promptGuidelines: [
       "For read-only inspection, page only through exact returned nextOffset values until null; never estimate an offset.",
       "Units marked represented are host-derived from exact evidence or annotations and must not be dispositioned by the model.",
+      "Same-slice checkpointed observation/semantic evidence contributes source coverage only. You must still review executable mechanisms; represented is not proof of an action, rule, or playable world.",
       "A prior field reports the materialized parent/current manifest only as review context; it never satisfies this active batch's fresh accounting requirement.",
       "A non-empty status=unresolved result returns a pageToken and one-based unit indexes. Review every unit, then pass that token to account_source_units with one page_default plus only genuinely different page_overrides.",
       "After a successful page accounting proposal, the unresolved result set shrinks: refetch status=unresolved at offset=0 instead of following the old nextOffset. Repeat until the returned units are empty.",
@@ -1819,15 +1881,10 @@ export function createCompilerProposalToolset(
       const page = candidates.slice(offset, offset + maxResults);
       const nextOffset = offset + page.length < candidates.length ? offset + page.length : null;
       const pageToken = statusFilter === "unresolved" && page.length
-        ? `acctpg-${crypto.randomBytes(8).toString("hex")}`
-        : undefined;
-      if (pageToken) {
-        issuedAccountingPages.set(pageToken, {
-          sourceId: source.id,
-          compilerBatchId: compilerBatchId!,
+        ? new CompilerAccountingPages(workspaceRoot, source.id, compilerBatchId!).issue({
+          sourceSha256: source.contentSha256, segmentIds: targetSegments.map((segment) => segment.id),
           unitIds: page.map((unit) => unit.unitId),
-        });
-      }
+        }).token : undefined;
       return {
         content: [{ type: "text" as const, text: promptJson({
           type: "source-accounting-units",
@@ -1916,8 +1973,9 @@ export function createCompilerProposalToolset(
             "Page accounting requires both page_token and page_default. Call find_source_accounting_units with status=unresolved and copy its exact pageToken; do not guess.",
           );
         }
-        const issued = issuedAccountingPages.get(input.page_token);
-        if (!issued || issued.sourceId !== source.id || issued.compilerBatchId !== compilerBatchId) {
+        const issued = new CompilerAccountingPages(workspaceRoot, source.id, compilerBatchId!).read(input.page_token);
+        if (!issued || issued.consumedBy || issued.sourceSha256 !== source.contentSha256
+          || issued.segmentIds.some((id) => !expectedSegmentIds.includes(id))) {
           throw new Error(
             `Unknown or stale accounting page token ${input.page_token}. Call find_source_accounting_units with status=unresolved in this same active batch, copy the exact returned pageToken, and retry once; do not guess or reuse an earlier token.`,
           );
@@ -1947,6 +2005,8 @@ export function createCompilerProposalToolset(
         ...semanticCoverage.assertions.flatMap((assertion) => assertion.anchors),
         ...semanticCoverage.annotations.flatMap((annotation) => annotation.anchors),
       ];
+      const representedUnitIds: string[] = [];
+      const accountedUnits: Array<{ unitId: string; proposalId: string }> = [];
       for (const decision of decisions) {
         const unit = byId.get(decision.unitId);
         if (!unit) throw new Error(`Unknown deterministic source unit ${decision.unitId}; call find_source_accounting_units and copy unitId exactly.`);
@@ -1959,12 +2019,21 @@ export function createCompilerProposalToolset(
         }
         if (semanticSpans.some((span) => span.sourceId === source.id
           && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte))) {
-          throw new Error(`Source unit ${decision.unitId} is represented by exact current-batch semantics and cannot receive a model disposition.`);
+          representedUnitIds.push(decision.unitId);
         }
         const priorProposalId = alreadyDecided.get(decision.unitId);
         if (priorProposalId && priorProposalId !== input.proposal_id) {
-          throw new Error(`Source unit ${decision.unitId} is already dispositioned by active proposal ${priorProposalId}; withdraw it before replacing the decision.`);
+          accountedUnits.push({ unitId: decision.unitId, proposalId: priorProposalId });
         }
+      }
+      if (representedUnitIds.length || accountedUnits.length) {
+        const covered = new Set([...representedUnitIds, ...accountedUnits.map((item) => item.unitId)]);
+        throw new Error("Source accounting coverage changed: no decisions were staged. "
+          + "Represented units cannot receive a model disposition; retain existing valid accounting.\n"
+          + JSON.stringify({ sourceId: source.id, compilerBatchId, proposal_id: input.proposal_id,
+            ...(input.page_token ? { pageToken: input.page_token } : {}), representedUnitIds, accountedUnits,
+            remainingUnitIds: decisions.filter((item) => !covered.has(item.unitId)).map((item) => item.unitId) })
+          + `\nKeep proposal_id=${input.proposal_id}. Call find_source_accounting_units with status=unresolved and offset=0; copy its exact pageToken and review the new page for one corrected retry. If none remain, stop for host coverage review; never submit empty decisions, invent a new identity, or withdraw valid coverage.`);
       }
       const proposal: SourceAccountingProposal = {
         version: 1,
@@ -1977,7 +2046,7 @@ export function createCompilerProposalToolset(
       };
       await accountingStore.stageProposal(proposal);
       successfulAccountingProposalIds.add(proposal.id);
-      if (input.page_token) issuedAccountingPages.delete(input.page_token);
+      if (input.page_token) new CompilerAccountingPages(workspaceRoot, source.id, compilerBatchId!).consume(input.page_token, proposal.id);
       recordProposalProgress();
       return proposalResult(
         `Pending source-accounting proposal ${proposal.id} recorded for ${decisions.length} unit(s). These review dispositions do not create world truth.`,
@@ -2013,10 +2082,21 @@ export function createCompilerProposalToolset(
       label: metadata.label,
       description: metadata.description,
       promptSnippet: metadata.description,
-      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "For each material field or relation, add an evidence_selector with an exact source quote, its payload JSON Pointer, relation, and independently judged strength. Never submit offsets or hashes.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
+      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "Place proposal_id, payload, evidence_segment_ids and evidence_selectors at the top level. Evidence envelope fields do not belong inside payload.", "For each material field or relation, add an evidence_selector with an exact source quote, its payload JSON Pointer, relation, and independently judged strength. Never submit offsets or hashes.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory.",
+        ...(kind === "utterance-expression" ? ["Supply logical quotation/proposition IDs and exact fragment selectors only. The host freezes their revisions and snapshots. Evidence selector target_path refers to the expanded expression: /canonicalEventId, /speakerId, /addresseeIds/i, /modality, /quotation/quotationId, /propositionId, and /propositions/i/snapshot/{subjectEntityId,relationId,polarity,modality,validStoryTime,object/...}. Use this occurrence’s fragment content for semantic fields; never another quotation. Read referenced propositions first to enumerate every object field including nested propositions."] : []),
+        ...(kind === "event-execution" ? ["Never copy an ad-hoc event.action into this binding. First find/read a supported action-schema, then use action.lane=schema-bound with its exact payload.id, role IDs and parameters. Without a supported mechanism, preserve the occurrence; a complete entryCheckpoint is allowed only when independently justified by bodily or active-channel entry evidence at the same source cut."] : []),
+        ...(kind === "initial-world" ? [INITIAL_WORLD_INPUT_GUIDANCE] : []),
+        "A failed call that never staged a proposal must be corrected under the same proposal_id. Only replace a successfully staged defective draft under a new ID; a new ID never clears an old failed call."],
       executionMode: "sequential",
       parameters,
-      prepareArguments: (args) => prepareProposalToolArguments(args, kind),
+      prepareArguments: (args) => {
+        const input = prepareProposalToolArguments(args, kind);
+        if (kind === "initial-world" && input?.evidence_segment_ids) {
+          const issues = initialWorldInputIssues(input);
+          if (issues.length) throw new Error(`Initial-world input validation failed:\n${issues.join("\n")}\nExact evidence and graph checks have not run. Correct all listed fields before one corrected submission with the same proposal_id.`);
+        }
+        return input;
+      },
       async execute(_id, input, signal) {
         signal?.throwIfAborted();
         const blocked = beginToolCall("mutation");
@@ -2065,6 +2145,90 @@ export function createCompilerProposalToolset(
         );
       },
     });
+  });
+  const openingPreviewInputs = new Set<string>();
+  let preparedPreviewHash: string | undefined;
+  const previewParameters = proposalToolParameters("initial-world");
+  const previewHash = (input: unknown) => crypto.createHash("sha256").update(JSON.stringify(input) ?? "undefined").digest("hex");
+  const assertPreviewScope = () => {
+    if (!activeSourceId || !compilerBatchId || !isWholeSourceEvidencePass()) {
+      throw new Error("Initial-world preview requires an active opening or reconciliation batch; do not retry outside that host scope.");
+    }
+    assertBatchWritable();
+    if (finishFrozen) throw finishHostError("a saved finish forbids new previews");
+    const journal = new CompilerProposalObligations(workspaceRoot, activeSourceId, compilerBatchId);
+    journal.assertModelRecoveryAllowed();
+    return journal;
+  };
+  const beginPreview = (raw: unknown) => {
+    assertPreviewScope().assertRetryAllowed("propose_initial_world", raw);
+    const hash = previewHash(raw);
+    if (openingPreviewInputs.has(hash) || openingPreviewInputs.size >= 2) {
+      throw new Error("Compiler proposal obligation requires host review: opening preview repeated unchanged input or exhausted its one corrected retry. Preserve drafts and stop; do not restart to repeat previews.");
+    }
+    openingPreviewInputs.add(hash);
+  };
+  const previewFailure = (issues: string[]): never => {
+    const diagnostic = `Initial-world preview validation failed:\n${[...new Set(issues)].join("\n")}\nNo proposal was staged. Graph/commit checks have not run.`;
+    throw new Error(openingPreviewInputs.size >= 2
+      ? `Compiler proposal obligation requires host review: the corrected preview failed. ${diagnostic}\nPreserve drafts; do not restart automatically to repeat previews.`
+      : diagnostic);
+  };
+  const previewInitialWorldTool = defineTool({
+    name: "preview_initial_world",
+    label: "Preview initial world",
+    description: "Read-only opening input and exact-evidence preflight. Does not stage, commit, settle failures, or certify graph closure/playability.",
+    promptGuidelines: [INITIAL_WORLD_INPUT_GUIDANCE,
+      "Use the intended propose_initial_world envelope. Review all errors, then make at most one changed preview; never repeat unchanged input. Submission always revalidates current dependencies."],
+    parameters: previewParameters,
+    prepareArguments(raw) {
+      preparedPreviewHash = undefined;
+      beginPreview(raw);
+      let input: ProposalToolInput;
+      try { input = prepareProposalToolArguments(raw); }
+      catch (error) { return previewFailure([error instanceof Error ? error.message : String(error)]); }
+      const issues = initialWorldInputIssues(input);
+      if (issues.length) previewFailure(issues);
+      // Validate here too: outer Pi validation must not be the first place an
+      // envelope failure occurs, otherwise it bypasses our retry accounting.
+      let validated: ProposalToolInput;
+      try {
+        validated = validateToolArguments({ name: "preview_initial_world", description: "Opening preflight", parameters: previewParameters },
+          { type: "toolCall", id: "opening-preflight", name: "preview_initial_world", arguments: input as never });
+      } catch (error) { return previewFailure([error instanceof Error ? error.message : String(error)]); }
+      preparedPreviewHash = previewHash(validated);
+      return validated;
+    },
+    executionMode: "sequential",
+    async execute(_id, raw, signal): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, unknown> }> {
+      signal?.throwIfAborted();
+      const prepared = preparedPreviewHash === previewHash(raw);
+      preparedPreviewHash = undefined;
+      assertPreviewScope();
+      if (await new CompilerFinishReceipts(workspaceRoot, activeSourceId!, compilerBatchId!).read()) throw finishHostError("a saved finish forbids new previews");
+      if (!prepared) beginPreview(raw);
+      const blocked = beginToolCall("retrieval");
+      if (blocked) return blocked;
+      const input = raw as ProposalToolInput;
+      const issues = initialWorldInputIssues(input);
+      // The independent shape errors above must not hide discoverable exact
+      // selector problems. Normalization reads source bytes but stages nothing.
+      let normalized: Awaited<ReturnType<typeof normalizeProposalEvidence>> | undefined;
+      try { normalized = await normalizeProposalEvidence("initial-world", input); }
+      catch (error) { issues.push(error instanceof Error ? error.message : String(error)); }
+      if (normalized && !initialWorldInputIssues(input).length) {
+        const parsed = initialWorldSchema.parse(normalized.payload);
+        issues.push(...validateInitialWorldEvidenceAssertions(parsed, normalized.evidenceAssertions)
+          .map(issue => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`));
+      }
+      if (issues.length) previewFailure(issues);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ valid: true, proposalId: input.proposal_id,
+          checked: ["input", "exact-evidence", "field-evidence"], unchecked: ["graph-closure", "commit", "playability"],
+          next: "Submit the reviewed envelope with propose_initial_world; the host revalidates it before staging." }) }],
+        details: { readOnly: true, proposalStaged: false },
+      };
+    },
   });
   const annotationResult = (
     proposalId: string,
@@ -2303,6 +2467,7 @@ export function createCompilerProposalToolset(
           ontologyVersion: ENTITY_RESOLUTION_ONTOLOGY_VERSION,
         },
       });
+      await hostOptions.upstreamRepair?.beforeStage("entity-resolution", resolution.id, resolution);
       await entityResolutionStore.stage(activeSourceId, {
         version: 1,
         id: input.proposal_id,
@@ -2388,6 +2553,7 @@ export function createCompilerProposalToolset(
           ontologyVersion: EVENT_RESOLUTION_ONTOLOGY_VERSION,
         },
       });
+      await hostOptions.upstreamRepair?.beforeStage("event-resolution", resolution.id, resolution);
       await eventResolutionStore.stage(activeSourceId, {
         version: 1,
         id: input.proposal_id,
@@ -2624,6 +2790,17 @@ export function createCompilerProposalToolset(
     },
   });
   const finishParameters = Type.Object({
+    target_reviews: Type.Optional(Type.Array(Type.Object({
+      target: Type.String({ minLength: 1 }),
+      disposition: Type.Union([Type.Literal("proposed"), Type.Literal("unsupported"), Type.Literal("capability-gap")]),
+      evidence_segment_ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+      summary: Type.String({ minLength: 1, maxLength: 2000 }),
+      requirement_reviews: Type.Optional(Type.Array(Type.Object({
+        requirementId: Type.String({ minLength: 1 }),
+        disposition: Type.Union([Type.Literal("proposed"), Type.Literal("unsupported"), Type.Literal("capability-gap")]),
+        summary: Type.String({ minLength: 1, maxLength: 2000 }),
+      }, { additionalProperties: false }), { maxItems: 16 })),
+    }, { additionalProperties: false }), { maxItems: 128 })),
     outcome: Type.Union([Type.Literal("complete"), Type.Literal("no-artifacts")]),
     reviewed_segments: Type.Array(Type.Object({
       segment_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
@@ -2632,6 +2809,43 @@ export function createCompilerProposalToolset(
     }, { additionalProperties: false })),
     summary: Type.String({ minLength: 1, maxLength: 2_000 }),
   }, { additionalProperties: false });
+  const obligations = () => activeSourceId && compilerBatchId
+    ? new CompilerProposalObligations(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+  const finishReceipts = () => activeSourceId && compilerBatchId
+    ? new CompilerFinishReceipts(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+  const trackProposal = (tool: ToolDefinition): ToolDefinition => {
+    if (!tool.name.startsWith("propose_") && tool.name !== "account_source_units") return tool;
+    return {
+      ...tool,
+      prepareArguments(raw) {
+        if (finishFrozen) throw finishHostError("a prepared finish freezes this batch's mutation set");
+        if (!obligations()) return (tool.prepareArguments ? tool.prepareArguments(raw) : raw) as never;
+        obligations()?.assertRetryAllowed(tool.name, raw);
+        try {
+          const prepared = tool.prepareArguments ? tool.prepareArguments(raw) : raw;
+          return validateToolArguments(tool, { type: "toolCall", id: "compiler-preflight", name: tool.name, arguments: prepared as Record<string, unknown> }) as never;
+        } catch (error) {
+          obligations()?.record(tool.name, raw, "failed", error instanceof Error ? error.message : String(error));
+          throw error;
+        }
+      },
+      async execute(id, input, signal, onUpdate, context) {
+        const journal = obligations();
+        journal?.assertRetryAllowed(tool.name, input);
+        journal?.record(tool.name, input, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
+        try {
+          const result = await tool.execute(id, input, signal, onUpdate, context);
+          const details = result.details as { compilerBatchBlocked?: boolean } | undefined;
+          if (details?.compilerBatchBlocked) journal?.record(tool.name, input, "failed", "Compiler circuit breaker opened; stop this turn.");
+          else journal?.record(tool.name, input, "succeeded");
+          return result;
+        } catch (error) {
+          journal?.record(tool.name, input, "failed", error instanceof Error ? error.message : String(error));
+          throw error;
+        }
+      },
+    };
+  };
   const finishTool = defineTool<typeof finishParameters, CompilerFinishDetails>({
     name: "finish_compiler_batch",
     label: "Finish compiler batch",
@@ -2651,6 +2865,15 @@ export function createCompilerProposalToolset(
       if (finished) throw new Error("Compiler batch was already finished.");
       const blocked = beginToolCall("finish");
       if (blocked) return blocked;
+      obligations()?.assertFinishable();
+      if (hostOptions.upstreamFinish) {
+        const { verifyUpstreamRepairFinish } = await import("./upstream-repair-finish.js");
+        if (!isDeepStrictEqual(input, hostOptions.upstreamFinish.input)) throw finishHostError("upstream finish input changed");
+        await verifyUpstreamRepairFinish(workspaceRoot, activeSourceId!, hostOptions.upstreamFinish.planHash, hostOptions.upstreamFinish);
+      }
+      const existingFinish = await finishReceipts()?.read();
+      if (existingFinish && !hostOptions.recoverPreparedFinish) throw finishHostError("a prepared finish must be resumed by the host");
+      if (existingFinish && !isDeepStrictEqual(existingFinish.identity.input, input)) throw finishHostError("the original finish input is frozen");
       const listed = [...successfulProposalIds].sort();
       const listedAnnotations = [...successfulAnnotationProposalIds].sort();
       const listedEntityResolutions = [...successfulEntityResolutionProposalIds].sort();
@@ -2677,6 +2900,31 @@ export function createCompilerProposalToolset(
       if (input.outcome === "complete" && expected.length === 0) {
         return failFinish("complete requires at least one active successful proposal submission.");
       }
+      const reviewScope = activeSourceId && compilerBatchId
+        ? await reconciliationReviewScope(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+      const targetScope = reviewScope?.targets;
+      if (targetScope !== undefined) {
+        const proposals = new Map<string, { kind: string; payload: Record<string, unknown> }>();
+        for (const id of listed) {
+          const envelope = await new ProposalStore(workspaceRoot).readEnvelope("pending", id);
+          proposals.set(id, { kind: String(envelope.kind), payload: envelope.payload as Record<string, unknown> });
+        }
+        const issues = reconciliationReviewIssues(targetScope, input.target_reviews ?? [], proposals, reviewScope?.requirements);
+        const knowledgePlan = await readKnowledgeRepairPlan(workspaceRoot, activeSourceId!, compilerBatchId!);
+        if (knowledgePlan) {
+          const canon = new CanonicalModelStore(workspaceRoot);
+          const [claims, propositions, attributions, expressions, perceptions, acquisitions] = await Promise.all([canon.listClaims(), canon.listPropositions(), canon.listAttributions(), canon.listUtteranceExpressions(), canon.listPerceptionObservations(), canon.listAcquisitions()]);
+          const existing = new Set([...claims.map(item => `claim:${item.id}`), ...propositions.map(item => `proposition:${item.id}`), ...attributions.map(item => `attribution:${item.id}`), ...expressions.map(item => `utterance-expression:${item.id}`), ...perceptions.map(item => `perception-observation:${item.id}`), ...acquisitions.map(item => `acquisition:${item.id}`)]);
+          issues.push(...knowledgeRepairScopeIssues(knowledgePlan, proposals, existing, new Map(attributions.map(a => [a.id, a]))));
+        }
+        for (const review of input.target_reviews ?? []) {
+          try { resolveEvidenceSegmentIds(review.evidence_segment_ids); }
+          catch (error) { issues.push(`${review.target}: ${error instanceof Error ? error.message : String(error)}`); }
+        }
+        if (issues.length) return failFinish(`Reconciliation target review: ${issues.join(" ")} Read each listed target and its same-source evidence. Copy requirementId from the isolated prompt's repairPlan.requirements[].id; never guess or search outside that plan. Copy read_source_evidence.evidence_segment_id; use find_source_evidence and its exact returned ref if discovery is needed. Preserve all active drafts. Correct the complete report once; if unchanged, stop for host review. Unsupported reports remain unresolved until host review; never invent a proposal to fill the report.`);
+      } else if (input.target_reviews?.length) {
+        return failFinish("target_reviews is outside this batch's versioned target-review scope. Preserve drafts and stop for host review; do not change the plan or batch ID.");
+      }
       const reviewedIds = input.reviewed_segments.map((review) => review.segment_id).sort();
       const uniqueReviewedIds = [...new Set(reviewedIds)];
       if (
@@ -2690,6 +2938,7 @@ export function createCompilerProposalToolset(
       let prospectiveCoverage: Awaited<ReturnType<typeof readProspectiveSemanticCoverage>> = {
         assertions: [],
         annotations: [],
+        inheritedSpans: [],
       };
       let activeAccountingProposals: ActiveSourceAccountingProposal[] = [];
       let activeAccountingDecisions: SourceUnitAccountingDecision[] = [];
@@ -2697,8 +2946,9 @@ export function createCompilerProposalToolset(
       let accountingStructure: Awaited<ReturnType<typeof ensureSourceStructure>> | undefined;
       let accountingBytes: Buffer | undefined;
       const stage = activeSemanticStage();
-      const recordsSourceAccounting = !stage || stage === "executable";
+      const recordsSourceAccounting = !managedUpstream && (!stage || stage === "executable");
       const graphAdjudicationIteration = graphAdjudicationIterationFromBatchId(compilerBatchId, activeSourceId);
+      const semanticReconciliationBatch = semanticReconciliationBatchFromBatchId(compilerBatchId, activeSourceId);
       if (recordsSourceAccounting && activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const workspace = await WorkspaceStore.create(workspaceRoot);
         accountingSource = await workspace.getSource(activeSourceId) ?? undefined;
@@ -2724,6 +2974,22 @@ export function createCompilerProposalToolset(
             disposition: review.disposition,
           };
         });
+        const accountingUnits = new Map(baseStructuralUnits(accountingStructure).map((unit) => [unit.id, unit]));
+        const coveredSpans = [...prospectiveCoverage.assertions.flatMap((item) => item.anchors), ...prospectiveCoverage.annotations.flatMap((item) => item.anchors)];
+        const conflictingSegments = input.reviewed_segments.filter((review) => {
+          if (review.disposition !== "no-artifacts") return false;
+          const segment = segmentsById.get(review.segment_id)!;
+          return coveredSpans.some((span) => byteRangesOverlap(span.startByte, span.endByte, segment.startByte, segment.endByte))
+            || activeAccountingDecisions.some((decision) => {
+              const unit = accountingUnits.get(decision.unitId);
+              return decision.status !== "background-only" && unit !== undefined
+                && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, segment.startByte, segment.endByte);
+            });
+        });
+        if (conflictingSegments.length) {
+          return failFinish(`Source-accounting review disposition conflicts for segment_id: ${conflictingSegments.map((review) => review.segment_id).join(", ")}. `
+            + "These slices have exact semantic coverage or explicit non-background accounting decisions. Set their reviewed_segments.disposition to proposed and retain every valid draft; absence of a new executable mechanism is not absence of source artifacts. Do not withdraw accounting pages or use no-artifacts to escape this diagnostic. Retry finish once after correcting the review disposition.");
+        }
         accountingIssues = accountingStore.validateBatchReview({
           structure: accountingStructure,
           sourceBytes: accountingBytes,
@@ -2743,9 +3009,12 @@ export function createCompilerProposalToolset(
         entityTraceIssues,
         attributionTraceIssues,
         acquisitionTraceIssues,
+        expressionTraceIssues,
+        perceptionTraceIssues,
         eventResolutionClosureIssues,
         eventTraceIssues,
         graphAdjudicationIssues,
+        semanticReconciliationIssues,
         canonicalStructureIssues,
       ] = await Promise.all([
         validateCompilerProposalClosure(workspaceRoot, listed, activeSourceId),
@@ -2788,6 +3057,8 @@ export function createCompilerProposalToolset(
             listedEntityResolutions,
           )
           : Promise.resolve([]),
+        activeSourceId ? validateUtteranceExpressionProposalTrace(workspaceRoot, activeSourceId, listed, listedAnnotations, listedEntityResolutions) : Promise.resolve([]),
+        activeSourceId ? validatePerceptionObservationProposalTrace(workspaceRoot, activeSourceId, listed, listedAnnotations, listedEntityResolutions, listedEventResolutions) : Promise.resolve([]),
         activeSourceId
           ? validateEventResolutionClosure(
             workspaceRoot,
@@ -2814,7 +3085,14 @@ export function createCompilerProposalToolset(
             activeSourceId,
             graphAdjudicationIteration,
             listed,
+            (() => {
+              const namespace = compilerBatchId!.slice(`reconcile-${activeSourceId}-graph-adjudication-`.length).replace(/-\d+$/, "");
+              return namespace === "v3" ? undefined : namespace;
+            })(),
           )
+          : Promise.resolve([]),
+        semanticReconciliationBatch
+          ? validateSemanticReconciliationProposalMonotonicity(workspaceRoot, listed)
           : Promise.resolve([]),
         new CompilerCommitService(workspaceRoot).validatePendingStructure(activeSourceId),
       ]);
@@ -2882,9 +3160,12 @@ export function createCompilerProposalToolset(
         ...finishIssueSection("Canonical entity proposal trace", entityTraceIssues),
         ...finishIssueSection("Attribution quotation trace", attributionTraceIssues),
         ...finishIssueSection("Knowledge acquisition trace", acquisitionTraceIssues),
+        ...finishIssueSection("Utterance expression trace", expressionTraceIssues),
+        ...finishIssueSection("Perception observation trace", perceptionTraceIssues),
         ...finishIssueSection("Event-resolution graph", eventResolutionClosureIssues),
         ...finishIssueSection("Canonical event proposal trace", eventTraceIssues),
         ...finishIssueSection("Graph-adjudication mutation scope", graphAdjudicationIssues),
+        ...finishIssueSection("Semantic-reconciliation monotonicity", semanticReconciliationIssues),
         ...finishAccountingIssueSection(accountingIssues),
         ...finishIssueSection("Cross-batch proposal lifecycle", crossBatchLifecycleIssues),
         ...finishIssueSection(
@@ -2894,6 +3175,20 @@ export function createCompilerProposalToolset(
         ),
       ];
       if (validationSections.length) return failFinish(validationSections.join("\n\n"));
+      const receipts = finishReceipts();
+      const finishSource = activeSourceId ? await WorkspaceStore.openReadOnly(workspaceRoot).getSource(activeSourceId) : undefined;
+      const receipt = receipts && finishSource && compilerBatchId ? await receipts.prepare({
+        version: hostOptions.upstreamFinish ? 3 : reviewScope?.requirements ? 2 : 1,
+        ...(hostOptions.upstreamFinish ? { upstreamRepairIntent: hostOptions.upstreamFinish } : {}), sourceId: finishSource.id, sourceSha256: finishSource.contentSha256, batchId: compilerBatchId,
+        ...(reviewScope?.requirements ? { requirementScope: { planHash: reviewScope.planHash!, requirements: reviewScope.requirements, ...(reviewScope.coreRoleScope !== undefined ? { coreRoleScope: reviewScope.coreRoleScope } : {}) } } : {}),
+        input, segments: validatedSourceSegments,
+        dependencies: await receipts.dependencies({ world: listed, annotation: listedAnnotations,
+          "entity-resolution": listedEntityResolutions, "event-resolution": listedEventResolutions, accounting: listedAccounting }),
+        metadata: { ...(pendingNovelTitleProposal ? { title: pendingNovelTitleProposal } : {}),
+          ...(pendingChapterSplitPlan ? { chapterSplit: pendingChapterSplitPlan } : {}),
+          ...(roleRosterTools.snapshot() ? { roleReview: roleRosterTools.snapshot() } : {}) },
+      }) : undefined;
+      finishFrozen = Boolean(receipt);
       await roleRosterTools.commit();
       if (pendingChapterSplitPlan) {
         if (!activeSourceId) return failFinish("Structure discovery lost its active source identity.");
@@ -2908,8 +3203,12 @@ export function createCompilerProposalToolset(
       }
       if (pendingNovelTitleProposal) {
         if (!activeSourceId) return failFinish("Novel-title proposal lost its active source identity.");
-        await (await WorkspaceStore.create(workspaceRoot))
-          .commitSourceTitleProposal(activeSourceId, pendingNovelTitleProposal.proposalId);
+        const workspace = await WorkspaceStore.create(workspaceRoot), source = await workspace.getSource(activeSourceId);
+        const inference = source?.titleInference;
+        if (inference && !source.pendingTitleProposal) {
+          if (inference.title !== pendingNovelTitleProposal.title || !isDeepStrictEqual(inference.evidence, pendingNovelTitleProposal.evidence)
+            || !isDeepStrictEqual(inference.generatedBy, pendingNovelTitleProposal.generatedBy)) throw finishHostError("accepted novel title differs from the original finish");
+        } else await workspace.commitSourceTitleProposal(activeSourceId, pendingNovelTitleProposal.proposalId);
       }
       if (activeSourceId && listedAnnotations.length) {
         await annotationStore.commitProposals(activeSourceId, listedAnnotations);
@@ -2946,10 +3245,18 @@ export function createCompilerProposalToolset(
           sourceBytes: accountingBytes,
         });
       }
+      const artifactCounts = {
+        world: listed.length, annotations: listedAnnotations.length,
+        resolutions: listedEntityResolutions.length + listedEventResolutions.length,
+        accounting: listedAccounting.length,
+      };
+      if (receipts && receipt) await receipts.complete(receipt.fingerprint);
+      const { observeRequirementValidity } = await import("./requirement-observation.js");
+      const requirementValidityIssues = activeSourceId ? await observeRequirementValidity(workspaceRoot, activeSourceId) : [];
       finished = true;
       return {
-        content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}).` }],
-        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: expected, reviewedSegmentIds: reviewedIds },
+        content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}). World proposals: ${artifactCounts.world}; accounting proposals: ${artifactCounts.accounting}. This checkpoint does not certify executable closure or playability.${requirementValidityIssues.length ? ` Requirement validity: ${requirementValidityIssues.join("; ")}` : ""}` }],
+        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: expected, reviewedSegmentIds: reviewedIds, artifactCounts, requirementValidityIssues },
         terminate: true,
       };
     },
@@ -2963,6 +3270,7 @@ export function createCompilerProposalToolset(
       peekAdjacentTool,
       deferBoundaryTool,
       ...proposalTools,
+      previewInitialWorldTool,
       ...annotationProposalTools,
       identityResolutionTool,
       eventResolutionTool,
@@ -2970,24 +3278,59 @@ export function createCompilerProposalToolset(
       withdrawTool,
       replaceBoundaryTool,
       finishTool,
-    ],
+    ].map(trackProposal).map((tool) => ({ ...tool, async execute(id, input, signal, onUpdate, context) {
+      if (!batchReady) throw finishHostError("compiler batch initialization did not complete; stop tool calls and preserve the original scope for host review");
+      if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution"].includes(tool.name))) {
+        throw finishHostError(hostOptions.upstreamFinish
+          ? "frozen upstream finish authorizes only the original host finish; preserve its receipt and drafts, and stop other tool calls"
+          : "managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
+      }
+      if (tool.name !== "finish_compiler_batch" && /^(?:propose_|account_source_units$|withdraw_|configure_|defer_|replace_)/u.test(tool.name)
+        && await finishReceipts()?.read()) throw finishHostError("a prepared finish freezes this batch's mutation set");
+      try { return await tool.execute(id, input, signal, onUpdate, context); }
+      catch (error) {
+        if (error instanceof UpstreamRepairFinishValidationError) throw error;
+        if (tool.name === "finish_compiler_batch" && await finishReceipts()?.read()) throw finishHostError(String(error));
+        throw error;
+      }
+    } })),
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
+      batchReady = false;
+      priorStageCoverage = undefined;
       roleRosterTools.reset();
       successfulProposalIds.clear();
       successfulAnnotationProposalIds.clear();
       successfulEntityResolutionProposalIds.clear();
       successfulEventResolutionProposalIds.clear();
       successfulAccountingProposalIds.clear();
-      issuedAccountingPages.clear();
+      openingPreviewInputs.clear();
+      preparedPreviewHash = undefined;
       peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];
       validatedSourceSegments = [];
       compilerBatchId = nextCompilerBatchId;
       activeSourceId = sourceId;
+      managedUpstream = false;
+      if (activeSourceId && compilerBatchId) {
+        const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
+        const managed = (await new UpstreamRepairLedger(workspaceRoot, activeSourceId).inspect()).plans.find(item => item.plan.batchId === compilerBatchId);
+        if (managed) {
+          const finishPermit = hostOptions.upstreamFinish && managed.finishIntent && isDeepStrictEqual(hostOptions.upstreamFinish, managed.finishIntent) && ["finish-frozen", "finished", "converged", "evaluated"].includes(managed.state);
+          const stagePermit = hostOptions.upstreamRepair?.planHash === managed.plan.planHash && ["authorized", "staging"].includes(managed.state);
+          if ((!finishPermit && !stagePermit) || (hostOptions.upstreamFinish && hostOptions.upstreamRepair)) throw finishHostError("managed upstream batch requires its exact active host authorization; preserve its ledger and stop ordinary batch recovery");
+          managedUpstream = true;
+        } else if (hostOptions.upstreamRepair || hostOptions.upstreamFinish) throw finishHostError("upstream authorization has no retained source-local plan");
+      } else if (hostOptions.upstreamRepair || hostOptions.upstreamFinish) throw finishHostError("upstream staging requires its exact source and batch");
+      const resumingFinish = await finishReceipts()?.read();
+      finishFrozen = Boolean(resumingFinish);
+      if (resumingFinish) await finishReceipts()!.verify(resumingFinish);
       activeBoundaryCalibration = undefined;
       pendingChapterSplitPlan = undefined;
       pendingNovelTitleProposal = undefined;
+      if (resumingFinish?.identity.metadata.title) pendingNovelTitleProposal = resumingFinish.identity.metadata.title;
+      if (resumingFinish?.identity.metadata.chapterSplit) pendingChapterSplitPlan = resumingFinish.identity.metadata.chapterSplit;
+      if (resumingFinish?.identity.metadata.roleReview) roleRosterTools.restore(resumingFinish.identity.metadata.roleReview);
       finished = false;
       circuitBreak = undefined;
       totalFinishFailures = 0;
@@ -3011,13 +3354,18 @@ export function createCompilerProposalToolset(
           new SegmentStore(workspaceRoot).readManifest(activeSourceId),
           segmentSource(workspaceRoot, source),
         ]);
-        if (!persistedManifest || !isDeepStrictEqual(persistedManifest, derivedManifest)) {
+        const partialStructureFinish = hostOptions.recoverPreparedFinish && resumingFinish?.identity.metadata.chapterSplit;
+        const preparedManifest = partialStructureFinish ? await segmentSource(workspaceRoot, source, { chapterSplitPlan: partialStructureFinish }) : undefined;
+        if (!persistedManifest || (!isDeepStrictEqual(persistedManifest, derivedManifest) && !isDeepStrictEqual(persistedManifest, preparedManifest))) {
           throw new Error(`Source evidence index for ${activeSourceId} is missing or stale; re-ingest/reparse before compilation.`);
         }
-        const byId = new Map(derivedManifest.segments.map((segment) => [segment.id, segment]));
+        // A structure finish may already have installed its new manifest. Its
+        // frozen source-verified segments retain the original review scope.
+        const reviewSegments = resumingFinish?.identity.segments ?? derivedManifest.segments;
+        const byId = new Map(reviewSegments.map((segment) => [segment.id, segment]));
         const missing = expectedSegmentIds.filter((id) => !byId.has(id));
         if (missing.length) throw new Error(`Active compiler slice references unknown segment(s): ${missing.join(", ")}.`);
-        validatedSourceSegments = structuredClone(derivedManifest.segments);
+        validatedSourceSegments = structuredClone(reviewSegments);
         boundedSliceSegments = expectedSegmentIds.map((id) => structuredClone(byId.get(id)!));
       }
       if (compilerBatchId && activeSourceId) {
@@ -3037,14 +3385,14 @@ export function createCompilerProposalToolset(
             throw new Error(`Boundary calibration ${compilerBatchId} requires exactly: ${calibrationSegmentIds.join(", ")}.`);
           }
         }
-        if (!activeBoundaryCalibration && compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
+        if (!managedUpstream && !resumingFinish && !activeBoundaryCalibration && compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
           // A retry must not inherit a request made by an attempt that never
           // reached the finish/checkpoint handshake. The model decides again
           // from the frozen evidence slice in this fresh turn.
           await boundaryCalibrations.removeRequestedByBatch(activeSourceId, compilerBatchId);
         }
       }
-      if (!compilerBatchId) return;
+      if (!compilerBatchId) { batchReady = true; return; }
       const migratedSceneBatchId = legacyExecutableSceneBatchId(compilerBatchId, activeSourceId);
       for (const summary of await service.store.list("pending")) {
         const envelope = await service.store.readEnvelope("pending", summary.id);
@@ -3089,6 +3437,7 @@ export function createCompilerProposalToolset(
           successfulAccountingProposalIds.add(summary.id);
         }
       }
+      batchReady = true;
     },
   };
 }

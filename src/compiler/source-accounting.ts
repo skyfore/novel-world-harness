@@ -57,6 +57,7 @@ export const sourceAccountingProposalSchema = z.object({
     model: z.string().min(1).optional(),
   }).strict(),
   createdAt: z.string().datetime(),
+  restoredFrom: z.object({ proposalId: idSchema, reason: z.string().trim().min(1).max(1_000) }).strict().optional(),
 }).strict();
 export type SourceAccountingProposal = z.infer<typeof sourceAccountingProposalSchema>;
 export type SourceAccountingProposalStatus = "pending" | "accepted" | "rejected";
@@ -209,6 +210,12 @@ export class SourceAccountingStore {
       unitDecisions: input.unitDecisions ?? [],
     });
     const current = await this.read(input.source.id);
+    const sameBatch = current?.batchReviews.find((candidate) => candidate.batchId === input.batchId);
+    if (current?.sourceSha256 === input.source.contentSha256 && current.structureVersion === input.structure.structureVersion && sameBatch) {
+      const { reviewedAt: _oldTime, ...oldContent } = sameBatch;
+      const { reviewedAt: _newTime, ...newContent } = review;
+      if (canonicalJson(oldContent) === canonicalJson(newContent)) return current;
+    }
     const priorReviews = current
       && current.sourceSha256 === input.source.contentSha256
       && current.structureVersion === input.structure.structureVersion
@@ -276,8 +283,11 @@ export class SourceAccountingStore {
       const overlappingReviews = input.reviews.filter((review) =>
         rangesOverlap(reviewRange.startByte, reviewRange.endByte, review.startByte, review.endByte));
       if (overlappingReviews.length > 0
-        && overlappingReviews.every((review) => review.disposition === "no-artifacts")) {
-        issues.push(`Source unit ${decision.unitId} is inside a no-artifacts segment and is already host-classified as background-only.`);
+        && overlappingReviews.every((review) => review.disposition === "no-artifacts")
+        && decision.status !== "background-only") {
+        issues.push(decision.proposalId
+          ? `Source unit ${decision.unitId} is inside a no-artifacts segment and is already host-classified as background-only; withdraw source-accounting proposal '${decision.proposalId}'.`
+          : `Source unit ${decision.unitId} is inside a no-artifacts segment and is already host-classified as background-only; withdraw its model disposition.`);
       }
       const represented = [...evidenceSpans, ...annotationSpans].some((span) =>
         span.sourceId === input.structure.sourceId
@@ -337,6 +347,16 @@ export class SourceAccountingStore {
     return sourceAccountingProposalSchema.parse(JSON.parse(
       await fs.readFile(this.proposalPath(sourceId, status, proposalId), "utf8"),
     ));
+  }
+
+  /** Host-only, auditable re-proposal after a diagnosed erroneous withdrawal.
+   * The original remains rejected; the restored copy still requires finish. */
+  async reproposeRejected(sourceId: string, compilerBatchId: string, proposalId: string, replacementId: string, reason: string): Promise<void> {
+    const original = await this.readProposal(sourceId, "rejected", proposalId);
+    if (original.sourceId !== sourceId || original.compilerBatchId !== compilerBatchId) {
+      throw new Error("Accounting recovery source/batch mismatch; do not retry in another scope.");
+    }
+    await this.stageProposal({ ...original, id: replacementId, createdAt: new Date().toISOString(), restoredFrom: { proposalId, reason } });
   }
 
   async listBatchProposals(

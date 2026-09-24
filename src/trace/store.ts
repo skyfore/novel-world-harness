@@ -307,14 +307,24 @@ export class TraceStore {
 
   async getRun(runId: string): Promise<TraceRunManifest> {
     await this.initialize();
+    return this.peekRun(runId);
+  }
+
+  async peekRun(runId: string): Promise<TraceRunManifest> {
     return structuredClone((await this.requireRun(runId)).manifest);
   }
 
   async listRuns(filter: TraceRunFilter = {}): Promise<TraceRunManifest[]> {
     await this.initialize();
+    return this.peekRuns(filter);
+  }
+
+  async peekRuns(filter: TraceRunFilter = {}): Promise<TraceRunManifest[]> {
     const limit = filter.limit ?? 200;
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("Trace run limit must be an integer between 1 and 1000.");
-    const index = await this.readIndex();
+    let index: z.infer<typeof runIndexSchema>;
+    try { index = await this.readIndex(); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
     const selected = index.runs
       .filter((entry) => !filter.sourceId || entry.sourceId === filter.sourceId)
       .filter((entry) => !filter.playSessionId || entry.playSessionId === filter.playSessionId)
@@ -353,6 +363,10 @@ export class TraceStore {
 
   async readEvents(runId: string, afterSeq = 0): Promise<TraceEvent[]> {
     await this.initialize();
+    return this.peekEvents(runId, afterSeq);
+  }
+
+  async peekEvents(runId: string, afterSeq = 0): Promise<TraceEvent[]> {
     if (!Number.isInteger(afterSeq) || afterSeq < 0) throw new Error("Trace event cursor must be a non-negative integer.");
     const { relativePath } = await this.requireRun(runId);
     return (await this.readEventsAt(relativePath, runId)).filter((event) => event.seq > afterSeq);
@@ -380,6 +394,10 @@ export class TraceStore {
 
   async getBlob(reference: TraceBlobRef): Promise<unknown> {
     await this.initialize();
+    return this.peekBlob(reference);
+  }
+
+  async peekBlob(reference: TraceBlobRef): Promise<unknown> {
     const parsedRef = traceBlobRefSchema.parse(reference);
     const blob = storedBlobSchema.parse(JSON.parse(await fs.readFile(this.blobPath(parsedRef.sha256), "utf8")));
     if (blob.sha256 !== parsedRef.sha256 || blob.byteLength !== parsedRef.byteLength || blob.mediaType !== parsedRef.mediaType) {

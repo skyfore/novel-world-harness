@@ -1,3 +1,5 @@
+import type { ActiveGoalPressure } from "./goal-pressure.js";
+import { SCHEDULING_POLICY_VERSION, UNSPECIFIED_WORLD_PRESSURE } from "./scheduling-policy.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentHash } from "./canonical.js";
@@ -14,7 +16,7 @@ import type {
   StoryTime,
   WorldState,
 } from "./model.js";
-import { dueNormInstances, type NormTemplate } from "./norm-ontology.js";
+import { dueNormInstances, resolveEffectiveNormTemplates, type NormTemplate } from "./norm-ontology.js";
 import type { NormState } from "./norm-effects.js";
 import { dueProcessInstances, processOwnerEntityIds, type ProcessTemplate } from "./process-ontology.js";
 import type { ProcessState } from "./process-effects.js";
@@ -63,6 +65,11 @@ export type SchedulerCausalTrace = {
   detail: string;
 };
 export type SchedulerTrace = {
+  policyVersion?: typeof SCHEDULING_POLICY_VERSION;
+  pressureBasis?: "unspecified" | "due-mechanism" | "active-goal";
+  pressureGoals?: ActiveGoalPressure[];
+  dueMechanism?: { candidateHash: string };
+  sourceConfidence?: number;
   candidateSource: PossibilityKind;
   gates: SchedulerGateTrace[];
   causalLinks: SchedulerCausalTrace[];
@@ -80,6 +87,7 @@ export type EvaluatedPossibility = {
 export type FrontierTemporalMode = "current-window" | "advance";
 export type Frontier = {
   version: 2;
+  policyVersion?: typeof SCHEDULING_POLICY_VERSION;
   branchId: BranchId;
   commitId: CommitId;
   temporalMode: FrontierTemporalMode;
@@ -87,6 +95,9 @@ export type Frontier = {
 };
 
 type FrontierEvaluationOptions = {
+  activeGoalPressures?: ReadonlyMap<string, ActiveGoalPressure>;
+  /** Exact host-derived due candidates at this branch/head; never model input. */
+  dueMechanisms?: ReadonlyMap<string, Possibility>;
   realizedIds?: ReadonlySet<string>;
   adaptedIds?: ReadonlySet<string>;
   supersededIds?: ReadonlySet<string>;
@@ -132,11 +143,22 @@ export function evaluatePossibility(
     ));
   const satisfiedPreconditions = possibility.preconditions.filter((predicate) => evaluatePredicate(state, predicate)).length;
   const conditionStrength = possibility.preconditions.length ? satisfiedPreconditions / possibility.preconditions.length : 1;
-  const motivationalPressure = causalTrace.filter((item) => item.operationality === "motivational" && item.resolution === "fulfilled").length * 0.25;
+  const pressureGoals = [...(options.activeGoalPressures?.values() ?? [])].filter(goal =>
+    possibility.participants.includes(goal.actorId) && (
+      (possibility.sourceGoalId === goal.goalId && possibility.sourceActorId === goal.actorId)
+      || causalTrace.some(link => link.operationality === "motivational" && link.resolution === "fulfilled"
+        && link.goalIds?.includes(goal.goalId) && link.motivatedActorIds?.includes(goal.actorId))
+    )).sort((a, b) => a.goalId.localeCompare(b.goalId));
+  // Repeated relations cannot multiply the urgency of the same current goal.
+  const motivationalPressure = Math.max(0, ...pressureGoals.map(goal => goal.pressure));
+  const dueWitness = options.dueMechanisms?.get(possibility.id);
+  const verifiedDue = possibility.kind === "due-process" && dueWitness !== undefined
+    && contentHash(dueWitness) === contentHash(possibility);
+  const basePressure = verifiedDue ? 1 : UNSPECIFIED_WORLD_PRESSURE;
   const factors: SchedulerFactors = {
-    tier: schedulerTier(possibility, causalTrace, state.logicalTime.elapsedDays ?? 0),
-    dueTime: schedulerDueTime(possibility),
-    pressure: clampFactor(possibility.pressure + motivationalPressure),
+    tier: schedulerTier(possibility, causalTrace, verifiedDue),
+    dueTime: schedulerDueTime(possibility, verifiedDue),
+    pressure: clampFactor(Math.max(basePressure, motivationalPressure)),
     causalSupport,
     sceneRelevance: clampFactor(possibility.relevance),
     cooldownPenalty: clampFactor(options.cooldownPenalty ?? 0),
@@ -219,11 +241,21 @@ export function evaluatePossibility(
     reasons,
     factors,
     score,
-    trace: { candidateSource: possibility.kind, gates, causalLinks: causalTrace, tuple },
+    trace: {
+      policyVersion: SCHEDULING_POLICY_VERSION,
+      pressureBasis: verifiedDue ? "due-mechanism" : motivationalPressure > 0 ? "active-goal" : "unspecified",
+      ...(verifiedDue ? { dueMechanism: { candidateHash: contentHash(dueWitness) } } : {}),
+      ...(possibility.sourceConfidence === undefined ? {} : { sourceConfidence: possibility.sourceConfidence }),
+      pressureGoals,
+      candidateSource: possibility.kind, gates, causalLinks: causalTrace, tuple,
+    },
   };
 }
 
 export function buildFrontier(branchId: BranchId, commitId: CommitId, state: WorldState, templates: readonly Possibility[], options: {
+  activeGoalPressures?: ReadonlyMap<string, ActiveGoalPressure>;
+  /** Exact host-derived due candidates at this branch/head; never model input. */
+  dueMechanisms?: ReadonlyMap<string, Possibility>;
   realizedIds?: ReadonlySet<string>;
   adaptedIds?: ReadonlySet<string>;
   supersededIds?: ReadonlySet<string>;
@@ -240,6 +272,8 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
   const evaluated = templates.map((template) => {
     const possibility: Possibility = { ...template, branchId, evaluatedAtCommit: commitId };
     return evaluatePossibility(state, possibility, {
+      activeGoalPressures: options.activeGoalPressures,
+      dueMechanisms: options.dueMechanisms,
       realizedIds: options.realizedIds,
       adaptedIds: options.adaptedIds,
       supersededIds: options.supersededIds,
@@ -255,7 +289,7 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
   });
   propagateInvalidatedDescendants(evaluated);
   evaluated.sort(compareEvaluatedPossibilities);
-  return { version: 2, branchId, commitId, temporalMode: options.temporalMode ?? "current-window", evaluated };
+  return { version: 2, policyVersion: SCHEDULING_POLICY_VERSION, branchId, commitId, temporalMode: options.temporalMode ?? "current-window", evaluated };
 }
 
 export function deriveDuePossibilities(input: {
@@ -271,7 +305,8 @@ export function deriveDuePossibilities(input: {
   const possibilities: Possibility[] = [];
   for (const norm of dueNormInstances(input.norms, elapsedDays)) {
     const template = input.normTemplates.get(norm.templateId);
-    if (!template) continue;
+    if (!template || !resolveEffectiveNormTemplates(input.normTemplates.values(), input.state, norm.subjectActorId)
+      .some(item => item.template.id === template.id)) continue;
     const id = `due-norm-${contentHash({ normId: norm.id, dueAt: norm.dueAtElapsedDays }).slice(0, 24)}`;
     possibilities.push({
       id,
@@ -439,6 +474,7 @@ export class FrontierStore {
   async read(branchId: BranchId, commitId: CommitId, temporalMode: FrontierTemporalMode = "current-window"): Promise<Frontier | null> {
     try {
       const value = JSON.parse(await fs.readFile(this.filePath(branchId, commitId, temporalMode), "utf8")) as Frontier;
+      if (value.policyVersion !== SCHEDULING_POLICY_VERSION) return null;
       if (value.version !== 2 || value.branchId !== branchId || value.commitId !== commitId || value.temporalMode !== temporalMode) {
         throw new Error(`Invalid frontier cache for ${branchId}@${commitId}`);
       }
@@ -498,9 +534,8 @@ function hasStructuralCausalLink(possibility: Possibility): boolean {
   return causalLinksFor(possibility).some((link) => link.operationality === "necessary" || link.operationality === "contributory");
 }
 
-function schedulerTier(possibility: Possibility, causal: readonly SchedulerCausalTrace[], elapsedDays: number): SchedulerTier {
-  if (possibility.kind === "direct-response" || possibility.kind === "due-process"
-    || (possibility.dueAtElapsedDays !== undefined && possibility.dueAtElapsedDays <= elapsedDays)) return 0;
+function schedulerTier(possibility: Possibility, causal: readonly SchedulerCausalTrace[], verifiedDue: boolean): SchedulerTier {
+  if (possibility.kind === "direct-response" || verifiedDue) return 0;
   if (possibility.kind === "causal-consequence"
     || causal.some((item) => item.resolution === "fulfilled" && item.operationality === "necessary")) return 1;
   if (["player-choice", "actor-plan", "obligation"].includes(possibility.kind)) return 2;
@@ -508,8 +543,8 @@ function schedulerTier(possibility: Possibility, causal: readonly SchedulerCausa
   return 4;
 }
 
-function schedulerDueTime(possibility: Possibility): number | null {
-  if (possibility.dueAtElapsedDays !== undefined) return possibility.dueAtElapsedDays;
+function schedulerDueTime(possibility: Possibility, verifiedDue: boolean): number | null {
+  if (verifiedDue && possibility.dueAtElapsedDays !== undefined) return possibility.dueAtElapsedDays;
   return comparableStoryTime(possibility.candidateWindow)?.min ?? null;
 }
 

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildChapterStructureSample,
   ChapterSplitPlanStore,
@@ -10,12 +10,14 @@ import {
 } from "../src/compiler/chapter-split.js";
 import { prepareCompilerBatches, runCompilerBatches, selectOpeningCompilerBatch } from "../src/compiler/batches.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
+import { recoverCompilerFinish } from "../src/compiler/finish-recovery.js";
 import { SegmentStore } from "../src/compiler/segments.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -38,7 +40,7 @@ async function fixture(options: { preamble?: string } = {}) {
 }
 
 describe("agentic chapter split discovery", () => {
-  it("validates a sampled declarative rule and commits it only with the finish handshake", async () => {
+  it.each([false, true])("validates and recovers the chapter finish with interruption=%s", async (interrupted) => {
     const { root, source } = await fixture();
     const preliminary = await prepareCompilerBatches(root, source);
     expect(preliminary[0]).toMatchObject({ purpose: "structure-discovery", segmentIds: [] });
@@ -73,13 +75,17 @@ describe("agentic chapter split discovery", () => {
     });
 
     await expect(new ChapterSplitPlanStore(root).read(source.id)).resolves.toBeNull();
-    await expect(finish.execute("finish", {
+    if (interrupted) vi.spyOn(ChapterSplitPlanStore.prototype, "write").mockRejectedValueOnce(new Error("injected crash after derived manifest write"));
+    const completion = finish.execute("finish", {
       outcome: "no-artifacts",
       reviewed_segments: [],
       summary: "Validated the author chapter structure.",
-    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
-      details: { compilerBatchFinished: true, outcome: "no-artifacts" },
-    });
+    } as never, undefined, undefined, {} as ExtensionContext);
+    if (interrupted) {
+      await expect(completion).rejects.toThrow("injected crash");
+      await expect(new ChapterSplitPlanStore(root).read(source.id)).resolves.toBeNull();
+      await expect(recoverCompilerFinish(root, source.id, preliminary[0]!.id)).resolves.toBe(true);
+    } else await expect(completion).resolves.toMatchObject({ details: { compilerBatchFinished: true, outcome: "no-artifacts" } });
 
     await expect(new ChapterSplitPlanStore(root).read(source.id)).resolves.toMatchObject({
       mode: "custom",
@@ -105,16 +111,7 @@ describe("agentic chapter split discovery", () => {
       ]);
     }
 
-    const recovery = createCompilerProposalToolset(root);
-    await recovery.beginBatch([], regenerated[0]!.id, source.id);
-    const recoveryFinish = recovery.tools.find((tool) => tool.name === "finish_compiler_batch")!;
-    await expect(recoveryFinish.execute("recovery-finish", {
-      outcome: "no-artifacts",
-      reviewed_segments: [],
-      summary: "Recovered the already validated chapter plan.",
-    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
-      details: { compilerBatchFinished: true },
-    });
+    await expect(recoverCompilerFinish(root, source.id, regenerated[0]!.id)).resolves.toBe(true);
   });
 
   it("cannot finish or persist structure discovery without a validated decision", async () => {

@@ -1,3 +1,7 @@
+import { withDecisionScope } from "./decision-scope.js";
+import { agencySpeechEnvelope, type AgencyDecisionView } from "./agency-profile.js";
+import { conditionalExpressionUtterances } from "./conditional-expression.js";
+import type { SpokenUtterance } from "./model.js";
 import { actorOutcomeShape, copyActorOutcome, hasActorOutcome } from "./actor-outcome.js";
 import { z } from "zod";
 import { contentHash } from "./canonical.js";
@@ -27,6 +31,7 @@ import {
   buildActorScopedActionContext,
   createPlayerActionModelBoundary,
   playerActionCandidateSchema,
+  playerActionToKnowledgeAwareAction,
   playerIntentSchema,
   playerActionTranslationContext,
   validatePlayerActionGrounding,
@@ -267,6 +272,8 @@ export function modelActorProposalSource(
           goal,
           actorName: entity.canonicalName,
           candidate: compiled.candidate,
+          agency: scoped.decision?.agency,
+          ...(compiled.spokenUtterances?.length ? { spokenUtterances: compiled.spokenUtterances } : {}),
           ...(compiled.action ? { action: compiled.action } : {}),
           coordination: normalizeActorCoordination(goal.actorId, compiled.coordination),
           candidateSource: "compiled-action",
@@ -331,7 +338,7 @@ export function modelActorProposalSource(
       };
       let output: ActorActionTemplate | null;
       try {
-        output = await options.reasoner(immutableClone({
+        output = await withDecisionScope({ branchId, headCommitId: commitId, actorId: goal.actorId }, () => options.reasoner(immutableClone({
           actor,
           goal: {
             description: goal.description,
@@ -361,7 +368,7 @@ export function modelActorProposalSource(
               progressChannels: [...experience.progressChannels],
             })),
           },
-        }));
+        })));
       } catch {
         continue;
       }
@@ -397,6 +404,7 @@ export function modelActorProposalSource(
           goal,
           actorName: entity.canonicalName,
           candidate,
+          agency: scoped.decision?.agency,
           ...(action ? { action } : {}),
           coordination: normalizeActorCoordination(goal.actorId, coordination),
           candidateSource: "model-reasoner",
@@ -486,9 +494,12 @@ async function firstValidCompiledAction(input: {
   activeSourceId?: string;
   state: Awaited<ReturnType<WorldEngine["projector"]["project"]>>;
   scoped: ActorScopedActionContext;
-}): Promise<{ candidate: ReturnType<typeof playerActionCandidateSchema.parse>; action?: ActionInvocation; coordination?: ActorCoordination } | undefined> {
-  for (const action of [input.goal.candidateAction, ...(input.goal.actionPatterns ?? [])]) {
+}): Promise<{ candidate: ReturnType<typeof playerActionCandidateSchema.parse>; action?: ActionInvocation; coordination?: ActorCoordination; spokenUtterances?: SpokenUtterance[] } | undefined> {
+  const [context, projection] = await Promise.all([input.engine.contextForCommit(input.commitId), input.engine.projections.project(input.commitId)]);
+  for (const [actionIndex, action] of [input.goal.candidateAction, ...(input.goal.actionPatterns ?? [])].entries()) {
     if (!action || !action.preconditions.every((predicate) => evaluatePredicate(input.state, predicate))) continue;
+    const spokenUtterances = conditionalExpressionUtterances(input.goal, actionIndex, context, projection);
+    if (!spokenUtterances) continue;
     const candidate = playerActionCandidateSchema.parse({
       title: action.title,
       participants: action.participants ?? [],
@@ -501,14 +512,20 @@ async function firstValidCompiledAction(input: {
       requiresKnowledge: [],
       forbidsKnowledge: [],
     });
-    if (!candidateHasMaterialEffect(candidate)) continue;
+    if (!candidateHasMaterialEffect(candidate) && !spokenUtterances.length) continue;
+    const speechChannels = (input.scoped.decision?.agency?.channels ?? []).filter(channel => spokenUtterances.some(utterance =>
+      utterance.channelBinding?.channelId === channel.id && utterance.channelBinding.processId === channel.processId));
+    const onlyRemoteSpeech = spokenUtterances.length > 0 && spokenUtterances.every(utterance => Boolean(utterance.channelBinding))
+      && !action.timeAdvance && candidate.proposedDelta.operations.every(op => op.op === "set" && op.entityId === input.actorId && op.field === "character.plan")
+      && candidate.participants.every(id => id === input.actorId || speechChannels.some(channel => channel.peerEntityIds.includes(id) || channel.carrierEntityIds.includes(id)));
     const issues = [
       ...validatePlayerActionScope(candidate, input.scoped),
       ...validatePlayerActionGrounding(candidate, input.scoped),
-      ...await validatePlayerActionSpatialScope(input.engine, candidate, input.actorId, input.commitId, input.activeSourceId),
+      ...(onlyRemoteSpeech ? [] : await validatePlayerActionSpatialScope(input.engine, candidate, input.actorId, input.commitId, input.activeSourceId)),
     ];
     if (!issues.length) return {
       candidate,
+      ...(spokenUtterances.length ? { spokenUtterances } : {}),
       ...(action.action ? { action: structuredClone(action.action) } : {}),
       ...(action.coordination ? { coordination: structuredClone(action.coordination) } : {}),
     };
@@ -522,13 +539,22 @@ function actorCandidateFromAction(input: {
   goal: RuntimeActorGoal;
   actorName: string;
   candidate: ReturnType<typeof playerActionCandidateSchema.parse>;
+  agency?: AgencyDecisionView;
+  spokenUtterances?: SpokenUtterance[];
   action?: ActionInvocation;
   coordination: ActorCoordination;
   candidateSource: "compiled-action" | "model-reasoner";
   salience: ActorSalienceTrace;
   proposedTime?: ActorProposalCandidate["proposal"]["proposedTime"];
 }): ActorProposalCandidate {
-  const participants = [...new Set([input.goal.actorId, ...input.candidate.participants])];
+  const interaction = input.candidate.intent?.controlledAct?.interaction;
+  const transported = interaction || input.agency && input.candidateSource === "model-reasoner" || input.candidate.action?.lane === "schema-bound" && input.candidate.action.channelBinding
+    || input.candidate.proposedSemantics?.operations.some(op => op.op === "record-acquisition" && op.acquisition.basis.mode === "read" && "channelBinding" in op.acquisition.basis && op.acquisition.basis.channelBinding)
+    ? playerActionToKnowledgeAwareAction({ branchId: input.branchId, actorId: input.goal.actorId, expectedParentCommit: input.commitId,
+      utterance: input.candidate.intent?.summary ?? input.candidate.title, candidate: input.candidate, agency: input.agency }).proposal
+    : undefined;
+  const speechEnvelope = agencySpeechEnvelope(input.spokenUtterances ?? [], input.agency?.channels ?? []);
+  const participants = [...new Set([...(transported?.participants ?? [input.goal.actorId, ...input.candidate.participants]), ...(speechEnvelope?.participants ?? [])])];
   const causalRelations = input.goal.causalEventId ? [{
     fromEventId: input.goal.causalEventId,
     type: "motivates" as const,
@@ -551,6 +577,13 @@ function actorCandidateFromAction(input: {
       actorId: input.goal.actorId,
       title: input.candidateSource === "compiled-action" ? input.candidate.title : `Validated actor action by ${input.actorName}`,
       participants,
+      ...(transported ? { participantPresence: transported.participantPresence, actorObservations: transported.actorObservations,
+        ...(transported.spokenUtterances?.length ? { spokenUtterances: transported.spokenUtterances } : {}),
+        ...(transported.writtenMessages?.length ? { writtenMessages: transported.writtenMessages } : {}),
+        ...(transported.action ? { action: transported.action } : {}),
+      } : {}),
+      ...(speechEnvelope ? { participantPresence: speechEnvelope.participantPresence } : {}),
+      ...(input.spokenUtterances?.length ? { spokenUtterances: structuredClone(input.spokenUtterances) } : {}),
       proposedTime: input.proposedTime ?? { kind: "unknown" },
       preconditions: input.candidate.preconditions,
       proposedDelta: input.candidate.proposedDelta,
@@ -566,7 +599,7 @@ function actorCandidateFromAction(input: {
 }
 
 function candidateHasMaterialEffect(candidate: ReturnType<typeof playerActionCandidateSchema.parse>): boolean {
-  return hasActorOutcome(candidate) || candidate.proposedDelta.operations.length > 0
+  return candidate.intent?.controlledAct?.interaction?.kind === "speech" || candidate.intent?.controlledAct?.interaction?.kind === "text" || hasActorOutcome(candidate) || candidate.proposedDelta.operations.length > 0
     || (candidate.proposedKnowledge?.operations.length ?? 0) > 0 || Boolean(candidate.intent?.requestedTimeAdvance);
 }
 

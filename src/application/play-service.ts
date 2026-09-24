@@ -1,3 +1,5 @@
+import { withPlayModelBudget } from "../runtime/play-model-budget.js";
+import { currentRuntimeHooks } from "../runtime/hooks.js";
 import crypto from "node:crypto";
 import path from "node:path";
 import { createPiCanonicalAttachmentResolver } from "../agent/pi-canonical-attachment.js";
@@ -40,7 +42,7 @@ import {
 } from "../world/play-experience.js";
 import { choosePlayExperience } from "../world/play-choice.js";
 import {
-  assertPlaySceneNarration,
+  settlePlaySceneNarration,
   buildPlayOpeningFrame,
   playSceneRequestForEntry,
   playerRuntimeContextFrame,
@@ -790,6 +792,16 @@ export class PlayApplicationService {
     recorder: TraceRecorder,
     playerMoveId: string,
   ): Promise<PlayOperationResult> {
+    return withPlayModelBudget(() => currentRuntimeHooks().run("user.input", "play.input", { workspaceRoot: this.root, sessionId }, () => this.runPlayerMoveInternal(sessionId, input, context, recorder, playerMoveId)), { newScope: true, id: playerMoveId });
+  }
+
+  private async runPlayerMoveInternal(
+    sessionId: string,
+    input: PlayMoveRequest,
+    context: OperationRunContext,
+    recorder: TraceRecorder,
+    playerMoveId: string,
+  ): Promise<PlayOperationResult> {
     const session = await this.requireWritableSession(sessionId);
     await this.assertExpectedHead(session, input.expectedHead);
     await this.sessions.activate(session.id);
@@ -1105,6 +1117,20 @@ export class PlayApplicationService {
     turnResolution?: PlayerTurnResolution,
     runtimeContext?: RuntimeContextSupplement,
   ): Promise<NarrationOutcome> {
+    return withPlayModelBudget(() => currentRuntimeHooks().run("play.response", "play.narrate", { workspaceRoot: this.root, sessionId: session.id, branchId: session.branchId, purpose }, () => this.narrateInternal(session, purpose, context, narrator, recorder, traceContext, playerMoveId, turnResolution, runtimeContext)));
+  }
+
+  private async narrateInternal(
+    session: ActivePlaySession,
+    purpose: PlayScenePurpose,
+    context: OperationRunContext,
+    narrator: PlayerOpeningNarrator,
+    recorder: TraceRecorder,
+    traceContext: TraceContext,
+    playerMoveId?: string,
+    turnResolution?: PlayerTurnResolution,
+    runtimeContext?: RuntimeContextSupplement,
+  ): Promise<NarrationOutcome> {
     context.signal.throwIfAborted();
     context.update("building-scene", { purpose });
     let frame: PlayOpeningFrame = await buildPlayOpeningFrame(
@@ -1132,19 +1158,22 @@ export class PlayApplicationService {
           signal: context.signal,
           onAttempt: (attempt) => context.update("narrating", { purpose, attempt }),
           onRetry: (message) => context.update("narration-retry", { purpose, statusText: message }),
-          onText: (delta) => this.options.events.publish("play.narration.delta", {
-            sessionId: session.id,
-            branchId: session.branchId,
-            delta,
-          }, { operationId: context.operationId, runId: recorder.manifest.id }),
+          // Adapters may emit drafts; publish only after validating their complete output.
+          onText: () => undefined,
         },
         modelPlayConversation(frame.messageHistory),
       );
       context.signal.throwIfAborted();
-      const narration = assertPlaySceneNarration(
-        typeof output === "string" ? output : output.narration,
+      const narration = settlePlaySceneNarration(
+        output,
         { frame: playerSceneModelFrame(frame, purpose), purpose },
       );
+      this.options.events.publish("play.narration.delta", {
+        sessionId: session.id,
+        branchId: session.branchId,
+        delta: narration,
+        validated: true,
+      }, { operationId: context.operationId, runId: recorder.manifest.id });
       const narratedChoices = typeof output === "string"
         ? []
         : parsedNarratedChoices(output.choices);

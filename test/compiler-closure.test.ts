@@ -97,3 +97,18 @@ it("tracks entry seed dependencies without treating seed-local semantic identiti
   input.canonical.initialWorld.knowledge!.operations[0] = { ...input.canonical.initialWorld.knowledge!.operations[0], claimId: "unintroduced-claim" } as never;
   expect(buildPreparedClosure(input).issues).toContainEqual(expect.objectContaining({ message: expect.stringContaining("claim/unintroduced-claim") }));
 });
+
+it("keeps quotation speaker and discourse viewpoint references in the typed dependency closure", () => {
+  const input = bundle();
+  input.compilerSnapshot.annotations.push({ id: "quote", annotationType: "quotation", speakerMentionId: "missing-speaker", addresseeMentionIds: ["mention"] } as never);
+  input.compilerSnapshot.annotations.push({ id: "scene", annotationType: "discourse-segment", anchors: [], viewpointMentionId: "missing-viewpoint" } as never);
+  const graph = buildPreparedClosure(input);
+  expect(graph.nodes.find(node => node.kind === "annotation" && node.id === "quote")!.dependsOn).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: "annotation", id: "missing-speaker", uses: [{ pointer: "/speakerMentionId", purpose: "evidence-support" }] }),
+    expect.objectContaining({ kind: "annotation", id: "mention" }),
+  ]));
+  expect(graph.issues).toEqual(expect.arrayContaining([
+    expect.objectContaining({ code: "CLOSURE_DANGLING_REFERENCE", message: expect.stringContaining("annotation/missing-speaker") }),
+    expect.objectContaining({ code: "CLOSURE_DANGLING_REFERENCE", message: expect.stringContaining("annotation/missing-viewpoint") }),
+  ]));
+});

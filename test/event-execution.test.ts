@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { z } from "zod";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -14,6 +15,12 @@ import { compilerToolAllowedInSemanticStage } from "../src/compiler/proposal-too
 import { deriveAdHocAction } from "../src/world/action-invocation.js";
 
 const roots: string[] = [];
+
+it("advertises only schema-bound action bindings in the provider JSON schema", () => {
+  const schema = z.toJSONSchema(eventExecutionSchema) as { properties: { action: { properties: { lane: { const: string } } } } };
+  expect(schema.properties.action.properties.lane.const).toBe("schema-bound");
+  expect(eventExecutionSchema.shape.action.safeParse({ lane: "ad-hoc", actionKindId: "drive", description: "Driving", footprint: { reads: [], writes: [], resources: [] } }).success).toBe(false);
+});
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
 it("links a later executable proposal to an earlier immutable semantic event and freezes the linkage in replay context", async () => {

@@ -16,6 +16,8 @@ import { CompilerCommitService } from "../src/compiler/validator.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import type { CanonicalEvent } from "../src/world/model.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { CompilerFinishReceipts } from "../src/compiler/finish-receipts.js";
+import { recoverCompilerFinish } from "../src/compiler/finish-recovery.js";
 
 const roots: string[] = [];
 const context = {} as ExtensionContext;
@@ -245,9 +247,7 @@ describe("event mention resolution", () => {
       relation: "coreference",
     }) as never, undefined, undefined, context);
     await finishOnly(toolset, fixture.segmentId, "Resolved the participant and event occurrence explicitly.");
-    const retry = createCompilerProposalToolset(root, { provider: "test", model: "event-resolution-model" });
-    await retry.beginBatch([fixture.segmentId], batchId, fixture.source.id);
-    await finishOnly(retry, fixture.segmentId, "Recovered the already committed resolution handshake.");
+    await expect(recoverCompilerFinish(root, fixture.source.id, batchId)).resolves.toBe(true);
     await expect(new CanonicalModelStore(root).listEvents()).resolves.toEqual([]);
     await expect(new CompilerCommitService(root).accept("canonical-event", "proposal-event-open-gate"))
       .resolves.toMatchObject({ accepted: true, errors: [] });
@@ -339,6 +339,8 @@ describe("event mention resolution", () => {
 
     const resolutions = new EventResolutionStore(root);
     await expect(resolutions.listRecoverableBatchProposals(sourceId, originBatch)).resolves.toEqual([]);
+    await expect(recoverCompilerFinish(root, sourceId, originBatch)).rejects.toThrow("host review");
+    await new CompilerFinishReceipts(root, sourceId, originBatch).archive("Explicit recompile of a superseded synthetic batch");
     await expect(resolutions.list(sourceId)).resolves.toEqual([
       expect.objectContaining({ id: "resolution-rain-later", status: "resolved" }),
     ]);

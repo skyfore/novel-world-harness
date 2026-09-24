@@ -7,6 +7,9 @@ import { WorkspaceStore } from "../storage/workspace-store.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { PreparedNovelCache, type PreparedCacheResult } from "./prepared-cache.js";
 import { assertSourceIsNotProjectInstruction } from "../workspace/instruction-trust.js";
+import { CompilerFinishReceipts } from "./finish-receipts.js";
+import { recoverCompilerFinish } from "./finish-recovery.js";
+import { CompilerProposalObligations } from "./proposal-obligations.js";
 
 const AUTO_SOURCE_EXTENSIONS = new Set([".txt", ".text", ".novel", ".md", ".markdown"]);
 
@@ -105,7 +108,12 @@ export async function markSourceLoopBatchComplete(
   workspaceRoot: string,
   sourceId: string,
   batchId: string,
+  options: { requireFinishReceipt?: boolean } = {},
 ): Promise<void> {
+  if (options.requireFinishReceipt) {
+    new CompilerProposalObligations(workspaceRoot, sourceId, batchId).assertFinishable();
+    await new CompilerFinishReceipts(workspaceRoot, sourceId, batchId).assertCompleted();
+  }
   await new CompilerBatchStore(workspaceRoot).markComplete(sourceId, batchId);
 }
 
@@ -118,6 +126,14 @@ async function prepareSourceLoopForSource(
   const completed = new Set(progress.completedBatchIds);
   const batch = batches.find((candidate) => !completed.has(candidate.id));
   if (!batch) return { status: "complete", source, totalBatches: batches.length };
+  // The TUI caller owns the compiler lock. Recover the saved host operation
+  // before offering another model turn over this source scope.
+  if (await recoverCompilerFinish(workspaceRoot, source.id, batch.id)) {
+    await markSourceLoopBatchComplete(workspaceRoot, source.id, batch.id, { requireFinishReceipt: true });
+    const refreshed = await WorkspaceStore.openReadOnly(workspaceRoot).getSource(source.id);
+    return prepareSourceLoopForSource(workspaceRoot, refreshed ?? source);
+  }
+  new CompilerProposalObligations(workspaceRoot, source.id, batch.id).assertModelRecoveryAllowed();
   const hydratedBatch = await hydrateCompilerBatch(workspaceRoot, batch);
 
   const completedBatches = batches.filter((candidate) => completed.has(candidate.id)).length;

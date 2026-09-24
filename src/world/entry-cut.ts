@@ -1,3 +1,4 @@
+import { TemporalConstraints } from "./temporal-constraints.js";
 import { contentHash } from "./canonical.js";
 import type { CanonicalEvent, EventRelation, StoryTime, ValidationIssue } from "./model.js";
 import { compareStoryTime } from "./time.js";
@@ -31,26 +32,11 @@ export function deriveEntryCut(input: {
     const [a, b] = [root(relation.fromEventId), root(relation.toEventId)].sort();
     if (a && b) canonical.set(b, a);
   }
-  const edges = new Map<string, Set<string>>();
-  for (const relation of input.relations.filter((x) => x.status !== "contested" && ["before", "after"].includes(x.type))) {
-    const [a, b] = relation.type === "before" ? [relation.fromEventId, relation.toEventId] : [relation.toEventId, relation.fromEventId];
-    const from = root(a), to = root(b);
-    if (!edges.has(from)) edges.set(from, new Set());
-    edges.get(from)!.add(to);
-  }
-  const precedes = (a: string, b: string): boolean => {
-    const pending = [...(edges.get(root(a)) ?? [])], seen = new Set<string>();
-    while (pending.length) {
-      const next = pending.pop()!;
-      if (next === root(b)) return true;
-      if (seen.has(next)) continue;
-      seen.add(next); pending.push(...(edges.get(next) ?? []));
-    }
-    return false;
-  };
+  const temporal = new TemporalConstraints(events, input.relations);
+  const precedes = (a: string, b: string) => temporal.definitelyBefore(root(a), root(b));
   const boundaryTime = input.storyTime ?? (input.beforeEventId ? events.get(input.beforeEventId)?.storyTime : undefined);
   const baselineTime = input.baselineTime ?? (input.baselineEventId ? events.get(input.baselineEventId)?.storyTime : undefined);
-  const issues: ValidationIssue[] = [];
+  const issues: ValidationIssue[] = temporal.issues.map(issue => ({ ...issue, code: "ENTRY_TIME_CONFLICT" }));
   const groups = new Map<string, CanonicalEvent[]>();
   for (const event of input.events) {
     const id = root(event.id);
@@ -75,7 +61,7 @@ export function deriveEntryCut(input: {
     if (before || ordering === -1) {
       completed.push(event);
       const baselineOrder = compareStoryTime(event.storyTime, baselineTime);
-      if (!input.completeCheckpoint && (baselineOrder === 0 || baselineOrder === 1 || input.baselineEventId && precedes(input.baselineEventId, event.id))) replay.push(event);
+      if (!input.completeCheckpoint && (baselineOrder === 0 || baselineOrder === 1 || input.baselineEventId && (root(input.baselineEventId) === root(event.id) || precedes(input.baselineEventId, event.id)))) replay.push(event);
       else if (!input.completeCheckpoint && baselineOrder === undefined && material(event)) {
         ambiguous.push(event.id); issues.push({ code: "ENTRY_BASELINE_UNKNOWN", message: `Cannot place ${event.id} relative to the opening seed` });
       }
@@ -88,7 +74,8 @@ export function deriveEntryCut(input: {
   if (!input.completeCheckpoint && compareStoryTime(boundaryTime, baselineTime) === -1) {
     issues.push({ code: "ENTRY_HISTORICAL_SEED_REQUIRED", message: "Historical entry requires a complete pre-event checkpoint; a later opening cannot seed its past" });
   }
-  replay.sort((a, b) => precedes(a.id, b.id) ? -1 : precedes(b.id, a.id) ? 1 : compareStoryTime(a.storyTime, b.storyTime) ?? a.id.localeCompare(b.id));
+  const replayRanks = new Map(temporal.order(replay.map(event => event.id)).map((id, index) => [id, index]));
+  replay.sort((a, b) => replayRanks.get(a.id)! - replayRanks.get(b.id)!);
   const lastWrite = new Map<string, CanonicalEvent>();
   for (const event of replay) for (const op of event.observedOutcome.operations) {
     const address = "entityId" in op ? `${op.entityId}/${op.field}` : `rule/${op.ruleId}`;

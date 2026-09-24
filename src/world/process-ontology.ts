@@ -17,6 +17,7 @@ import type { ProcessInstance, ProcessState } from "./process-effects.js";
 import { actionPatternSchema, constraintPredicateSchema } from "./action-constraint.js";
 import { mechanismVisibilityFields, validateMechanismVisibility } from "./mechanism-visibility.js";
 
+export const INCAPACITY_PROCESS_VERSION = "incapacity-process-v1" as const;
 export const PROCESS_ONTOLOGY_VERSION = "process-template-v1" as const;
 
 export const processPhaseSchema = z.object({
@@ -65,6 +66,11 @@ export const processTemplateSchema = z.object({
   initialPhaseId: idSchema,
   transitions: z.array(processTransitionSchema).min(1).max(128),
   actorControls: z.array(processActorControlSchema).max(128).optional(),
+  incapacity: z.object({
+    version: z.literal(INCAPACITY_PROCESS_VERSION),
+    ownerRoleId: idSchema, capacity: z.enum(["action", "speech", "perception"]), recoveryPhaseId: idSchema,
+    duration: z.discriminatedUnion("kind", [z.object({ kind: z.literal("unknown") }).strict(), z.object({ kind: z.literal("days"), days: z.number().finite().positive() }).strict()]),
+  }).strict().optional(),
   cadence: z.object({ kind: z.literal("elapsed-days"), intervalDays: z.number().finite().positive() }).strict().optional(),
   outcomeIds: z.array(idSchema).min(1).max(64),
   visibility: z.enum(["public", "observable", "knowledge", "engine"]),
@@ -76,6 +82,14 @@ export const processTemplateSchema = z.object({
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
   validateMechanismVisibility(value, ctx);
+  if (value.incapacity) {
+    const condition = value.incapacity, owner = value.ownerRoles.find(role => role.id === condition.ownerRoleId);
+    if (!owner || owner.allowedEntityKinds.length !== 1 || owner.allowedEntityKinds[0] !== "character" || owner.minCardinality !== 1 || owner.maxCardinality !== 1) ctx.addIssue({ code: "custom", path: ["incapacity", "ownerRoleId"], message: "Incapacity requires exactly one character owner" });
+    if (value.phases.length !== 2 || !value.phases.find(phase => phase.id === condition.recoveryPhaseId)?.terminal) ctx.addIssue({ code: "custom", path: ["incapacity"], message: "Registered incapacity uses onset and recovered phases" });
+    if (condition.duration.kind === "unknown" && (value.cadence || value.transitions.some(transition => transition.onDue))) ctx.addIssue({ code: "custom", path: ["incapacity", "duration"], message: "Unknown incapacity duration cannot invent cadence or timed recovery" });
+    if (condition.duration.kind === "days" && (value.cadence?.intervalDays !== condition.duration.days || !value.transitions.some(transition => transition.fromPhaseId === value.initialPhaseId && transition.toPhaseId === condition.recoveryPhaseId && transition.onDue?.advanceBy === 1 && transition.onDue.outcomeId))) ctx.addIssue({ code: "custom", path: ["incapacity", "duration"], message: "Known incapacity duration requires the exact recovery cadence and terminal due outcome" });
+    if (value.actorControls?.some(control => control.actionPattern.kind !== "schema" || control.op === "pause-process" || control.op === "resume-process")) ctx.addIssue({ code: "custom", path: ["actorControls"], message: "Incapacity changes require schema actions bound to the same owner role; pausing a process is not recovery" });
+  }
   for (const [path, ids] of [
     ["ownerRoles", value.ownerRoles.map((item) => item.id)],
     ["phases", value.phases.map((item) => item.id)],
@@ -161,6 +175,7 @@ export function materializeProcessProposal(
           id,
           ...structuredClone(operation.process),
           phaseId: operation.process.phaseId ?? template.initialPhaseId,
+          ...(template.incapacity ? { startedAtElapsedDays: options.elapsedDays } : {}),
           ...(operation.process.dueAtElapsedDays !== undefined
             ? { dueAtElapsedDays: operation.process.dueAtElapsedDays }
             : template.cadence
@@ -199,6 +214,10 @@ export function validateProcessTemplateCatalog(
     template.actorControls?.forEach((control, controlIndex) => {
       const path = `processTemplates.${templateIndex}.actorControls.${controlIndex}`;
       if (catalog && control.actionPattern.kind === "schema" && !catalog.actionSchemas.has(control.actionPattern.schemaId)) issues.push(issue("UNKNOWN_PROCESS_CONTROL_ACTION", `Unknown process action ${control.actionPattern.schemaId}`, path));
+      if (catalog && template.incapacity && control.actionPattern.kind === "schema") {
+        const owner = catalog.actionSchemas.get(control.actionPattern.schemaId)?.roles.find(role => role.id === template.incapacity!.ownerRoleId);
+        if (!owner || owner.minCardinality !== 1 || owner.maxCardinality !== 1 || owner.allowedEntityKinds.length !== 1 || owner.allowedEntityKinds[0] !== "character") issues.push(issue("INCAPACITY_CONTROL_OWNER_MISMATCH", "Recovery action must bind the same single character owner role; stop for source-supported mechanism review", path));
+      }
       const inspect = (predicate: import("./action-constraint.js").ConstraintPredicate): void => {
         if (predicate.op === "all" || predicate.op === "any") return predicate.items.forEach(inspect);
         if (predicate.op === "not") return inspect(predicate.item);

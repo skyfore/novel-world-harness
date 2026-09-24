@@ -105,7 +105,9 @@ export const traceEventSchema = z.object({
   spanId: traceIdentifierSchema,
   parentSpanId: traceIdentifierSchema.optional(),
   callId: traceIdentifierSchema.optional(),
-  toolCallId: traceIdentifierSchema.optional(),
+  // Provider-owned opaque correlation IDs are not filesystem identifiers.
+  // Responses providers can join call/item IDs with characters such as '|'.
+  toolCallId: z.string().min(1).optional(),
   storyTime: z.unknown().optional(),
   data: z.record(z.string(), z.unknown()).optional(),
   blobRef: traceBlobRefSchema.optional(),

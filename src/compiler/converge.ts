@@ -1,3 +1,4 @@
+import { observeUpstreamRepairConvergence } from "./upstream-repair-convergence.js";
 import { ProposalStore } from "../world/canonical-model.js";
 import type { ValidationIssue } from "../world/model.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -5,6 +6,7 @@ import { CompilerCommitService, type BatchAcceptResult } from "./validator.js";
 import { PossibilityCommitService, type PossibilityValidation } from "./possibility-commit.js";
 import { EntityResolutionStore, inspectEntityResolutionCoverage } from "./entity-resolution.js";
 import { EventResolutionStore, inspectEventResolutionCoverage } from "./event-resolution.js";
+import { observeRequirementValidity } from "./requirement-observation.js";
 
 export type WorldProposalConvergence = {
   sourceId?: string;
@@ -14,6 +16,8 @@ export type WorldProposalConvergence = {
     blocked: Array<{ id: string; errors: PossibilityValidation["errors"] }>;
   };
   staging: Array<{ id: string; kind: string }>;
+  requirementValidityIssues?: string[];
+  upstreamRepairIssues?: string[];
 };
 
 export type QuarantinedProposal = { id: string; kind: string };
@@ -65,6 +69,10 @@ export async function convergeWorldProposals(
       .filter((item) => item.kind !== "possibility" && !blockedCanonicalIds.has(item.id))
       .map((item) => ({ id: item.id, kind: item.kind })),
   };
+  // Also runs on an empty retry after interruption between commit and observation.
+  // Canonical inputs can be shared, so conservatively inspect all retained sources.
+  const upstreamRepairIssues = await observeUpstreamRepairConvergence(workspaceRoot);
+  const requirementValidityIssues = await observeRequirementValidity(workspaceRoot);
   options.onProgress?.({
     phase: "complete",
     processed: canonical.accepted.length + canonical.blocked.length + possibilityProposals.length,
@@ -72,7 +80,7 @@ export async function convergeWorldProposals(
     accepted: canonical.accepted.length + accepted.length,
     blocked: canonical.blocked.length + blocked.length,
   });
-  return result;
+  return { ...result, ...(upstreamRepairIssues.length ? { upstreamRepairIssues } : {}), ...(requirementValidityIssues.length ? { requirementValidityIssues } : {}) };
 }
 
 export async function quarantineUncommittableProposals(

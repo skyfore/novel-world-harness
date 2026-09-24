@@ -4,7 +4,7 @@ import path from "node:path";
 import { worldStorageRoot } from "../world/paths.js";
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 33;
+export const COMPILER_PIPELINE_VERSION = 50;
 const SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION = 30;
 
 export type BatchProgress = {
@@ -36,18 +36,13 @@ export class CompilerBatchStore {
     if (!parsed) {
       return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };
     }
-    if (parsed.pipelineVersion === SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION) {
-      // Pipelines 31/32 move scene construction beside canonical events and
-      // bind their executable mechanisms. Structure discovery and the
-      // source-observation inventory are byte-identical in pipeline 30, so
-      // preserve only those checkpoints instead of paying to recreate them.
-      return {
-        ...parsed,
-        pipelineVersion: COMPILER_PIPELINE_VERSION,
-        completedBatchIds: parsed.completedBatchIds.filter((batchId) =>
-          batchId.startsWith(`structure-${sourceId}-`)
-          || (batchId.startsWith(`batch-${sourceId}-`) && batchId.includes("-observation-"))),
-      };
+    if (typeof parsed.pipelineVersion === "number" && [SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48].includes(parsed.pipelineVersion)) {
+      // Pipeline 49 also requires later remote-entry checkpoint and occurrence evidence. Preserve immutable byte
+      // observations only; earlier semantic/executable checkpoints cannot
+      // prove the new contract. The original persisted history is untouched.
+      return { ...parsed, pipelineVersion: COMPILER_PIPELINE_VERSION,
+        completedBatchIds: parsed.completedBatchIds.filter(id =>
+          id.startsWith(`structure-${sourceId}-`) || (id.startsWith(`batch-${sourceId}-`) && id.includes("-observation-"))) };
     }
     if (parsed.pipelineVersion !== COMPILER_PIPELINE_VERSION) {
       return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };

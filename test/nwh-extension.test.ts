@@ -1527,21 +1527,17 @@ describe("NWH TUI extension", () => {
     const entering = commands.get("play")!.handler("hero main", ctx);
     await started.promise;
 
-    expect(streams[0]?.updates.at(-1)?.content).toContainEqual(expect.objectContaining({
-      type: "text",
-      text: "黄昏的微光沿着门边慢慢退去",
-    }));
+    expect(streams).toEqual([]); // No partial provider draft reaches the UI.
     expect(widgetKeys).not.toContain("nwh-player-scene-stream");
     expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
 
     release.resolve();
     await entering;
 
-    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
-    expect(streams).toHaveLength(1);
-    expect(streams[0]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: finalNarration }));
-    expect(streams[0]?.committed).toMatchObject({ customType: "nwh-narrator" });
-    expect(streams[0]?.disposed).toBe(false);
+    expect(streams).toEqual([]);
+    expect(sentMessages.filter(message => message.customType === "nwh-narrator")).toEqual([
+      expect.objectContaining({ content: finalNarration, display: true }),
+    ]);
   });
 
   it("returns from session_start before generating a restored world's scene", async () => {
@@ -2026,7 +2022,7 @@ describe("NWH TUI extension", () => {
     expect(await engine.branches.readHead("main")).toBe(genesis);
   });
 
-  it("renders native narrator text and thinking deltas and persists exactly the streamed final text", async () => {
+  it("withholds native text and thinking drafts and publishes only validated final text", async () => {
     const narration = "雨声沿着屋檐一寸寸落下，福贵站在昏暗的门槛前。眼前能确认的痕迹都留在湿润光线里，远处的动静却还没有给出答案。檐角最后一滴水砸进石缝，门内随即传来衣料擦过木板的窸窣声。";
     const { commands, root, sentMessages } = await fixture(
       undefined,
@@ -2105,27 +2101,12 @@ describe("NWH TUI extension", () => {
     await commands.get("play")!.handler("hero main", ctx);
 
     expect(widgetKeys).not.toContain("nwh-player-scene-stream");
-    expect(statuses.join("\n")).toContain("faux/faux-1");
-    expect(streams).toHaveLength(1);
-    expect(streams[0]?.events.map((event) => event.type)).toEqual([
-      "thinking_delta",
-      "thinking_end",
-      "text_delta",
-      "thinking_delta",
-      "thinking_end",
-    ]);
-    expect(streams[0]?.updates.at(-1)?.content).toContainEqual(expect.objectContaining({ type: "text", text: narration }));
-    expect(streams[0]?.completed?.content).toContainEqual(expect.objectContaining({
-      type: "thinking",
-      thinking: "工具返回后确认停止，不再重复正文",
-    }));
-    expect(streams[0]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: narration }));
-    expect(streams[0]?.committed).toMatchObject({ customType: "nwh-narrator" });
-    expect(streams[0]?.disposed).toBe(false);
-    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
+    expect(streams).toEqual([]);
+    expect(sentMessages).toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: narration }));
+    expect(JSON.stringify(sentMessages)).not.toContain("工具返回后确认停止");
   });
 
-  it("disposes a rejected scene stream before mounting the replacement attempt", async () => {
+  it("never displays a rejected rendering before publishing its validated replacement", async () => {
     const rejected = "首稿只是一段不足以成立的场景。";
     const accepted = "夜色压低了远处的轮廓，福贵仍站在原来的位置。近处能够确认的声音和光线都属于此刻，墙上的影子随着灯芯轻轻摇晃。门外传来一声鞋底碾过碎石的脆响，随后停在离门槛很近的地方。";
     const { commands, root, sentMessages } = await fixture(
@@ -2176,16 +2157,14 @@ describe("NWH TUI extension", () => {
 
     await commands.get("play")!.handler("hero main", ctx);
 
-    expect(streams).toHaveLength(2);
-    expect(streams[0]).toMatchObject({ disposed: true });
-    expect(streams[1]).toMatchObject({ disposed: false });
-    expect(streams[1]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: accepted }));
-    expect(streams[1]?.committed).toMatchObject({ customType: "nwh-narrator" });
-    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
+    expect(streams).toEqual([]);
+    expect(sentMessages.filter(message => message.customType === "nwh-narrator")).toEqual([
+      expect.objectContaining({ content: accepted }),
+    ]);
     expect(sentMessages).not.toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: rejected }));
   });
 
-  it("rejects a settled narrator result that differs from the native text stream", async () => {
+  it("publishes validated settled text while discarding a different unconfirmed native draft", async () => {
     const streamed = "雨停在门槛之外，福贵能听见檐角最后几滴水落下。屋里没有新的事实凭空出现，眼前仍只有已经看见的门和微暗的光。靠近门轴的位置泛着一线湿亮，木板另一侧忽然传来短促的呼吸声。";
     const settled = "福贵站在门槛内侧，雨后的冷意沿着木纹缓慢渗进屋里。檐角的水滴已经停住，门轴附近那线湿亮却仍在微光中发颤。木板另一侧没有脚步离去的声音，只有一道短促呼吸贴着门缝落下。";
     const { commands, root, sentMessages } = await fixture(
@@ -2226,8 +2205,11 @@ describe("NWH TUI extension", () => {
 
     await commands.get("play")!.handler("hero main", ctx);
 
-    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
-    expect(notifications).toContainEqual(expect.stringContaining("did not match the text shown in the live provider stream"));
+    expect(sentMessages.filter(message => message.customType === "nwh-narrator")).toEqual([
+      expect.objectContaining({ content: settled }),
+    ]);
+    expect(sentMessages).not.toContainEqual(expect.objectContaining({ content: streamed }));
+    expect(notifications.some(message => message.includes("Scene narration failed"))).toBe(false);
   });
 
   it("keeps free-form input available beside grounded host choices and routes it through the normal player gate", async () => {
@@ -2840,7 +2822,7 @@ describe("NWH TUI extension", () => {
   });
 
   it("continues with the next compiler batch automatically during /prepare-all", async () => {
-    const { commands, events, root, sentHiddenMessages } = await fixture();
+    const { commands, events, root, sentHiddenMessages, registeredToolDefinitions } = await fixture();
     const content = Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n");
     const evidence = await createEvidenceFixture(root, content, "all-batches.txt");
     const notifications: string[] = [];
@@ -2862,6 +2844,7 @@ describe("NWH TUI extension", () => {
       reviewed_segments: segmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No supported facts." })),
       summary: "No supported facts.",
     };
+    await registeredToolDefinitions.get("finish_compiler_batch")!.execute("finish-all", finishInput as never, undefined, undefined, ctx);
     await events.get("agent_end")?.({
       type: "agent_end",
       messages: [
@@ -2978,8 +2961,8 @@ describe("NWH TUI extension", () => {
     expect(notifications).toContainEqual(expect.stringContaining(`nwh audit --source ${evidence.source.id}`));
   });
 
-  it("checkpoints a successful compiler batch before /compile-next advances", async () => {
-    const { commands, events, root, sentUserMessages, sentHiddenMessages, getActiveTools } = await fixture();
+  it.each([true, false])("requires a durable finish before /compile-next advances (receipt=%s)", async (durable) => {
+    const { commands, events, root, sentUserMessages, sentHiddenMessages, getActiveTools, registeredToolDefinitions } = await fixture();
     const novelPath = path.join(root, "long-novel.txt");
     await fs.writeFile(
       novelPath,
@@ -3002,12 +2985,14 @@ describe("NWH TUI extension", () => {
       { type: "input", text: novelPath, source: "interactive" } as InputEvent,
       ctx as unknown as ExtensionContext,
     );
+    const prompt = await events.get("before_agent_start")?.({ type: "before_agent_start", prompt: "compile", systemPrompt: "system", systemPromptOptions: {} });
+    const segmentIds = [...String((prompt as { message?: { content?: string } } | undefined)?.message?.content).matchAll(/<source-segment id="([^"]+)">/g)].map((match) => match[1]!);
+    const finishInput = { outcome: "no-artifacts", reviewed_segments: segmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "Reviewed fixture source" })), summary: "Reviewed fixture source" };
+    if (durable) await registeredToolDefinitions.get("finish_compiler_batch")!.execute("finish-1", finishInput as never, undefined, undefined, ctx);
     await events.get("agent_end")?.({
       type: "agent_end",
       messages: [
-        { role: "assistant", content: [{ type: "toolCall", id: "proposal-1", name: "propose_entity", arguments: { proposal_id: "entity-1" } }], stopReason: "toolUse" },
-        { role: "toolResult", toolCallId: "proposal-1", toolName: "propose_entity", content: [], isError: false },
-        { role: "assistant", content: [{ type: "toolCall", id: "finish-1", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["entity-1"], summary: "done" } }], stopReason: "toolUse" },
+        { role: "assistant", content: [{ type: "toolCall", id: "finish-1", name: "finish_compiler_batch", arguments: finishInput }], stopReason: "toolUse" },
         { role: "toolResult", toolCallId: "finish-1", toolName: "finish_compiler_batch", content: [], isError: false },
         { role: "assistant", content: [{ type: "text", text: "batch complete" }], stopReason: "stop" },
       ],
@@ -3025,7 +3010,8 @@ describe("NWH TUI extension", () => {
     expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);
     expect(sentUserMessages).toEqual([]);
     expect(sentHiddenMessages).toHaveLength(1);
-    expect(sentHiddenMessages[0]).toMatch(/batch 2\/\d+/);
+    expect(sentHiddenMessages[0]).toMatch(durable ? /batch 2\/\d+/ : /batch 1\/\d+/);
+    if (!durable) expect(notifications).toContainEqual(expect.stringContaining("checkpoint requires a completed durable finish receipt"));
     expect(sentHiddenMessages[0]).toContain("<source-segment");
   });
 
@@ -3071,7 +3057,7 @@ describe("NWH TUI extension", () => {
     expect(sentHiddenMessages[0]).toContain("<source-segment");
   });
 
-  it("lets a successful finish supersede abandoned drafts after low-level retries settle", async () => {
+  it("keeps the same batch when an unrelated successful draft leaves an earlier failure unresolved", async () => {
     const { commands, events, root, sentUserMessages, sentHiddenMessages } = await fixture();
     const novelPath = path.join(root, "retry-novel.txt");
     await fs.writeFile(
@@ -3119,7 +3105,7 @@ describe("NWH TUI extension", () => {
     expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);
     expect(sentUserMessages).toEqual([]);
     expect(sentHiddenMessages).toHaveLength(1);
-    expect(sentHiddenMessages[0]).toMatch(/batch 2\/\d+/);
+    expect(sentHiddenMessages[0]).toMatch(/batch 1\/\d+/);
     expect(sentHiddenMessages[0]).toContain("<source-segment");
   });
 
@@ -3152,7 +3138,6 @@ describe("NWH TUI extension", () => {
     const firstSegmentIds = [...String((firstPrompt as { message?: { content?: string } } | undefined)?.message?.content).matchAll(/<source-segment id="([^"]+)">/g)].map((match) => match[1]!);
     const finishInput = {
       outcome: "no-artifacts",
-      proposal_ids: [],
       reviewed_segments: firstSegmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No supported facts." })),
       summary: "No supported facts.",
     };

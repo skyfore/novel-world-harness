@@ -167,7 +167,7 @@ function RootLayout() {
     };
     const onNarrationDelta = (raw: Event) => {
       const event = parseServerEvent(raw);
-      if (!event?.operationId || typeof event.data.delta !== "string") return;
+      if (!event?.operationId || event.data.validated !== true || typeof event.data.delta !== "string") return;
       narrationStreamStore.append(event.operationId, event.data.delta);
     };
     const onPlayChanged = (raw: Event) => {

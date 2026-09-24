@@ -1,6 +1,15 @@
+import { entryKnowledgeSupplement } from "./entry-knowledge.js";
+import { entryAgencyIssues, remoteEntryOccurrenceIssues } from "./entry-agency.js";
+import { applyProcessDelta, emptyProcessState } from "./process-effects.js";
+import { applyStateDelta, emptyWorldState, StateSchemaRegistry, DEFAULT_STATE_FIELDS, evaluatePredicateTruth, advanceTemporalState } from "./state.js";
+import { resolveActionInvocation } from "./action-ontology.js";
+import { contentHash } from "./canonical.js";
+import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateIncapacityChanges } from "./process-capacity.js";
+import { materializeProcessProposal } from "./process-ontology.js";
+import { validateSemanticEffect } from "./semantic-effect.js";
 import { deriveEntryCut, type EntryCut } from "./entry-cut.js";
 import { timeAdvanceInDays } from "./time.js";
-import { applyEventExecutions } from "./event-execution.js";
+import { applyEventExecutions, validateEventExecutions } from "./event-execution.js";
 import type { EntryProjectionSeed } from "./model.js";
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 import type {
@@ -130,10 +139,10 @@ export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): Charac
       };
     } else {
       const event = orderedEvents.find((candidate) =>
-        eventEmbodiesActor(candidate, character.id)
+        eventOffersEntry(candidate, character.id, bundle)
         && completeReaderContextBefore.has(candidate.id));
       if (event) {
-        const checkpoint = entryCheckpointFor(event, character.id)!;
+        const checkpoint = entryCheckpointFor(event, character.id, bundle)!;
         entry = {
           actorId: character.id,
           kind: "canonical-scene",
@@ -171,7 +180,7 @@ export function deriveCharacterEntrySeed(
   const targetEvent = option.entry.canonicalEventId
     ? orderedEvents.find((event) => event.id === option.entry.canonicalEventId)
     : undefined;
-  const entryCheckpoint = targetEvent ? entryCheckpointFor(targetEvent, actorId) : undefined;
+  const entryCheckpoint = targetEvent ? entryCheckpointFor(targetEvent, actorId, bundle) : undefined;
   let projectionSeed = entryCheckpoint?.projectionSeed ?? (option.entry.kind === "opening" ? bundle.canonical.initialWorld.projectionSeed : undefined);
   const openingSeed = bundle.canonical.initialWorld.projectionSeed;
   if (option.entry.kind !== "opening" && !entryCheckpoint?.projectionSeed && openingSeed
@@ -194,19 +203,78 @@ export function deriveCharacterEntrySeed(
     ...forwardEvents.flatMap((event) => structuredClone(event.observedOutcome.operations)),
     ...structuredClone(entryCheckpoint?.delta.operations ?? []),
   ];
-  const knowledgeOperations = [
+  let knowledgeOperations = [
     ...(useOpening ? structuredClone(bundle.canonical.initialWorld.knowledge?.operations ?? []) : []),
     ...forwardEvents.flatMap((event) => structuredClone(event.observedKnowledge?.operations ?? [])),
     ...structuredClone(entryCheckpoint?.knowledge?.operations ?? []),
   ];
+  if (targetEvent && entryCheckpoint?.projectionSeed && entryCheckpoint.participantPresence.some(item => item.entityId === actorId && item.mode === "remote")) {
+    // A complete process/state snapshot does not replace the actor's actual learning history.
+    const historicalCut = deriveEntryCut({ events: bundle.canonical.events, relations: bundle.canonical.eventRelations ?? [],
+      beforeEventId: targetEvent.id, storyTime: targetEvent.storyTime,
+      baselineEventId: bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId,
+      baselineTime: bundle.canonical.initialWorld.checkpoint?.storyTime });
+    if (historicalCut.issues.length) throw new Error(historicalCut.issues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+    knowledgeOperations = [
+      ...structuredClone(bundle.canonical.initialWorld.knowledge?.operations ?? []),
+      ...historicalCut.replayEventIds.flatMap(id => structuredClone(bundle.canonical.events.find(event => event.id === id)!.observedKnowledge?.operations ?? [])),
+    ];
+    knowledgeOperations.push(...structuredClone(entryCheckpoint.projectionSeed.knowledgeHistory ? [] : entryKnowledgeSupplement(knowledgeOperations, entryCheckpoint.knowledge)?.operations ?? []));
+    projectionSeed = { ...entryCheckpoint.projectionSeed, knowledgeHistory: { version: 1, actorId, beforeCanonicalEventId: targetEvent.id, cutHash: historicalCut.hash } };
+  }
   if (!projectionSeed) {
     const activeRuleIds = new Set(openingSeed?.activeRuleIds ?? []);
     for (const operation of stateOperations) {
       if (operation.op === "activate-rule") activeRuleIds.add(operation.ruleId);
       if (operation.op === "deactivate-rule") activeRuleIds.delete(operation.ruleId);
     }
-    projectionSeed = { version: 1, semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] },
-      activeRuleIds: [...activeRuleIds].sort(), elapsedDays: (openingSeed?.elapsedDays ?? 0) + forwardEvents.reduce((days, event) => days + timeAdvanceInDays(event.timeAdvance), 0) };
+    const templates = new Map((bundle.canonical.processTemplates ?? []).map(template => [template.id, template]));
+    const processes: EntryProjectionSeed["processes"] = { version: 1, operations: [] };
+    const entities = new Map(bundle.canonical.entities.map(entity => [entity.id, entity]));
+    const rules = new Map(bundle.canonical.rules.map(rule => [rule.id, rule]));
+    const actions = new Map((bundle.canonical.actionSchemas ?? []).map(action => [action.id, action]));
+    const recoveryBindings = (bundle.canonical.eventExecutions ?? []).filter(binding => binding.processRecoveries?.length);
+    const recoveryIssues = validateEventExecutions(recoveryBindings, { entities, events: new Map(bundle.canonical.events.map(event => [event.id, event])), actionSchemas: actions, processTemplates: templates, participations: bundle.canonical.eventParticipations });
+    if (recoveryIssues.length) throw new Error(recoveryIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+    const registry = new StateSchemaRegistry(DEFAULT_STATE_FIELDS);
+    let processState = emptyProcessState(contentHash(cut));
+    let world = emptyWorldState(contentHash(cut));
+    world.logicalTime.elapsedDays = openingSeed?.elapsedDays ?? 0;
+    world.activeRuleIds = [...(openingSeed?.activeRuleIds ?? [])];
+    world = applyStateDelta(world, bundle.canonical.initialWorld.delta, registry, entities, rules);
+    let elapsedDays = openingSeed?.elapsedDays ?? 0;
+    for (const event of forwardEvents) {
+      const before = world;
+      elapsedDays += timeAdvanceInDays(event.timeAdvance);
+      world = advanceTemporalState(world, { step: world.logicalTime.step + 1, elapsedDays, storyTime: event.storyTime }, registry, entities);
+      world = applyStateDelta(world, event.observedOutcome, registry, entities, rules);
+      const binding = recoveryBindings.find(binding => binding.canonicalEventId === event.id);
+      if (binding?.action) {
+        const resolved = resolveActionInvocation(binding.action, actions, entities, { actorId: binding.actorId, participants: event.participants, proposedDelta: event.observedOutcome, hasKnowledge: Boolean(event.observedKnowledge?.operations.length), hasTimeAdvance: Boolean(event.timeAdvance), hasSceneTransition: false });
+        const capacityIssues = capacityUseIssues({ actorId: binding.actorId }, processState, processState, templates);
+        if (resolved.issues.length || capacityIssues.length || [...event.preconditions, ...resolved.preconditions].some(predicate => evaluatePredicateTruth(before, predicate, registry) !== "true")) throw new Error("PROCESS_RECOVERY_PRECONDITION_UNPROVEN: Entry recovery action is not executable at its original cut; stop for source review.");
+      }
+      const effects = (bundle.canonical.semanticEffects ?? []).filter(effect => effect.canonicalEventId === event.id);
+      const issues = effects.flatMap(effect => validateSemanticEffect(effect, {
+        entities: new Map(bundle.canonical.entities.map(entity => [entity.id, entity])), events: new Map(bundle.canonical.events.map(item => [item.id, item])),
+        processTemplates: templates, eventExecutions: new Map((bundle.canonical.eventExecutions ?? []).map(item => [item.id, item])), actionSchemas: new Map((bundle.canonical.actionSchemas ?? []).map(item => [item.id, item])),
+        eventParticipations: new Map((bundle.canonical.eventParticipations ?? []).map(item => [item.id, item])),
+      }));
+      if (issues.length) throw new Error(issues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+      if (effects.some(effect => effect.lowering.status === "unmapped")) throw new Error("SEMANTIC_EFFECT_UNMAPPED: Entry history contains an unsupported mechanism; preserve source and stop for host compilation.");
+      const onsets = incapacityOnsets(effects, new Set([event.id]), templates);
+      const operations = [...onsets, ...incapacityRecoveries(recoveryBindings, new Set([event.id]), processState, templates, event.action)];
+      if (operations.length) {
+        const delta = materializeProcessProposal({ version: 1, operations }, { branchId: `entry-${actorId}`, parentCommitId: contentHash(cut), proposalHash: contentHash(event), templates, elapsedDays }).delta;
+        const provenance = { commitId: contentHash(cut), eventId: event.id, eventHash: contentHash(event) };
+        validateIncapacityChanges({ actorId: binding?.action ? binding.actorId : undefined, action: event.action }, delta, processState, { entities, templates }, before, world, provenance, onsets);
+        processState = applyProcessDelta(processState, delta, { entities, templates }, provenance, elapsedDays);
+        processes.operations.push(...delta.operations);
+      }
+    }
+    projectionSeed = { version: 1,
+      ...(targetEvent && forwardEvents.some(event => event.observedKnowledge?.operations.length) ? { knowledgeHistory: { version: 1 as const, actorId, beforeCanonicalEventId: targetEvent.id, cutHash: cut.hash } } : {}), semantics: { version: 1, operations: [] }, processes, norms: { version: 1, operations: [] },
+      activeRuleIds: [...activeRuleIds].sort(), elapsedDays };
   }
   const evidence = uniqueEvidence([
     ...bundle.canonical.initialWorld.evidence,
@@ -358,26 +426,35 @@ function initialWorldRepresentsActor(
 ): boolean {
   const actorOperations = bundle.canonical.initialWorld.delta.operations.filter((operation) =>
     "entityId" in operation && operation.entityId === actorId);
-  const physicallyPresent = bundle.canonical.initialWorld.participantPresence?.some((presence) =>
-    presence.entityId === actorId && presence.mode === "physical") ?? false;
-  if (physicallyPresent && actorOperations.some((operation) =>
+  const playablePresence = !entryAgencyIssues(actorId, bundle.canonical.initialWorld, {
+    sourceId: bundle.source.id, entities: new Map(bundle.canonical.entities.map(entity => [entity.id, entity])),
+    acquisitions: new Map((bundle.canonical.acquisitions ?? []).map(item => [item.id, item])),
+    processTemplates: new Map((bundle.canonical.processTemplates ?? []).map(template => [template.id, template])),
+    actionSchemas: new Map((bundle.canonical.actionSchemas ?? []).map(action => [action.id, action])),
+  }).length;
+  if (playablePresence && actorOperations.some((operation) =>
     "entityId" in operation
     && ["character.location", "character.plan", "character.momentum"].includes(operation.field))) return true;
-  return allowSoleAliveFallback && actorOperations.some((operation) =>
+  return allowSoleAliveFallback && !bundle.canonical.entities.find(entity => entity.id === actorId)?.agencyProfile && actorOperations.some((operation) =>
     operation.op === "set" && operation.field === "character.alive" && operation.value === true);
 }
 
-function eventEmbodiesActor(event: CanonicalEvent, actorId: string): boolean {
+function eventOffersEntry(event: CanonicalEvent, actorId: string, bundle: PreparedNovelBundle): boolean {
   const mode = event.narrativeContext?.mode;
   if (mode && mode !== "scene") return false;
-  return Boolean(entryCheckpointFor(event, actorId));
+  return Boolean(entryCheckpointFor(event, actorId, bundle));
 }
 
-function entryCheckpointFor(event: CanonicalEvent, actorId: string): CharacterEntryCheckpoint | undefined {
+function entryCheckpointFor(event: CanonicalEvent, actorId: string, bundle: PreparedNovelBundle): CharacterEntryCheckpoint | undefined {
   return event.characterEntryCheckpoints?.find((checkpoint) =>
     checkpoint.actorId === actorId
-    && checkpoint.participantPresence.some((presence) =>
-      presence.entityId === actorId && presence.mode === "physical")
+    && !remoteEntryOccurrenceIssues(actorId, checkpoint, event, bundle.canonical.eventParticipations).length
+    && !entryAgencyIssues(actorId, checkpoint, {
+      sourceId: bundle.source.id, entities: new Map(bundle.canonical.entities.map(item => [item.id, item])),
+      processTemplates: new Map((bundle.canonical.processTemplates ?? []).map(item => [item.id, item])),
+      actionSchemas: new Map((bundle.canonical.actionSchemas ?? []).map(item => [item.id, item])),
+      acquisitions: new Map((bundle.canonical.acquisitions ?? []).map(item => [item.id, item])),
+    }).length
     && checkpoint.delta.operations.some((operation) =>
       "entityId" in operation
       && operation.entityId === actorId

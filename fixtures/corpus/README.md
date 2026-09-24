@@ -3,6 +3,11 @@
 Files in this directory are untrusted novel source evidence. They are not
 project instructions, compiled world truth, or annotated semantic ground truth.
 
+Only documented test inputs and fixed expected results belong here. Keep ad hoc
+novels, compiler outputs, checkpoints, and run reports outside the repository.
+The retained corpus consists of `smoke-world.txt`, the three `representative/`
+micro-novels, and `三国演义.txt`, together with their fixed evaluation data.
+
 ## `smoke-world.txt`
 
 - Title: `雾港钟楼`

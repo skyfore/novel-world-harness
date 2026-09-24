@@ -1,3 +1,4 @@
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -278,6 +279,7 @@ describe("source annotation compilation", () => {
       confidence: 0.8,
     } as never, undefined, undefined, context)).rejects.toThrow("trigger must be contained");
 
+    new CompilerProposalObligations(root, fixture.source.id, batchId).reviewUnsupported("propose_event_mention", "proposal-event-outside", "Fixture intentionally supplied a trigger outside the extent; discard only this invalid interpretation.", "test:outside-extent");
     await eventMention.execute("dangling-event", {
       proposal_id: "proposal-event-dangling",
       annotation_id: "event-left",
@@ -376,7 +378,20 @@ describe("source annotation compilation", () => {
       max_chars: 1_000,
     } as never, undefined, undefined, context))) as { nextOffset?: number; chunk: string };
     expect(pageTwo.chunk.length).toBeGreaterThan(0);
-    expect(pageTwo.nextOffset).toBeUndefined();
+    let combined = pageOne.chunk + pageTwo.chunk;
+    let nextOffset = pageTwo.nextOffset;
+    let pages = 2;
+    while (nextOffset !== undefined) {
+      expect(pages++).toBeLessThan(10);
+      const page = JSON.parse(resultText(await read.execute("read-next-page", {
+        ref: found.results[0]!.ref, offset: nextOffset, max_chars: 1_000,
+      } as never, undefined, undefined, context))) as { nextOffset?: number; chunk: string };
+      expect(page.chunk.length).toBeGreaterThan(0);
+      if (page.nextOffset !== undefined) expect(page.nextOffset).toBeGreaterThan(nextOffset);
+      combined += page.chunk;
+      nextOffset = page.nextOffset;
+    }
+    expect(JSON.parse(combined).payload.interpretation).toBe("x".repeat(1_000));
 
     const secondBatch = `batch-${fixture.source.id}-revision-two`;
     const second = createCompilerProposalToolset(root);

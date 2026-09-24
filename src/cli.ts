@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { Command } from "commander";
+import fs from "node:fs/promises";
+import { HookCommand as Command } from "./runtime/hook-command.js";
 import type { TuiMode } from "@earendil-works/pi-coding-agent";
 import { resolveConfigPath } from "./config/load.js";
 import { auditCommand } from "./commands/audit.js";
@@ -8,6 +9,9 @@ import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
+import { reviewAccountingObligation } from "./compiler/accounting-review.js";
+import { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
+import { reviewScenesCommand, inspectRequirementsCommand, registerCoreRoleRequirementsCommand, beginCoreRoleReviewCommand } from "./commands/review-scenes.js";
 import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
 import { resumeCommand } from "./commands/resume.js";
 import { playCommand } from "./commands/play.js";
@@ -16,8 +20,11 @@ import { compileSourceCommand } from "./commands/compile-source.js";
 import { prepareCommand } from "./commands/prepare.js";
 import { prepareAllCommand } from "./commands/prepare-all.js";
 import { reparseCommand } from "./commands/reparse.js";
+import { migrateLegacyAcquisitions } from "./compiler/acquisition-migration.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
+import { WorkspaceOperationLock } from "./util/workspace-lock.js";
+import { withCompilerSignals, CompilerInterruptedError } from "./util/compiler-signals.js";
 import { activatePreparedCacheRevisionCommand, inspectNovelClosureCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
 import { evaluateNovelCommand, freezeNovelEvaluationCommand } from "./commands/novel-evaluation.js";
 import { playWorldCommand } from "./commands/play-world.js";
@@ -57,9 +64,185 @@ program
   .option("--new-session", "start a fresh terminal transcript while preserving world progress")
   .option("--no-save", "do not persist the interactive session");
 
+const compilerLock = program.command("compiler-lock").description("Inspect or explicitly recover the workspace compiler lock on its owning host");
+compilerLock.command("inspect").action(async () => {
+  console.log(JSON.stringify(await WorkspaceOperationLock.inspect(rootFor({})), null, 2));
+});
+compilerLock.command("recover")
+  .requiredOption("--owner-token <token>", "exact owner.token returned by compiler-lock inspect")
+  .option("--legacy-owner-host-verified", "attest that a legacy owner PID was checked on its original host, outside sandbox PID views")
+  .action(async (options) => {
+    console.log(JSON.stringify(await WorkspaceOperationLock.recover(rootFor({}), options.ownerToken, options.legacyOwnerHostVerified), null, 2));
+  });
+
 function rootFor(options: { root?: string }): string {
   return options.root ?? program.opts().root ?? process.cwd();
 }
+
+const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and review exact accounting coverage on the host");
+program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")
+  .option("--register <set-id>", "register persistent mandatory requirements using the canonical catalog under the compiler lock")
+  .option("--predecessor <hash>", "exact definitions[].revisionHash from requirements inspect when revising a registered set")
+  .description("check pending/canonical scene capabilities without writing world truth; exits 2 for unresolved checks")
+  .action(async (options) => {
+    if (options.predecessor && !options.register) throw new Error("--predecessor requires --register; do not retry unchanged.");
+    await reviewScenesCommand(rootFor({}), options.spec, options.register ? { id: options.register, predecessorRevision: options.predecessor } : undefined);
+  });
+const requirementsCommand = program.command("requirements").description("Inspect persistent capability definitions and evaluation history");
+requirementsCommand.command("inspect").requiredOption("--source <id>", "registered source ID")
+  .action(async options => inspectRequirementsCommand(rootFor({}), options.source));
+requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", "registered source ID")
+  .description("Read retained upstream repair plans and attempts without authorizing or retrying them")
+  .action(async options => {
+    const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
+    console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
+  });
+requirementsCommand.command("plan-bound-upstream-repair").requiredOption("--request <path>", "current binding snapshot and selected findings JSON")
+  .description("Derive original scene requirement IDs and freeze every supported dependency path before host authorization")
+  .action(async options => {
+    const { planBoundUpstreamRepairCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await planBoundUpstreamRepairCommand(rootFor({}), options.request), null, 2));
+  });
+requirementsCommand.command("bind-upstream-repairs").requiredOption("--source <id>", "registered source ID")
+  .description("Bind current structural findings to unresolved scene requirements through exact typed dependency paths")
+  .action(async options => {
+    const { bindUpstreamRepairCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await bindUpstreamRepairCommand(rootFor({}), options.source), null, 2));
+  });
+requirementsCommand.command("discover-upstream-repairs").requiredOption("--source <id>", "registered source ID")
+  .description("Discover actual missing source dependencies without guessing identities or granting write authority")
+  .action(async options => {
+    const { discoverUpstreamRepairCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await discoverUpstreamRepairCommand(rootFor({}), options.source), null, 2));
+  });
+requirementsCommand.command("plan-upstream-repair").requiredOption("--review <path>", "typed host-reviewed diagnostic JSON")
+  .description("Derive a bounded frozen plan from actual source dependencies; never register or authorize it")
+  .action(async options => {
+    const { planUpstreamRepairCommand } = await import("./commands/upstream-repair.js");
+    const result = await planUpstreamRepairCommand(rootFor({}), options.review);
+    console.log(JSON.stringify(result, null, 2));
+    if (result.status === "needs-host-review") process.exitCode = 2;
+  });
+requirementsCommand.command("register-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--file <path>", "exact frozen host plan JSON, including planHash")
+  .option("--predecessor <hash>", "exact predecessor plans[].plan.planHash when revising host dependencies")
+  .description("Validate and retain frozen host policy without authorizing mutation")
+  .action(async options => {
+    const { registerUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await registerUpstreamRepairPlanCommand(rootFor({}), options.source, options.file, options.predecessor ?? null), null, 2));
+  });
+requirementsCommand.command("authorize-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact registered plans[].plan.planHash")
+  .description("Recheck current source and dependencies, then authorize the frozen bounded host plan")
+  .action(async options => {
+    const { authorizeUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await authorizeUpstreamRepairPlanCommand(rootFor({}), options.source, options.plan), null, 2));
+  });
+requirementsCommand.command("finish-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact plans[].plan.planHash")
+  .option("--input <path>", "host finish review JSON; required only before the original input is frozen")
+  .description("Validate and commit exact authorized drafts, or recover the original frozen finish without a model call")
+  .action(async options => {
+    const { finishUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await finishUpstreamRepairPlanCommand(rootFor({}), options.source, options.plan, options.input), null, 2));
+  });
+requirementsCommand.command("stop-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact plans[].plan.planHash")
+  .requiredOption("--reason <text>", "host diagnostic or review reason; preserves original drafts and budgets")
+  .description("Stop the original repair for host review without erasing history")
+  .action(async options => {
+    const { stopUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await stopUpstreamRepairPlanCommand(rootFor({}), options.source, options.plan, options.reason), null, 2));
+  });
+requirementsCommand.command("stage-upstream-plan").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact authorized plans[].plan.planHash from inspect-upstream")
+  .option("--config <path>", "explicit extractor profile configuration")
+  .option("--model <model>", "override the Pi model")
+  .option("--timeout-ms <number>", "per-slot timeout, 1–600000 milliseconds", Number)
+  .description("Stage the authorized dependency DAG, verifying and reusing original drafts on resume")
+  .action(async options => {
+    const { stageUpstreamRepairPlanCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await stageUpstreamRepairPlanCommand(rootFor({}), { ...options, model: options.model ?? program.opts().model }), null, 2));
+  });
+requirementsCommand.command("run-upstream-slot").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--plan <hash>", "exact authorized plans[].plan.planHash from inspect-upstream")
+  .requiredOption("--kind <kind>", "exact allowedWrites/allowedCreations kind")
+  .requiredOption("--artifact <id>", "exact allowedWrites/allowedCreations id")
+  .option("--config <path>", "explicit configuration containing the extractor profile")
+  .option("--model <model>", "override the Pi model for this isolated invocation")
+  .option("--timeout-ms <number>", "bounded invocation timeout, 1–600000 milliseconds", Number)
+  .description("Stage one already authorized upstream slot in an isolated Pi session; never finish or publish")
+  .action(async options => {
+    const { runUpstreamRepairSlotCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await runUpstreamRepairSlotCommand(rootFor({}), {
+      ...options, model: options.model ?? program.opts().model,
+    }), null, 2));
+  });
+requirementsCommand.command("recover-upstream-session").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--session-ref <hash>", "exact modelSessions[].sessionRef from inspect-upstream")
+  .description("Recover an original validated draft without another model invocation")
+  .action(async options => {
+    const { recoverUpstreamRepairSessionCommand } = await import("./commands/upstream-repair.js");
+    console.log(JSON.stringify(await recoverUpstreamRepairSessionCommand(rootFor({}), options.source, options.sessionRef), null, 2));
+  });
+requirementsCommand.command("observe-upstream-convergence").requiredOption("--source <id>", "registered source ID")
+  .description("Verify actual committed repair revisions without accepting unrelated pending proposals")
+  .action(async options => {
+    const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
+    const { observeUpstreamRepairConvergence } = await import("./compiler/upstream-repair-convergence.js");
+    const issues = await withWorkspaceOperationLock(rootFor({}), "compiler", () => observeUpstreamRepairConvergence(rootFor({}), options.source));
+    console.log(JSON.stringify({ issues }, null, 2));
+    if (issues.length) process.exitCode = 2;
+  });
+requirementsCommand.command("evaluate-upstream").requiredOption("--source <id>", "registered source ID")
+  .description("Evaluate converged upstream repairs against actual independent requirements without model replay")
+  .action(async options => {
+    const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
+    const { settleUpstreamRepairRequirements } = await import("./compiler/upstream-repair-evaluation.js");
+    const result = await withWorkspaceOperationLock(rootFor({}), "compiler", () => settleUpstreamRepairRequirements(rootFor({}), options.source));
+    console.log(JSON.stringify(result, null, 2));
+    if (result.issues.length) process.exitCode = 2;
+  });
+requirementsCommand.command("refresh").requiredOption("--source <id>", "registered source ID")
+  .description("Observe current requirement validity without replaying proposals or granting role satisfaction")
+  .action(async options => {
+    const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
+    const { observeRequirementValidity } = await import("./compiler/requirement-observation.js");
+    const issues = await withWorkspaceOperationLock(rootFor({}), "compiler", () => observeRequirementValidity(rootFor({}), options.source));
+    await inspectRequirementsCommand(rootFor({}), options.source);
+    if (issues.length) process.exitCode = 2;
+  });
+requirementsCommand.command("begin-core-role-review").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--revision <id>", "stable host review revision ID; reuse the same ID to recover")
+  .requiredOption("--roster-hash <hash>", "exact savedRosterHash from requirements inspect")
+  .option("--predecessor <hash>", "last coreRoleDefinitions[].revisionHash, if registered")
+  .requiredOption("--scope-decision <ref>", "host audit reference authorizing a new independent review")
+  .requiredOption("--reason <text>", "reason for reviewing again; this does not approve a reduced role scope")
+  .action(async options => beginCoreRoleReviewCommand(rootFor({}), { sourceId: options.source, revisionId: options.revision,
+    priorRosterHash: options.rosterHash, predecessorDefinitionRevision: options.predecessor, scopeDecisionRef: options.scopeDecision, reason: options.reason }));
+requirementsCommand.command("register-core-roles").requiredOption("--source <id>", "registered source ID")
+  .option("--predecessor <hash>", "last coreRoleDefinitions[].revisionHash from requirements inspect")
+  .requiredOption("--scope-decision <ref>", "host audit reference for this independent source-review revision")
+  .requiredOption("--reason <text>", "explicit reason for changes, including any removed role requirements")
+  .action(async options => registerCoreRoleRequirementsCommand(rootFor({}), options.source, {
+    predecessorRevision: options.predecessor, scopeDecisionRef: options.scopeDecision, scopeChangeReason: options.reason,
+  }));
+compilerObligations.command("inspect").requiredOption("--source <id>", "registered source ID").requiredOption("--batch <id>", "exact compiler batch ID")
+  .action((options) => {
+    const journal = new CompilerProposalObligations(rootFor({}), options.source, options.batch);
+    console.log(JSON.stringify({ unresolved: journal.unresolved(), requiringHostReview: journal.requiringHostReview() }, null, 2));
+  });
+compilerObligations.command("review-accounting")
+  .requiredOption("--source <id>", "registered source ID").requiredOption("--batch <id>", "exact executable batch ID")
+  .requiredOption("--proposal <id>", "failed account_source_units proposal ID")
+  .requiredOption("--reason <text>", "host review rationale").requiredOption("--audit-ref <ref>", "incident or review reference")
+  .option("--from-run <id>", "original audit run when legacy page receipts are missing")
+  .option("--apply", "record the verified settlement under the compiler lock; default is read-only")
+  .action(async (options) => {
+    const proof = await reviewAccountingObligation(rootFor({}), { sourceId: options.source, batchId: options.batch, proposalId: options.proposal,
+      reason: options.reason, auditRef: options.auditRef, ...(options.fromRun ? { fromRun: options.fromRun } : {}) }, options.apply === true);
+    console.log(JSON.stringify({ status: options.apply ? "superseded-by-coverage" : "verified-preview", executableCertification: false, proof }, null, 2));
+  });
 function configFor(options: { root?: string; config?: string }): string {
   return options.config ? resolveConfigPath(options.config) : path.resolve(rootFor(options), "novel-harness.yaml");
 }
@@ -132,7 +315,10 @@ program.command("ingest")
     const content = options.stdin ? await readStandardInput() : options.content;
     return ingestContentCommand(content, options.title, configFor(options));
   });
-program.command("status").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("show inventory and the next safe preparation step").action(async (options) => statusCommand(configFor(options)));
+program.command("status").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace")
+  .option("--json", "read-only compiler snapshot with current checkpoints, obligations, runs and candidate closure")
+  .option("--source <id>", "one exact source ID for --json")
+  .description("show inventory and the next safe preparation step").action(async (options) => statusCommand(configFor(options), { json: options.json, sourceId: options.source }));
 program.command("novels")
   .option("--root <path>", "local novel workspace")
   .description("list registered novels in the current workspace")
@@ -261,7 +447,7 @@ program
   .action(async (options) => {
     const globalOptions = program.opts();
     const maxBatches = options.maxBatches === undefined ? undefined : nonNegativeInteger(options.maxBatches, "--max-batches");
-    await compileSourceCommand({
+    await withCompilerSignals((signal) => compileSourceCommand({
       root: rootFor(options),
       configPath: configFor(options),
       allowMissingConfig: !options.config,
@@ -269,7 +455,8 @@ program
       model: options.model ?? globalOptions.model,
       ...(maxBatches !== undefined ? { maxBatches } : {}),
       resume: options.resume,
-    });
+      signal,
+    }));
   });
 
 program
@@ -303,8 +490,17 @@ program
   .option("--replace-staging", "preserve displaced drafts in rejected history before replacing conflicting staging")
   .option("--model <model>", "override the Pi compiler model")
   .description("resume or rebuild the core novel world into an immutable candidate without publishing Play")
-  .action(async (options) => { await rebuildCommand({ root: rootFor(options), configPath: configFor(options), sourceId: options.source, chapters: options.chapters,
-    fromRevision: options.fromRevision, replaceStaging: options.replaceStaging, model: options.model ?? program.opts().model }); });
+  .action(async (options) => withCompilerSignals((signal) => rebuildCommand({ root: rootFor(options), configPath: configFor(options), sourceId: options.source, chapters: options.chapters,
+    fromRevision: options.fromRevision, replaceStaging: options.replaceStaging, model: options.model ?? program.opts().model, signal })));
+
+program.command("migrate-acquisitions")
+  .argument("<manifest>", "reviewed v1 migration JSON with exact source evidence selectors")
+  .option("--root <path>", "local novel workspace")
+  .description("fork a prepared revision and archive an evidence-validated legacy acquisition candidate")
+  .action(async (manifest, options) => {
+    const result = await migrateLegacyAcquisitions({ root: rootFor(options), manifest: JSON.parse(await fs.readFile(manifest, "utf8")) });
+    console.log(JSON.stringify(result, null, 2));
+  });
 
 program
   .command("repair-existing")
@@ -422,9 +618,13 @@ program
   .option("--branch <id>", "playable branch id")
   .option("--model <model>", "override compiler model; use provider/model when ambiguous")
   .option("-y, --yes", "accept every recommended preparation decision without prompting")
+  .option("--candidate-only", "continue compilation and archive a candidate without publishing Play or creating a branch")
+  .option("--upstream-plan <hash>", "resume an exact already-authorized upstream repair before normal preparation")
+  .option("--upstream-finish <path>", "original host finish review JSON, required before the repair finish is frozen")
   .description("guide full compilation, validation and playable-branch preparation")
   .action(async (novel, options) => {
-    await prepareAllCommand({
+    await withCompilerSignals(signal => prepareAllCommand({
+      signal,
       root: rootFor(options),
       configPath: configFor(options),
       ...(novel ? { novelPath: novel } : {}),
@@ -432,7 +632,10 @@ program
       ...(options.branch ? { branchId: options.branch } : {}),
       model: options.model ?? program.opts().model,
       yes: Boolean(options.yes),
-    });
+      upstreamRepairPlan: options.upstreamPlan,
+      upstreamRepairFinishFile: options.upstreamFinish,
+      ...(options.candidateOnly ? { candidateOnly: true, createBranch: false, restoreCache: false } : {}),
+    }));
   });
 
 program
@@ -523,5 +726,5 @@ try {
   await program.parseAsync(process.argv);
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+  process.exitCode = error instanceof CompilerInterruptedError ? error.exitCode : 1;
 }

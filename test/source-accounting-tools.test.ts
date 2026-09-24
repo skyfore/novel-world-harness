@@ -3,12 +3,18 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { prepareCompilerBatches } from "../src/compiler/batches.js";
+import { CompilerBatchStore } from "../src/compiler/batch-progress.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
+import { recoverCompilerFinish } from "../src/compiler/finish-recovery.js";
 import { SegmentStore } from "../src/compiler/segments.js";
 import { SourceAccountingStore, sourceUnitReviewRange } from "../src/compiler/source-accounting.js";
 import { baseStructuralUnits, ensureSourceStructure } from "../src/compiler/structure.js";
 import { readSourceMaterial } from "../src/storage/source-material-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { CompilerAccountingPages } from "../src/compiler/accounting-pages.js";
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
+import { withNwhToolRecovery } from "../src/agent/tool-recovery.js";
+import { worldStorageRoot } from "../src/world/paths.js";
 
 const roots: string[] = [];
 
@@ -17,6 +23,146 @@ afterEach(async () => {
 });
 
 describe("source-unit accounting tools", () => {
+  it("preserves a 20-unit failed page across sessions and permits one same-ID correction after a 19+1 rebase", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-rebase-")); roots.push(root);
+    const ruleText = "Entry requires day zero or later.";
+    const text = Array.from({ length: 21 }, (_, index) => index === 19 ? ruleText : `Traveler ${index + 1} waits quietly at the gate.`).join("\n");
+    const fixture = await createEvidenceFixture(root, text);
+    const batch = (await prepareCompilerBatches(root, fixture.source)).find((item) => item.semanticStage === "executable")!;
+    const create = async () => { const set = createCompilerProposalToolset(root); await set.beginBatch(batch.segmentIds, batch.id, fixture.source.id); return set; };
+    const call = (set: ReturnType<typeof createCompilerProposalToolset>, name: string, input: unknown) =>
+      withNwhToolRecovery(set.tools.find((tool) => tool.name === name)!).execute(name, input as never, undefined, undefined, {} as never);
+    const discover = async (set: ReturnType<typeof createCompilerProposalToolset>) => {
+      const result = await call(set, "find_source_accounting_units", { status: "unresolved", offset: 0, max_results: 20 });
+      return JSON.parse((result.content[0] as { text: string }).text) as { pageToken: string; units: Array<{ unitId: string }> };
+    };
+    const set = await create();
+    const oldPage = await discover(set);
+    expect(oldPage.units).toHaveLength(20);
+    await call(set, "propose_world_rule", { proposal_id: "new-evidence", payload: {
+      ontologyVersion: "world-rule-v2", id: "entry", name: ruleText, kind: "social", scope: "global", visibility: "public",
+      priority: 1, defeasible: true, clauses: [{ id: "entry-day", modality: "require", predicate: { op: "elapsed-days-gte", days: 0 },
+        basis: "explicit", status: "supported", confidence: 1 }], exceptions: [], basis: "explicit", status: "supported", confidence: 1,
+    }, evidence_segment_ids: batch.segmentIds, evidence_selectors: ["/name", "/clauses/0/predicate"].map((target_path) => ({
+      segment_id: batch.segmentIds[0], exact: ruleText, target_path, relation: "supports", strength: "explicit",
+    })) });
+    const originalInput = { proposal_id: "p07", page_token: oldPage.pageToken,
+      page_default: { status: "background-only", reason: "Individually reviewed descriptive context." } };
+    let diagnostic = "";
+    try { await call(set, "account_source_units", originalInput); }
+    catch (error) { diagnostic = (error as Error).message; }
+    expect(diagnostic).toContain('"category": "coverage-changed"');
+    expect(diagnostic).toContain(`"representedUnitIds":["${oldPage.units[19]!.unitId}"]`);
+    expect(diagnostic).toContain("same exact proposal_id");
+    expect(diagnostic).toContain("empty decisions");
+    await expect(new SourceAccountingStore(root).readProposal(fixture.source.id, "pending", "p07")).rejects.toMatchObject({ code: "ENOENT" });
+    const pages = new CompilerAccountingPages(root, fixture.source.id, batch.id);
+    expect(pages.read(oldPage.pageToken)).toMatchObject({ sourceSha256: fixture.source.contentSha256, unitIds: oldPage.units.map((unit) => unit.unitId) });
+    expect(new CompilerAccountingPages(root, fixture.source.id, "other-batch").read(oldPage.pageToken)).toBeUndefined();
+    expect(new CompilerAccountingPages(root, "other-source", batch.id).read(oldPage.pageToken)).toBeUndefined();
+    const resumed = await create();
+    const rebased = await discover(resumed);
+    expect(rebased.units.filter((unit) => oldPage.units.some((old) => old.unitId === unit.unitId))).toHaveLength(19);
+    await call(resumed, "account_source_units", { ...originalInput, page_token: rebased.pageToken });
+    expect(new CompilerProposalObligations(root, fixture.source.id, batch.id).unresolved()).toEqual([]);
+    expect(pages.read(rebased.pageToken)?.consumedBy).toBe("p07");
+    await expect(call(await create(), "account_source_units", { ...originalInput, proposal_id: "reuse", page_token: rebased.pageToken })).rejects.toThrow("Unknown or stale");
+  });
+
+  it("inherits checkpointed same-slice observations without treating them as executable artifacts", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-stages-")); roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero waits at the gate.\nRain falls quietly on the empty road.");
+    const batch = (await prepareCompilerBatches(root, fixture.source)).find((item) => item.semanticStage === "executable")!;
+    const observationId = batch.id.replace("-executable-", "-observation-");
+    const call = async (set: ReturnType<typeof createCompilerProposalToolset>, name: string, input: unknown) =>
+      set.tools.find((tool) => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
+    const page = async (set: ReturnType<typeof createCompilerProposalToolset>) => {
+      const result = await call(set, "find_source_accounting_units", { status: "all", offset: 0 });
+      return JSON.parse((result.content[0] as { text: string }).text) as { units: Array<{ unitId: string; text: string; status: string }> };
+    };
+    const observations = createCompilerProposalToolset(root);
+    await observations.beginBatch(batch.segmentIds, observationId, fixture.source.id);
+    await call(observations, "propose_entity_mention", { proposal_id: "hero-mention-proposal", annotation_id: "hero-mention",
+      selector: { segment_id: batch.segmentIds[0], exact: "Hero" }, surface: "Hero", form: "proper", kind_candidates: ["character"], confidence: 1 });
+    await call(observations, "finish_compiler_batch", { outcome: "complete", reviewed_segments: batch.segmentIds.map((segment_id) => ({ segment_id, disposition: "proposed", summary: "Exact Hero observation." })), summary: "Exact Hero observation." });
+    const before = createCompilerProposalToolset(root);
+    await before.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+    const first = await page(before);
+    expect(first.units.find((item) => item.text.includes("Hero"))!.status).toBe("unresolved");
+    // Preserve a pre-migration interrupted page; inherited coverage must
+    // supersede just its overlapping decision without deleting the draft.
+    await call(before, "account_source_units", { proposal_id: "old-page", decisions: first.units.filter((item) => item.status === "unresolved").map((item) => ({ unit_id: item.unitId, status: "background-only", reason: "Earlier review." })) });
+    const accounting = new SourceAccountingStore(root);
+    await accounting.withdrawProposal(fixture.source.id, "old-page");
+    await expect(accounting.reproposeRejected(fixture.source.id, "wrong-batch", "old-page", "wrong-recovery", "Recovery test.")).rejects.toThrow("source/batch mismatch");
+    await accounting.reproposeRejected(fixture.source.id, batch.id, "old-page", "old-page-restored", "Host diagnosed an erroneous withdrawal.");
+    await new CompilerBatchStore(root).markComplete(fixture.source.id, observationId);
+    const resumed = createCompilerProposalToolset(root);
+    await resumed.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+    const after = await page(resumed);
+    expect(after.units.find((item) => item.text.includes("Hero"))!.status).toBe("represented");
+    await expect(call(resumed, "finish_compiler_batch", { outcome: "complete", reviewed_segments: batch.segmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No new mechanism." })), summary: "No new executable mechanism." })).rejects.toThrow("Set their reviewed_segments.disposition to proposed and retain every valid draft");
+    const finish = await call(resumed, "finish_compiler_batch", { outcome: "complete", reviewed_segments: batch.segmentIds.map((segment_id) => ({ segment_id, disposition: "proposed", summary: "Source accounting review." })), summary: "Source accounting reviewed; no executable mechanism certified." });
+    expect(finish).toMatchObject({ details: { artifactCounts: { world: 0, accounting: 1 } } });
+    const store = new SourceAccountingStore(root);
+    const manifest = await store.read(fixture.source.id);
+    expect(manifest!.records.find((record) => record.unitId === after.units.find((item) => item.text.includes("Hero"))!.unitId)!.status).toBe("represented");
+    const original = await store.readProposal(fixture.source.id, "rejected", "old-page");
+    const restored = await store.readProposal(fixture.source.id, "accepted", "old-page-restored");
+    expect(restored.decisions).toEqual(original.decisions);
+    expect(restored.restoredFrom!.proposalId).toBe(original.id);
+    // A different slice/batch cannot borrow this coverage.
+    const other = createCompilerProposalToolset(root);
+    await other.beginBatch(batch.segmentIds, batch.id.replace("-00001-", "-00002-"), fixture.source.id);
+    expect((await page(other)).units.find((item) => item.text.includes("Hero"))!.status).toBe("unresolved");
+  });
+  it("accepts a matching background decision for a no-artifacts review but rejects a conflicting status", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-no-artifacts-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Quiet decorative rain crosses the empty courtyard.");
+    const [structure, sourceBytes, segments] = await Promise.all([
+      ensureSourceStructure(root, fixture.source),
+      readSourceMaterial(root, fixture.source),
+      new SegmentStore(root).list(fixture.source.id),
+    ]);
+    const unit = baseStructuralUnits(structure).find((candidate) => candidate.kind !== "non-scene");
+    if (!unit) throw new Error("Missing semantic source unit");
+    const reviews = segments.map((segment) => ({
+      startByte: segment.startByte,
+      endByte: segment.endByte,
+      disposition: "no-artifacts" as const,
+    }));
+    const accounting = new SourceAccountingStore(root);
+
+    expect(accounting.validateBatchReview({
+      structure,
+      sourceBytes,
+      reviews,
+      unitDecisions: [{
+        unitId: unit.id,
+        status: "background-only",
+        reason: "Reviewed as non-material scene texture.",
+        proposalId: "account-background",
+      }],
+      requireExplicitSemanticDisposition: true,
+    })).toEqual([]);
+
+    expect(accounting.validateBatchReview({
+      structure,
+      sourceBytes,
+      reviews,
+      unitDecisions: [{
+        unitId: unit.id,
+        status: "paratext",
+        reason: "Incorrect conflicting classification.",
+        proposalId: "account-conflict",
+      }],
+      requireExplicitSemanticDisposition: true,
+    })).toContain(
+      `Source unit ${unit.id} is inside a no-artifacts segment and is already host-classified as background-only; withdraw source-accounting proposal 'account-conflict'.`,
+    );
+  });
+
   it("expands a fresh unresolved-page token into exact per-unit decisions without copying unit IDs", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-page-tool-"));
     roots.push(root);
@@ -211,25 +357,10 @@ describe("source-unit accounting tools", () => {
 
     const accounting = new SourceAccountingStore(root);
     // Simulate a process failure after proposal acceptance but before the
-    // final accounting manifest write. A fresh session must hydrate accepted
-    // decisions and recreate the marker without asking for duplicate drafts.
+    // final accounting manifest write. Host recovery must hydrate accepted
+    // decisions and replay the original finish without duplicate drafts.
     await accounting.remove(fixture.source.id);
-    const retry = createCompilerProposalToolset(root, { provider: "test", model: "accounting-model" });
-    await retry.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
-    await expect(retry.tools.find((candidate) => candidate.name === "finish_compiler_batch")!.execute(
-      "finish-after-marker-loss",
-      {
-        outcome: "complete",
-        reviewed_segments: reviewedSegments,
-        summary: "Recovered the final marker from already accepted accounting decisions.",
-      } as never,
-      undefined,
-      undefined,
-      {} as never,
-    )).resolves.toMatchObject({
-      details: { compilerBatchFinished: true },
-      terminate: true,
-    });
+    await expect(recoverCompilerFinish(root, fixture.source.id, batch.id)).resolves.toBe(true);
 
     const summary = await accounting.summarize(
       await ensureSourceStructure(root, fixture.source),
@@ -238,10 +369,12 @@ describe("source-unit accounting tools", () => {
     expect(summary.blockingUnits).toBe(0);
     expect(summary.statusCounts["background-only"]).toBe(summary.totalUnits);
 
-    // A later recovery may add exact semantics that overlap decisions which
-    // were valid when the accounting proposals were first accepted. The host
-    // must project those units as represented without mutating or replaying a
-    // conflicting model disposition.
+    // Legacy workspaces predating finish receipts retain the old projection
+    // recovery path. Remove only this synthetic fixture's new receipt to
+    // model that historical input; production recovery must never erase it.
+    await fs.rm(path.join(worldStorageRoot(root), "compiler", "finish-receipts"), { recursive: true });
+    // Later exact semantics can overlap those legacy accepted decisions;
+    // their projection must preserve history without replaying a conflict.
     await accounting.remove(fixture.source.id);
     const semanticRetry = createCompilerProposalToolset(root, {
       provider: "test",

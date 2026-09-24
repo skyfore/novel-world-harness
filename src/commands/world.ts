@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import { stdout } from "node:process";
 import { z } from "zod";
-import { validateEventProposal } from "../world/engine.js";
 import { diffWorldBranches } from "../world/diff.js";
 import { fsckWorld } from "../world/fsck.js";
 import { KnowledgeProjector } from "../world/knowledge.js";
@@ -112,11 +111,9 @@ const proposalFileSchema = eventProposalBaseSchema
 export async function worldValidateCommand(root: string, branchId: string, proposalPath: string): Promise<void> {
   const { engine } = await openWorld(root);
   const head = await engine.branches.readHead(branchId);
-  const context = await engine.contextForCommit(head);
   const payload = proposalFileSchema.parse(JSON.parse(await fs.readFile(proposalPath, "utf8")));
   const proposal = eventProposalSchema.parse({ ...payload, branchId, expectedParentCommit: head });
-  const state = await engine.projector.project(head);
-  stdout.write(`${JSON.stringify(validateEventProposal(proposal, head, state, context).report, null, 2)}\n`);
+  stdout.write(`${JSON.stringify((await engine.previewProposal(proposal)).report, null, 2)}\n`);
 }
 
 export async function worldMoveCommand(root: string, branchId: string, proposalPath: string | undefined, maxActors: number, maxBackground: number): Promise<void> {

@@ -1,3 +1,4 @@
+import { DEFAULT_STATE_FIELDS } from "../src/world/state.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -5,10 +6,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { auditCompiler, type CompilerAuditReport } from "../src/compiler/audit.js";
 import {
   buildWorldReconciliationPrompt,
+  reconciliationProposalLifecycle,
+  hasWorldReconciliationTargets,
   graphAdjudicationIterationFromBatchId,
+  narrativeGraphNearNavigable,
   narrativeGraphRepairIsTargetable,
   narrativeGraphRepairIterations,
   reparseReconciliationIterations,
+  semanticEventRegressionIssues,
+  semanticInitialWorldRegressionIssues,
   semanticRepairIsIsolated,
   semanticRepairRequiresReparse,
   validateGraphAdjudicationProposalScope,
@@ -24,6 +30,7 @@ afterEach(async () => {
 });
 
 type ReconciliationContext = {
+  stateFieldCatalog: typeof DEFAULT_STATE_FIELDS;
   repairPlan: {
     targetCount: number;
     maxIterations: number;
@@ -43,6 +50,143 @@ function reconciliationContext(prompt: string): ReconciliationContext {
 }
 
 describe("world semantic reconciliation", () => {
+  it("rejects semantic event replacements that erase established readiness", () => {
+    const current = {
+      id: "arrival",
+      title: "Arrival",
+      participants: ["hero"],
+      storyTime: { kind: "ordinal", orderHint: 2 },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "hall" }] },
+      readerSummary: "Hero arrives.",
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      characterEntryCheckpoints: [{
+        actorId: "hero",
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "hall" }] },
+      }],
+      evidence: [],
+      causalParents: [],
+      confidence: 1,
+    } as Parameters<typeof semanticEventRegressionIssues>[0];
+    const candidate = {
+      ...current,
+      storyTime: { kind: "unknown" },
+      observedOutcome: { version: 1, operations: [] },
+      readerSummary: undefined,
+      participantPresence: [],
+      characterEntryCheckpoints: [],
+    } as Parameters<typeof semanticEventRegressionIssues>[1];
+
+    expect(semanticEventRegressionIssues(current, candidate)).toEqual(expect.arrayContaining([
+      "removes an existing comparable story-time anchor",
+      "removes all existing typed state/knowledge effects",
+      "removes the existing reader summary",
+      "removes all existing participant-presence records",
+      "removes the complete entry checkpoint for hero",
+    ]));
+  });
+
+  it("requires an initial-world repair to establish a deterministically comparable time", () => {
+    const current = {
+      version: 1,
+      checkpoint: { mode: "chronological", storyTime: { kind: "exact", value: "春天下午" } },
+      delta: { version: 1, operations: [] },
+      evidence: [],
+    } as Parameters<typeof semanticInitialWorldRegressionIssues>[0];
+    const stillIncomparable = structuredClone(current);
+    const ordinal = {
+      ...current,
+      checkpoint: { ...current.checkpoint, storyTime: { kind: "ordinal", label: "opening", orderHint: 0 } },
+    } as Parameters<typeof semanticInitialWorldRegressionIssues>[1];
+
+    expect(semanticInitialWorldRegressionIssues(current, stillIncomparable)).toContain(
+      "does not establish the required comparable opening story-time anchor",
+    );
+    expect(semanticInitialWorldRegressionIssues(current, ordinal)).toEqual([]);
+  });
+
+  it("routes a temporal causal regression to semantic event repair above the timeline threshold", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-reconcile-temporal-regression-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "The train arrives before the examination begins.\n");
+    const canon = new CanonicalModelStore(root);
+    const evidence = fixture.evidence("The train arrives before the examination begins.");
+    for (const event of [
+      { id: "train", title: "Train arrives", orderHint: 5 },
+      { id: "exam", title: "Examination begins", orderHint: 1 },
+    ]) {
+      await canon.putEvent({
+        id: event.id,
+        title: event.title,
+        participants: [],
+        storyTime: { kind: "ordinal", label: event.title, orderHint: event.orderHint },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence,
+        causalParents: [],
+        confidence: 1,
+      });
+    }
+    await canon.putEventRelation({
+      id: "train-enables-exam",
+      fromEventId: "train",
+      toEventId: "exam",
+      type: "enables",
+      operationality: "necessary",
+      status: "explicit",
+      confidence: 1,
+      mechanism: "Arrival enables the examination to begin.",
+      evidence,
+    });
+
+    const audit = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(audit.coverage.timelineAnchoring).toBe(1);
+    expect(audit.consistency.temporalRegressions).toEqual([{ eventId: "exam", parentId: "train" }]);
+    expect(audit.semanticRepairTargets.eventIds).toContain("exam");
+    expect(audit.consistency.semanticReady).toBeNull();
+    expect(semanticRepairIsIsolated(audit)).toBe(true);
+    expect(semanticRepairIsIsolated({
+      ...audit,
+      consistency: { ...audit.consistency, semanticReady: true },
+    })).toBe(true);
+    const context = reconciliationContext(await buildWorldReconciliationPrompt(
+      root,
+      fixture.source.id,
+      audit,
+      1,
+    ));
+    expect(context.weakEventCandidates).toContainEqual(expect.objectContaining({
+      id: "exam",
+      weaknesses: expect.arrayContaining(["story-time-precedes-causal-parent"]),
+    }));
+    expect(context.weakEventCandidates).toHaveLength(1);
+    expect(context.weakCharacterCandidates).toEqual([]);
+    expect(context.repairPlan).toMatchObject({ targetCount: 1, requireAutonomousDriver: false });
+    expect(context).not.toHaveProperty("initialWorld");
+
+    for (const invalidConsistency of [
+      { causalCycles: [["train", "exam", "train"]] },
+      { missingCausalParents: [{ eventId: "exam", parentId: "missing" }] },
+    ]) {
+      const blocked = { ...audit, consistency: { ...audit.consistency, ...invalidConsistency } };
+      expect(semanticRepairIsIsolated(blocked)).toBe(false);
+      expect(semanticRepairRequiresReparse(blocked)).toBe(false);
+    }
+
+    const largeTemporalRepair = {
+      ...audit,
+      consistency: { ...audit.consistency, semanticReady: true },
+      semanticRepairTargets: {
+        ...audit.semanticRepairTargets,
+        eventIds: ["exam", ...Array.from({ length: 160 }, (_, index) => `child-${index}`)],
+      },
+    };
+    expect(semanticRepairIsIsolated(largeTemporalRepair)).toBe(false);
+    expect(semanticRepairRequiresReparse(largeTemporalRepair)).toBe(true);
+    expect(reparseReconciliationIterations(largeTemporalRepair)).toBe(11);
+  });
+
   it("persists two disjoint bounded target shards and budgets direct exact reads", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-reconcile-plan-"));
     roots.push(root);
@@ -74,6 +218,8 @@ describe("world semantic reconciliation", () => {
     const secondPrompt = await buildWorldReconciliationPrompt(root, fixture.source.id, audit, 2);
     const first = reconciliationContext(firstPrompt);
     const second = reconciliationContext(secondPrompt);
+    expect(first.stateFieldCatalog).toEqual(DEFAULT_STATE_FIELDS);
+    expect(first.stateFieldCatalog.find(field => field.key === "artifact.condition")).toMatchObject({ valueType: "number", minimum: 0, maximum: 1 });
     const firstIds = first.weakEventCandidates.map(({ id }) => id);
     const secondIds = second.weakEventCandidates.map(({ id }) => id);
 
@@ -87,7 +233,7 @@ describe("world semantic reconciliation", () => {
       "story-time-unknown",
       "no-typed-effect",
     ]));
-    expect(first.repairPlan).toMatchObject({ targetCount: 17, maxIterations: 10 });
+    expect(first.repairPlan).toMatchObject({ targetCount: 18, maxIterations: 10 });
     expect(second.repairPlan).toMatchObject({ targetCount: 16, maxIterations: 10 });
     expect(first.repairPlan).not.toHaveProperty("estimatedToolCalls");
     expect(first.repairPlan).not.toHaveProperty("toolCallLimit");
@@ -129,7 +275,7 @@ describe("world semantic reconciliation", () => {
     expect(reparseFirst.weakEventCandidates).toHaveLength(16);
     expect(reparseSecond.weakEventCandidates).toHaveLength(16);
     expect(reparseFirst.weakCharacterCandidates).toEqual([
-      expect.objectContaining({ actor: expect.objectContaining({ id: "hero" }), needsExecutableDriver: true }),
+      expect.objectContaining({ actor: expect.objectContaining({ id: "hero" }), needsExecutableDriver: false }),
     ]);
     expect(reparseSecond.weakCharacterCandidates).toEqual([]);
     expect(reparseFirst.weakEventCandidates.some(({ id }) =>
@@ -166,6 +312,18 @@ describe("world semantic reconciliation", () => {
     expect(graphFirstPrompt).toContain("do not submit a canonical-event replacement that leaves its preconditions unchanged");
     expect(graphFirst.weakEventCandidates.some(({ id }) =>
       graphSecond.weakEventCandidates.some((candidate) => candidate.id === id))).toBe(false);
+    // A resumed first shard must not rebind its existing finish receipt to new targets.
+    await canon.putEvent({ ...(await canon.getEvent("event-01")), id: "event-00" });
+    const resumed = reconciliationContext(await buildWorldReconciliationPrompt(root, fixture.source.id, audit, 1));
+    expect(resumed.repairPlan.proposalIdSuffix).toBe(first.repairPlan.proposalIdSuffix);
+    expect(resumed.weakEventCandidates.map(({ id }) => id)).toEqual(firstIds);
+    const fresh = reconciliationContext(await buildWorldReconciliationPrompt(root, fixture.source.id, audit, 1, { proposalIdSuffixTail: "reviewed-new-round" }));
+    expect(fresh.weakEventCandidates.map(({ id }) => id)).toContain("event-00");
+    expect(fresh.repairPlan.proposalIdSuffix).not.toBe(first.repairPlan.proposalIdSuffix);
+    const originalSecond = reconciliationContext(await buildWorldReconciliationPrompt(root, fixture.source.id, audit, 2));
+    expect(originalSecond.weakEventCandidates.map(({ id }) => id)).toEqual(secondIds);
+    expect(await hasWorldReconciliationTargets(root, fixture.source.id, "bounded", 3)).toBe(false);
+    expect(await hasWorldReconciliationTargets(root, fixture.source.id, "bounded", 3, "reviewed-new-round")).toBe(true);
   });
 
   it("rejects graph-shard no-ops, outgoing-only links, and duplicate typed relations", async () => {
@@ -237,6 +395,15 @@ describe("world semantic reconciliation", () => {
       payload: events[0],
       generatedBy: { worker: "test" },
     });
+    await proposals.submit("canonical-event", {
+      proposalId: "outside-field-change",
+      payload: {
+        ...events[0],
+        title: "Changed title",
+        preconditions: [{ op: "after-step", step: 1 }],
+      },
+      generatedBy: { worker: "test" },
+    });
     await proposals.submit("event-relation", {
       proposalId: "outgoing-only-link",
       payload: {
@@ -272,10 +439,11 @@ describe("world semantic reconciliation", () => {
       root,
       fixture.source.id,
       1,
-      ["no-op-root-replacement", "outgoing-only-link", "duplicate-link"],
+      ["no-op-root-replacement", "outside-field-change", "outgoing-only-link", "duplicate-link"],
     );
     expect(issues).toEqual(expect.arrayContaining([
       expect.stringContaining("changes neither preconditions nor sceneOccurrenceIds"),
+      expect.stringContaining("outside preconditions/sceneOccurrenceIds: title"),
       expect.stringContaining("outgoing relation from a listed root does not condition that root"),
       expect.stringContaining("already exists as existing-contributory-link"),
     ]));
@@ -389,5 +557,42 @@ describe("world semantic reconciliation", () => {
     };
     expect(semanticRepairIsIsolated(ruleMigration)).toBe(false);
     expect(semanticRepairRequiresReparse(ruleMigration)).toBe(true);
+
+    const nearGraph = {
+      ...systemic,
+      canonical: { ...systemic.canonical, events: 47 },
+      consistency: {
+        ...systemic.consistency,
+        narrativeGraphNavigable: false,
+        unconditionalRootEvents: Array.from({ length: 20 }, (_value, index) => `root-${index + 1}`),
+      },
+    };
+    expect(narrativeGraphNearNavigable(nearGraph)).toBe(true);
+    expect(semanticRepairRequiresReparse(nearGraph)).toBe(true);
+    const boundedGraphFallback = {
+      ...nearGraph,
+      consistency: {
+        ...nearGraph.consistency,
+        unconditionalRootEvents: [...nearGraph.consistency.unconditionalRootEvents, "root-21"],
+      },
+    };
+    expect(narrativeGraphNearNavigable(boundedGraphFallback)).toBe(false);
+    expect(semanticRepairRequiresReparse(boundedGraphFallback)).toBe(true);
   });
+});
+
+it("supplies only same-batch proposal lifecycle with current successors and retired identities", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-lifecycle-")); roots.push(root);
+  const fixture = await createEvidenceFixture(root, "Hero waits.");
+  const service = new CompilerProposalService(root);
+  const payload = { id: "hero", kind: "character" as const, canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") };
+  await service.submit("entity", { proposalId: "old", payload, generatedBy: { worker: "test", compilerBatchId: "batch-a" } });
+  await service.submit("entity", { proposalId: "successor", payload, generatedBy: { worker: "test", compilerBatchId: "batch-a" } });
+  await service.withdraw("old", "Replaced by successor.");
+  await service.submit("entity", { proposalId: "unrelated", payload, generatedBy: { worker: "test", compilerBatchId: "batch-b" } });
+  const inventory = await reconciliationProposalLifecycle(root, fixture.source.id, "batch-a");
+  expect(inventory).toEqual([
+    { proposalId: "successor", status: "pending", kind: "entity", logicalId: "hero", ref: "pending:successor", immutable: true },
+    { proposalId: "old", status: "rejected", kind: "entity", logicalId: "hero", immutable: true },
+  ]);
 });

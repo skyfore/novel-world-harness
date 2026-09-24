@@ -1,4 +1,14 @@
+import { upstreamRepairSnapshotInputs } from "./upstream-repair-evaluation-model.js";
+import { upstreamRepairEvaluationIssues } from "./upstream-repair-evaluation.js";
+import { upstreamRepairSnapshotIssues } from "./upstream-repair-snapshot.js";
+import { roleReviewFinishIssues } from "./role-review-finish.js";
+import { coreRoleAttemptHistoryIssues, requirementJournalBindingIssues, requirementSnapshotInputs } from "./requirement-ledger.js";
 import fs from "node:fs/promises";
+import { activeRequirementSets, evaluateRequirementSet, requirementResultSchema, requirementResultIssues } from "./requirement-ledger.js";
+import { reconciliationObligationIssues } from "./reconciliation-review-ledger.js";
+import { frozenSceneCatalog } from "./requirement-service.js";
+import { SourceMaterialStore } from "../storage/source-material-store.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
 import path from "node:path";
 import crypto from "node:crypto";
 import { z } from "zod";
@@ -6,7 +16,10 @@ import { canonicalJson, contentHash } from "../world/canonical.js";
 import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, validationIssueSchema } from "../world/model.js";
 import { worldStorageRoot } from "../world/paths.js";
 import { buildPreparedClosure, closureGraphSchema } from "./closure.js";
-import { buildRoleRoster, majorRoleCandidates, roleRosterSchema, validateRoleRoster } from "./role-roster.js";
+import { buildRoleRoster, majorRoleCandidates, roleRosterSchema, validateRoleRoster, validateRoleDevelopmentExpectations } from "./role-roster.js";
+import { entryDriverWitnessIssues } from "./entry-driver-probe.js";
+import { evaluateCoreRoleCapabilities, coreRoleResultIssues } from "./core-role-capabilities.js";
+import { assertCoreRoleDefinitionEvidence, coreRoleDefinitionBindingIssues } from "./core-role-requirement-records.js";
 import { playabilityManifestSchema, probeMajorRoleEntries } from "./playability.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { NovelPlayQualityStore, novelPlayQualitySchema, validateNovelPlayQuality } from "../eval/novel-play-quality.js";
@@ -24,13 +37,15 @@ export const novelClosureAssessmentSchema = z.object({
   entryReady: z.boolean(), fullNovelReady: z.boolean(),
   quality: novelPlayQualitySchema.nullable(),
   supportAssessments: z.array(supportAssessmentSchema), sceneContracts: z.array(sceneExecutionContractSchema),
+  requirementResults: z.array(requirementResultSchema).optional(),
+  coreRoleResult: requirementResultSchema.optional(),
   issues: z.array(validationIssueSchema),
 }).strict();
 export type NovelClosureAssessment = z.infer<typeof novelClosureAssessmentSchema>;
 
 /** Derived outputs are excluded so the snapshot, probes and certificate never form a hash cycle. */
 export function preparedSubjectHash(bundle: Pick<PreparedNovelBundle, "version" | "source" | "canonical" | "compilerSnapshot" | "compilerFingerprint" | "segmenterVersion" | "batchIds" | "chapterSplitPlan">): string {
-  return contentHash({ version: bundle.version, source: bundle.source, canonical: bundle.canonical, compilerSnapshot: bundle.compilerSnapshot,
+  return contentHash({ version: bundle.version, source: bundle.source, canonical: bundle.canonical, compilerSnapshot: upstreamRepairSnapshotInputs(requirementSnapshotInputs(bundle.compilerSnapshot)),
     compilerFingerprint: bundle.compilerFingerprint ?? null, segmenterVersion: bundle.segmenterVersion, batchIds: [...bundle.batchIds].sort(), chapterSplitPlan: bundle.chapterSplitPlan ?? null });
 }
 
@@ -38,7 +53,29 @@ export function preparedSubjectHash(bundle: Pick<PreparedNovelBundle, "version" 
 export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle): Promise<NovelClosureAssessment> {
   const subjectSnapshotHash = preparedSubjectHash(bundle), closure = buildPreparedClosure(bundle);
   const issues = [...closure.issues, ...validateFrozenAccounting(bundle)];
+  issues.push(...upstreamRepairSnapshotIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "UPSTREAM_REPAIR_SNAPSHOT_INVALID", message })));
+  issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true).map(message => ({ code: "REQUIREMENT_JOURNAL_INVALID", message })));
+  issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));
+  issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id).map(message => ({ code: "CORE_ROLE_ATTEMPT_DEFINITION_MISMATCH", message })));
   const snapshot = bundle.compilerSnapshot;
+  issues.push(...roleReviewFinishIssues(snapshot.reconciliationObligations ?? [], snapshot.roleRoster, bundle.source.id).map(message => ({ code: "ROLE_REVIEW_FINISH_NOT_CERTIFIED", message })));
+  const requirementSets = activeRequirementSets(snapshot.requirementDefinitions ?? []);
+  const coreDefinitions = snapshot.coreRoleRequirementDefinitions ?? [];
+  const requirementResults: z.infer<typeof requirementResultSchema>[] = [];
+  if (requirementSets.length || coreDefinitions.length) {
+    try {
+      const source = await WorkspaceStore.openReadOnly(root).getSource(bundle.source.id);
+      if (!source || source.contentSha256 !== bundle.source.contentSha256) throw new Error("Frozen requirement source is not registered at the same revision");
+      const bytes = await new SourceMaterialStore().read(source);
+      if (!bytes) throw new Error("Immutable source bytes unavailable for requirement evaluation");
+      for (const definition of coreDefinitions) assertCoreRoleDefinitionEvidence(definition, bytes);
+      for (const set of requirementSets) {
+        if (set.spec.sourceId !== source.id || set.spec.sourceSha256 !== source.contentSha256) throw new Error("Frozen requirement source scope mismatch");
+        requirementResults.push(evaluateRequirementSet(set, bytes, frozenSceneCatalog(bundle)));
+      }
+    } catch (error) { issues.push({ code: "REQUIREMENT_EVALUATION_BLOCKED", message: String(error) }); }
+    issues.push(...requirementResultIssues(requirementSets, requirementResults, frozenSceneCatalog(bundle)).map(message => ({ code: "REQUIREMENT_NOT_CERTIFIED", message })));
+  }
   let roster: NovelClosureAssessment["roster"] = null, playability: NovelClosureAssessment["playability"] = null;
   try {
     const fresh = buildRoleRoster({ sourceId: bundle.source.id, sourceSha256: bundle.source.contentSha256, unitIds: snapshot.structure.baseUnitIds,
@@ -46,11 +83,19 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
     const saved = snapshot.roleRoster;
     roster = saved?.subjectHash === fresh.subjectHash ? saved : fresh;
     issues.push(...validateRoleRoster(roster));
+    issues.push(...validateRoleDevelopmentExpectations(roster));
     playability = await probeMajorRoleEntries(bundle, roster, subjectSnapshotHash);
     issues.push(...playability.issues, ...playability.roles.flatMap((role) => role.issues));
   } catch (error) {
     issues.push({ code: "ROSTER_ASSESSMENT_BLOCKED", message: error instanceof Error ? error.message : String(error) });
   }
+  let coreRoleResult: NovelClosureAssessment["coreRoleResult"];
+  try {
+    if (roster) coreRoleResult = evaluateCoreRoleCapabilities(bundle, roster, playability, subjectSnapshotHash);
+    issues.push(...coreRoleDefinitionBindingIssues(coreDefinitions, { sourceId: bundle.source.id, sourceSha256: bundle.source.contentSha256, roster, specHash: coreRoleResult?.revisionHash }).map(message => ({ code: "CORE_ROLE_DEFINITION_NOT_CERTIFIED", message })));
+    issues.push(...coreRoleResultIssues(bundle, roster, playability, subjectSnapshotHash, coreRoleResult).map(message => ({ code: "CORE_ROLE_REQUIREMENT_NOT_CERTIFIED", message })));
+  } catch (error) { issues.push({ code: "CORE_ROLE_REQUIREMENTS_BLOCKED", message: String(error) }); }
+  issues.push(...upstreamRepairEvaluationIssues(bundle, { subjectSnapshotHash, roster, playability, requirementResults, coreRoleResult }).map(message => ({ code: "UPSTREAM_REPAIR_UNRESOLVED", message })));
   const quality = await new NovelPlayQualityStore(root).read(subjectSnapshotHash);
   const support = assessSemanticSupport(bundle, quality?.supportReviews), scenes = buildSceneExecutionContracts(bundle, roster);
   issues.push(...support.issues, ...scenes.issues);
@@ -60,6 +105,8 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   // Entry probes establish deterministic operability, never semantic recall or 50-turn Pi behavior.
   const assessment = novelClosureAssessmentSchema.parse({ version: 1, sourceId: bundle.source.id, sourceSha256: bundle.source.contentSha256, subjectSnapshotHash,
     engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION, closure, roster, playability, entryReady, fullNovelReady: entryReady && qualityIssues.length === 0, quality, supportAssessments: support.assessments, sceneContracts: scenes.contracts,
+    ...(requirementSets.length ? { requirementResults } : {}),
+    ...(coreRoleResult ? { coreRoleResult } : {}),
     issues: [...new Map(issues.map((issue) => [`${issue.code}/${issue.path ?? ""}/${issue.message}`, issue])).values()] });
   await new NovelClosureStore(root).write(assessment);
   return assessment;
@@ -67,6 +114,17 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
 
 export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment): string[] {
   const issues: string[] = [];
+  issues.push(...upstreamRepairSnapshotIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256));
+  issues.push(...upstreamRepairEvaluationIssues(bundle, assessment));
+  issues.push(...coreRoleDefinitionBindingIssues(bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], { sourceId: bundle.source.id,
+    sourceSha256: bundle.source.contentSha256, roster: assessment.roster, specHash: assessment.coreRoleResult?.revisionHash }));
+  issues.push(...coreRoleResultIssues(bundle, assessment.roster, assessment.playability, assessment.subjectSnapshotHash, assessment.coreRoleResult));
+  issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256));
+  issues.push(...roleReviewFinishIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.compilerSnapshot.roleRoster, bundle.source.id));
+  issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id));
+  issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true));
+  issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));
+  if (bundle.compilerSnapshot.roleRoster) issues.push(...validateRoleDevelopmentExpectations(bundle.compilerSnapshot.roleRoster).map(issue => `${issue.code}: ${issue.path}`));
   if (preparedSubjectHash(bundle) !== assessment.subjectSnapshotHash) issues.push("ENTRY_CUT_STALE: prepared inputs changed after entry evaluation");
   if (assessment.sourceId !== bundle.source.id || assessment.sourceSha256 !== bundle.source.contentSha256) issues.push("WORLD_SOURCE_MISMATCH: certificate belongs to another source");
   if (assessment.engineVersion !== WORLD_ENGINE_VERSION || assessment.schemaVersion !== WORLD_SCHEMA_VERSION) issues.push("WORLD_VERSION_UNSUPPORTED: evaluator fingerprint changed");
@@ -74,6 +132,14 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
   if (contentHash(buildSceneExecutionContracts(bundle, assessment.roster).contracts) !== contentHash(assessment.sceneContracts)) issues.push("SCENE_CONTRACT_STALE: scene execution inputs changed");
   if (contentHash(assessSemanticSupport(bundle, assessment.quality?.supportReviews).assessments) !== contentHash(assessment.supportAssessments)) issues.push("SUPPORT_ASSESSMENT_STALE: support review inputs changed");
   if (assessment.playability && (assessment.playability.subjectSnapshotHash !== assessment.subjectSnapshotHash || assessment.playability.rosterHash !== contentHash(assessment.roster))) issues.push("MAJOR_ROLE_ROSTER_MISMATCH: entry probes refer to another source or roster");
+  for (const role of assessment.playability?.roles ?? []) {
+    if (!role.actorId) { issues.push(`ENTRY_DRIVER_NOT_EVALUATED: ${role.candidateId}`); continue; }
+    try {
+      const cut = deriveCharacterEntrySeed(bundle, role.actorId).cut;
+      issues.push(...entryDriverWitnessIssues(role.driverWitness, { sourceId: bundle.source.id,
+        subjectSnapshotHash: assessment.subjectSnapshotHash, entryCutHash: cut.hash, actorId: role.actorId }));
+    } catch (error) { issues.push(`ENTRY_DRIVER_CUT_INVALID: ${role.candidateId}: ${String(error)}`); }
+  }
   return issues;
 }
 
@@ -101,12 +167,12 @@ export function assertPreparedReadiness(bundle: PreparedNovelBundle): void {
         try {
           if (role.entryCutHash !== deriveCharacterEntrySeed(bundle, candidate.entityId).cut.hash) issues.push(`ENTRY_CUT_STALE: ${candidate.id}`);
         } catch (error) { issues.push(`MAJOR_ROLE_ENTRY_BLOCKED: ${String(error)}`); }
-        if (canonicalJson(role.probes.map((probe) => probe.kind).sort()) !== canonicalJson(["decision", "fork", "genesis", "intent", "resume", "wait"])) issues.push(`MAJOR_ROLE_PROBES_INCOMPLETE: ${candidate.id}`);
+        if (canonicalJson(role.probes.map((probe) => probe.kind).sort()) !== canonicalJson(["decision", "driver", "fork", "genesis", "intent", "resume", "wait"])) issues.push(`MAJOR_ROLE_PROBES_INCOMPLETE: ${candidate.id}`);
       }
       issues.push(...assessment.playability.issues.map((issue) => `${issue.code}: ${issue.message}`));
     }
   }
-  if (assessment.playability && (assessment.playability.majorTotal === 0 || assessment.playability.majorTotal !== assessment.playability.readyTotal || assessment.playability.roles.some((role) => role.status !== "ready" || !role.actorId || !role.entryCutHash || role.issues.length || role.probes.length !== 6 || role.probes.some((probe) => !probe.passed)))) issues.push("MAJOR_ROLE_NOT_CERTIFIED: role probe results are incomplete");
+  if (assessment.playability && (assessment.playability.majorTotal === 0 || assessment.playability.majorTotal !== assessment.playability.readyTotal || assessment.playability.roles.some((role) => role.status !== "ready" || !role.actorId || !role.entryCutHash || role.issues.length || role.probes.length !== 7 || role.probes.some((probe) => !probe.passed)))) issues.push("MAJOR_ROLE_NOT_CERTIFIED: role probe results are incomplete");
   if (issues.length) throw new Error(`WORLD_CLOSURE_BLOCKED: ${[...new Set(issues)].join("; ")}`);
 }
 

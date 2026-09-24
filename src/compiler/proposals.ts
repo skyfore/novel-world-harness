@@ -1,3 +1,14 @@
+import { entryArtifactEvidenceIssues } from "../world/entry-agency.js";
+import { validateProcessRecoveryEvidence } from "../world/event-execution.js";
+import { validateIncapacityEvidence } from "../world/process-capacity.js";
+import { InitialWorldStore } from "../world/initial.js";
+import { acquisitionSchema, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
+import { contentHash } from "../world/canonical.js";
+import { perceptionObservationSchema, validatePerceptionObservationEvidence, type PerceptionObservation } from "../world/perception-observation.js";
+import { utteranceExpressionSchema, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
+import { validateGoalExpressionEvidence } from "../world/conditional-expression.js";
+import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { semanticEffectSchema, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import { z } from "zod";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
@@ -175,7 +186,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "perception-observation" | "acquisition" | "utterance-expression" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -193,6 +204,10 @@ export const compilerProposalSchemas = {
   "event-relation": compilerEventRelationSchema,
   "scene-occurrence": sceneOccurrenceSchema,
   "event-frame": compilerEventFrameSchema,
+  "semantic-effect": semanticEffectSchema,
+  "perception-observation": perceptionObservationSchema,
+  "acquisition": acquisitionSchema,
+  "utterance-expression": utteranceExpressionSchema,
   "action-schema": compilerActionSchema,
   "event-execution": eventExecutionSchema,
   "action-constraint": compilerActionConstraintSchema,
@@ -255,10 +270,22 @@ export function compilerPayloadEvidence(payload: unknown): EvidenceRef[] {
 
 export class CompilerProposalService {
   readonly store: ProposalStore;
-  constructor(workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
+  constructor(private readonly workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
   async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; evidenceAssertions?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string } }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
     const schema = compilerProposalSchemas[kind];
     const payload = schema.parse(input.payload);
+    if (input.generatedBy.compilerBatchId) {
+      const canonical = new CanonicalModelStore(this.workspaceRoot);
+      const current = await (kind === "canonical-event" ? canonical.getEvent((payload as CanonicalEvent).id)
+        : kind === "event-execution" ? canonical.getEventExecution((payload as EventExecution).id)
+          : kind === "initial-world" ? new InitialWorldStore(this.workspaceRoot).get() : Promise.resolve(undefined))
+        .catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+      const established = new Set(findKnowledgeDeltas(current).flatMap(item => item.delta.operations.map(operation => contentHash(operation))));
+      for (const located of findKnowledgeDeltas(payload)) for (const operation of located.delta.operations) {
+        if (operation.op === "learn" && operation.acquisitionMode === "observed" && !operation.perceptionId && !established.has(contentHash(operation))) throw new Error("PERCEPTION_REQUIRED: New observed acquisition requires a source-grounded perceptionId. Use same-source find_compiler_artifacts with kind perception-observation; copy results[].readArguments.ref into read_compiler_artifact.ref and payload.id into perceptionId. At most one corrected retry if proof exists within scope; otherwise preserve drafts and stop for host source review. Deleting sourceActorId or attributionId from a report is not perception; never guess or retry unchanged.");
+        if (operation.op === "learn" && !operation.acquisitionId && !established.has(contentHash(operation))) throw new Error("ACQUISITION_REQUIRED: New compiler knowledge requires a source-grounded acquisitionId. Use same-source find_compiler_artifacts with kind acquisition, copy results[].readArguments.ref into read_compiler_artifact.ref and payload.id into acquisitionId. If no record exists, propose_acquisition only within current authority with this occurrence's own receipt/understanding/belief evidence. One corrected retry; otherwise preserve drafts and stop for host review. Never remove provenance, rename the event or change mode to reuse legacy compatibility.");
+      }
+    }
     if (kind !== "entity" && kind !== "claim" && kind !== "character-model") assertCompilerStateFields(payload);
     const evidence = input.evidence === undefined ? [] : evidenceRefSchema.array().parse(input.evidence);
     const evidenceAssertions = input.evidenceAssertions === undefined
@@ -279,7 +306,9 @@ export class CompilerProposalService {
       );
     }
     const artifactId = compilerProposalArtifactId(kind, payload, input.proposalId);
-    const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
+    const targetIssues = [...entryArtifactEvidenceIssues(kind, payload, evidenceAssertions), ...(kind === "event-execution" ? validateProcessRecoveryEvidence(eventExecutionSchema.parse(payload), evidenceAssertions) : []), ...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : []), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : []), ...(kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions) : []), ...(kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : []), ...(kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions) : [])];
+    targetIssues.push(...(kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(payload), evidenceAssertions) : []));
+    targetIssues.push(...(kind === "entity" ? validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions) : []));
     const characterEvidenceIssues = kind === "character-model"
       ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
       : [];
@@ -424,6 +453,9 @@ type ProposalClosureCatalog = {
   entities: Set<string>;
   entityKinds: Map<string, string>;
   propositions: Set<string>;
+  expressions: Set<string>;
+  perceptions: Set<string>;
+  acquisitions: Set<string>;
   attributions: Set<string>;
   claims: Set<string>;
   events: Set<string>;
@@ -490,7 +522,12 @@ export async function validateCompilerProposalClosure(
     if (matches) assertEvidenceExclusiveToSource(evidence, sourceId, `Proposal-closure artifact ${item.id ?? "unknown"}`);
     return matches;
   };
+  const canonicalExpressions = (await canon.listUtteranceExpressions()).filter(fromActiveSource);
+  const entryAcquisitions = new Map((await canon.listAcquisitions()).filter(fromActiveSource).map(item => [item.id, item]));
   const catalog: ProposalClosureCatalog = {
+    acquisitions: new Set(entryAcquisitions.keys()),
+    perceptions: new Set((await canon.listPerceptionObservations()).filter(fromActiveSource).map(item => item.id)),
+    expressions: new Set(canonicalExpressions.map(item => item.id)),
     entities: new Set(canonicalEntities.filter(fromActiveSource).map((item) => item.id)),
     entityKinds: new Map(canonicalEntities.filter(fromActiveSource).map((item) => [item.id, item.kind])),
     propositions: new Set(canonicalPropositions.filter(fromActiveSource).map((item) => item.id)),
@@ -530,6 +567,9 @@ export async function validateCompilerProposalClosure(
       catalog.entities.add(entity.id);
       catalog.entityKinds.set(entity.id, entity.kind);
     }
+    if (summary.kind === "acquisition") catalog.acquisitions.add((payload as { id: string }).id);
+    if (summary.kind === "perception-observation") catalog.perceptions.add((payload as { id: string }).id);
+    if (summary.kind === "utterance-expression") catalog.expressions.add((payload as { id: string }).id);
     if (summary.kind === "proposition") catalog.propositions.add((payload as { id: string }).id);
     if (summary.kind === "attribution") catalog.attributions.add((payload as { id: string }).id);
     if (summary.kind === "claim") catalog.claims.add((payload as { id: string }).id);
@@ -662,10 +702,11 @@ export async function validateCompilerProposalClosure(
     }
   }
 
+  for (const proposal of staged.values()) if (proposal.kind === "acquisition") { const acquisition = acquisitionSchema.parse(proposal.payload); entryAcquisitions.set(acquisition.id, acquisition); }
   const executionBindings = new Map(canonicalEventExecutions.filter(fromActiveSource).map((binding) => [binding.id, binding]));
   for (const proposal of staged.values()) if (proposal.kind === "event-execution") { const binding = eventExecutionSchema.parse(proposal.payload); executionBindings.set(binding.id, binding); }
   const issues = new Set<string>();
-  for (const issue of validateEventExecutions([...executionBindings.values()], { participations: [...participationCatalog.participations.values()], entities: executableEntityCatalog, events: participationCatalog.events, actionSchemas: executableActionCatalog })) issues.add(`${issue.path}: ${issue.code}: ${issue.message}`);
+  for (const issue of validateEventExecutions([...executionBindings.values()], { acquisitions: entryAcquisitions, participations: [...participationCatalog.participations.values()], entities: executableEntityCatalog, events: participationCatalog.events, actionSchemas: executableActionCatalog, processTemplates: processTemplateCatalog })) issues.add(`${issue.path}: ${issue.code}: ${issue.message}`);
   for (const proposalId of proposalIds) {
     const proposal = staged.get(proposalId);
     if (!proposal) {
@@ -770,6 +811,9 @@ export async function validateCompilerProposalClosure(
   })) {
     issues.add(`norm-template: ${normIssue.code} at ${normIssue.path ?? "payload"}: ${normIssue.message}`);
   }
+  for (const entity of executableEntityCatalog.values()) for (const error of validateAgencyProfile(entity, { processTemplates: processTemplateCatalog, actionSchemas: executableActionCatalog })) {
+    issues.add(`entity ${entity.id}: ${error.code} at ${error.path}: ${error.message}`);
+  }
   for (const processIssue of validateProcessTemplateCatalog(
     processTemplateCatalog.values(),
     new Set(participationCatalog.events.keys()),
@@ -848,7 +892,13 @@ function collectProposalClosureIssues(
     }
   };
   const payload = proposal.payload;
-  if (proposal.kind === "entity") return;
+  if (proposal.kind === "entity") {
+    entitySchema.parse(payload).agencyProfile?.channels.forEach((channel, index) => {
+      missing("processes", channel.processTemplateId, `agencyProfile.channels.${index}.processTemplateId`);
+      if (channel.actionSchemaId) missing("actions", channel.actionSchemaId, `agencyProfile.channels.${index}.actionSchemaId`);
+    });
+    return;
+  }
   if (proposal.kind === "proposition") {
     const proposition = payload as Proposition;
     missing("entities", proposition.subjectEntityId, "subjectEntityId");
@@ -859,6 +909,7 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "attribution") {
     const attribution = payload as Attribution;
+    attribution.expressionIds?.forEach((id, index) => missing("expressions", id, `expressionIds.${index}`));
     missing("propositions", attribution.propositionId, "propositionId");
     if (attribution.holderEntityId) missing("entities", attribution.holderEntityId, "holderEntityId");
     if (attribution.sourceAttributionId) missing("attributions", attribution.sourceAttributionId, "sourceAttributionId");
@@ -913,6 +964,42 @@ function collectProposalClosureIssues(
     }
     return;
   }
+  if (proposal.kind === "utterance-expression") {
+    const expression = payload as UtteranceExpression;
+    missing("events", expression.canonicalEventId, "canonicalEventId");
+    missing("entities", expression.speakerId, "speakerId");
+    if (expression.documentId) missing("entities", expression.documentId, "documentId");
+    expression.addresseeIds.forEach((id, index) => missing("entities", id, `addresseeIds.${index}`));
+    expression.propositions.forEach((item, index) => missing("propositions", item.propositionId, `propositions.${index}.propositionId`));
+    return;
+  }
+  if (proposal.kind === "acquisition") {
+    const value = payload as Acquisition;
+    missing("events", value.canonicalEventId, "canonicalEventId");
+    missing("entities", value.actorId, "actorId");
+    missing("claims", value.claimId, "claimId");
+    missing("propositions", value.propositionId, "propositionId");
+    const fields = { entity: "entities", "process-template": "processes", "canonical-event": "events", claim: "claims", proposition: "propositions", attribution: "attributions", "utterance-expression": "expressions", "perception-observation": "perceptions", acquisition: "acquisitions" } as const;
+    value.revisions.forEach((ref, index) => missing(fields[ref.kind], ref.id, `revisions.${index}.id`));
+    return;
+  }
+  if (proposal.kind === "perception-observation") {
+    const observation = payload as PerceptionObservation;
+    missing("events", observation.canonicalEventId, "canonicalEventId");
+    missing("entities", observation.observerId, "observerId");
+    missing("entities", observation.access.locationId, "access.locationId");
+    if (observation.phenomenon.entityId) missing("entities", observation.phenomenon.entityId, "phenomenon.entityId");
+    observation.access.conditions.forEach((condition, index) => collectPredicateIssues(condition, `access.conditions.${index}`, missing, fieldReference));
+    return;
+  }
+  if (proposal.kind === "semantic-effect") {
+    const effect = payload as SemanticEffect;
+    missing("events", effect.canonicalEventId, "canonicalEventId");
+    missing("entities", effect.subjectEntityId, "subjectEntityId");
+    collectStoryTimeIssues(effect.validTime, "validTime", missing);
+    if (effect.kind === "temporary-incapacity" && effect.lowering.status === "mapped") missing("processes", effect.lowering.processTemplateId, "lowering.processTemplateId");
+    return;
+  }
   if (proposal.kind === "event-frame") return;
   if (proposal.kind === "event-execution") {
     const binding = payload as EventExecution;
@@ -920,6 +1007,7 @@ function collectProposalClosureIssues(
     missing("entities", binding.actorId, "actorId");
     if (binding.action?.lane === "schema-bound") missing("actions", binding.action.schemaId, "action.schemaId");
     binding.action?.lane === "schema-bound" && binding.action.roleBindings.forEach((role) => role.entityIds.forEach((id) => missing("entities", id, "action.roleBindings")));
+    for (const recovery of binding.processRecoveries ?? []) { missing("processes", recovery.processTemplateId, "processRecoveries.processTemplateId"); missing("entities", recovery.subjectEntityId, "processRecoveries.subjectEntityId"); }
     if (binding.entryCheckpoint) collectStateDeltaIssues(binding.entryCheckpoint.delta, "entryCheckpoint.delta", missing, fieldReference);
     return;
   }
@@ -1049,6 +1137,11 @@ function collectProposalClosureIssues(
       ...(goal.actionPatterns ?? []).map((value, index) => ({ path: `actionPatterns.${index}`, value })),
     ];
     for (const { path, value } of actions) {
+      value.expressionCandidates?.forEach((candidate, index) => {
+        missing("expressions", candidate.expressionId, `${path}.expressionCandidates.${index}.expressionId`);
+        candidate.requiredKnowledgeClaimIds.forEach((id, i) => missing("claims", id, `${path}.expressionCandidates.${index}.requiredKnowledgeClaimIds.${i}`));
+        candidate.relationshipConditions.forEach((predicate, i) => collectPredicateIssues(predicate, `${path}.expressionCandidates.${index}.relationshipConditions.${i}`, missing, fieldReference));
+      });
       value.participants?.forEach((id, index) => missing("entities", id, `${path}.participants.${index}`));
       value.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `${path}.preconditions.${index}`, missing, fieldReference));
       collectStateDeltaIssues(value.proposedDelta, `${path}.proposedDelta`, missing, fieldReference);
@@ -1189,6 +1282,9 @@ function collectKnowledgeDeltaIssues(delta: KnowledgeDelta, path: string, missin
     const operationPath = `${path}.operations.${index}`;
     missing("entities", operation.actorId, `${operationPath}.actorId`);
     missing("claims", operation.claimId, `${operationPath}.claimId`);
+    if (operation.op === "learn" && operation.acquisitionId) missing("acquisitions", operation.acquisitionId, `${operationPath}.acquisitionId`);
+    if (operation.op === "learn" && operation.perceptionId) missing("perceptions", operation.perceptionId, `${operationPath}.perceptionId`);
+    if (operation.op === "learn" && operation.expressionId) missing("expressions", operation.expressionId, `${operationPath}.expressionId`);
     if (operation.propositionId) missing("propositions", operation.propositionId, `${operationPath}.propositionId`);
     if (operation.op === "learn" && operation.attributionId) {
       missing("attributions", operation.attributionId, `${operationPath}.attributionId`);

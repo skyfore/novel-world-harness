@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { activeRequirementSets } from "./requirement-ledger.js";
 import { contentHash } from "../world/canonical.js";
 import { predicateSchema, stateOperationSchema, validationIssueSchema } from "../world/model.js";
 import { predicateReferences, stateOperationReferences } from "../world/state-references.js";
@@ -7,7 +8,7 @@ import { annotationAnchors } from "./annotations.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { applyEventExecutions } from "../world/event-execution.js";
 
-export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "action", "event-execution", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry"]);
+export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "semantic-effect", "perception-observation", "acquisition", "utterance-expression", "action", "event-execution", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry", "requirement-set", "core-role-requirements"]);
 export type ClosureKind = z.infer<typeof closureKindSchema>;
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const dependencyUseSchema = z.object({ pointer: z.string(), purpose: z.enum(["identity", "evidence-support", "temporal-order", "causal-precondition", "state-effect", "knowledge-acquisition", "entry-seed", "capability", "certificate"]) }).strict();
@@ -22,14 +23,20 @@ const key = (value: { kind: string; id: string }) => `${value.kind}/${value.id}`
 
 /** An explicit reference vocabulary, not an ID-suffix heuristic or a free-text scan. */
 const referenceFields: Readonly<Record<string, ClosureKind>> = {
+  acquisitionId: "acquisition", priorAcquisitionId: "acquisition", premiseAcquisitionIds: "acquisition", actualSourceActorId: "entity", believedSourceActorId: "entity",
+  processTemplateId: "process",
+  perceptionId: "perception-observation", observerId: "entity", observerMentionId: "annotation", eventMentionId: "annotation", observerResolutionId: "entity-resolution", eventResolutionId: "event-resolution",
+  documentId: "entity", speakerId: "entity", addresseeIds: "entity", expressionId: "utterance-expression", expressionIds: "utterance-expression", quotationId: "annotation",
   entityId: "entity", actorId: "entity", subjectEntityId: "entity", holderEntityId: "entity", fromActorId: "entity", toActorId: "entity", debtorActorId: "entity", creditorActorId: "entity", beneficiaryActorId: "entity", sourceActorId: "entity", authorityEntityId: "entity", focalActorId: "entity", viewpointActorId: "entity", fromLocationId: "entity", toLocationId: "entity", containerLocationId: "entity", containedLocationId: "entity", locationId: "entity",
   entityIds: "entity", participants: "entity", targetEntityIds: "entity", targetIds: "entity", presentActorIds: "entity", viewpointActorIds: "entity", jurisdictionEntityIds: "entity", locationIds: "entity",
-  propositionId: "proposition", attributionId: "attribution", sourceAttributionId: "attribution", claimId: "claim", knownByClaimIds: "claim", requiresKnowledge: "claim", blockedByKnowledge: "claim", forbidsKnowledge: "claim", focalKnowledgeClaimIds: "claim",
+  propositionId: "proposition", attributionId: "attribution", sourceAttributionId: "attribution", claimId: "claim", knownByClaimIds: "claim", requiresKnowledge: "claim", requiredKnowledgeClaimIds: "claim", blockedByKnowledge: "claim", forbidsKnowledge: "claim", focalKnowledgeClaimIds: "claim",
+  afterCanonicalEventIds: "event", afterExperiencedCanonicalEventIds: "event", triggerEventIds: "event", reversalEventIds: "event",
   eventId: "event", canonicalEventId: "event", fromEventId: "event", toEventId: "event", anchorEventId: "event", beforeCanonicalEventId: "event", eventIds: "event", supportingEventIds: "event", establishedByEventIds: "event", retiredByEventIds: "event", causalParents: "event",
-  sceneOccurrenceIds: "scene", frameId: "frame", schemaId: "action", ruleId: "rule", activeRuleIds: "rule", overridesRuleIds: "rule", overridesConstraintIds: "constraint", overridesTemplateIds: "norm",
+  sceneOccurrenceIds: "scene", frameId: "frame", schemaId: "action", actionSchemaId: "action", ruleId: "rule", activeRuleIds: "rule", overridesRuleIds: "rule", overridesConstraintIds: "constraint", overridesTemplateIds: "norm",
   goalId: "goal", parentGoalId: "goal",
   unitIds: "unit", reviewedUnitIds: "unit", basisUnitIds: "unit", resolutionIds: "entity-resolution",
-  mentionId: "annotation", mentionIds: "annotation", participantMentionIds: "annotation", speakerMentionIds: "annotation", addresseeMentionIds: "annotation", viewpointMentionIds: "annotation", eventMentionIds: "annotation", quotationIds: "annotation", basisMentionIds: "annotation", basisEventMentionIds: "annotation", discourseSegmentId: "discourse", discourseSegmentIds: "discourse", sceneId: "discourse",
+  speakerMentionId: "annotation", viewpointMentionId: "annotation",
+  mentionId: "annotation", mentionIds: "annotation", participantMentionIds: "annotation", speakerMentionIds: "annotation", addresseeMentionIds: "annotation", viewpointMentionIds: "annotation", eventMentionIds: "annotation", quotationIds: "annotation", basisMentionIds: "annotation", basisEventMentionIds: "annotation", executionId: "event-execution", discourseSegmentId: "discourse", discourseSegmentIds: "discourse", sceneId: "discourse",
 };
 
 export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph {
@@ -43,12 +50,21 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
   add("source", bundle.source.id, bundle.source);
   const canonical = bundle.canonical;
   const collections: Array<[ClosureKind, readonly { id: string }[]]> = [
-    ["entity", canonical.entities], ["proposition", canonical.propositions], ["attribution", canonical.attributions], ["claim", canonical.claims], ["event", canonical.events], ["participation", canonical.eventParticipations], ["event-relation", canonical.eventRelations], ["spatial", canonical.spatialRelations], ["scene", canonical.sceneOccurrences], ["frame", canonical.eventFrames], ["action", canonical.actionSchemas], ["event-execution", canonical.eventExecutions ?? []], ["constraint", canonical.actionConstraints], ["norm", canonical.normTemplates], ["process", canonical.processTemplates], ["rule", canonical.rules], ["goal", canonical.goals], ["possibility", canonical.possibilities],
+    ["entity", canonical.entities], ["proposition", canonical.propositions], ["attribution", canonical.attributions], ["claim", canonical.claims], ["event", canonical.events], ["participation", canonical.eventParticipations], ["event-relation", canonical.eventRelations], ["spatial", canonical.spatialRelations], ["scene", canonical.sceneOccurrences], ["frame", canonical.eventFrames], ["semantic-effect", canonical.semanticEffects ?? []], ["perception-observation", canonical.perceptionObservations ?? []], ["acquisition", canonical.acquisitions ?? []], ["utterance-expression", canonical.utteranceExpressions ?? []], ["action", canonical.actionSchemas], ["event-execution", canonical.eventExecutions ?? []], ["constraint", canonical.actionConstraints], ["norm", canonical.normTemplates], ["process", canonical.processTemplates], ["rule", canonical.rules], ["goal", canonical.goals], ["possibility", canonical.possibilities],
   ];
   for (const [kind, records] of collections) for (const record of records) add(kind, record.id, record);
   for (const model of canonical.models) add("model", model.actorId, model);
   add("initial", bundle.source.id, canonical.initialWorld);
   const snapshot = bundle.compilerSnapshot;
+  for (const set of activeRequirementSets(snapshot.requirementDefinitions ?? [])) {
+    add("requirement-set", set.id, set);
+    if (set.spec.sourceId !== bundle.source.id || set.spec.sourceSha256 !== bundle.source.contentSha256) issues.push({ code: "REQUIREMENT_SOURCE_MISMATCH", message: `Requirement set ${set.id} belongs to another source revision`, path: `requirement-set/${set.id}` });
+  }
+  const coreRoles = snapshot.coreRoleRequirementDefinitions?.at(-1);
+  if (coreRoles) {
+    add("core-role-requirements", coreRoles.id, coreRoles);
+    if (coreRoles.sourceId !== bundle.source.id || coreRoles.sourceSha256 !== bundle.source.contentSha256) issues.push({ code: "REQUIREMENT_SOURCE_MISMATCH", message: "Core role requirements belong to another source revision" });
+  }
   if (snapshot.roleRoster) add("roster", bundle.source.id, snapshot.roleRoster);
   for (const unit of snapshot.structure.units) add("unit", unit.id, unit);
   const baseUnits = snapshot.structure.units.filter((unit) => snapshot.structure.baseUnitIds?.includes(unit.id));
@@ -60,6 +76,22 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
   for (const resolution of snapshot.entityResolutions) add("entity-resolution", resolution.id, resolution);
   for (const resolution of snapshot.eventResolutions) add("event-resolution", resolution.id, resolution);
   for (const binding of snapshot.evidenceBindings) add("evidence", `${binding.artifactKind}/${binding.artifactId}`, binding);
+  for (const expression of canonical.utteranceExpressions ?? []) {
+    for (const ref of [{ kind: "annotation", id: expression.quotation.quotationId, hash: expression.quotation.revisionHash },
+      ...expression.propositions.map(item => ({ kind: "proposition", id: item.propositionId, hash: item.revisionHash }))]) {
+      if (nodes.get(`${ref.kind}/${ref.id}`)?.revisionHash !== ref.hash) issues.push({ code: "CLOSURE_REVISION_MISMATCH", message: `Expression ${expression.id} requires frozen ${ref.kind}/${ref.id}@${ref.hash}`, path: `utterance-expression/${expression.id}` });
+    }
+  }
+  for (const observation of canonical.perceptionObservations ?? []) {
+    const trace = observation.trace;
+    for (const ref of [
+      { kind: "annotation", id: trace.observerMentionId, hash: trace.observerMentionHash },
+      { kind: "annotation", id: trace.eventMentionId, hash: trace.eventMentionHash },
+      { kind: "entity-resolution", id: trace.observerResolutionId, hash: trace.observerResolutionHash },
+      { kind: "event-resolution", id: trace.eventResolutionId, hash: trace.eventResolutionHash },
+    ]) if (nodes.get(`${ref.kind}/${ref.id}`)?.revisionHash !== ref.hash) issues.push({ code: "CLOSURE_REVISION_MISMATCH", message: `Perception ${observation.id} requires frozen ${ref.kind}/${ref.id}@${ref.hash}`, path: `perception-observation/${observation.id}` });
+  }
+  for (const acquisition of canonical.acquisitions ?? []) for (const ref of acquisition.revisions) if (nodes.get(`${ref.kind === "canonical-event" ? "event" : ref.kind === "process-template" ? "process" : ref.kind}/${ref.id}`)?.revisionHash !== ref.hash) issues.push({ code: "CLOSURE_REVISION_MISMATCH", message: `Acquisition ${acquisition.id} requires frozen ${ref.kind}/${ref.id}`, path: `acquisition/${acquisition.id}` });
   const link = (node: Node, kind: ClosureKind, id: string, pointer = "") => {
     if (node.kind === kind && node.id === id) return;
     const target = nodes.get(key({ kind, id }));
@@ -149,7 +181,7 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
       if (anchor.startByte < unit.anchor.endByte && anchor.endByte > unit.anchor.startByte) link(node, "unit", unit.id);
     }
   }
-  const artifactKinds: Readonly<Record<string, ClosureKind>> = { entity: "entity", proposition: "proposition", attribution: "attribution", claim: "claim", event: "event", "canonical-event": "event", "event-participation": "participation", "event-relation": "event-relation", "spatial-relation": "spatial", "scene-occurrence": "scene", "event-frame": "frame", "action-schema": "action", "event-execution": "event-execution", "action-constraint": "constraint", "norm-template": "norm", "process-template": "process", rule: "rule", "world-rule": "rule", goal: "goal", "character-goal": "goal", model: "model", "character-model": "model", possibility: "possibility", "initial-world": "initial" };
+  const artifactKinds: Readonly<Record<string, ClosureKind>> = { entity: "entity", proposition: "proposition", attribution: "attribution", claim: "claim", event: "event", "canonical-event": "event", "event-participation": "participation", "event-relation": "event-relation", "spatial-relation": "spatial", "scene-occurrence": "scene", "event-frame": "frame", "semantic-effect": "semantic-effect", "perception-observation": "perception-observation", "acquisition": "acquisition", "utterance-expression": "utterance-expression", "action-schema": "action", "event-execution": "event-execution", "action-constraint": "constraint", "norm-template": "norm", "process-template": "process", rule: "rule", "world-rule": "rule", goal: "goal", "character-goal": "goal", model: "model", "character-model": "model", possibility: "possibility", "initial-world": "initial" };
   for (const binding of snapshot.evidenceBindings) {
     const evidenceId = `${binding.artifactKind}/${binding.artifactId}`, node = nodes.get(`evidence/${evidenceId}`)!;
     const kind = artifactKinds[binding.artifactKind];

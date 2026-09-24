@@ -1,17 +1,20 @@
+import { RequirementLedger } from "./requirement-ledger.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { CanonicalModelStore } from "../world/canonical-model.js";
 import { SourceAnnotationStore } from "./annotations.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
 import { SourceStructureStore, baseStructuralUnits } from "./structure.js";
-import { buildRoleRoster, RoleRosterStore, roleRosterEntrySchema, roleRosterReviewSchema, validateRosterReview, type RoleRoster, type RoleRosterReview } from "./role-roster.js";
+import { registerReviewedCoreRoles } from "./core-role-requirement-service.js";
+import { buildRoleRoster, RoleRosterStore, roleRosterEntrySchema, roleRosterReviewSchema, roleDevelopmentExpectationSchema, validateRosterReview, type RoleRoster, type RoleRosterReview } from "./role-roster.js";
 
 export const ROLE_ROSTER_TOOL_NAMES = ["read_role_roster", "read_roster_source_page", "propose_role_roster_review"] as const;
 
-export async function loadCurrentRoleRoster(root: string, sourceId: string) {
+export async function readRoleRosterInputs(root: string, sourceId: string) {
   const source = await (await WorkspaceStore.create(root)).getSource(sourceId);
   if (!source) throw new Error("Roster review source is unavailable. Stop; the host must restore the active source.");
   const [entities, annotations, resolutions, structure, saved] = await Promise.all([
@@ -21,7 +24,16 @@ export async function loadCurrentRoleRoster(root: string, sourceId: string) {
   if (!structure || structure.sourceSha256 !== source.contentSha256) throw new Error("Roster source structure is missing or stale. Stop and recompile structure before retrying.");
   const fresh = buildRoleRoster({ sourceId, sourceSha256: source.contentSha256, unitIds: structure.baseUnitIds,
     entities: entities.filter((x) => x.evidence.some((e) => e.span.sourceId === sourceId)), annotations, resolutions });
-  return { roster: saved?.subjectHash === fresh.subjectHash ? saved : fresh, source, structure };
+  return { roster: saved?.subjectHash === fresh.subjectHash ? saved : fresh, fresh, saved, source, structure };
+}
+
+export async function loadCurrentRoleRoster(root: string, sourceId: string) {
+  const input = await readRoleRosterInputs(root, sourceId);
+  const revision = (await new RequirementLedger(root, sourceId).roleReviewRevisions()).at(-1);
+  if ((input.saved && input.saved.subjectHash !== input.fresh.subjectHash) || (revision && input.saved?.reviewRevisionId !== revision.id)) {
+    throw new Error(`Role source identity or authorized review revision changed. Stop model retries. The host must inspect nwh requirements inspect --source ${sourceId} and start or resume requirements begin-core-role-review with the exact savedRosterHash and original revision decision; never discard the saved reviews.`);
+  }
+  return input;
 }
 
 /** Independent, source-scoped review. Source-page visits are recorded by the host. */
@@ -58,7 +70,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       async execute(_id, input, signal) {
         signal?.throwIfAborted(); const { roster } = await load(); const offset = input.offset ?? 0;
         if (offset >= roster.candidates.length && offset !== 0) throw new Error("Invalid roster offset. Call read_role_roster with offset=0 and copy nextOffset; make one corrected retry, never guess.");
-        const result = { subjectHash: roster.subjectHash, candidates: roster.candidates.slice(offset, offset + 50), totalCandidates: roster.candidates.length,
+        const result = { subjectHash: roster.subjectHash, ...(roster.reviewRevisionId ? { reviewRevisionId: roster.reviewRevisionId } : {}), candidates: roster.candidates.slice(offset, offset + 50), totalCandidates: roster.candidates.length,
           sourcePages: pages.length, ...(offset + 50 < roster.candidates.length ? { nextOffset: offset + 50 } : {}) };
         return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
       },
@@ -74,17 +86,17 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       },
     }),
   ];
-  const schema = z.object({ subjectHash: z.string(), entries: z.array(roleRosterEntrySchema).min(1), missingMajorCharacters: roleRosterReviewSchema.shape.missingMajorCharacters }).strict();
+  const schema = z.object({ subjectHash: z.string(), entries: z.array(roleRosterEntrySchema.extend({ developmentExpectation: roleDevelopmentExpectationSchema })).min(1), missingMajorCharacters: roleRosterReviewSchema.shape.missingMajorCharacters }).strict();
   const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(schema);
-  tools.push(defineTool({ name: "propose_role_roster_review", label: "Propose role roster review", description: "Capture one full-source importance review for every candidate. This is not a playability certificate; persistence requires the compiler finish handshake.",
+  tools.push(defineTool({ name: "propose_role_roster_review", label: "Propose role roster review", description: "Capture independent full-source importance and development expectations for every candidate. Record stable, source-supported dimensional changes, or unknown; use source page unitIds, never compiled models as evidence. This is not a playability certificate; persistence requires the compiler finish handshake.",
     executionMode: "sequential", parameters: Type.Unsafe<z.infer<typeof schema>>(jsonSchema as TSchema),
     async execute(_id, raw, signal) {
       signal?.throwIfAborted(); const { roster } = await load(); const input = schema.parse(raw); const current = active();
       if (pending) throw new Error("Role review is single-use. Finish the batch; do not resubmit.");
       if (visited.size !== pages.length) throw new Error(`Role review has unread source pages: ${pages.map((_, i) => i).filter((i) => !visited.has(i)).slice(0, 20).join(", ")}. Read them with read_roster_source_page, then retry once with the completed review.`);
-      const review: RoleRosterReview = { runId: current.batchId, subjectHash: input.subjectHash, entries: input.entries, reviewedUnitIds: roster.unitIds, missingMajorCharacters: input.missingMajorCharacters };
+      const review: RoleRosterReview = { version: 2, ...(roster.reviewRevisionId ? { reviewRevisionId: roster.reviewRevisionId } : {}), runId: current.batchId, subjectHash: input.subjectHash, entries: input.entries, reviewedUnitIds: roster.unitIds, missingMajorCharacters: input.missingMajorCharacters };
       const issues = validateRosterReview(roster, review);
-      if (issues.length) throw new Error(`${issues.map((x) => `${x.code}: ${x.message}`).join("; ")}. Call read_role_roster in this scope, copy candidates[].id and subjectHash exactly, then make one corrected retry. Never delete an unresolved candidate or repeat unchanged arguments.`);
+      if (issues.length) throw new Error(`${issues.map((x) => `${x.code}: ${x.message}`).join("; ")}. Call read_role_roster in this scope and copy candidates[].id and subjectHash exactly; for evidence-unit errors call read_roster_source_page and copy its unitIds into basisUnitIds/beforeUnitIds/afterUnitIds as appropriate. Make at most one corrected retry. Never guess IDs, delete an unresolved candidate, or repeat unchanged arguments.`);
       pending = review;
       return { content: [{ type: "text" as const, text: "Independent role review captured. Call finish_compiler_batch with outcome=complete and reviewed_segments=[]." }], details: { captured: true } };
     },
@@ -92,13 +104,22 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
   return {
     tools,
     pendingId: () => pending ? `role-review-${pending.runId}` : undefined,
+    snapshot: () => pending ? structuredClone(pending) : undefined,
+    restore(review: RoleRosterReview) { pending = roleRosterReviewSchema.parse(review); },
     async commit() {
       if (!pending) {
         if (scope().batchId?.startsWith(`role-roster-${scope().sourceId}-`)) throw new Error("Dedicated role review requires a complete captured review before finish.");
         return;
       }
       const current = await loadCurrentRoleRoster(root, active().sourceId);
-      await new RoleRosterStore(root).review(current.roster, pending);
+      const saved = current.roster.reviews.find((review) => review.runId === pending!.runId);
+      if (saved) {
+        if (!isDeepStrictEqual(saved, pending)) throw new Error("Compiler finish requires host review: persisted role review differs from the prepared finish. Stop model retries.");
+        await registerReviewedCoreRoles(root, current);
+        return;
+      }
+      const roster = await new RoleRosterStore(root).review(current.roster, pending);
+      await registerReviewedCoreRoles(root, { ...current, roster });
     },
     reset() { snapshot = undefined; pages = []; visited.clear(); pending = undefined; },
   };

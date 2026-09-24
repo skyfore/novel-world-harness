@@ -17,6 +17,7 @@ export type NwhToolRecoveryCategory =
   | "scope-or-lifecycle"
   | "budget-or-circuit-breaker"
   | "host-repair-required"
+  | "coverage-changed"
   | "unexpected-failure";
 
 export type NwhToolRecoveryAdvice = {
@@ -31,6 +32,38 @@ export type NwhToolRecoveryAdvice = {
     arguments: Record<string, unknown>;
   };
 };
+
+export type NwhToolRecoveryScope = {
+  activeToolNames: readonly string[];
+};
+
+/** Read host-produced metadata; older Pi error paths preserve only its tagged JSON. */
+export function readNwhToolRecovery(result: { details?: unknown; content?: unknown }, toolName: string): NwhToolRecoveryAdvice | undefined {
+  const valid = (value: unknown): value is NwhToolRecoveryAdvice => {
+    if (!value || typeof value !== "object") return false;
+    const advice = value as NwhToolRecoveryAdvice;
+    return advice.version === NWH_TOOL_RECOVERY_VERSION && advice.failedTool === toolName
+      && typeof advice.category === "string" && typeof advice.retryable === "boolean"
+      && typeof advice.retryCondition === "string" && Array.isArray(advice.steps)
+      && advice.steps.every((step) => typeof step === "string");
+  };
+  if (result.details && typeof result.details === "object") {
+    const value = (result.details as Record<string, unknown>).nwhToolRecovery;
+    if (valid(value)) return value;
+  }
+  if (!Array.isArray(result.content)) return undefined;
+  for (const part of result.content) {
+    if (!part || part.type !== "text" || typeof part.text !== "string") continue;
+    const start = part.text.lastIndexOf(NWH_TOOL_RECOVERY_MARKER);
+    const end = part.text.indexOf(NWH_TOOL_RECOVERY_END_MARKER, start);
+    if (start < 0 || end < 0) continue;
+    try {
+      const value: unknown = JSON.parse(part.text.slice(start + NWH_TOOL_RECOVERY_MARKER.length, end));
+      if (valid(value)) return value;
+    } catch { /* An incomplete tag is not authoritative recovery metadata. */ }
+  }
+  return undefined;
+}
 
 type NwhToolResultRecovery = {
   content?: ToolResultEvent["content"];
@@ -164,6 +197,20 @@ function lookupMiss(lower: string): boolean {
 
 function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | undefined {
   const direct = LOOKUP_RECOVERY[toolName];
+  if (toolName === "read_source_annotation") {
+    const ref = /source annotation ref '([^']+)'/u.exec(lower)?.[1];
+    if (ref) return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
+      retryCondition: "Retry only after exact-ID discovery returns a ref in the same active source.",
+      steps: [
+        "Call find_source_annotations using the exact failed ID in suggestedCall, omitting status; do not substitute neighboring dialogue.",
+        "Copy results[].ref (including committed:/pending:) into read_source_annotation.ref; annotationId and proposalId are not read refs.",
+        "Retry read_source_annotation at most once with that returned ref. Never guess or retry unchanged.",
+        "If exact-ID discovery returns no match, stop for host review and preserve the failed ID and discovery result. Do not fabricate a replacement or widen source scope.",
+      ],
+      suggestedCall: { tool: "find_source_annotations", arguments: { query: ref.replace(/^(?:committed|pending):/u, ""), max_results: 20 } },
+    };
+  }
   if (direct) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -310,7 +357,14 @@ function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | 
 export function buildNwhToolRecoveryAdvice(
   toolName: string,
   errorText: string,
+  scope?: NwhToolRecoveryScope,
 ): NwhToolRecoveryAdvice {
+  // Thrown tool errors may already contain host recovery instructions. Classify
+  // only the original diagnostic, never words such as "offset" in that SOP.
+  errorText = errorText.split(NWH_TOOL_RECOVERY_MARKER, 1)[0]!;
+  // Pi schema errors echo model arguments after the diagnostic. Those values
+  // can contain arbitrary novel wording, including "unknown" or "offset".
+  errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
 
   if (/tool-call budget|tool call budget|tool-call safety fuse|circuit breaker|circuit-breaker/u.test(lower)) {
@@ -343,6 +397,226 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  if (/branch_text_(?:history_unavailable|already_received)/u.test(lower)) {
+    if (scope && !scope.activeToolNames.includes(toolName)) return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+      retryCondition: "This proposal tool is inactive; stop.", steps: ["Preserve the proposal and head. Do not switch actors, reactivate tools or retry unchanged."] };
+    const consumed = /branch_text_already_received/u.test(lower);
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: consumed ? "scope-or-lifecycle" : "lookup-miss", retryable: !consumed,
+      retryCondition: consumed ? "This message receipt is consumed; stop." : "At most one corrected retry if the exact delivery is offered in the current decision.pendingMessages.",
+      steps: ["Copy one entry's eventId and messageIndex into read/branch-message basis.messageEventId and basis.messageIndex, and authorId into the asserts attribution; read learn has no sourceActorId or expressionId. Preserve the current actor and branch; never guess IDs or import another scope.",
+        "If absent, consumed or stale, stop. Never recreate the message or invent a source document. Later recall uses remembered with this actor's own decision.experiences[].acquisitionId."] };
+  }
+  if (/branch_speech_(?:history_unavailable|already_received)/u.test(lower)) {
+    if (scope && !scope.activeToolNames.includes(toolName)) return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+      retryCondition: "The proposal tool is inactive in this scope; stop.", steps: ["Preserve the proposal and head. Do not guess IDs, reactivate tools, switch actors or retry unchanged."] };
+    const consumed = /branch_speech_already_received/u.test(lower);
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: consumed ? "scope-or-lifecycle" : "lookup-miss", retryable: !consumed,
+      retryCondition: consumed ? "The delivery has already been consumed; stop this receipt attempt." : "At most one corrected retry, only if this exact delivery is offered in the current actor's decision.pendingSpeech.",
+      steps: ["Read the current isolated decision.pendingSpeech array; copy the same entry's eventId and utteranceIndex into basis.utteranceEventId and basis.utteranceIndex, and its speakerId into the source attribution. Never guess IDs, change the recipient, or search another actor/branch.",
+        "If absent, consumed, stale or outside scope, preserve head and stop. Never duplicate the old utterance in a new event; later recall uses remembered mode with the actor's own decision.experiences acquisitionId."] };
+  }
+  if (/acquisition_text_channel_(?:invalid|unproven)/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop until exact source-backed text access is reconstructed at the pre-event cut.",
+      steps: ["Preserve head, proposal and receipt. Verify the reader profile, stable channel/template revisions and exactly one disclosed running session with the document and carrier. Do not guess a runtime session ID, select an ambiguous session, borrow another actor’s channel or start/resume it in the receiving event."] };
+  }
+  if (/acquisition_document_access_unproven/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop until actual document access is established by the host in this event cut.",
+      steps: ["Preserve head, proposal and acquisition provenance. Check the actual reader presence and committed document/reader locations. Canonical evidence and unknown locations do not substitute for branch access; never guess, relabel presence, delete the receipt or retry unchanged."] };
+  }
+  if (/branch_text_channel_unproven/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop until the host restores the reader’s exact pre-event text-channel authority.",
+      steps: ["Preserve the proposal, document expression and head. Verify the reader, document peer, carrier, active session and disclosed mechanism before a fresh turn. Never guess IDs, use audio as text, borrow a channel, relabel presence or resume/start the session in this same event."] };
+  }
+  if (/branch_acquisition_channel_unproven/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop until the host restores the exact sender channel and committed pre-event process authority.",
+      steps: ["Preserve the proposal, branch head and exact incoming utterance. Do not guess channel/process IDs, copy another actor's channel, relabel remote presence as physical, or remove acquisition provenance.",
+        "A session started or resumed by this same event cannot authorize its receipt. No unchanged retry; a missing historical authority requires host reconstruction before a fresh turn."] };
+  }
+  if (/(?:^|\W)acquisition_(?:dependency|revision|occurrence|content|prior|premise|reception|source|cut|required|evidence)/u.test(lower)
+    && !/(budget|circuit.breaker|consumed|outside.*scope)/u.test(lower)) {
+    const stopped = /(revision_mismatch|dependency_cycle|prior_not_realized|premise_unavailable|cut_not_current)/u.test(lower);
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: stopped ? "host-repair-required" : "invalid-arguments", retryable: !stopped,
+      retryCondition: stopped ? "Stop for host review; frozen or unrealized experience cannot be repaired by model retry." : "At most one materially corrected retry after same-source discovery within existing authority.",
+      steps: stopped ? ["Preserve drafts, frozen dependency revisions and branch head. Do not import future canon, borrow another actor's knowledge, invent premises, delete acquisitionId or reset scope."] : [
+        "Use same-source find_compiler_artifacts with kind acquisition or the dependency kind named in the diagnostic; copy results[].readArguments.ref into read_compiler_artifact.ref and payload.id into the logical ID field. For a missing occurrence use kind canonical-event.",
+        "Check the acquiring event's own receipt, understanding and belief evidence. Host owns hashes; correct once without changing the mode to evade proof. If absent or outside authority, stop with drafts intact.",
+        "Runtime failures preserve the head and stop for host compilation; actor tools must not discover compiler-only evidence. Never guess or retry unchanged."] };
+  }
+  if (/(?:^|\W)(?:perception_|acquisition_perception_)/u.test(lower)
+    && !/(budget|circuit.breaker|consumed|outside.*scope)/u.test(lower)) {
+    const stopped = /(revision_mismatch|quoted_report|unmapped|cut_not_current|access_not_proven)/u.test(lower);
+    const trace = /trace|observer_missing/u.test(lower);
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: stopped ? "host-repair-required" : "invalid-arguments", retryable: !stopped,
+      retryCondition: stopped ? "Stop for host source or mechanism review; no model retry." : "At most one corrected retry within the same source and existing authority; otherwise stop.",
+      steps: stopped ? ["Preserve frozen perception revisions, drafts and branch head. Do not relabel reports, remove perceptionId, overwrite hashes, or retry unchanged."] : [
+        trace ? "Use same-source find_source_annotations; copy results[].readArguments.ref into read_source_annotation.ref and payload.id into the mention field. For identity/event resolution use find_identity_resolutions/find_event_resolutions and copy results[].ref into read_identity_resolution.ref/read_event_resolution.ref."
+          : "Use same-source find_compiler_artifacts with the required kind (perception-observation, canonical-event, entity or proposition); copy results[].readArguments.ref into read_compiler_artifact.ref and payload.id into the corresponding logical ID field.",
+        "Preserve proposal_id and inspect the original occurrence and exact field evidence. The host owns hashes. Correct once only if supported; never guess, relabel a report or delete provenance.",
+        "If evidence or authority is absent, stop for host review. At runtime preserve head and stop for host compilation; do not discover compiler-only evidence through actor tools."] };
+  }
+  if (/entry_agency_evidence_required/u.test(lower)) {
+    if (scope && !scope.activeToolNames.includes(toolName)) return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+      retryCondition: "Stop until the host starts a compiler turn with this proposal tool in scope.",
+      steps: ["Preserve the draft and exact diagnostic. Do not borrow another batch's source segments, switch tools to bypass scope, or retry unchanged."] };
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one corrected compiler proposal after inspecting original evidence at this exact entry cut; otherwise stop for host review.",
+      steps: ["Re-read the current same-source <source-segment id=...> blocks. Copy their exact id into evidence_segment_ids and selector.segment_id; never use a source path, stale ID or a segment from another batch.",
+        "Supply evidence_selectors targeting the diagnosed /participantPresence/i/mode and /projectionSeed/processes/operations/i fields (with the checkpoint prefix when shown), and the named /actorId, /canonicalEventId and checkpoint /actorId links. Copy exact source text supporting the session before entry, its actor/peer/carrier roles and phase; future occurrences cannot supply current authority.",
+        "Keep the failed proposal_id if unstaged; staged drafts use the successor protocol. Do not erase the seed, relabel presence, invent timestamps or retry unchanged. If source support is absent, stop."] };
+  }
+  if (/(?:entry_agency_unproven|event_entry_presence_unproven)/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop until the host reconstructs the source-backed pre-entry process and knowledge state at the same cut.",
+      steps: ["Preserve the head, source and checkpoint. Never infer a live session from a future occurrence, relabel a picture as a body, guess a process ID or retry unchanged.",
+        "Entry requires the selected actor's autonomous profile, peer/carrier bindings, running phase and disclosed mechanism. Missing or paused channels do not grant entry or perception."] };
+  }
+  if (/agency_/u.test(lower)) {
+    const runtime = /agency_(not_live|unavailable|body_required|channel_unavailable)/u.test(lower);
+    const scoped = scope && (!scope.activeToolNames.includes("find_compiler_artifacts") || !scope.activeToolNames.includes("read_compiler_artifact"));
+    if (runtime || scoped) return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName,
+      category: runtime ? "host-repair-required" : "scope-or-lifecycle", retryable: false,
+      retryCondition: "Stop until the host reconstructs the current agency/channel authority in the correct scope.",
+      steps: ["Preserve the branch head, frozen profiles and real error. Do not relabel presence, invent a body, guess a session ID, widen scope or retry unchanged.",
+        "A communication channel never grants physical control. A paused, absent or same-event-created session cannot authorize this candidate."] };
+    const action = /agency_action/u.test(lower);
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName,
+      category: /agency_(process|action)_missing/u.test(lower) ? "lookup-miss" : "invalid-arguments", retryable: true,
+      retryCondition: "At most one corrected proposal after same-source discovery and exact field evidence review; stop if unsupported.",
+      steps: [`Call find_compiler_artifacts with kind ${action ? "action-schema" : "process-template"} in the same source. Copy results[].readArguments.ref into read_compiler_artifact.ref, then payload.id into agencyProfile.channels[].${action ? "actionSchemaId" : "processTemplateId"}.`,
+        "Read the original source segment and exact agency, embodiment, channel, role and phase selectors. Preserve proposal_id for an unstaged failure; use the successor protocol for staged drafts.",
+        "Correct once only if supported. Unknown agency is not permission; never remove evidence, invent mechanics or repeat unchanged. Stop for host review if the source or mechanism is absent."],
+      suggestedCall: { tool: "find_compiler_artifacts", arguments: { kind: action ? "action-schema" : "process-template", query: "*", max_results: 20 } } };
+  }
+  if (/conditional_expression_/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop this candidate until the host reconstructs it from the current branch head and frozen goal/expression revisions.",
+      steps: ["Preserve the branch head and real validation error. Never retry unchanged or use compiler discovery from an actor scope.",
+        "Do not remove expressionBinding, rewrite the quotation, force a canonical realization or use current-event learning as prior knowledge.",
+        "Invalid replay bindings require history review. A narration retry may only render committed speech, never repeat the action."] };
+  }
+  if (/goal_expression_/u.test(lower)) {
+    if (scope && (!scope.activeToolNames.includes("find_compiler_artifacts") || !scope.activeToolNames.includes("read_compiler_artifact"))) {
+      return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+        retryCondition: "Stop until a host-started same-source compiler scope provides expression discovery.",
+        steps: ["Preserve all drafts and conditions. Do not guess references, call unavailable discovery tools, widen scope or retry unchanged."] };
+    }
+    const claim = /goal_expression_knowledge/u.test(lower);
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: /goal_expression_(missing|knowledge)/u.test(lower) ? "lookup-miss" : "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected proposal after same-source discovery and exact evidence review; stop if unsupported.",
+      steps: [`Call find_compiler_artifacts with kind ${claim ? "claim" : "utterance-expression"} in this source. Copy results[].readArguments.ref into read_compiler_artifact.ref, then payload.id into ${claim ? "expressionCandidates[].requiredKnowledgeClaimIds[]" : "expressionCandidates[].expressionId"}.`,
+        "Inspect the original source segment and every named field. Preserve the original speaker, recipients, motivation, knowledge and relationship gates; supply exact selectors for the diagnosed links and conditions.",
+        "Correct a failed unstaged proposal with its original proposal_id; use the normal successor protocol for a staged draft. Never erase conditions, guess a hash/ID or retry unchanged. Stop after one corrected attempt or if source support is absent."],
+      suggestedCall: { tool: "find_compiler_artifacts", arguments: { kind: claim ? "claim" : "utterance-expression", query: "*", max_results: 20 } } };
+  }
+  if (/(acquisition_expression_not_realized|expression_quotation_revision_mismatch|expression_group_scene_blocked)/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop until the host resolves the source revision, occurrence or scene boundary.",
+      steps: ["Preserve drafts, frozen quotation/proposition revisions and the current branch head.",
+        "Future canonical expressions are not branch events. Do not remove expressionId, relabel acquisition as observed, rewrite anchors, or retry unchanged.",
+        "A reviewed source revision requires the normal compiler proposal, validation and new prepared-candidate path; do not overwrite archived proof."] };
+  }
+  if (/(?:^|\W)(?:expression_|attribution_expression_|acquisition_expression_)/u.test(lower)
+    && !/(budget|circuit.breaker|consumed|outside.*scope)/u.test(lower)) {
+    const quotation = /expression_quotation_missing/u.test(lower);
+    const kind = /expression_event_missing/u.test(lower) ? "canonical-event" : /expression_entity_missing/u.test(lower) ? "entity" : /expression_proposition_/u.test(lower) ? "proposition" : "utterance-expression";
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: /_missing/u.test(lower) ? "lookup-miss" : "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected retry after inspecting same-source evidence within existing authority.",
+      steps: [quotation
+        ? "Call same-source find_source_annotations with annotation_type quotation; copy results[].readArguments.ref into read_source_annotation.ref and payload.id into quotation.quotationId."
+        : `Call same-source find_compiler_artifacts with kind ${kind}; copy results[].readArguments.ref into read_compiler_artifact.ref. Copy payload.id only for logical IDs; never substitute a proposal or read ref.`,
+        "Use logical quotation/proposition IDs and exact fragment selectors. The host freezes revisions, anchors and nested proposition snapshots. Every semantic field needs this occurrence's own evidence; multiple anchors are conjunctive.",
+        "Preserve the failed proposal_id if no draft was staged. Correct once; use the normal successor protocol for a staged draft. Never guess hashes/IDs, drop expression evidence, change acquisition mode or repeat unchanged.",
+        "If source, annotation or identity authority is insufficient, stop for host review with drafts intact."],
+      suggestedCall: quotation ? { tool: "find_source_annotations", arguments: { annotation_type: "quotation", query: "*", max_results: 20 } }
+        : { tool: "find_compiler_artifacts", arguments: { kind, query: "*", max_results: 20 } } };
+  }
+
+  if (/semantic_effect_(event_missing|subject_missing|execution_missing)/u.test(lower)
+    && !/(budget|circuit.breaker|frozen|consumed)/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
+      retryCondition: "One corrected retry only after discovering the exact dependency in this active source.",
+      steps: [
+        "Call find_compiler_artifacts in this source with kind canonical-event, entity, or event-execution matching the missing field.",
+        "Copy results[].readArguments.ref into read_compiler_artifact.ref; copy the returned payload.id into canonicalEventId, subjectEntityId, or lowering.executionId respectively. Do not guess an ID or mix kinds.",
+        "Preserve all staged drafts and the original failed proposal_id. Make at most one materially corrected submission under the normal successor protocol if a successful draft already exists; never retry unchanged or reset the batch.",
+        "If the required source-supported occurrence, subject, or mechanism does not exist, stop for host dependency repair. Do not fabricate an execution or change the source meaning to fit a different one.",
+      ],
+      suggestedCall: { tool: "find_compiler_artifacts", arguments: { kind: lower.includes("semantic_effect_event_missing") ? "canonical-event" : lower.includes("semantic_effect_subject_missing") ? "entity" : "event-execution", query: "*", max_results: 20 } },
+    };
+  }
+  if (/semantic_effect_(unmapped|lowering_mismatch|time_mismatch)/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop this task until the original source meaning and supported mechanism are reconciled by the host.",
+      steps: ["Preserve the semantic effect, exact evidence, original occurrence and all drafts.",
+        "Do not invent duration, rewrite the occurrence outcome, remove the effect, or change canonical realization into a false success.",
+        "No unchanged model retry or namespace reset is permitted. A reviewed source revision or newly supported mechanism requires the normal host proposal and validation path."],
+    };
+  }
+
+  if (toolName === "account_source_units" && lower.startsWith("source accounting coverage changed:")) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "coverage-changed", retryable: true,
+      retryCondition: "Retry once under the same exact proposal_id only after refreshing and reviewing the page; if all original units are covered, stop for host coverage review.",
+      steps: [
+        "Keep the exact proposal_id in the diagnostic. Inspect representedUnitIds, accountedUnits and remainingUnitIds; no decisions from the failed call were staged.",
+        "Call find_source_accounting_units in this same batch with status=unresolved and offset=0. Copy its exact pageToken; review every returned unit and use only exact returned unitIndex values for overrides.",
+        "Make at most one corrected account_source_units call using the same proposal_id and the fresh pageToken. Do not reuse old indexes, guess IDs or repeat unchanged input.",
+        "If discovery returns no remaining units, do not submit empty decisions or create a new identity. Stop for host coverage review; preserve all valid drafts and the original failure journal.",
+      ],
+      suggestedCall: { tool: "find_source_accounting_units", arguments: { status: "unresolved", offset: 0, max_results: 20 } },
+    };
+  }
+
+  if (toolName === "propose_entity_mention" && lower.includes("surface must exactly equal selector.exact")) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "One corrected call under the original proposal_id; a further failure requires host review.",
+      steps: [
+        "Keep the same proposal_id: this failed call did not stage a draft. A new ID cannot settle its obligation.",
+        "Copy the mention surface verbatim from the supplied citable segment into both surface and selector.exact. Use exact prefix/suffix from that same segment to disambiguate; do not extend the selector to the surrounding sentence or guess text.",
+        "Correct all reported fields together and retry once. Preserve unrelated drafts; stop if the corrected call fails.",
+      ],
+    };
+  }
+
+  if (lower.startsWith("initial-world preview requires an active")) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+      retryCondition: "Only the host can establish an opening or reconciliation scope.",
+      steps: ["Stop preview calls in this scope. Do not guess a batch or widen evidence access; preserve the diagnostic for the host."] };
+  }
+
+  if (lower.startsWith("compiler proposal obligation requires host review")
+    || lower.startsWith("upstream_repair_requires_host_review")
+    || lower.startsWith("compiler finish requires host review")
+    || lower.startsWith("compiler accounting page scope mismatch")
+    || lower.startsWith("accounting page is missing or already consumed")) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Do not retry in this or a fresh session until host adjudication.",
+      steps: ["Stop and retain the exact diagnostic and all valid drafts. The host must inspect the persisted attempt and its evidence before adjudicating; changing IDs, withdrawing unrelated work, or restarting cannot resolve it."],
+    };
+  }
+
+  if (toolName === "finish_compiler_batch" && lower.startsWith("unresolved compiler proposal obligations")) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle",
+      retryable: true,
+      retryCondition: "Retry finish only after every named durable obligation is resolved; unchanged finish and fresh sessions cannot clear failures.",
+      steps: [
+        "Copy each exact tool and proposal_id from the diagnostic. Recheck all selectors against the supplied citable segments, then make at most one corrected proposal retry under that same identity.",
+        "If an ID is missing, use the same-scope discovery tool and copy its exact ref; never construct refs from logicalId or guess IDs. Do not widen the evidence scope.",
+        "If evidence is absent, a call was interrupted, or the corrected attempt fails, stop for host review. Do not add unrelated proposals, withdraw accounting, or restart to erase the obligation.",
+        "Preserve every valid draft. Retry finish once only after actual resolution; if it still fails with the same diagnostic, stop.",
+      ],
+    };
+  }
+
   if (/not an active successful submission|lost its active .+ identity/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -354,6 +628,18 @@ export function buildNwhToolRecoveryAdvice(
         "Re-read successful proposal results and the current pending catalogs for the relevant proposal kind.",
         "Copy the exact proposal_id; do not substitute a logical artifact ID, retrieval ref, rejected proposal, or ID from another batch.",
         `Retry ${toolName} once. If the proposal is no longer active, stop instead of recreating it merely to satisfy this operation.`,
+      ],
+    };
+  }
+
+  if (COMPILER_PROPOSAL_TOOLS.has(toolName) && /(?:pending proposal .* already exists with different content|proposal .* already exists in (?:accepted|rejected) history)/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Stop this identity's retries; the host must review the persisted failed mutation before any replacement.",
+      steps: [
+        "The proposal ID belongs to an existing immutable draft or history entry. This is not a never-staged validation failure; the same-ID correction rule cannot overwrite or revive it.",
+        "Retain the failed obligation and every valid draft. Use find_compiler_artifacts in this source, copy the returned pending ref into read_compiler_artifact, and inspect the current active successor for the same logical artifact. Do not guess IDs or retry a retired ID.",
+        "After host adjudication, keep an unchanged valid active draft. Only a specifically diagnosed defective successful draft may be replaced through normal proposal validation and withdrawal, preserving its stable artifact ID. Never change IDs to clear this failed obligation.",
       ],
     };
   }
@@ -370,6 +656,65 @@ export function buildNwhToolRecoveryAdvice(
         "If the existing draft is correct, keep it and continue/finish. If it is defective, withdraw or replace the exact active proposal through the narrow supported tool.",
         "Use a new unique proposal_id only for the corrected replacement, then retry once.",
       ],
+    };
+  }
+
+  if (toolName === "finish_compiler_batch" && /source-accounting review disposition conflicts|inside a no-artifacts segment/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "Retry finish once after correcting the review disposition; preserve all valid drafts.",
+      steps: [
+        "Set the named reviewed_segments.disposition fields to proposed. Existing exact source coverage and accounting decisions remain artifacts even when no new executable mechanism was induced.",
+        "Retain the accounting pages and their per-unit decisions; do not mass-withdraw or reclassify the source as background to make finish pass.",
+        "Retry finish_compiler_batch once with the corrected review fields. If the same diagnostic repeats, stop and report it. finish_compiler_batch has no offset argument.",
+      ],
+    };
+  }
+
+  const conflictingAccountingProposalIds = [...errorText.matchAll(
+    /withdraw source-accounting proposal '([A-Za-z0-9][A-Za-z0-9._-]*)'/giu,
+  )].map((match) => match[1]!);
+  if (toolName === "finish_compiler_batch" && conflictingAccountingProposalIds.length) {
+    const proposalIds = [...new Set(conflictingAccountingProposalIds)];
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry once only after withdrawing every exact conflicting accounting proposal named by the host and re-accounting any units that become unresolved.",
+      steps: [
+        `Call withdraw_compiler_proposal once for each exact proposal_id named in the diagnostic: ${proposalIds.join(", ")}. Do not guess a unit-to-proposal mapping.`,
+        "Call find_source_accounting_units with status=unresolved, offset=0, and max_results=20; review and account each returned page, refetching from offset=0 after every successful proposal.",
+        "Do not disposition represented units or units in no-artifacts segments; their host-derived states already account for them.",
+        `Retry ${toolName} once after concrete withdrawal/accounting progress. If the same full diagnostic repeats, stop instead of looping.`,
+      ],
+      suggestedCall: {
+        tool: "withdraw_compiler_proposal",
+        arguments: {
+          proposal_id: proposalIds[0]!,
+          reason: "Recovered accounting dispositions conflict with host-derived source-unit states.",
+        },
+      },
+    };
+  }
+
+  if (toolName === "finish_compiler_batch" && /source-unit accounting is incomplete/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry once only after every reported source unit has exact semantic coverage or a successful typed accounting proposal.",
+      steps: [
+        "Call find_source_accounting_units with status=unresolved, offset=0, and max_results=20 in the same active batch.",
+        "Review every returned unit, then copy its exact pageToken into account_source_units with one page_default and only genuinely different page_overrides by exact returned unitIndex; never guess a token/index or label represented/non-scene units yourself.",
+        "After each successful accounting proposal, refetch status=unresolved at offset=0 because the result set shrinks; repeat until units is empty instead of following a stale nextOffset.",
+        "Keep unresolved or intentionally-deferred when the source cannot be decided honestly; those statuses remain publication blockers.",
+        `Retry ${toolName} once after concrete accounting progress. If the same full diagnostic repeats, stop instead of looping.`,
+      ],
+      suggestedCall: {
+        tool: "find_source_accounting_units",
+        arguments: { status: "unresolved", offset: 0, max_results: 20 },
+      },
     };
   }
 
@@ -415,54 +760,6 @@ export function buildNwhToolRecoveryAdvice(
         "Continue with the supplied evidence/context and an in-scope tool, or let the host open the required compiler/player phase.",
         "Never widen source, actor, or future-canon scope to make the call succeed.",
       ],
-    };
-  }
-
-  const representedAccountingProposalIds = [...errorText.matchAll(
-    /withdraw source-accounting proposal '([A-Za-z0-9][A-Za-z0-9._-]*)'/giu,
-  )].map((match) => match[1]!);
-  if (toolName === "finish_compiler_batch" && representedAccountingProposalIds.length) {
-    const proposalIds = [...new Set(representedAccountingProposalIds)];
-    return {
-      version: NWH_TOOL_RECOVERY_VERSION,
-      failedTool: toolName,
-      category: "invalid-arguments",
-      retryable: true,
-      retryCondition: "Retry once only after withdrawing every exact conflicting accounting proposal named by the host and re-accounting any units that become unresolved.",
-      steps: [
-        `Call withdraw_compiler_proposal once for each exact proposal_id named in the diagnostic: ${proposalIds.join(", ")}. Do not guess a unit-to-proposal mapping.`,
-        "Call find_source_accounting_units with status=unresolved, offset=0, and max_results=20; review and account each returned page, refetching from offset=0 after every successful proposal.",
-        "Do not disposition represented units; host-derived exact semantic coverage already accounts for them.",
-        `Retry ${toolName} once after concrete withdrawal/accounting progress. If the same full diagnostic repeats, stop instead of looping.`,
-      ],
-      suggestedCall: {
-        tool: "withdraw_compiler_proposal",
-        arguments: {
-          proposal_id: proposalIds[0]!,
-          reason: "Recovered accounting dispositions overlap host-derived represented semantics.",
-        },
-      },
-    };
-  }
-
-  if (toolName === "finish_compiler_batch" && /source-unit accounting is incomplete/u.test(lower)) {
-    return {
-      version: NWH_TOOL_RECOVERY_VERSION,
-      failedTool: toolName,
-      category: "invalid-arguments",
-      retryable: true,
-      retryCondition: "Retry once only after every reported source unit has exact semantic coverage or a successful typed accounting proposal.",
-      steps: [
-        "Call find_source_accounting_units with status=unresolved, offset=0, and max_results=20 in the same active batch.",
-        "Review every returned unit, then copy its exact pageToken into account_source_units with one page_default and only genuinely different page_overrides by exact returned unitIndex; never guess a token/index or label represented/non-scene units yourself.",
-        "After each successful accounting proposal, refetch status=unresolved at offset=0 because the result set shrinks; repeat until units is empty instead of following a stale nextOffset.",
-        "Keep unresolved or intentionally-deferred when the source cannot be decided honestly; those statuses remain publication blockers.",
-        `Retry ${toolName} once after concrete accounting progress. If the same full diagnostic repeats, stop instead of looping.`,
-      ],
-      suggestedCall: {
-        tool: "find_source_accounting_units",
-        arguments: { status: "unresolved", offset: 0, max_results: 20 },
-      },
     };
   }
 
@@ -534,7 +831,58 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
-  if (toolName === "finish_compiler_batch" && /(?:graph|trace) is incomplete/u.test(lower)) {
+  const missingEntityNames = [...errorText.matchAll(
+    /^-\s+Entity ([A-Za-z0-9][A-Za-z0-9._-]*) canonicalName '([^\r\n]*)' has no resolved source mention\.$/gmu,
+  )].map((match) => ({ entityId: match[1]!, canonicalName: match[2]! }));
+  if (toolName === "finish_compiler_batch" && missingEntityNames.length) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry finish once only after repairing every reported graph/trace section, including an exact-name identity resolution for each diagnosed entity.",
+      steps: [
+        `Repair these entity/name pairs: ${missingEntityNames.map((item) => `${item.entityId} -> ${JSON.stringify(item.canonicalName)}`).join(", ")}. Preserve unrelated valid drafts.`,
+        "For each name, call find_source_annotations with annotation_type=entity-mention and query equal to that name (use * if the name exceeds the 500-character query limit). Omit status to search both committed and pending mentions; follow exact returned nextOffset values when paging. Copy the returned ref to read_source_annotation and inspect payload.surface, kindCandidates, and the source context. Copy annotationId, never ref/proposalId, as the mention_id; do not guess IDs.",
+        "The trace requires surface === canonicalName, a compatible entity kind, and a selected resolution to the diagnosed entity. A substring or similar wording is insufficient: resolving a longer surface containing the name does not establish the exact canonicalName. An existing exact-name mention still needs identity resolution; creating another mention alone cannot repair this error.",
+        "For a context-supported exact-name mention, call find_entity_resolution_candidates with its mention_id, inspect the returned mention.surface, and then call propose_entity_resolution, copying the source-supported candidate.entityId into entity_id and its resolutionMode into status. For a same-finish new entity use new-entity; resolved is for canonical/checkpointed identity. Lexical matches alone do not prove identity; do not force an unsupported link.",
+        "If no suitable mention exists, inspect the immutable evidence before proposing an exact anchored mention. If the entity name itself is defective, submit a source-supported corrected entity proposal under a fresh envelope proposal_id while preserving its logical entity id, then withdraw only the defective current-batch proposal. Never alter mention text without a matching source anchor, duplicate an entity to bypass the guard, or withdraw checkpointed work.",
+        "Include every successful repair in the finish handshake. Retry finish_compiler_batch once only after concrete proposal progress and all reported sections are repaired; do not use no-artifacts to escape validation. If the same full diagnostic repeats, stop instead of looping.",
+      ],
+      suggestedCall: {
+        tool: "find_source_annotations",
+        arguments: { query: missingEntityNames[0]!.canonicalName.length <= 500 ? missingEntityNames[0]!.canonicalName || "*" : "*", annotation_type: "entity-mention", offset: 0, max_results: 20 },
+      },
+    };
+  }
+
+  const unresolvedEventParticipants = [...errorText.matchAll(
+    /Canonical event ([A-Za-z0-9][A-Za-z0-9._-]*) participant '([A-Za-z0-9][A-Za-z0-9._-]*)' at participants\.\d+ has no resolved participant mention in its event trace\./gu,
+  )].map((match) => ({ eventId: match[1]!, entityId: match[2]! }));
+  if (toolName === "finish_compiler_batch" && unresolvedEventParticipants.length) {
+    const pairs = unresolvedEventParticipants.map((item) => `${item.eventId} -> ${item.entityId}`);
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry finish once only after every named canonical participant has a source mention in that event trace and that mention has a successful selected identity resolution.",
+      steps: [
+        `Repair each exact event/participant pair named by the host: ${pairs.join(", ")}. Preserve unrelated active proposals.`,
+        "Call find_source_annotations for the affected event and participant surfaces and inspect every active event resolution's eventMentionIds plus each event mention's participantMentionIds. Reuse an exact existing entity mention ID when present; otherwise propose one exact evidence-backed entity mention in the event extent.",
+        "If none of the resolved event mention(s) includes that entity mention ID, submit a corrected event-mention revision under a new envelope proposal_id while preserving its stable annotation_id, trigger, anchors, and other participants, and add the missing mention ID to participant_mention_ids. Creating an unreferenced entity mention alone cannot change the event trace.",
+        "For every affected mention, call find_entity_resolution_candidates with that exact mention ID, then complete the sequence by calling propose_entity_resolution. Merely creating the mention or merely calling the finder does not select an identity and cannot close the event trace.",
+        "The successful resolution must select the named canonical participant through the finder-authorized resolutionMode. If the finder does not authorize that identity, correct the canonical event participant or preserve the ambiguity; never guess or force the link.",
+        `Only after all ${unresolvedEventParticipants.length} selected resolution(s) succeed, retry ${toolName} once. If the same diagnostic repeats, stop instead of looping.`,
+      ],
+      suggestedCall: {
+        tool: "find_source_annotations",
+        arguments: { query: "*", status: "pending", offset: 0, max_results: 200 },
+      },
+    };
+  }
+
+  if (toolName === "finish_compiler_batch" && /(?:graph|trace) is incomplete|deterministic canonical commit preview(?: is incomplete)?:/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
@@ -543,6 +891,8 @@ export function buildNwhToolRecoveryAdvice(
       retryCondition: "Retry once only after correcting every reported graph/trace section through successful propose, withdraw, or replace calls.",
       steps: [
         "Treat the complete finish diagnostic as one validation report; preserve valid drafts and correct each listed logical dependency or trace.",
+        "These finish diagnostics refer to already-staged drafts. Discover their current pending refs with find_compiler_artifacts, copy the returned ref into read_compiler_artifact, and inspect the exact draft before editing. A successful draft is immutable: stage a specifically corrected replacement under a fresh envelope ID, preserve the stable artifact ID, then withdraw only its superseded successful predecessor. Never overwrite a successful ID or revive a withdrawn ID; use the latest active successor on subsequent repairs.",
+        "Repair only named defects. Restore SCENE_EVENT_BACKLINK_REQUIRED scene IDs without dropping any existing fields. For INACTIONABLE_CHARACTER_ENTRY, establish the named actor's source-backed pre-event location, plan or momentum; do not invent state or remove an entry just to pass. Leave unrelated active drafts unchanged.",
         "For entity identity, call find_entity_resolution_candidates and follow its resolutionMode: resolved reuses canonical/checkpointed identity, while new-entity requires a same-finish entity proposal.",
         "Use source-scoped finder results only when an exact existing ID is genuinely missing; do not re-propose a checkpointed pending identity or guess a replacement ID.",
         `Retry ${toolName} once after concrete proposal progress. If the same full diagnostic repeats, stop instead of looping.`,
@@ -550,23 +900,60 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const ambiguousQuoteSegment = /exact evidence quote is ambiguous in segment ([a-z0-9][a-z0-9._-]*): \d+ occurrences match\./iu.exec(errorText)?.[1];
+  if (COMPILER_PROPOSAL_TOOLS.has(toolName) && ambiguousQuoteSegment) {
+    const sourceRead = exactSourceRecovery(ambiguousQuoteSegment, scope);
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry once only after locating the intended occurrence in the named active-source segment.",
+      steps: [
+        ...sourceRead.steps,
+        "Keep the intended exact quote and disambiguate it with verbatim surrounding prefix/suffix, or a one-based occurrence counted from the complete segment, never from an individual page. Do not guess which occurrence supports this annotation.",
+        "This failed selector did not create the proposed annotation. Correct the selector and retain the intended logical annotation ID; do not create new logical IDs or withdraw dependent supported annotations to bypass ambiguity.",
+        `Retry ${toolName} once after that correction. If the intended occurrence cannot be identified or the same diagnostic repeats, stop and report the unresolved selector.`,
+      ],
+      ...(sourceRead.suggestedCall ? { suggestedCall: sourceRead.suggestedCall } : {}),
+    };
+  }
+
   const exactQuoteSegment = /exact evidence quote was not found in segment ([a-z0-9][a-z0-9._-]*?)(?: with the supplied context)?\./iu.exec(errorText)?.[1];
   if (COMPILER_PROPOSAL_TOOLS.has(toolName) && exactQuoteSegment) {
+    const sourceRead = exactSourceRecovery(exactQuoteSegment, scope);
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
       category: "lookup-miss",
       retryable: true,
-      retryCondition: "Retry once only after reading the named active-source segment and copying the selector text verbatim from its returned chunk.",
+      retryCondition: "Retry once only after reading the named active-source segment and copying the selector text verbatim.",
       steps: [
-        `Call read_source_evidence with ref source-segment:${exactQuoteSegment}, offset=0, and max_chars=120000. If it returns nextOffset before the intended passage, continue only with that exact nextOffset.`,
-        "Copy the intended non-empty substring verbatim from the returned chunk into the failing evidence selector's exact field, and copy the returned evidence_segment_id into segment_id; do not copy JSON escaping from the prompt or normalize punctuation/whitespace.",
+        ...sourceRead.steps,
+        "Repair every reported selector in the complete diagnostic, not just the first. Copy the intended non-empty substring verbatim into the failing evidence selector's exact field; do not copy JSON escaping from the prompt or normalize punctuation/whitespace.",
         `Retry ${toolName} once after changing that selector. If the intended wording is absent after reading the complete segment, remove/reframe the unsupported field or stop; never guess another quote.`,
       ],
-      suggestedCall: {
-        tool: "read_source_evidence",
-        arguments: { ref: `source-segment:${exactQuoteSegment}`, offset: 0, max_chars: 120_000 },
-      },
+      ...(sourceRead.suggestedCall ? { suggestedCall: sourceRead.suggestedCall } : {}),
+    };
+  }
+
+  if (toolName === "propose_event_execution" && /validation|schema-bound|compiled mechanism|evidence_segment_ids|additional propert/u.test(lower)) {
+    if (scope && (!scope.activeToolNames.includes("find_compiler_artifacts") || !scope.activeToolNames.includes("read_compiler_artifact"))) {
+      return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+        retryCondition: "Mechanism discovery is unavailable in this scope. Resume only in a host-started compiler turn with the required source-scoped discovery tools.",
+        steps: ["Preserve the original validation diagnostic and valid drafts. Do not guess a schema ID, call unavailable tools, or relabel an ad-hoc action to bypass the contract."] };
+    }
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "One corrected retry only after fixing the envelope and using a source-supported compiled mechanism or complete entry checkpoint.",
+      steps: [
+        "Place proposal_id, payload, evidence_segment_ids and evidence_selectors beside each other in the outer argument object; never nest evidence_segment_ids/evidence_selectors inside payload.",
+        "An action binding requires action.lane=schema-bound; never copy an event's ad-hoc action or relabel it without a real mechanism.",
+        "Call find_compiler_artifacts with kind=action-schema in the same active source. Copy its returned ref into read_compiler_artifact, then copy the read payload.id into action.schemaId and use its exact role IDs. A retrieval ref is not a schema ID.",
+        "If no supported schema exists, propose one only when source evidence satisfies the induction contract; otherwise preserve the occurrence without an action binding. Use entryCheckpoint only for a separately supported complete embodied entry, never to bypass a missing mechanism.",
+        "Retry once after concrete correction. If the same diagnostic repeats, stop and report it; never guess schema IDs or submit unchanged proposals.",
+      ],
+      suggestedCall: { tool: "find_compiler_artifacts", arguments: { kind: "action-schema", query: "*", max_results: 20 } },
     };
   }
 
@@ -583,7 +970,8 @@ export function buildNwhToolRecoveryAdvice(
       retryable: true,
       retryCondition: "Retry only after correcting the named field/path against the current tool schema.",
       steps: [
-        "Read the first validation path and constraint in the error; change the smallest responsible field instead of rewriting unrelated valid data.",
+        "Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.",
+        "A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.",
         "Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.",
         `Retry ${toolName} once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction.`,
       ],
@@ -604,17 +992,38 @@ export function buildNwhToolRecoveryAdvice(
   };
 }
 
-export function formatNwhToolError(toolName: string, error: unknown): string {
+function exactSourceRecovery(segmentId: string, scope: NwhToolRecoveryScope | undefined): Pick<NwhToolRecoveryAdvice, "steps" | "suggestedCall"> {
+  if (scope?.activeToolNames.includes("read_source_evidence")) {
+    return {
+      steps: [
+        `Call read_source_evidence with ref source-segment:${segmentId}, offset=0, and max_chars=120000. Continue pages only with the exact returned nextOffset.`,
+        "Use the returned chunk as verbatim source text and copy its evidence_segment_id into segment_id.",
+      ],
+      suggestedCall: {
+        tool: "read_source_evidence",
+        arguments: { ref: `source-segment:${segmentId}`, offset: 0, max_chars: 120_000 },
+      },
+    };
+  }
+  return {
+    steps: [
+      `Re-read the complete host-supplied <source-segment id="${segmentId}"> block in the current prompt and copy that exact id into segment_id.`,
+      "Use only the supplied segment text. If the complete named segment is unavailable, stop and report the missing evidence to the host; do not call unavailable retrieval tools or widen the source slice.",
+    ],
+  };
+}
+
+export function formatNwhToolError(toolName: string, error: unknown, scope?: NwhToolRecoveryScope): string {
   const message = errorMessage(error);
   if (hasNwhToolRecovery(message)) return message;
-  const advice = buildNwhToolRecoveryAdvice(toolName, message);
+  const advice = buildNwhToolRecoveryAdvice(toolName, message, scope);
   return `${message}\n\n${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2)}\n${NWH_TOOL_RECOVERY_END_MARKER}`;
 }
 
-export function actionableToolError(toolName: string, error: unknown): Error {
+export function actionableToolError(toolName: string, error: unknown, scope?: NwhToolRecoveryScope): Error {
   const original = error instanceof Error ? error : undefined;
   if (original && hasNwhToolRecovery(original.message)) return original;
-  const wrapped = new Error(formatNwhToolError(toolName, error), original ? { cause: original } : undefined);
+  const wrapped = new Error(formatNwhToolError(toolName, error, scope), original ? { cause: original } : undefined);
   wrapped.name = "NwhActionableToolError";
   return wrapped;
 }
@@ -633,11 +1042,11 @@ function toolResultErrorText(event: ToolResultEvent): string {
 }
 
 /** Add recovery metadata to both thrown failures and terminate=true blocked results. */
-export function recoverNwhToolResult(event: ToolResultEvent): NwhToolResultRecovery | undefined {
+export function recoverNwhToolResult(event: ToolResultEvent, scope?: NwhToolRecoveryScope): NwhToolResultRecovery | undefined {
   const blocked = toolResultWasBlocked(event.details);
   if (!event.isError && !blocked) return undefined;
   const message = toolResultErrorText(event);
-  const advice = buildNwhToolRecoveryAdvice(event.toolName, message);
+  const advice = buildNwhToolRecoveryAdvice(event.toolName, message, scope);
   const content = hasNwhToolRecovery(message)
     ? event.content
     : [
@@ -660,7 +1069,7 @@ export function recoverNwhToolResult(event: ToolResultEvent): NwhToolResultRecov
 /** Always-on adapter, including isolated sessions that disable the main NWH extension. */
 export function createNwhToolRecoveryExtension(): ExtensionFactory {
   return (pi) => {
-    pi.on("tool_result", (event) => recoverNwhToolResult(event));
+    pi.on("tool_result", (event) => recoverNwhToolResult(event, { activeToolNames: pi.getActiveTools() }));
   };
 }
 
@@ -676,7 +1085,7 @@ function isAbortFailure(error: unknown, signal: AbortSignal | undefined): boolea
  * as a preflight so schema failures receive the same guidance as execute-time
  * failures; Pi still performs its authoritative validation afterwards.
  */
-export function withNwhToolRecovery(tool: ToolDefinition): ToolDefinition {
+export function withNwhToolRecovery(tool: ToolDefinition, getScope?: () => NwhToolRecoveryScope): ToolDefinition {
   if ((tool as unknown as { [WRAPPED_TOOL]?: boolean })[WRAPPED_TOOL]) return tool;
   const originalPrepare = tool.prepareArguments;
   const prepareArguments: NonNullable<ToolDefinition["prepareArguments"]> = (raw: unknown) => {
@@ -689,7 +1098,7 @@ export function withNwhToolRecovery(tool: ToolDefinition): ToolDefinition {
         arguments: prepared as Record<string, unknown>,
       } satisfies ToolCall) as never;
     } catch (error) {
-      throw actionableToolError(tool.name, error);
+      throw actionableToolError(tool.name, error, getScope?.());
     }
   };
   const execute: ToolDefinition["execute"] = async (toolCallId, params, signal, onUpdate, context) => {
@@ -697,7 +1106,7 @@ export function withNwhToolRecovery(tool: ToolDefinition): ToolDefinition {
       return await tool.execute(toolCallId, params, signal, onUpdate, context);
     } catch (error) {
       if (isAbortFailure(error, signal)) throw error;
-      throw actionableToolError(tool.name, error);
+      throw actionableToolError(tool.name, error, getScope?.());
     }
   };
   const wrapped: ToolDefinition = {

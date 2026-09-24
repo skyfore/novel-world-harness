@@ -1,8 +1,11 @@
+import { pendingTextDeliveries } from "./text-delivery.js";
+import { pendingSpeechDeliveries } from "./speech-delivery.js";
 import { actionSchemaSchema } from "./action-ontology.js";
 import { processTemplateSchema } from "./process-ontology.js";
 import { normTemplateSchema } from "./norm-ontology.js";
 import { actionConstraintSchema, type ActionPattern } from "./action-constraint.js";
 import { z } from "zod";
+import { agencyDecisionViewSchema, projectAgencyChannels } from "./agency-profile.js";
 import { projectCharacterDevelopment } from "./development.js";
 import type { WorldEngine } from "./engine.js";
 import { idSchema, predicateSchema, worldRuleSchema, valueTypeSchema, type StateValue, type ValueType } from "./model.js";
@@ -24,6 +27,11 @@ const visibleActionConstraintSchema = z.object(actionConstraintSchema.shape).pic
 
 /** Actor-owned decision facts shared by player translation, NPCs and autonomous actors. */
 export const actorDecisionViewSchema = z.object({
+  agency: agencyDecisionViewSchema.optional(),
+  readableTexts: z.array(z.object({ expressionId: idSchema, propositionId: idSchema, attributionId: idSchema, documentId: idSchema, fragments: z.array(z.string().min(1)).min(1), channelBinding: z.object({ channelId: idSchema, processId: idSchema }).strict() }).strict()).max(16).optional(),
+  pendingMessages: z.array(z.object({ eventId: idSchema, messageIndex: z.number().int().min(0).max(31), authorId: idSchema, content: z.string() }).strict()).max(16).optional(),
+  pendingSpeech: z.array(z.object({ eventId: idSchema, utteranceIndex: z.number().int().min(0).max(31), speakerId: idSchema, content: z.string(), delivery: z.enum(["physical", "remote"]) }).strict()).max(16).optional(),
+  experiences: z.array(z.object({ acquisitionId: idSchema, claimId: idSchema, propositionId: idSchema }).strict()).optional(),
   capabilities: z.object({
     actions: z.array(z.object(actionSchemaSchema.shape).pick({ id: true, name: true, roles: true, initiatorRoleId: true, parameters: true, preconditions: true, stateEffects: true, effectEnvelope: true }).extend({ fieldValueTypes: z.record(z.string(), valueTypeSchema).default({}), ...hostChecks })),
     processes: z.array(z.object(processTemplateSchema.shape).pick({ id: true, name: true, ownerRoles: true, phases: true, initialPhaseId: true, transitions: true, outcomeIds: true, cadence: true, actorControls: true }).extend(hostChecks)),
@@ -156,12 +164,36 @@ export async function buildActorDecisionView(
     }; }),
   };
   const fieldValueTypes = Object.fromEntries(contractFieldKeys({ capabilities, constraints }).map((field) => [field, context.stateSchema.get(field).valueType]));
-  return actorDecisionViewSchema.parse({ goals, appraisals, relationships, obligations, norms, processes, capabilities, constraints, fieldValueTypes });
+  const experiences = Object.values(projection.knowledge.actors[actorId] ?? {}).filter(fact => scope.knownClaimIds.has(fact.claimId) && fact.acquisitionId && fact.propositionId).map(fact => ({ acquisitionId: fact.acquisitionId!, claimId: fact.claimId, propositionId: fact.propositionId! }));
+  const actor = context.entities.get(actorId);
+  const agency = actor ? projectAgencyChannels(actor, projection.processes, context, scope) : undefined;
+  const realized = new Set(projection.history.flatMap(item => item.event.realizesCanonicalEventIds ?? []));
+  const readableTexts = [...(context.utteranceExpressions?.values() ?? [])].flatMap(expression => {
+    if (expression.modality !== "writing" || !expression.documentId || !visible(expression.documentId)
+      || !expression.addresseeIds.includes(actorId) || !realized.has(expression.canonicalEventId)
+      || !evidenceBelongsExclusivelyToSource(expression.evidence, scope.sourceId)) return [];
+    const channels = agency?.channels.filter(channel => channel.modality === "text" && channel.peerEntityIds.includes(expression.documentId!)) ?? [];
+    const attributions = [...(context.attributions?.values() ?? [])].filter(item => item.holderKind === "document" && item.holderEntityId === expression.documentId
+      && item.propositionId === expression.propositionId && item.expressionIds?.includes(expression.id) && evidenceBelongsExclusivelyToSource(item.evidence, scope.sourceId));
+    // Do not choose an ambiguous provenance or channel on the model's behalf.
+    if (channels.length !== 1 || attributions.length !== 1) return [];
+    return [{ expressionId: expression.id, propositionId: expression.propositionId, attributionId: attributions[0]!.id,
+      documentId: expression.documentId, fragments: expression.fragments.map(item => item.text),
+      channelBinding: { channelId: channels[0]!.id, processId: channels[0]!.processId } }];
+  }).sort((a, b) => a.expressionId.localeCompare(b.expressionId)).slice(0, 16);
+  const pendingMessages = pendingTextDeliveries(projection.history, projection.semantics, actorId).filter(item => visible(item.authorId)).slice(-16).map(({ recipientId: _recipient, ...item }) => item);
+  const pendingSpeech = pendingSpeechDeliveries(projection.history, projection.semantics, actorId).filter(item => visible(item.speakerId)).slice(-16).map(({ recipientId: _recipient, ...item }) => item);
+  return actorDecisionViewSchema.parse({ ...(pendingMessages.length ? { pendingMessages } : {}), ...(readableTexts.length ? { readableTexts } : {}), ...(pendingSpeech.length ? { pendingSpeech } : {}), ...(agency ? { agency } : {}), ...(experiences.length ? { experiences } : {}), goals, appraisals, relationships, obligations, norms, processes, capabilities, constraints, fieldValueTypes });
 }
 
 export function decisionReferenceIds(view?: ActorDecisionView): string[] {
   if (!view) return [];
   return [...new Set([
+    ...(view.pendingSpeech ?? []).map(item => item.eventId),
+    ...(view.pendingMessages ?? []).map(item => item.eventId),
+    ...(view.readableTexts ?? []).flatMap(item => [item.expressionId, item.propositionId, item.attributionId]),
+    ...(view.agency?.channels ?? []).flatMap(channel => [channel.id, channel.processId, channel.processTemplateId, ...(channel.actionSchemaId ? [channel.actionSchemaId] : [])]),
+    ...(view.experiences ?? []).flatMap(x => [x.acquisitionId, x.claimId, x.propositionId]),
     ...view.capabilities.actions.map((item) => item.id), ...view.capabilities.processes.map((item) => item.id), ...view.capabilities.norms.map((item) => item.id),
     ...view.goals.map((item) => item.id), ...view.appraisals.map((item) => item.id),
     ...view.relationships.map((item) => item.id), ...view.obligations.map((item) => item.id),
@@ -176,6 +208,15 @@ export function mapActorDecisionView(view: ActorDecisionView, entity: (id: strin
   const mapValue = (value: StateValue, type: ValueType | undefined): StateValue => type === "entity-ref" && typeof value === "string" ? entity(value)
     : type === "entity-ref-set" && Array.isArray(value) ? value.map((id) => entity(String(id))) : value;
   return {
+    ...(view.readableTexts ? { readableTexts: view.readableTexts.map(item => ({ ...item, expressionId: ref(item.expressionId), propositionId: ref(item.propositionId), attributionId: ref(item.attributionId), documentId: entity(item.documentId), channelBinding: { channelId: ref(item.channelBinding.channelId), processId: ref(item.channelBinding.processId) } })) } : {}),
+    ...(view.pendingMessages ? { pendingMessages: view.pendingMessages.map(item => ({ ...item, eventId: ref(item.eventId), authorId: entity(item.authorId) })) } : {}),
+    ...(view.pendingSpeech ? { pendingSpeech: view.pendingSpeech.map(item => ({ ...item, eventId: ref(item.eventId), speakerId: entity(item.speakerId) })) } : {}),
+    ...(view.agency ? { agency: { ...view.agency, channels: view.agency.channels.map(channel => ({ ...channel,
+      id: ref(channel.id), processId: ref(channel.processId), processTemplateId: ref(channel.processTemplateId),
+      peerEntityIds: channel.peerEntityIds.map(entity), carrierEntityIds: channel.carrierEntityIds.map(entity),
+      ...(channel.actionSchemaId ? { actionSchemaId: ref(channel.actionSchemaId) } : {}),
+    })) } } : {}),
+    ...(view.experiences ? { experiences: view.experiences.map(x => ({ acquisitionId: ref(x.acquisitionId), claimId: ref(x.claimId), propositionId: ref(x.propositionId) })) } : {}),
     fieldValueTypes: view.fieldValueTypes,
     constraints: {
       worldRules: view.constraints.worldRules.map((item) => mapActorContract({ ...item, id: ref(item.id) }, entity, ref, view.fieldValueTypes)),

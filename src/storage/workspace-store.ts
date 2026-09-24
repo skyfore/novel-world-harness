@@ -94,6 +94,9 @@ export class WorkspaceStore {
     this.sourcesDir = path.join(this.stateDir, "sources");
   }
 
+  /** Inspection must not migrate or archive state as a side effect. */
+  static openReadOnly(root = process.cwd()): WorkspaceStore { return new WorkspaceStore(path.resolve(root)); }
+
   static async create(root = process.cwd()): Promise<WorkspaceStore> {
     const resolvedRoot = path.resolve(root);
     let realRoot: string;

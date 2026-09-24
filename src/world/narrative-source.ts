@@ -11,11 +11,15 @@ export type NarrativeEvidenceCandidate = {
   evidence: readonly EvidenceRef[];
   relevance: readonly string[];
   anchors: readonly string[];
+  /** Exact text already admitted to this actor; nearby source prose is not implied. */
+  admittedTexts?: readonly string[];
+  occurrenceId?: string;
 };
 
 /** Exact source prose admitted only as non-authoritative literary evidence. */
 export type NarrativeSourceReference = {
   ref: string;
+  occurrenceId?: string;
   sourceId: string;
   startByte: number;
   endByte: number;
@@ -29,8 +33,8 @@ export type NarrativeSourceReference = {
 
 /**
  * Build a small exact-prose corpus from evidence already attached to
- * actor-visible committed events. Long evidence segments are admitted only
- * around a literal safe anchor, and any excerpt naming an unavailable entity
+ * actor-visible committed events AND exact already-visible text. Long admitted
+ * texts may be cropped, but anchors never authorize neighboring prose. Any excerpt naming an unavailable entity
  * fails closed. This is deliberately separate from compiler full-source
  * retrieval: a narrator never receives arbitrary future canon.
  */
@@ -62,31 +66,37 @@ export async function buildNarrativeSourceReferences(input: {
       const fullSlice = buffer.subarray(bounds.startByte, bounds.endByte);
       if (sha256(fullSlice) !== span.quoteHash) continue;
       const fullText = fullSlice.toString("utf8");
-      const excerpt = boundedAnchoredExcerpt(fullText, candidate.anchors, MAX_REFERENCE_CHARACTERS);
-      if (!excerpt) continue;
-      if (containsForbiddenName(excerpt.text, forbiddenNames)) continue;
-      const startByte = bounds.startByte + Buffer.byteLength(fullText.slice(0, excerpt.start), "utf8");
-      const endByte = bounds.startByte + Buffer.byteLength(fullText.slice(0, excerpt.end), "utf8");
-      const startLine = span.startLine + newlineCount(fullText.slice(0, excerpt.start));
-      const endLine = startLine + newlineCount(excerpt.text);
-      const identity = `${input.sourceId}:${startByte}:${endByte}`;
-      if (seen.has(identity)) continue;
-      const characters = Array.from(excerpt.text).length;
-      if (totalCharacters + characters > MAX_TOTAL_REFERENCE_CHARACTERS) continue;
-      seen.add(identity);
-      totalCharacters += characters;
-      references.push({
-        ref: `source-style-${sha256(Buffer.from(identity)).slice(0, 24)}`,
-        sourceId: input.sourceId,
-        startByte,
-        endByte,
-        startLine,
-        endLine,
-        text: excerpt.text,
-        relevance: [...new Set(candidate.relevance)].slice(0, 8),
-        authority: "style-only",
-        safety: "actor-visible-committed-evidence",
-      });
+      if (!Buffer.from(fullText, "utf8").equals(fullSlice)) continue;
+      for (const admitted of [...new Set(candidate.admittedTexts ?? [])]) {
+        if (!admitted) continue;
+        // Ambiguous repeated wording needs a narrower occurrence-specific span.
+        const admittedStart = fullText.indexOf(admitted);
+        if (admittedStart < 0 || fullText.indexOf(admitted, admittedStart + 1) >= 0) continue;
+        const slice = boundedAnchoredExcerpt(admitted, candidate.anchors, MAX_REFERENCE_CHARACTERS);
+        if (!slice) continue;
+        const excerpt = { text: slice.text, start: admittedStart + slice.start, end: admittedStart + slice.end };
+        if (containsForbiddenName(excerpt.text, forbiddenNames)) continue;
+        const startByte = bounds.startByte + Buffer.byteLength(fullText.slice(0, excerpt.start), "utf8");
+        const endByte = bounds.startByte + Buffer.byteLength(fullText.slice(0, excerpt.end), "utf8");
+        const startLine = span.startLine + newlineCount(fullText.slice(0, excerpt.start));
+        const endLine = startLine + newlineCount(excerpt.text);
+        const identity = `${input.sourceId}:${startByte}:${endByte}:${candidate.occurrenceId ?? ""}`;
+        if (seen.has(identity)) continue;
+        const characters = Array.from(excerpt.text).length;
+        if (references.length >= MAX_REFERENCES || totalCharacters + characters > MAX_TOTAL_REFERENCE_CHARACTERS) continue;
+        seen.add(identity);
+        totalCharacters += characters;
+        references.push({
+          ref: `source-style-${sha256(Buffer.from(identity)).slice(0, 24)}`,
+          ...(candidate.occurrenceId ? { occurrenceId: candidate.occurrenceId } : {}),
+          sourceId: input.sourceId,
+          startByte, endByte, startLine, endLine,
+          text: excerpt.text,
+          relevance: [...new Set(candidate.relevance)].slice(0, 8),
+          authority: "style-only",
+          safety: "actor-visible-committed-evidence",
+        });
+      }
     }
   }
   return references;

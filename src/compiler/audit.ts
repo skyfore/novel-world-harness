@@ -1,4 +1,18 @@
-import { ActorModelStore, characterGoalHasDevelopmentBoundary, characterModelSchema, evaluateCharacterGoal } from "../world/actors.js";
+import { entryArtifactEvidenceIssues, entryAgencyIssues, remoteEntryOccurrenceIssues } from "../world/entry-agency.js";
+import { playableEntryActorIds } from "../world/entry-agency.js";
+import { applyEventExecutions, eventExecutionSchema, validateProcessRecoveryEvidence } from "../world/event-execution.js";
+import { validateIncapacityEvidence } from "../world/process-capacity.js";
+import { validateAcquisition, validateAcquisitionEvidence, acquisitionSchema } from "../world/acquisition.js";
+import { validatePerceptionObservation, validatePerceptionObservationEvidence, perceptionObservationSchema } from "../world/perception-observation.js";
+import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
+import { validateUtteranceExpression, validateUtteranceExpressionEvidence, utteranceExpressionSchema } from "../world/utterance-expression.js";
+import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.js";
+import { expressionActionConditionsSatisfied, validateGoalExpressions, validateGoalExpressionEvidence } from "../world/conditional-expression.js";
+import { emptyKnowledgeState } from "../world/knowledge.js";
+import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { validateSemanticEffect } from "../world/semantic-effect.js";
+import { selectOpeningDriverActor } from "./opening-driver.js";
+import { ActorModelStore, actorActionHasMaterialEffect, characterGoalHasDevelopmentBoundary, characterGoalSchema, characterModelSchema, evaluateCharacterGoal } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
 import type { CanonicalEvent, ControlledWorldRule, EvidenceRef, EventRelation, Predicate, StoryTime, WorldState } from "../world/model.js";
@@ -70,7 +84,7 @@ import {
   validateActionConstraintCatalog,
 } from "../world/action-constraint.js";
 import { NORM_ONTOLOGY_VERSION, validateNormTemplateCatalog } from "../world/norm-ontology.js";
-import { PROCESS_ONTOLOGY_VERSION, validateProcessTemplateCatalog } from "../world/process-ontology.js";
+import { PROCESS_ONTOLOGY_VERSION, processTemplateSchema, validateProcessTemplateCatalog } from "../world/process-ontology.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 export { NOVEL_SCALE_EVENT_THRESHOLD } from "./scale.js";
@@ -168,6 +182,10 @@ export type CompilerAuditReport = {
     relationErrors: Array<{ code: string; message: string; path?: string }>;
     sceneOccurrences: number;
     eventFrames: number;
+    semanticEffects: number;
+    perceptionObservations: number;
+    acquisitions: number;
+    utteranceExpressions: number;
     framedEvents: number;
     actionSchemas: number;
     schemaBoundEvents: number;
@@ -286,6 +304,10 @@ export type CompilerAuditReport = {
     eventRelations: number;
     sceneOccurrences: number;
     eventFrames: number;
+    semanticEffects: number;
+    perceptionObservations: number;
+    acquisitions: number;
+    utteranceExpressions: number;
     actionSchemas: number;
     actionConstraints: number;
     normTemplates: number;
@@ -358,6 +380,7 @@ export type CompilerAuditReport = {
     openingReaderContext: number | null;
     openingActorObservation: number | null;
     openingPhysicalPresence: number | null;
+    openingLivePresence?: number | null;
     openingActionability: number | null;
     autonomousDriverCoverage: number | null;
   };
@@ -604,6 +627,10 @@ export async function auditCompiler(
   const eventRelations = allEventRelations.filter(belongsToSelectedSource);
   const sceneOccurrences = allSceneOccurrences.filter(belongsToSelectedSource);
   const eventFrames = allEventFrames.filter(belongsToSelectedSource);
+  const semanticEffects = (await canon.listSemanticEffects()).filter(belongsToSelectedSource);
+  const perceptionObservations = (await canon.listPerceptionObservations()).filter(belongsToSelectedSource);
+  const acquisitions = (await canon.listAcquisitions()).filter(belongsToSelectedSource);
+  const utteranceExpressions = (await canon.listUtteranceExpressions()).filter(belongsToSelectedSource);
   const eventExecutions = allEventExecutions.filter(belongsToSelectedSource);
   const actionSchemas = allActionSchemas.filter((item) => item.induction.kind === "domain-module" || belongsToSelectedSource(item));
   const actionConstraints = allActionConstraints.filter((item) => item.induction.kind === "domain-module" || belongsToSelectedSource(item));
@@ -631,6 +658,10 @@ export async function auditCompiler(
     ...eventRelations.map((item) => ({ name: `event-relation:${item.id}`, kind: "event-relation", id: item.id, payload: item, evidence: artifactEvidence(item) })),
     ...sceneOccurrences.map((item) => ({ name: `scene-occurrence:${item.id}`, kind: "scene-occurrence", id: item.id, payload: item, evidence: item.evidence })),
     ...eventFrames.map((item) => ({ name: `event-frame:${item.id}`, kind: "event-frame", id: item.id, payload: item, evidence: item.evidence })),
+    ...semanticEffects.map((item) => ({ name: `semantic-effect:${item.id}`, kind: "semantic-effect", id: item.id, payload: item, evidence: item.evidence })),
+    ...perceptionObservations.map((item) => ({ name: `perception-observation:${item.id}`, kind: "perception-observation", id: item.id, payload: item, evidence: item.evidence })),
+    ...acquisitions.map((item) => ({ name: `acquisition:${item.id}`, kind: "acquisition", id: item.id, payload: item, evidence: item.evidence })),
+    ...utteranceExpressions.map((item) => ({ name: `utterance-expression:${item.id}`, kind: "utterance-expression", id: item.id, payload: item, evidence: item.evidence })),
     ...eventExecutions.map((item) => ({ name: `event-execution:${item.id}`, kind: "event-execution", id: item.id, payload: item, evidence: item.evidence })),
     ...actionSchemas.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `action-schema:${item.id}`, kind: "action-schema", id: item.id, payload: item, evidence: item.evidence })),
     ...actionConstraints.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `action-constraint:${item.id}`, kind: "action-constraint", id: item.id, payload: item, evidence: item.evidence })),
@@ -659,9 +690,27 @@ export async function auditCompiler(
     for (const issue of result.issues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
     const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
     if (!binding?.assertions.length) {
+      const entryIssues = entryArtifactEvidenceIssues(artifact.kind, artifact.payload, []);
+      invalidAssertions += entryIssues.length;
+      evidenceErrors.push(...entryIssues.map(issue => ({ artifact: artifact.name, code: issue.code, message: issue.message })));
+      if (artifact.kind === "entity") {
+        const issues = validateAgencyProfileEvidence(artifact.payload as import("../world/model.js").Entity, []);
+        invalidAssertions += issues.length;
+        evidenceErrors.push(...issues.map(issue => ({ artifact: artifact.name, code: issue.code, message: issue.message })));
+      }
+      if (artifact.kind === "character-goal") {
+        const issues = validateGoalExpressionEvidence(characterGoalSchema.parse(artifact.payload), []);
+        invalidAssertions += issues.length;
+        evidenceErrors.push(...issues.map(issue => ({ artifact: artifact.name, code: issue.code, message: issue.message })));
+      }
+      if (artifact.kind === "event-execution" && eventExecutionSchema.parse(artifact.payload).processRecoveries?.length) { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "PROCESS_RECOVERY_EVIDENCE_MISSING", message: "Recovery requires exact field evidence" }); }
+      if (artifact.kind === "process-template" && processTemplateSchema.parse(artifact.payload).incapacity) { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "INCAPACITY_EVIDENCE_MISSING", message: "Incapacity process requires exact field evidence" }); }
+      if (artifact.kind === "acquisition") { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "ACQUISITION_EVIDENCE_MISSING", message: "Acquisition has no exact evidence binding; it is unverified." }); }
+      if (artifact.kind === "perception-observation") { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "PERCEPTION_EVIDENCE_MISSING", message: "Perception has no exact evidence binding; it is unverified." }); }
+      if (artifact.kind === "utterance-expression") { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "EXPRESSION_EVIDENCE_MISSING", message: "Expression has no exact evidence binding; it is unverified." }); }
       if (artifact.kind === "initial-world") {
         const parsedInitialWorld = initialWorldSchema.parse(artifact.payload);
-        if (parsedInitialWorld.readerContext || parsedInitialWorld.actorObservations?.length) {
+        if (parsedInitialWorld.readerContext || parsedInitialWorld.actorObservations?.length || parsedInitialWorld.projectionSeed && parsedInitialWorld.participantPresence?.some(item => item.mode === "remote")) {
           invalidAssertions += 1;
           evidenceErrors.push({
             artifact: artifact.name,
@@ -702,6 +751,14 @@ export async function auditCompiler(
     artifactsWithExactEvidence += 1;
     assertionsChecked += binding.assertions.length;
     const exactIssues = [
+      ...entryArtifactEvidenceIssues(artifact.kind, artifact.payload, binding.assertions),
+      ...(artifact.kind === "event-execution" ? validateProcessRecoveryEvidence(eventExecutionSchema.parse(artifact.payload), binding.assertions) : []),
+      ...(artifact.kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(artifact.payload), binding.assertions) : []),
+      ...(artifact.kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(artifact.payload), binding.assertions) : []),
+      ...(artifact.kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(artifact.payload), binding.assertions) : []),
+      ...(artifact.kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(artifact.payload), binding.assertions) : []),
+      ...(artifact.kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(artifact.payload), binding.assertions) : []),
+      ...(artifact.kind === "entity" ? validateAgencyProfileEvidence(artifact.payload as import("../world/model.js").Entity, binding.assertions) : []),
       ...validateEvidenceAssertionTargets(artifact.kind, artifact.id, artifact.payload, binding.assertions),
       ...(artifact.kind === "character-model"
         ? validateCharacterOntologyEvidenceAssertions(
@@ -870,7 +927,15 @@ export async function auditCompiler(
         }).issues
       : []),
   ];
-  const executableSemanticValidation = [...sceneValidation, ...frameValidation, ...actionValidation];
+  const expressionValidation = (await Promise.all(utteranceExpressions.map(async expression => [
+    ...validateUtteranceExpression(expression, { entities: entityCatalog, events: eventCatalog, propositions: new Map(propositions.map(item => [item.id, item])) }),
+    ...await validateUtteranceExpressionTrace(workspaceRoot, expression),
+  ]))).flat();
+  expressionValidation.push(...goals.flatMap(goal => validateGoalExpressions(goal, { entities: entityCatalog, claims: new Map(claims.map(item => [item.id, item])), utteranceExpressions: new Map(utteranceExpressions.map(item => [item.id, item])) })));
+  expressionValidation.push(...entities.flatMap(entity => validateAgencyProfile(entity, { processTemplates: new Map(processTemplates.map(item => [item.id, item])), actionSchemas: actionSchemaCatalog })));
+  const perceptionValidation = (await Promise.all(perceptionObservations.map(async observation => [...validatePerceptionObservation(observation, { entities: entityCatalog, events: eventCatalog }), ...await validatePerceptionObservationTrace(workspaceRoot, observation)]))).flat();
+  const acquisitionValidation = acquisitions.flatMap(value => validateAcquisition(value, { processTemplates: new Map(processTemplates.map(item => [item.id, item])), entities: entityCatalog, events: eventCatalog, claims: new Map(claims.map(item => [item.id, item])), propositions: new Map(propositions.map(item => [item.id, item])), attributions: new Map(attributions.map(item => [item.id, item])), utteranceExpressions: new Map(utteranceExpressions.map(item => [item.id, item])), perceptionObservations: new Map(perceptionObservations.map(item => [item.id, item])), acquisitions: new Map(acquisitions.map(item => [item.id, item])) }));
+  const executableSemanticValidation = [...acquisitionValidation, ...perceptionValidation, ...expressionValidation, ...sceneValidation, ...frameValidation, ...actionValidation, ...semanticEffects.flatMap(effect => validateSemanticEffect(effect, { entities: entityCatalog, events: eventCatalog, actionSchemas: actionSchemaCatalog, processTemplates: new Map(processTemplates.map(item => [item.id, item])), eventParticipations: new Map(eventParticipations.map(item => [item.id, item])), eventExecutions: new Map(eventExecutions.map(item => [item.id, item])) }))];
   const executablePolicyValidation = [
     ...validateActionConstraintCatalog(actionConstraints, {
       entities: entityCatalog,
@@ -1027,10 +1092,16 @@ export async function auditCompiler(
   const physicalOpeningActorIds = new Set(initialWorld?.participantPresence
     ?.filter((presence) => presence.mode === "physical" && characterIds.has(presence.entityId))
     .map((presence) => presence.entityId) ?? []);
+  const entryCatalog = { entities: entityCatalog,
+    processTemplates: new Map(processTemplates.map(item => [item.id, item])), actionSchemas: new Map(actionSchemas.map(item => [item.id, item])),
+    acquisitions: new Map(acquisitions.map(item => [item.id, item])),
+  };
+  const playableOpeningActorIds = initialWorld ? playableEntryActorIds(initialWorld, entryCatalog) : new Set<string>();
+  const openingLivePresence = initialWorld ? (playableOpeningActorIds.size ? 1 : 0) : null;
   const openingActorIds = new Set(initialWorld?.delta.operations.flatMap((operation) =>
     "entityId" in operation
     && characterIds.has(operation.entityId)
-    && physicalOpeningActorIds.has(operation.entityId)
+    && playableOpeningActorIds.has(operation.entityId)
     && actionableOpeningFields.has(operation.field)
       ? [operation.entityId]
       : []) ?? []);
@@ -1038,7 +1109,7 @@ export async function auditCompiler(
     ? initialWorld.delta.operations.some((operation) =>
         "entityId" in operation
         && characterIds.has(operation.entityId)
-        && physicalOpeningActorIds.has(operation.entityId)
+        && playableOpeningActorIds.has(operation.entityId)
         && actionableOpeningFields.has(operation.field)) ? 1 : 0
     : null;
   const openingReaderSetup = initialWorld
@@ -1052,31 +1123,31 @@ export async function auditCompiler(
     : null;
   const openingObservationActorIds = new Set(initialWorld?.actorObservations?.map((observation) => observation.actorId) ?? []);
   const openingActorObservation = initialWorld
-    ? (physicalOpeningActorIds.size > 0
-        && [...physicalOpeningActorIds].every((actorId) => openingObservationActorIds.has(actorId)) ? 1 : 0)
+    ? (playableOpeningActorIds.size > 0
+        && [...playableOpeningActorIds].every((actorId) => openingObservationActorIds.has(actorId)) ? 1 : 0)
     : null;
   // discourseOrder is local to one compiler evidence batch. Source evidence
   // lines are the cross-batch textual-order authority; the model-proposed
   // value only breaks ties inside the same evidence slice.
-  const eventsByDiscourse = [...events].sort((left, right) =>
+  const eventsByDiscourse = applyEventExecutions(events, eventExecutions).sort((left, right) =>
     earliestEvidenceLine(left) - earliestEvidenceLine(right)
     || (left.narrativeContext?.discourseOrder ?? 0) - (right.narrativeContext?.discourseOrder ?? 0)
     || left.id.localeCompare(right.id));
-  const firstEmbodiedEventByActor = new Map<string, CanonicalEvent>();
+  const firstLiveEventByActor = new Map<string, CanonicalEvent>();
   for (const event of eventsByDiscourse) {
     if (event.narrativeContext?.mode && event.narrativeContext.mode !== "scene") continue;
     for (const presence of event.participantPresence ?? []) {
-      if (presence.mode !== "physical" || openingActorIds.has(presence.entityId)) continue;
-      if (!firstEmbodiedEventByActor.has(presence.entityId)) firstEmbodiedEventByActor.set(presence.entityId, event);
+      if (openingActorIds.has(presence.entityId) || !(presence.mode === "physical" || presence.mode === "remote" && entityCatalog.get(presence.entityId)?.agencyProfile?.agency === "autonomous")) continue;
+      if (!firstLiveEventByActor.has(presence.entityId)) firstLiveEventByActor.set(presence.entityId, event);
     }
   }
-  const laterEntryActors = [...firstEmbodiedEventByActor.keys()];
+  const laterEntryActors = [...firstLiveEventByActor.keys()];
   const characterEntryCheckpointCoverage = laterEntryActors.length
     ? laterEntryActors.filter((actorId) =>
-        firstEmbodiedEventByActor.get(actorId)?.characterEntryCheckpoints?.some((checkpoint) =>
+        firstLiveEventByActor.get(actorId)?.characterEntryCheckpoints?.some((checkpoint) =>
           checkpoint.actorId === actorId
-          && checkpoint.participantPresence.some((presence) =>
-            presence.entityId === actorId && presence.mode === "physical")
+          && !remoteEntryOccurrenceIssues(actorId, checkpoint, firstLiveEventByActor.get(actorId)!, eventParticipations).length
+          && !entryAgencyIssues(actorId, checkpoint, entryCatalog).length
           && checkpoint.delta.operations.some((operation) =>
             "entityId" in operation
             && operation.entityId === actorId
@@ -1084,10 +1155,10 @@ export async function auditCompiler(
       .length / laterEntryActors.length
     : null;
   const incompleteEntryActors = laterEntryActors.filter((actorId) =>
-    !firstEmbodiedEventByActor.get(actorId)?.characterEntryCheckpoints?.some((checkpoint) =>
+    !firstLiveEventByActor.get(actorId)?.characterEntryCheckpoints?.some((checkpoint) =>
       checkpoint.actorId === actorId
-      && checkpoint.participantPresence.some((presence) =>
-        presence.entityId === actorId && presence.mode === "physical")
+      && !remoteEntryOccurrenceIssues(actorId, checkpoint, firstLiveEventByActor.get(actorId)!, eventParticipations).length
+          && !entryAgencyIssues(actorId, checkpoint, entryCatalog).length
       && checkpoint.delta.operations.some((operation) =>
         "entityId" in operation
         && operation.entityId === actorId
@@ -1096,9 +1167,7 @@ export async function auditCompiler(
     !["canon-analogue", "player-choice", "actor-plan"].includes(possibility.kind)
     && hasExecutablePossibilityEffect(possibility));
   const executableGoals = goals.filter((goal) => [goal.candidateAction, ...(goal.actionPatterns ?? [])]
-    .filter(Boolean)
-    .some((action) => (action!.proposedDelta.operations.length > 0)
-      || ((action!.proposedKnowledge?.operations.length ?? 0) > 0)));
+    .some((action) => action && actorActionHasMaterialEffect(action)));
   const autonomousWorldDrivers = autonomousPossibilities.length + executableGoals.length;
   const openingTimelineComparable = initialWorld
     ? (comparableStoryTime(initialWorld.checkpoint?.storyTime) ? 1 : 0)
@@ -1138,11 +1207,18 @@ export async function auditCompiler(
   }
 
   const knownClaimsByActor = new Map<string, Set<string>>();
+  const openingKnowledge = emptyKnowledgeState("compiler-audit-genesis");
   for (const operation of initialWorld?.knowledge?.operations ?? []) {
     const known = knownClaimsByActor.get(operation.actorId) ?? new Set<string>();
     if (operation.op === "learn" && operation.status !== "disbelieves") known.add(operation.claimId);
     else known.delete(operation.claimId);
     knownClaimsByActor.set(operation.actorId, known);
+    const facts = openingKnowledge.actors[operation.actorId] ??= {};
+    if (operation.op === "forget") delete facts[operation.claimId];
+    else {
+      const acquisition = acquisitions.find(item => item.id === operation.acquisitionId);
+      facts[operation.claimId] = { ...operation, acquiredAtCommit: openingKnowledge.atCommit, ...(acquisition ? { reception: acquisition.reception } : {}) };
+    }
   }
   const realizedCanonicalEventIds = new Set<string>();
   const experiencedCanonicalEventIdsByActor = new Map<string, Set<string>>();
@@ -1166,9 +1242,13 @@ export async function auditCompiler(
         if (actor?.kind !== "character") return false;
         const action = [goal.candidateAction, ...(goal.actionPatterns ?? [])]
           .filter((candidate) => Boolean(candidate))
-          .find((candidate) => candidate!.preconditions.every((predicate) => evaluatePredicate(openingState!, predicate)));
-        if (!action || (action.proposedDelta.operations.length === 0
-          && (action.proposedKnowledge?.operations.length ?? 0) === 0)) return false;
+          .find((candidate) => actorActionHasMaterialEffect(candidate!)
+            && candidate!.preconditions.every((predicate) => evaluatePredicate(openingState!, predicate))
+            && expressionActionConditionsSatisfied(goal, candidate!, {
+              entities: entityCatalog, rules: new Map(rules.map(item => [item.id, item])), stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+              claims: new Map(claims.map(item => [item.id, item])), utteranceExpressions: new Map(utteranceExpressions.map(item => [item.id, item])),
+            }, { state: openingState!, knowledge: openingKnowledge }));
+        if (!action) return false;
         const phaseSupported = Boolean(goal.activation || goal.requiresKnowledge.length)
           || (openingActiveEntityIds.has(goal.actorId)
             && initialWorld?.evidence.some((openingEvidence) => goal.evidence.some((goalEvidence) =>
@@ -1212,6 +1292,13 @@ export async function auditCompiler(
   let semanticRepairInitialWorld = false;
   let semanticRepairRequiresFullReparse = worldRuleValidation.length > 0 || executablePolicyValidation.length > 0;
   for (const eventId of sceneClosureRepairEventIds(sceneValidation, sceneOccurrences)) {
+    semanticRepairEventIds.add(eventId);
+  }
+  // Comparable anchors may be added after an event relation was committed.
+  // Keep a now-regressing child in semantic repair even when aggregate
+  // timeline coverage already passes, because graph adjudication cannot alter
+  // the event's story-time.
+  for (const { eventId } of graph.temporalRegressions) {
     semanticRepairEventIds.add(eventId);
   }
   const novelScale = isNovelScaleCompilation(sourceBytes, events.length);
@@ -1279,9 +1366,9 @@ export async function auditCompiler(
       events.filter((event) => !event.readerSummary?.trim()).forEach((event) => semanticRepairEventIds.add(event.id));
     }
     if (laterEntryActors.length && characterEntryCheckpointCoverage !== 1) {
-      semanticIssues.push(`Only ${formatRatio(characterEntryCheckpointCoverage)} of later embodied characters have a complete pre-event entry checkpoint (required 100%).`);
+      semanticIssues.push(`Only ${formatRatio(characterEntryCheckpointCoverage)} of later embodied or autonomous remote characters have a complete pre-event entry checkpoint (required 100%).`);
       incompleteEntryActors.forEach((actorId) => {
-        const event = firstEmbodiedEventByActor.get(actorId);
+        const event = firstLiveEventByActor.get(actorId);
         if (event) semanticRepairEventIds.add(event.id);
       });
     }
@@ -1293,8 +1380,8 @@ export async function auditCompiler(
       semanticIssues.push("The initial world has no structured unread-reader context for first-use identities, causal premises, actor stance, and the unresolved opening situation.");
       semanticRepairInitialWorld = true;
     }
-    if (initialWorld && openingPhysicalPresence !== 1) {
-      semanticIssues.push("The initial world does not explicitly identify a physically present opening role; identity or state alone is not bodily presence.");
+    if (initialWorld && openingLivePresence !== 1) {
+      semanticIssues.push("The initial world does not explicitly identify a bodily or channel-grounded live opening role; identity or state alone does not establish entry agency.");
       semanticRepairInitialWorld = true;
     }
     if (initialWorld && openingActionability !== 1) {
@@ -1302,18 +1389,14 @@ export async function auditCompiler(
       semanticRepairInitialWorld = true;
     }
     if (initialWorld && openingActorObservation !== 1) {
-      semanticIssues.push("One or more physically present opening characters lack a direct-perception Genesis observation.");
+      semanticIssues.push("One or more live opening characters lack a source-supported Genesis observation within their physical or channel access.");
       semanticRepairInitialWorld = true;
     }
     if (openingActiveWorldDrivers === 0) {
       semanticIssues.push("The compiled world has no executable autonomous driver active at the opening checkpoint, so divergence can only wait for canon or repeat local dialogue.");
-      const driverActorId = [...participationCounts]
-        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0]
-        ?? [...physicalOpeningActorIds].sort()[0]
-        ?? [...openingActiveEntityIds]
-          .filter((entityId) => entities.find((entity) => entity.id === entityId)?.kind === "character")
-          .sort()[0];
+      const driverActorId = selectOpeningDriverActor(playableOpeningActorIds, initialWorld?.readerContext?.focalActorId, participationCounts);
       if (driverActorId) semanticRepairCharacterIds.push(driverActorId);
+      else if (initialWorld) semanticRepairInitialWorld = true;
       else semanticRepairRequiresFullReparse = true;
     }
     if (models.length && controlledCharacterModelCoverage !== 1) {
@@ -1377,7 +1460,7 @@ export async function auditCompiler(
       : "ready";
   const runtimeRatios = [
     openingReaderSetup,
-    openingPhysicalPresence,
+    openingLivePresence,
     openingActionability,
     autonomousDriverCoverage,
     ...(novelScale ? [openingTimelineComparable, openingReaderContext, openingActorObservation] : []),
@@ -1537,6 +1620,10 @@ export async function auditCompiler(
       relationErrors: relationValidation,
       sceneOccurrences: sceneOccurrences.length,
       eventFrames: eventFrames.length,
+      semanticEffects: semanticEffects.length,
+      perceptionObservations: perceptionObservations.length,
+      acquisitions: acquisitions.length,
+      utteranceExpressions: utteranceExpressions.length,
       framedEvents: events.filter((event) => event.frameInstance !== undefined).length,
       actionSchemas: actionSchemas.length,
       schemaBoundEvents: events.filter((event) => event.action?.lane === "schema-bound").length,
@@ -1655,6 +1742,10 @@ export async function auditCompiler(
       eventRelations: eventRelations.length,
       sceneOccurrences: sceneOccurrences.length,
       eventFrames: eventFrames.length,
+      semanticEffects: semanticEffects.length,
+      perceptionObservations: perceptionObservations.length,
+      acquisitions: acquisitions.length,
+      utteranceExpressions: utteranceExpressions.length,
       actionSchemas: actionSchemas.length,
       actionConstraints: actionConstraints.length,
       normTemplates: normTemplates.length,
@@ -1743,6 +1834,7 @@ export async function auditCompiler(
       openingReaderContext,
       openingActorObservation,
       openingPhysicalPresence,
+      openingLivePresence,
       openingActionability,
       autonomousDriverCoverage,
     },

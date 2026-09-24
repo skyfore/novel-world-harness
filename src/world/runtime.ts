@@ -1,3 +1,5 @@
+import { withPlayModelBudget } from "../runtime/play-model-budget.js";
+import { activeGoalPressures } from "./goal-pressure.js";
 import { z } from "zod";
 import { actorProposalCandidateSchema, type ActorCandidateSource, type ActorProposalCandidate, type ActorProposalSource } from "./actors.js";
 import {
@@ -278,6 +280,10 @@ export class WorldRuntime {
   }
 
   async move(input: MoveInput): Promise<MoveResult> {
+    return withPlayModelBudget(() => this.moveInternal(input));
+  }
+
+  private async moveInternal(input: MoveInput): Promise<MoveResult> {
     const previousHead = await this.engine.branches.readHead(input.branchId);
     let currentHead = previousHead;
     const committedEvents: string[] = [];
@@ -318,7 +324,19 @@ export class WorldRuntime {
       const candidates: ActorProposalCandidate[] = [];
       for (const candidate of parsedCandidates) {
         if (actorProposalHasMaterialEffect(candidate.proposal)) {
-          candidates.push(candidate);
+          // An invalid high-priority proposal must not eliminate a legal alternative.
+          // This is read-only; selected proposals are validated again at their actual commit head.
+          const proposal = { ...candidate.proposal, branchId: input.branchId, expectedParentCommit: currentHead };
+          const preview = await this.engine.previewProposal(proposal);
+          if (preview.report.accepted) {
+            candidates.push(candidate);
+          } else {
+            rejectedProposals.push(proposal.proposalId);
+            candidateTraces.push(await committedMoveCandidateTrace(this.engine, {
+              proposal, lane: "actor", candidateSource: candidate.candidateSource ?? "injected",
+              beforeHead: currentHead, result: preview, coordination: candidate.coordination, preflight: true,
+            }));
+          }
           continue;
         }
         rejectedProposals.push(candidate.proposal.proposalId);
@@ -507,6 +525,8 @@ export class WorldRuntime {
     if (duplicateId) throw new Error(`Duplicate possibility id ${duplicateId} in the current frontier`);
     const history = await this.possibilityHistory(head);
     const frontier = buildFrontier(branchId, head, state, templates, {
+      activeGoalPressures: await activeGoalPressures(this.engine, head),
+      dueMechanisms: new Map(due.map(candidate => [candidate.id, possibilitySchema.parse(candidate)])),
       realizedIds: history.realizedIds,
       adaptedIds: history.adaptedIds,
       supersededIds: history.supersededIds,
@@ -1253,6 +1273,7 @@ async function committedMoveCandidateTrace(
     result: { report: ValidationReport; newHead: CommitId; eventHash?: string };
     coordination?: ActorProposalCandidate["coordination"];
     scheduler?: SchedulerTrace;
+    preflight?: boolean;
   },
 ): Promise<MoveCandidateTrace> {
   const accepted = input.result.report.accepted;
@@ -1281,7 +1302,10 @@ async function committedMoveCandidateTrace(
     code: "VALIDATION_REJECTED",
     detail: "Deterministic proposal validation rejected the candidate.",
   });
-  gates.push({
+  gates.push(input.preflight ? {
+    gate: "commit", outcome: "info", code: "COMMIT_NOT_ATTEMPTED",
+    detail: "Read-only preflight rejected the candidate before conflict arbitration; no commit was attempted.",
+  } : {
     gate: "commit",
     outcome: accepted && input.result.newHead !== input.beforeHead ? "pass" : "fail",
     code: accepted && input.result.newHead !== input.beforeHead ? "COMMIT_ADVANCED_HEAD" : "COMMIT_DID_NOT_ADVANCE_HEAD",
@@ -1448,6 +1472,7 @@ function actorProposalHasMaterialEffect(proposal: EventProposal): boolean {
     || (proposal.proposedProcesses?.operations.length ?? 0) > 0
     || (proposal.proposedNorms?.operations.length ?? 0) > 0
     || (proposal.spokenUtterances?.length ?? 0) > 0
+    || (proposal.writtenMessages?.length ?? 0) > 0
     || Boolean(proposal.timeAdvance)
     || Boolean(proposal.progress?.scene);
 }

@@ -13,13 +13,15 @@ import { fsckWorld } from "../world/fsck.js";
 import { idSchema, validationIssueSchema } from "../world/model.js";
 import { majorRoleCandidates, validateRoleRoster, type RoleRoster } from "./role-roster.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
+import { entryDriverWitnessSchema, probeEntryDriver } from "./entry-driver-probe.js";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const rolePlayabilitySchema = z.object({
   candidateId: idSchema, name: z.string(), actorId: idSchema.optional(),
   status: z.enum(["ready", "blocked"]), entryCutHash: hashSchema.optional(),
   entryViewHash: hashSchema.optional(),
-  probes: z.array(z.object({ kind: z.enum(["genesis", "decision", "intent", "wait", "resume", "fork"]), passed: z.boolean() }).strict()),
+  driverWitness: entryDriverWitnessSchema.optional(),
+  probes: z.array(z.object({ kind: z.enum(["genesis", "decision", "driver", "intent", "wait", "resume", "fork"]), passed: z.boolean() }).strict()),
   issues: z.array(validationIssueSchema),
 }).strict();
 export type RolePlayability = z.infer<typeof rolePlayabilitySchema>;
@@ -62,6 +64,9 @@ export async function probeMajorRoleEntries(bundle: PreparedNovelBundle, roster:
         if (!view.decision?.goals.length && typeof view.selfState["character.plan"] !== "string") throw new Error("Entry lacks a grounded current goal or plan");
         role.entryViewHash = contentHash({ selfState: view.selfState, knowledge: view.knowledge, decision: view.decision, scene: view.scene });
         role.probes.push({ kind: "decision", passed: true });
+        role.driverWitness = await probeEntryDriver(engine, scratch, { branchId, head, actorId,
+          sourceId: bundle.source.id, subjectSnapshotHash, entryCutHash: seed.cut.hash });
+        role.probes.push({ kind: "driver", passed: true });
         const intent = playerActionToKnowledgeAwareAction({ branchId, actorId, expectedParentCommit: head, utterance: "I consider my next choice", candidate: {
           title: "Consider next choice", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [],
           proposedDelta: { version: 1, operations: [{ op: "set", entityId: actorId, field: "character.plan", value: `${String(view.selfState["character.plan"] ?? view.decision!.goals[0]!.description)}; consider the next choice` }] },

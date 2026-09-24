@@ -4,6 +4,14 @@ A local-first, Pi-backed terminal harness for compiling novels into evidence-bac
 
 The target is not a novel RAG chatbot. Source text is compiled into a canonical model; runtime branches then evolve through validated events without forcing a divergent branch back onto the book's future plot.
 
+## 仓库保留范围 / Repository contents
+
+本项目仅保留源码、必要的测试小说与固定测试预期，以及维护这些内容所需的测试、配置和架构文档。小说解析经验应沉淀为通用世界模型能力和回归测试。
+
+**仓库不保存运行中间状态数据**，包括编译草稿、检查点、世界快照、会话记录、日志、运行报告，以及针对单次小说运行的补修脚本。`run-records/`、构建输出和测试运行输出均不纳入版本控制。历史运行材料仅可从已有 Git 历史追溯。
+
+运行时数据由应用存放于仓库外的 `$NWH_HOME`（默认 `~/.novel-harness/`）；临时实验输出也应放在仓库外。不要将 `NWH_HOME` 指向仓库内。固定测试预期是人工维护的验收输入，不是一次运行产生的状态快照。新增测试小说须有明确的测试用途，并在 [语料说明](fixtures/corpus/README.md) 中登记。
+
 ## Current status
 
 The repository contains a tested, constrained end-to-end novel-player vertical slice. It is not yet evidence that arbitrary full novels compile reliably or that the runtime is a finished role-playing product.
@@ -245,6 +253,35 @@ one batch per user action so importing a long novel cannot silently trigger an
 unbounded sequence of model requests. Generated artifacts remain pending proposals
 until deterministic validation and explicit acceptance. The MVP compiler does
 not expose capacity counters or ask the model to prioritize semantics by cost.
+
+Compiler CLI runs now write an independent audit run under the workspace's
+`observability/v1/` directory, including Pi tool results and finish diagnostics.
+The printed run ID identifies the audit; it is never reused as a model session.
+Completion output reports world, observation, resolution, and accounting counts
+separately. An accounting-only executable checkpoint does not certify a playable
+world; an accounting-only finish with outstanding proposal failures cannot
+checkpoint the batch. Pipeline 34 retains pipeline-33 observation/semantic checkpoints and all
+draft history, but re-reviews executable batches with same-slice prior evidence
+coverage. A represented source unit still requires executable review where the
+source supports actions, rules, or effects.
+
+`rebuild` and `compile-source` handle SIGINT/SIGTERM by cancelling the active
+model call and releasing the workspace lock after cleanup. After an ungraceful
+host/process loss, inspect and recover the lock on its owning Linux host:
+
+```sh
+nwh compiler-lock inspect
+nwh compiler-lock recover --owner-token <exact-owner.token>
+```
+
+Recovery requires `flock` (util-linux), serializes concurrent recoverers, refuses
+live owners or mismatched host/PID namespaces, and archives the old lock with a
+recovery record under `locks/recovered/`. Never delete the persistent
+`compiler-recovery.mutex` file. Legacy owners have no host metadata: verify their
+PID on the original host, outside sandbox PID views, then add
+`--legacy-owner-host-verified` there. Invalid owner metadata needs host diagnosis;
+the command does not bypass it. Resume compilation only after recovery succeeds.
+
 A defective proposal can be withdrawn to rejected history within its originating
 batch, but valid material must never be withdrawn merely to save calls. Repeated
 unchanged finish failures remain circuit-broken, while host-only runaway safety

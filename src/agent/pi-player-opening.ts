@@ -1,7 +1,10 @@
+import { ModelRequestBudget } from "./model-request-budget.js";
+import { assertLockedUtteranceIds, narrationBlocksSchema, renderNarrationBlocks, type NarrationBlocks } from "../world/utterance-rendering.js";
 import type { LlmProfile } from "../config/schema.js";
 import type { AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
-  assertPlaySceneNarration,
+  settlePlaySceneNarration,
+  requiresNarrationBlocks,
   playSceneChoicePrompt,
   playScenePrompt,
   type PlayerLiteraryAdvisory,
@@ -30,6 +33,7 @@ import type { PiTraceContextPartInput } from "../trace/pi-trace.js";
 
 export type PlayerSceneNarrationResult = {
   narration: string;
+  blocks?: NarrationBlocks;
   choices: PlayerSceneChoice[];
 };
 
@@ -81,9 +85,11 @@ export function finalizePlayerSceneChoices(choices: readonly PlayerSceneChoice[]
 
 export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOptions): PlayerOpeningNarrator {
   return async (suppliedFrame, purpose, observer, relatedMessages) => {
-    const frame: Readonly<PlayerSceneNarratorFrame> = purpose === "opening" || !suppliedFrame.readerPrelude
+    const requestBudget = new ModelRequestBudget();
+    const frame: Readonly<PlayerSceneNarratorFrame> = structuredClone(purpose === "opening" || !suppliedFrame.readerPrelude
       ? suppliedFrame
-      : frameWithout(suppliedFrame, ["readerPrelude"]) as PlayerSceneNarratorFrame;
+      : frameWithout(suppliedFrame, ["readerPrelude"]) as PlayerSceneNarratorFrame);
+    if (requiresNarrationBlocks(frame, purpose)) assertLockedUtteranceIds(frame.resolvedAct!.lockedUtterances);
     observer?.signal?.throwIfAborted();
     const workspace = await LocalFileWorkspace.create(options.root);
     const messageArchive = relatedMessages ?? frame.recentMessages ?? [];
@@ -104,6 +110,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
     }): Promise<string> => {
       observer?.signal?.throwIfAborted();
       const session = await PiAgentSession.create({
+        requestBudget,
         workspace,
         ...(options.profile ? { profile: options.profile } : {}),
         ...(options.model ? { model: options.model } : {}),
@@ -132,10 +139,12 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
         ...(input.playerFacing
           ? {
               onEvent(event: AgentSessionEvent) {
-                observer?.onEvent?.(event);
+                // Provider drafts (including native text events) are not confirmed narration.
+                void event;
               },
               onText(delta: string) {
-                observer?.onText?.(delta);
+                // Buffer in Pi until the complete document passes host validation.
+                void delta;
               },
               onRetry(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>) {
                 observer?.onRetry?.(formatRetryNotice(event));
@@ -170,6 +179,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
           atomicSections: new Set([
             "narrativeContract",
             "actor",
+            "agency",
             "selfState",
             "scene",
             "resolvedAct",
@@ -180,6 +190,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
           requiredSections: new Set([
             "narrativeContract",
             "actor",
+            "agency",
             "selfState",
             "scene",
             "presentEntities",
@@ -223,9 +234,10 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       const actorAccess = createActorContextAccess(choiceFrame, {
         query: actorQuery,
         maxModelChars: 40_000,
-        atomicSections: new Set(["actor", "selfState", "scene", "resolvedAct", "turnResolution"]),
+        atomicSections: new Set(["actor", "agency", "selfState", "scene", "resolvedAct", "turnResolution"]),
         requiredSections: new Set([
           "actor",
+          "agency",
           "selfState",
           "scene",
           "presentEntities",
@@ -315,9 +327,10 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       const actorAccess = createActorContextAccess(dramaturgyFrame, {
         query: actorQuery,
         maxModelChars: 56_000,
-        atomicSections: new Set(["actor", "selfState", "scene", "resolvedAct", "turnResolution"]),
+        atomicSections: new Set(["actor", "agency", "selfState", "scene", "resolvedAct", "turnResolution"]),
         requiredSections: new Set([
           "actor",
+          "agency",
           "selfState",
           "scene",
           "presentEntities",
@@ -398,11 +411,13 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       );
       const prompt = attempt === 1
         ? basePrompt
-        : `${basePrompt}\n\n<host-retry-requirement>This is a fresh independent literary rendering. Write focalized third-person prose centered on narrativeContract.focalCharacter; never address the player as \"you\" or use an \"I/we\" narrator outside dialogue or clearly quoted thought. Write a fully developed scene of at least 80 characters, preserve every required locked utterance verbatim, realize only one immediate committed beat, end on a concrete present signal without a choice menu or agency handoff, and stop. No prior draft is part of this request.</host-retry-requirement>`;
+        : `${basePrompt}\n\n<host-retry-requirement>This is a fresh independent literary rendering. Write focalized third-person prose centered on narrativeContract.focalCharacter; never address the player as \"you\" or use an \"I/we\" narrator outside dialogue or clearly quoted thought. Use the requested output format. For narration-blocks-v1, copy every locked utterance ID exactly once in supplied order, and never copy its text into prose blocks. Write a fully developed scene of at least 80 characters, preserve every required locked utterance verbatim, realize only one immediate committed beat, end on a concrete present signal without a choice menu or agency handoff, and stop. No prior draft is part of this request.</host-retry-requirement>`;
       return runSession({
         invocationName: `narration-final-attempt-${attempt}`,
         attempt,
-        systemPrompt: PLAYER_LITERARY_NARRATOR_SYSTEM_PROMPT,
+        systemPrompt: requiresNarrationBlocks(frame, purpose)
+          ? `${PLAYER_LITERARY_NARRATOR_SYSTEM_PROMPT}\nOutput the narration-blocks-v1 JSON document specified in the request. The host renders it into finished prose; do not emit raw scene text outside that document.`
+          : PLAYER_LITERARY_NARRATOR_SYSTEM_PROMPT,
         prompt,
         tools: [...actorAccess.tools, ...messageAccess.tools],
         timeoutMs: options.promptTimeoutMs ?? PLAYER_SCENE_TIMEOUT_MS,
@@ -421,20 +436,32 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       });
     };
 
-    const settle = (text: string): PlayerSceneNarrationResult => ({
-      narration: assertPlaySceneNarration(text, { frame, purpose }),
-      choices,
-    });
+    const settle = (text: string): PlayerSceneNarrationResult => {
+      const blocks = requiresNarrationBlocks(frame, purpose) ? narrationBlocksSchema.parse(JSON.parse(text)) : undefined;
+      const candidate = { narration: blocks ? renderNarrationBlocks(blocks, frame.resolvedAct!.lockedUtterances) : text, ...(blocks ? { blocks } : {}) };
+      const narration = settlePlaySceneNarration(candidate, { frame, purpose });
+      observer?.signal?.throwIfAborted();
+      return { narration, ...(blocks ? { blocks } : {}), choices };
+    };
 
     // Specialist failure degrades only its advisory channel. Invalid final
     // prose gets one clean literary retry; provider/session errors still surface.
     const firstAttempt = await runNarrationAttempt(1);
+    let result: PlayerSceneNarrationResult;
     try {
-      return settle(firstAttempt);
-    } catch {
+      result = settle(firstAttempt);
+    } catch (firstError) {
       observer?.signal?.throwIfAborted();
-      return settle(await runNarrationAttempt(2));
+      try {
+        result = settle(await runNarrationAttempt(2));
+      } catch (secondError) {
+        observer?.signal?.throwIfAborted();
+        throw new AggregateError([firstError, secondError], "Scene rendering failed after one corrected attempt. Preserve the committed head and stop this rendering task; do not retry unchanged blocks, guess utterance IDs, or repeat the player action. Inspect the original rendering errors before a host narration-only recovery.");
+      }
     }
+    // A consumer failure is not an invalid model draft and must not trigger another rendering.
+    observer?.onText?.(result.narration);
+    return result;
   };
 }
 

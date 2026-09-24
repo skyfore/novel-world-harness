@@ -25,6 +25,7 @@ import { SourceAnnotationStore, annotationAnchors } from "../compiler/annotation
 import { EntityResolutionStore } from "../compiler/entity-resolution.js";
 import { EventResolutionStore } from "../compiler/event-resolution.js";
 import { SourceAccountingStore } from "../compiler/source-accounting.js";
+import { CompilerFinishReceipts } from "../compiler/finish-receipts.js";
 import { ensureSourceStructure } from "../compiler/structure.js";
 import { EvidenceAssertionStore } from "../compiler/evidence-assertions.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
@@ -179,6 +180,7 @@ export async function reparseCommand(
 
   try {
     options.onStatus?.("Invalidating selected preparation artifacts");
+    await CompilerFinishReceipts.archiveSource(root, source.id, `Explicit reparse ${runId}; rollback baseline ${previousBundleHash}`, selectedBatchIds);
     await new CompilerBatchStore(root).markIncomplete(source.id, selectedBatchIds);
     const invalidated = await invalidatePreparationArtifacts(root, source.id, selected, Boolean(options.all), new Set(repair.affectedNodeKeys));
     for (const batchId of selectedBatchIds) await rejectPendingCompilerBatchProposals(root, batchId);
@@ -211,6 +213,8 @@ export async function reparseCommand(
         `Converging proposals · ${progress.phase} ${progress.processed}/${progress.total}`,
       ),
     });
+    for (const issue of convergence.upstreamRepairIssues ?? []) report(`Upstream repair: ${issue}`);
+    for (const issue of convergence.requirementValidityIssues ?? []) report(`Requirement validity: ${issue}`);
     const quarantined = await quarantineUncommittableProposals(root, convergence);
     options.signal?.throwIfAborted();
     report(
@@ -458,6 +462,10 @@ export async function invalidatePreparationArtifacts(
     }
   }
   for (const item of sceneOccurrences) if (shouldInvalidate(item, "scene", item.id)) await invalidate("scene-occurrence", item.id, () => canon.removeCurrent("scene-occurrences", item.id));
+  for (const item of await canon.listSemanticEffects()) if (shouldInvalidate(item, "semantic-effect", item.id)) await invalidate("semantic-effect", item.id, () => canon.removeCurrent("semantic-effects", item.id));
+  for (const item of await canon.listPerceptionObservations()) if (shouldInvalidate(item, "perception-observation", item.id)) await invalidate("perception-observation", item.id, () => canon.removeCurrent("perception-observations", item.id));
+  for (const item of await canon.listAcquisitions()) if (shouldInvalidate(item, "acquisition", item.id)) await invalidate("acquisition", item.id, () => canon.removeCurrent("acquisitions", item.id));
+  for (const item of await canon.listUtteranceExpressions()) if (shouldInvalidate(item, "utterance-expression", item.id)) await invalidate("utterance-expression", item.id, () => canon.removeCurrent("utterance-expressions", item.id));
   for (const item of eventFrames) if (shouldInvalidate(item, "frame", item.id)) await invalidate("event-frame", item.id, () => canon.removeCurrent("event-frames", item.id));
   for (const item of eventExecutions) if (shouldInvalidate(item, "event-execution", item.id)) await invalidate("event-execution", item.id, () => canon.removeCurrent("event-executions", item.id));
   for (const item of actionSchemas) if (shouldInvalidate(item, "action", item.id)) await invalidate("action-schema", item.id, () => canon.removeCurrent("action-schemas", item.id));

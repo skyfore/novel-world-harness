@@ -230,7 +230,7 @@ describe("narrative scene director", () => {
 
     expect(publicNarrativeThread(relationshipThread)).toMatchObject({
       kind: "relationship",
-      summary: expect.stringContaining("Ally"),
+      summary: expect.stringContaining("Unidentified character 1"),
       stage: "emerging",
     });
     expect(direction.affordances.some((choice) => choice.intent === "observe")).toBe(false);
@@ -251,7 +251,8 @@ describe("narrative scene director", () => {
       authorizedKnowledgeClaimIds: relationshipChoice.authorizedKnowledgeClaimIds,
     });
     expect(result.accepted).toBe(true);
-    expect(result.contextAfter.selfState["character.plan"]).toContain("Ally");
+    expect(result.contextAfter.selfState["character.plan"]).toContain("Unidentified character 1");
+    expect(result.contextAfter.selfState["character.plan"]).not.toContain("Ally");
 
     const next = await buildNarrativeDirection(engine, runtime, "hero", result.newHead);
     expect(next.threads.find((thread) => thread.kind === "relationship")?.stage).toBe(1);

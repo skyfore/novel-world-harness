@@ -82,7 +82,7 @@ describe("Pi autonomous actor reasoner", () => {
       includeLocalTools: false,
       includeNwhExtension: false,
     });
-    expect((sessionOptions[0]?.additionalTools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(["propose_actor_action"]);
+    expect((sessionOptions[0]?.additionalTools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(["find_actor_context", "read_actor_context", "propose_actor_action"]);
     expect(prompts[0]).toContain("Keep the promise");
     expect(prompts[0]).toContain("Journey");
     expect(prompts[0]).not.toContain("expectedParentCommit");

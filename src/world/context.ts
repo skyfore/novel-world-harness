@@ -1,3 +1,9 @@
+import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "./initial.js";
+import { validateAcquisition, type Acquisition } from "./acquisition.js";
+import { validatePerceptionObservation, type PerceptionObservation } from "./perception-observation.js";
+import { validateAttributionExpressions, validateUtteranceExpression, type UtteranceExpression } from "./utterance-expression.js";
+import { SCHEDULING_POLICY_VERSION } from "./scheduling-policy.js";
+import { type SemanticEffect, validateSemanticEffect } from "./semantic-effect.js";
 import { applyEventExecutions, validateEventExecutions, type EventExecution } from "./event-execution.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -34,8 +40,10 @@ const validatePreparedSnapshotScope = (
 };
 export const canonicalSnapshotSchema = z.object({
   version: z.literal(9),
+  schedulingPolicyVersion: z.enum(["world-pressure-v2", "legality-first-v3", "legal-alternatives-v4", "active-goal-pressure-v5", "host-world-pressure-v6", "effective-norm-scope-v7", "unknown-world-rule-v8", "bounded-rule-time-v9", SCHEDULING_POLICY_VERSION]).optional(),
   sourceId: idSchema.optional(),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  initialWorld: initialWorldSchema.optional(),
   entities: z.array(revisionRefSchema),
   propositions: z.array(revisionRefSchema),
   attributions: z.array(revisionRefSchema),
@@ -46,6 +54,10 @@ export const canonicalSnapshotSchema = z.object({
   spatialRelations: z.array(revisionRefSchema),
   sceneOccurrences: z.array(revisionRefSchema),
   eventFrames: z.array(revisionRefSchema),
+  semanticEffects: z.array(revisionRefSchema).optional(),
+  perceptionObservations: z.array(revisionRefSchema).optional(),
+  acquisitions: z.array(revisionRefSchema).optional(),
+  utteranceExpressions: z.array(revisionRefSchema).optional(),
   actionSchemas: z.array(revisionRefSchema),
   eventExecutions: z.array(revisionRefSchema),
   actionConstraints: z.array(revisionRefSchema),
@@ -60,6 +72,7 @@ export const canonicalSnapshotSchema = z.object({
 export type CanonicalSnapshot = z.infer<typeof canonicalSnapshotSchema>;
 
 export type ScopedWorldArtifacts = {
+  initialWorld?: InitialWorld;
   entities: readonly Entity[];
   propositions: readonly Proposition[];
   attributions: readonly Attribution[];
@@ -70,6 +83,10 @@ export type ScopedWorldArtifacts = {
   spatialRelations: readonly SpatialRelation[];
   sceneOccurrences: readonly SceneOccurrence[];
   eventFrames: readonly EventFrame[];
+  semanticEffects?: readonly SemanticEffect[];
+  perceptionObservations?: readonly PerceptionObservation[];
+  acquisitions?: readonly Acquisition[];
+  utteranceExpressions?: readonly UtteranceExpression[];
   actionSchemas: readonly ActionSchema[];
   eventExecutions?: readonly EventExecution[];
   actionConstraints?: readonly ActionConstraint[];
@@ -85,7 +102,7 @@ export class WorldContextStore {
   readonly root: string;
   private readonly actors: ActorModelStore;
   private readonly possibilities: PossibilityTemplateStore;
-  constructor(workspaceRoot: string, private readonly canon = new CanonicalModelStore(workspaceRoot)) {
+  constructor(private readonly workspaceRoot: string, private readonly canon = new CanonicalModelStore(workspaceRoot)) {
     this.root = path.join(worldStorageRoot(workspaceRoot), "canon", "snapshots");
     this.actors = new ActorModelStore(workspaceRoot);
     this.possibilities = new PossibilityTemplateStore(workspaceRoot);
@@ -115,7 +132,9 @@ export class WorldContextStore {
     ]);
     const belongsToSource = (item: { evidence: readonly { span: { sourceId: string } }[] }) =>
       !sourceId || item.evidence.some((reference) => reference.span.sourceId === sourceId);
+    const initialWorld = await new InitialWorldStore(this.workspaceRoot).get();
     const artifacts: ScopedWorldArtifacts = {
+      ...(initialWorld && belongsToSource(initialWorld) ? { initialWorld } : {}),
       entities: entities.filter(belongsToSource),
       propositions: propositions.filter(belongsToSource),
       attributions: attributions.filter(belongsToSource),
@@ -126,6 +145,10 @@ export class WorldContextStore {
       spatialRelations: spatialRelations.filter(belongsToSource),
       sceneOccurrences: sceneOccurrences.filter(belongsToSource),
       eventFrames: eventFrames.filter(belongsToSource),
+      semanticEffects: (await this.canon.listSemanticEffects()).filter(belongsToSource),
+      perceptionObservations: (await this.canon.listPerceptionObservations()).filter(belongsToSource),
+      acquisitions: (await this.canon.listAcquisitions()).filter(belongsToSource),
+      utteranceExpressions: (await this.canon.listUtteranceExpressions()).filter(belongsToSource),
       eventExecutions: eventExecutions.filter(belongsToSource),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || belongsToSource(schema)),
       actionConstraints: actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module" || belongsToSource(constraint)),
@@ -145,6 +168,11 @@ export class WorldContextStore {
     artifacts: ScopedWorldArtifacts,
   ): Promise<WorldModelContext> {
     if (!/^[a-f0-9]{64}$/.test(preparedRevisionHash)) throw new Error(`Invalid prepared revision hash: ${preparedRevisionHash}`);
+    if (sourceId && artifacts.initialWorld) assertEvidenceExclusiveToSource(artifacts.initialWorld.evidence, sourceId, "Frozen opening baseline");
+    assertSemanticEffectProjection(artifacts);
+    assertPerceptionObservationProjection(artifacts);
+    assertAcquisitionProjection(artifacts);
+    assertUtteranceExpressionProjection(artifacts);
     assertEventParticipationProjection(artifacts);
     assertEventRelationProjection(artifacts);
     assertSpatialProjection(artifacts);
@@ -161,6 +189,10 @@ export class WorldContextStore {
       ...artifacts.spatialRelations.map((item) => this.canon.ensureSpatialRelationRevision(item)),
       ...artifacts.sceneOccurrences.map((item) => this.canon.ensureSceneOccurrenceRevision(item)),
       ...artifacts.eventFrames.map((item) => this.canon.ensureEventFrameRevision(item)),
+      ...(artifacts.semanticEffects ?? []).map(item => this.canon.ensureSemanticEffectRevision(item)),
+      ...(artifacts.perceptionObservations ?? []).map(item => this.canon.ensurePerceptionObservationRevision(item)),
+      ...(artifacts.acquisitions ?? []).map(item => this.canon.ensureAcquisitionRevision(item)),
+      ...(artifacts.utteranceExpressions ?? []).map(item => this.canon.ensureUtteranceExpressionRevision(item)),
       ...artifacts.actionSchemas.map((item) => this.canon.ensureActionSchemaRevision(item)),
       ...(artifacts.eventExecutions ?? []).map((item) => this.canon.ensureEventExecutionRevision(item)),
       ...(artifacts.actionConstraints ?? []).map((item) => this.canon.ensureActionConstraintRevision(item)),
@@ -180,6 +212,11 @@ export class WorldContextStore {
     preparedRevisionHash?: string,
     refsFromContent = false,
   ): Promise<WorldModelContext> {
+    if (sourceId && artifacts.initialWorld) assertEvidenceExclusiveToSource(artifacts.initialWorld.evidence, sourceId, "Frozen opening baseline");
+    assertSemanticEffectProjection(artifacts);
+    assertPerceptionObservationProjection(artifacts);
+    assertAcquisitionProjection(artifacts);
+    assertUtteranceExpressionProjection(artifacts);
     assertEventParticipationProjection(artifacts);
     assertEventRelationProjection(artifacts);
     assertSpatialProjection(artifacts);
@@ -200,6 +237,10 @@ export class WorldContextStore {
         artifacts.spatialRelations,
         artifacts.sceneOccurrences,
         artifacts.eventFrames,
+        artifacts.semanticEffects ?? [],
+        artifacts.perceptionObservations ?? [],
+        artifacts.acquisitions ?? [],
+        artifacts.utteranceExpressions ?? [],
         artifacts.eventExecutions ?? [],
         artifacts.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
         actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
@@ -225,8 +266,10 @@ export class WorldContextStore {
         : this.possibilityRefs(items.map((item) => item.id));
     const snapshot = canonicalSnapshotSchema.parse({
       version: 9,
+      schedulingPolicyVersion: SCHEDULING_POLICY_VERSION,
       ...(sourceId ? { sourceId } : {}),
       ...(preparedRevisionHash ? { preparedRevisionHash } : {}),
+      ...(artifacts.initialWorld ? { initialWorld: artifacts.initialWorld } : {}),
       entities: await canonicalRefs("entities", artifacts.entities),
       propositions: await canonicalRefs("propositions", artifacts.propositions),
       attributions: await canonicalRefs("attributions", artifacts.attributions),
@@ -237,6 +280,10 @@ export class WorldContextStore {
       spatialRelations: await canonicalRefs("spatial-relations", artifacts.spatialRelations),
       sceneOccurrences: await canonicalRefs("scene-occurrences", artifacts.sceneOccurrences),
       eventFrames: await canonicalRefs("event-frames", artifacts.eventFrames),
+      semanticEffects: await canonicalRefs("semantic-effects", artifacts.semanticEffects ?? []),
+      perceptionObservations: await canonicalRefs("perception-observations", artifacts.perceptionObservations ?? []),
+      acquisitions: await canonicalRefs("acquisitions", artifacts.acquisitions ?? []),
+      utteranceExpressions: await canonicalRefs("utterance-expressions", artifacts.utteranceExpressions ?? []),
       actionSchemas: await canonicalRefs("action-schemas", artifacts.actionSchemas),
       eventExecutions: await canonicalRefs("event-executions", artifacts.eventExecutions ?? []),
       actionConstraints: await canonicalRefs("action-constraints", actionConstraints),
@@ -309,7 +356,16 @@ export class WorldContextStore {
       Promise.all(snapshot.actorModels.map((ref) => this.actors.getModelRevision(ref.id, ref.hash))),
       Promise.all(snapshot.possibilities.map((ref) => this.possibilities.getRevision(ref.id, ref.hash))),
     ]);
+    const semanticEffects = await Promise.all((snapshot.semanticEffects ?? []).map(ref => this.canon.getSemanticEffectRevision(ref.id, ref.hash)));
+    const perceptionObservations = await Promise.all((snapshot.perceptionObservations ?? []).map(ref => this.canon.getPerceptionObservationRevision(ref.id, ref.hash)));
+    const acquisitions = await Promise.all((snapshot.acquisitions ?? []).map(ref => this.canon.getAcquisitionRevision(ref.id, ref.hash)));
+    const utteranceExpressions = await Promise.all((snapshot.utteranceExpressions ?? []).map(ref => this.canon.getUtteranceExpressionRevision(ref.id, ref.hash)));
+    assertSemanticEffectProjection({ entities, events, eventExecutions, semanticEffects, actionSchemas, eventParticipations, processTemplates });
+    assertPerceptionObservationProjection({ entities, events, perceptionObservations });
+    assertAcquisitionProjection({ entities, events, claims, propositions, attributions, utteranceExpressions, perceptionObservations, acquisitions, processTemplates });
+    assertUtteranceExpressionProjection({ entities, events, propositions, attributions, utteranceExpressions });
     if (snapshot.sourceId) {
+      if (snapshot.initialWorld) assertEvidenceExclusiveToSource(snapshot.initialWorld.evidence, snapshot.sourceId, "Frozen opening baseline");
       assertArtifactCollectionsExclusiveToSource(snapshot.sourceId, [
         entities,
         propositions,
@@ -321,6 +377,10 @@ export class WorldContextStore {
         spatialRelations,
         sceneOccurrences,
         eventFrames,
+        semanticEffects,
+        perceptionObservations,
+        acquisitions,
+        utteranceExpressions,
         eventExecutions,
         actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
         actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
@@ -346,7 +406,7 @@ export class WorldContextStore {
       processTemplates,
     });
     const participationIndex = eventParticipationsByEvent(eventParticipations);
-    const executionIssues = validateEventExecutions(eventExecutions, { participations: eventParticipations, events: new Map(events.map((event) => [event.id, event])), entities: new Map(entities.map((entity) => [entity.id, entity])), actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])) });
+    const executionIssues = validateEventExecutions(eventExecutions, { acquisitions: new Map(acquisitions.map(item => [item.id, item])), participations: eventParticipations, events: new Map(events.map((event) => [event.id, event])), entities: new Map(entities.map((entity) => [entity.id, entity])), actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])), processTemplates: new Map(processTemplates.map(template => [template.id, template])) });
     if (executionIssues.length) throw new Error(executionIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
     const projectedEvents = applyEventExecutions(events, eventExecutions).map((event) =>
       projectEventParticipations(event, participationIndex.get(event.id) ?? []));
@@ -354,17 +414,24 @@ export class WorldContextStore {
       canonicalSnapshotHash: snapshotHash,
       ...(snapshot.sourceId ? { sourceId: snapshot.sourceId } : {}),
       ...(snapshot.preparedRevisionHash ? { preparedRevisionHash: snapshot.preparedRevisionHash } : {}),
+      ...(snapshot.initialWorld ? { initialWorld: snapshot.initialWorld } : {}),
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       propositions: new Map(propositions.map((proposition) => [proposition.id, proposition])),
       attributions: new Map(attributions.map((attribution) => [attribution.id, attribution])),
       claims: new Map(claims.map((claim) => [claim.id, claim])),
       events: new Map(projectedEvents.map((event) => [event.id, event])),
+      eventExecutions: new Map(eventExecutions.map(binding => [binding.id, binding])),
+      sourceEventRevisions: new Map(events.map(event => [event.id, contentHash(event)])),
       eventParticipations,
       eventRelations,
       spatialOntologyVersion: "spatial-v1",
       spatialRelations,
       sceneOccurrences,
       eventFrames: new Map(eventFrames.map((frame) => [frame.id, frame])),
+      semanticEffects: new Map(semanticEffects.map(item => [item.id, item])),
+      perceptionObservations: new Map(perceptionObservations.map(item => [item.id, item])),
+      acquisitions: new Map(acquisitions.map(item => [item.id, item])),
+      utteranceExpressions: new Map(utteranceExpressions.map(item => [item.id, item])),
       actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])),
       actionConstraints: new Map(actionConstraints.map((constraint) => [constraint.id, constraint])),
       normTemplates: new Map(normTemplates.map((template) => [template.id, template])),
@@ -517,4 +584,31 @@ export async function loadWorldContext(
     ? await contexts.capturePrepared(options.sourceId, options.preparedRevisionHash, options.artifacts)
     : await contexts.captureCurrent(options.sourceId);
   return { canon, contexts, context };
+}
+
+function assertSemanticEffectProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "eventExecutions" | "semanticEffects" | "actionSchemas" | "eventParticipations" | "processTemplates">): void {
+  const catalog = { processTemplates: new Map((artifacts.processTemplates ?? []).map(item => [item.id, item])), entities: new Map(artifacts.entities.map(item => [item.id, item])), events: new Map(artifacts.events.map(item => [item.id, item])),
+    eventExecutions: new Map((artifacts.eventExecutions ?? []).map(item => [item.id, item])), actionSchemas: new Map(artifacts.actionSchemas.map(item => [item.id, item])), eventParticipations: new Map(artifacts.eventParticipations.map(item => [item.id, item])) };
+  const issues = (artifacts.semanticEffects ?? []).flatMap(effect => validateSemanticEffect(effect, catalog));
+  if (issues.length) throw new Error(`Invalid semantic effect projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);
+}
+
+function assertUtteranceExpressionProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "propositions" | "utteranceExpressions" | "attributions">): void {
+  const catalog = { entities: new Map(artifacts.entities.map(item => [item.id, item])), events: new Map(artifacts.events.map(item => [item.id, item])), propositions: new Map(artifacts.propositions.map(item => [item.id, item])) };
+  const issues = (artifacts.utteranceExpressions ?? []).flatMap(expression => validateUtteranceExpression(expression, catalog));
+  issues.push(...artifacts.attributions.flatMap(item => validateAttributionExpressions(item, new Map((artifacts.utteranceExpressions ?? []).map(expression => [expression.id, expression])))));
+  if (issues.length) throw new Error(`Invalid utterance expression projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);
+}
+
+function assertPerceptionObservationProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "perceptionObservations">): void {
+  const catalog = { entities: new Map(artifacts.entities.map(item => [item.id, item])), events: new Map(artifacts.events.map(item => [item.id, item])) };
+  const issues = (artifacts.perceptionObservations ?? []).flatMap(observation => validatePerceptionObservation(observation, catalog));
+  if (issues.length) throw new Error(`Invalid perception observation projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);
+}
+
+function assertAcquisitionProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "claims" | "propositions" | "attributions" | "utteranceExpressions" | "perceptionObservations" | "acquisitions" | "processTemplates">): void {
+  const map = <T extends { id: string }>(items: readonly T[]) => new Map(items.map(item => [item.id, item]));
+  const catalog = { processTemplates: map(artifacts.processTemplates ?? []), entities: map(artifacts.entities), events: map(artifacts.events), claims: map(artifacts.claims), propositions: map(artifacts.propositions), attributions: map(artifacts.attributions), utteranceExpressions: map(artifacts.utteranceExpressions ?? []), perceptionObservations: map(artifacts.perceptionObservations ?? []), acquisitions: map(artifacts.acquisitions ?? []) };
+  const issues = (artifacts.acquisitions ?? []).flatMap(value => validateAcquisition(value, catalog));
+  if (issues.length) throw new Error(`Invalid acquisition projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);
 }

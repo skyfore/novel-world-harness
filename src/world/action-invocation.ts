@@ -28,7 +28,7 @@ export function deriveAdHocAction(input: {
 export function normalizeActorProposal(proposal: EventProposal): EventProposal {
   if (!proposal.actorId || proposal.action) return proposal;
   return { ...proposal, action: deriveAdHocAction({
-    kind: proposal.spokenUtterances?.length ? "speak" : "act",
+    kind: proposal.spokenUtterances?.length ? "speak" : proposal.writtenMessages?.length ? "write" : "act",
     description: proposal.title, delta: proposal.proposedDelta, preconditions: proposal.preconditions,
   }) };
 }

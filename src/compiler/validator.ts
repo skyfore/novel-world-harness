@@ -1,3 +1,18 @@
+import { entryArtifactEvidenceIssues, remoteEntryOccurrenceIssues } from "../world/entry-agency.js";
+import { entryAgencyIssues, playableEntryActorIds } from "../world/entry-agency.js";
+import { validateIdentityName } from "../world/actor-recognition.js";
+import { validateProcessRecoveryEvidence } from "../world/event-execution.js";
+import { validateIncapacityEvidence } from "../world/process-capacity.js";
+import { acquisitionSchema, validateAcquisitionOperation, validateAcquisition, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
+import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
+import { validatePerceptionAcquisition } from "../world/perception-observation.js";
+import { perceptionObservationSchema, validatePerceptionObservation, validatePerceptionObservationEvidence, type PerceptionObservation } from "../world/perception-observation.js";
+import { validateAttributionExpressions, validateExpressionAcquisition } from "../world/utterance-expression.js";
+import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.js";
+import { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
+import { validateGoalExpressions, validateGoalExpressionEvidence } from "../world/conditional-expression.js";
+import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { applyEventExecutions, eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import type { z } from "zod";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
@@ -112,7 +127,7 @@ import {
   type ProcessTemplate,
 } from "../world/process-ontology.js";
 
-export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
+export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "semantic-effect" | "perception-observation" | "acquisition" | "utterance-expression" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type CompilerCatalogValidationScope = "catalog" | "record";
 export type CompilerValidationCatalog = {
@@ -126,6 +141,10 @@ export type CompilerValidationCatalog = {
   spatialRelations: Map<string, SpatialRelation>;
   sceneOccurrences: Map<string, SceneOccurrence>;
   eventFrames: Map<string, EventFrame>;
+  semanticEffects?: Map<string, SemanticEffect>;
+  perceptionObservations?: Map<string, PerceptionObservation>;
+  acquisitions?: Map<string, Acquisition>;
+  utteranceExpressions?: Map<string, UtteranceExpression>;
   actionSchemas: Map<string, ActionSchema>;
   eventExecutions?: Map<string, EventExecution>;
   actionConstraints: Map<string, ActionConstraint>;
@@ -190,6 +209,10 @@ export class CompilerValidator {
       spatialRelations: new Map(spatialRelationList.map((item) => [item.id, item])),
       sceneOccurrences: new Map(sceneOccurrenceList.map((item) => [item.id, item])),
       eventFrames: new Map(eventFrameList.map((item) => [item.id, item])),
+      semanticEffects: new Map((await this.canon.listSemanticEffects()).map(item => [item.id, item])),
+      perceptionObservations: new Map((await this.canon.listPerceptionObservations()).map(item => [item.id, item])),
+      acquisitions: new Map((await this.canon.listAcquisitions()).map(item => [item.id, item])),
+      utteranceExpressions: new Map((await this.canon.listUtteranceExpressions()).map(item => [item.id, item])),
       actionSchemas: new Map(actionSchemaList.map((item) => [item.id, item])),
       eventExecutions: new Map(eventExecutionList.map((item) => [item.id, item])),
       actionConstraints: new Map(actionConstraintList.map((item) => [item.id, item])),
@@ -210,11 +233,21 @@ export class CompilerValidator {
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
+    if (kind === "attribution") errors.push(...validateAttributionExpressions(attributionSchema.parse(payload), catalog.utteranceExpressions ?? new Map()));
+    for (const located of findKnowledgeDeltas(payload)) for (const operation of located.delta.operations) errors.push(...validateExpressionAcquisition(operation, catalog.utteranceExpressions ?? new Map(), undefined, catalog.attributions));
+    for (const located of findKnowledgeDeltas(payload)) for (const operation of located.delta.operations) errors.push(...validatePerceptionAcquisition(operation, { observations: catalog.perceptionObservations ?? new Map(), propositions: catalog.propositions }, undefined, kind === "canonical-event" ? canonicalEventSchema.parse(payload).id : undefined));
+    if (kind === "semantic-effect") errors.push(...validateSemanticEffect(semanticEffectSchema.parse(payload), catalog));
+    if (kind === "perception-observation") errors.push(...validatePerceptionObservation(perceptionObservationSchema.parse(payload), catalog));
+    if (kind === "acquisition") errors.push(...validateAcquisition(acquisitionSchema.parse(payload), catalog));
+    for (const located of findKnowledgeDeltas(payload)) for (const operation of located.delta.operations) errors.push(...validateAcquisitionOperation(operation, catalog, undefined, kind === "canonical-event" ? canonicalEventSchema.parse(payload).id : undefined));
+    if (kind === "utterance-expression") errors.push(...validateUtteranceExpression(utteranceExpressionSchema.parse(payload), catalog));
+    if (kind === "character-goal") errors.push(...validateGoalExpressions(characterGoalSchema.parse(payload), catalog));
     if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors);
+    if (kind === "entity") errors.push(...validateAgencyProfile(entitySchema.parse(payload), catalog));
     if (kind === "proposition") this.validateProposition(propositionSchema.parse(payload), entities, propositions, events, errors);
     if (kind === "attribution") this.validateAttribution(attributionSchema.parse(payload), entities, propositions, attributions, errors);
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
-    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, propositions, attributions, claims, events, eventFrames, actionSchemas, rules, errors);
+    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, propositions, attributions, claims, events, eventFrames, actionSchemas, rules, errors, catalog);
     if (kind === "event-participation") this.validateEventParticipation(eventParticipationSchema.parse(payload), entities, events, eventParticipations, errors);
     if (kind === "event-relation") {
       const relation = eventRelationSchema.parse(payload);
@@ -242,7 +275,7 @@ export class CompilerValidator {
     if (kind === "event-execution") {
       const binding = eventExecutionSchema.parse(payload);
       const bindings = new Map(catalog.eventExecutions ?? []).set(binding.id, binding);
-      errors.push(...validateEventExecutions([...bindings.values()], { entities, events, actionSchemas, participations: [...eventParticipations.values()] }));
+      errors.push(...validateEventExecutions([...bindings.values()], { entities, events, actionSchemas, acquisitions: catalog.acquisitions, processTemplates: catalog.processTemplates, participations: [...eventParticipations.values()] }));
       const occurrence = events.get(binding.canonicalEventId);
       if (occurrence && binding.entryCheckpoint) {
         const checkpoint = binding.entryCheckpoint, seed = checkpoint.projectionSeed;
@@ -259,7 +292,7 @@ export class CompilerValidator {
               ...(attribution?.holderKind === "character" && attribution.holderEntityId ? { speaker: attribution.holderEntityId } : {}) });
           }
         }
-        this.validateEvent(applyEventExecutions([occurrence], [binding])[0]!, entities, entryPropositions, entryAttributions, entryClaims, events, eventFrames, actionSchemas, rules, errors);
+        this.validateEvent(applyEventExecutions([occurrence], [binding])[0]!, entities, entryPropositions, entryAttributions, entryClaims, events, eventFrames, actionSchemas, rules, errors, catalog);
         for (const operation of seed.processes.operations) if (operation.op === "start-process" && !catalog.processTemplates.has(operation.process.templateId)) errors.push(issue("UNKNOWN_ENTRY_PROCESS_TEMPLATE", `Unknown process template ${operation.process.templateId}`, "entryCheckpoint.projectionSeed.processes"));
         for (const operation of seed.norms.operations) if (operation.op === "instantiate-norm" && !catalog.normTemplates.has(operation.norm.templateId)) errors.push(issue("UNKNOWN_ENTRY_NORM_TEMPLATE", `Unknown norm template ${operation.norm.templateId}`, "entryCheckpoint.projectionSeed.norms"));
         for (const id of seed.activeRuleIds) if (!rules.has(id)) errors.push(issue("UNKNOWN_ENTRY_RULE", `Unknown world rule ${id}`, "entryCheckpoint.projectionSeed.activeRuleIds"));
@@ -331,7 +364,7 @@ export class CompilerValidator {
         rules: prospectiveRules,
       }));
     }
-    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
+    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors, catalog);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, propositions, claims, events, rules, goals, errors);
     return { accepted: errors.length === 0, errors, warnings };
@@ -348,6 +381,7 @@ export class CompilerValidator {
     events: ReadonlyMap<string, CanonicalEvent>,
     errors: ValidationIssue[],
   ): void {
+    errors.push(...validateIdentityName(proposition.relationId, proposition.object.kind === "literal" ? proposition.object.value : undefined));
     if (!proposition.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Proposition ${proposition.id} has no source evidence`, "evidence"));
     if (!entities.has(proposition.subjectEntityId)) {
       errors.push(issue("UNKNOWN_PROPOSITION_SUBJECT", `Proposition subject ${proposition.subjectEntityId} is not canonical`, "subjectEntityId"));
@@ -406,6 +440,7 @@ export class CompilerValidator {
   }
 
   private validateClaim(claim: Claim, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
+    errors.push(...validateIdentityName(claim.predicate, claim.object));
     if (!entities.has(claim.subject)) errors.push(issue("UNKNOWN_SUBJECT", `Claim subject ${claim.subject} is not canonical`, "subject"));
     if (claim.speaker && !entities.has(claim.speaker)) errors.push(issue("UNKNOWN_SPEAKER", `Claim speaker ${claim.speaker} is not canonical`, "speaker"));
     if (isMetaKnowledgePredicate(claim.predicate)) {
@@ -425,6 +460,7 @@ export class CompilerValidator {
     actionSchemas: ReadonlyMap<string, ActionSchema>,
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
+    catalog: CompilerValidationCatalog,
   ): void {
     if (!event.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event ${event.id} has no source evidence`, "evidence"));
     if (event.observedOutcome.operations.length > 16) {
@@ -520,6 +556,8 @@ export class CompilerValidator {
         errors.push(issue("DUPLICATE_CHARACTER_ENTRY", `Event ${event.id} has multiple entry checkpoints for ${checkpoint.actorId}`, `${prefix}.actorId`));
       }
       entryActors.add(checkpoint.actorId);
+      errors.push(...entryAgencyIssues(checkpoint.actorId, checkpoint, { ...catalog, sourceId: event.evidence[0]?.span.sourceId }).map(issue => ({ ...issue, path: `${prefix}.${issue.path}` })));
+      errors.push(...remoteEntryOccurrenceIssues(checkpoint.actorId, checkpoint, event, catalog.eventParticipations.values()).map(issue => ({ ...issue, path: `${prefix}.${issue.path}` })));
       if (!checkpoint.projectionSeed && checkpoint.delta.operations.length > 16) {
         errors.push(issue("OVERSIZED_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} contains more than 16 state operations`, `${prefix}.delta.operations`));
       }
@@ -611,6 +649,7 @@ export class CompilerValidator {
     events: ReadonlyMap<string, CanonicalEvent>,
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
+    catalog: CompilerValidationCatalog,
   ): void {
     if (!initial.evidence.length) errors.push(issue("MISSING_EVIDENCE", "Initial world has no source evidence", "evidence"));
     if (initial.checkpoint?.beforeCanonicalEventId && !events.has(initial.checkpoint.beforeCanonicalEventId)) {
@@ -633,7 +672,7 @@ export class CompilerValidator {
     const representedCharacters = new Set<string>();
     const explicitlyDead = new Set<string>();
     const openingPresenceIds = new Set<string>();
-    const physicalOpeningIds = new Set<string>();
+    const playableOpeningIds = playableEntryActorIds(initial, catalog);
     for (let index = 0; index < (initial.participantPresence?.length ?? 0); index += 1) {
       const presence = initial.participantPresence![index]!;
       const entity = entities.get(presence.entityId);
@@ -644,7 +683,7 @@ export class CompilerValidator {
         errors.push(issue("DUPLICATE_OPENING_PRESENCE", `Opening presence ${presence.entityId} is duplicated`, `participantPresence.${index}.entityId`));
       }
       openingPresenceIds.add(presence.entityId);
-      if (presence.mode === "physical") physicalOpeningIds.add(presence.entityId);
+      if (presence.mode === "physical") errors.push(...entryAgencyIssues(presence.entityId, initial, catalog));
     }
     const observationActorIds = new Set<string>();
     for (let index = 0; index < (initial.actorObservations?.length ?? 0); index += 1) {
@@ -665,10 +704,10 @@ export class CompilerValidator {
         ));
       }
       observationActorIds.add(observation.actorId);
-      if (!physicalOpeningIds.has(observation.actorId)) {
+      if (!playableOpeningIds.has(observation.actorId)) {
         errors.push(issue(
           "OPENING_OBSERVER_NOT_PHYSICAL",
-          `Opening observer ${observation.actorId} must be physically present at the checkpoint`,
+          `Opening observer ${observation.actorId} must have grounded bodily presence or a live entry channel at the checkpoint`,
           `actorObservations.${index}.actorId`,
         ));
       }
@@ -682,10 +721,10 @@ export class CompilerValidator {
           "readerContext.focalActorId",
         ));
       }
-      if (!physicalOpeningIds.has(initial.readerContext.focalActorId)) {
+      if (!playableOpeningIds.has(initial.readerContext.focalActorId)) {
         errors.push(issue(
           "OPENING_FOCAL_ACTOR_NOT_PHYSICAL",
-          `Opening reader focal actor ${initial.readerContext.focalActorId} must be physically present`,
+          `Opening reader focal actor ${initial.readerContext.focalActorId} must have grounded bodily presence or a live entry channel`,
           "readerContext.focalActorId",
         ));
       }
@@ -764,7 +803,7 @@ export class CompilerValidator {
           ));
         }
       }
-      for (const actorId of physicalOpeningIds) {
+      for (const actorId of playableOpeningIds) {
         if (!observationActorIds.has(actorId)) {
           errors.push(issue(
             "MISSING_OPENING_ACTOR_OBSERVATION",
@@ -804,21 +843,21 @@ export class CompilerValidator {
     const actionableOpening = initial.delta.operations.some((operation) =>
       "entityId" in operation
       && sourceCharacterIds.includes(operation.entityId)
-      && physicalOpeningIds.has(operation.entityId)
+      && playableOpeningIds.has(operation.entityId)
       && !explicitlyDead.has(operation.entityId)
       && ["character.location", "character.plan", "character.momentum"].includes(operation.field)
       && (operation.op !== "set" || operation.value !== null));
-    if (sourceCharacterIds.length > 1 && !physicalOpeningIds.size) {
+    if (sourceCharacterIds.length > 1 && !playableOpeningIds.size) {
       errors.push(issue(
         "MISSING_OPENING_PRESENCE",
-        "A multi-character source must explicitly identify at least one physically present opening role; identity, mention, or alive state is not presence.",
+        "A multi-character source must explicitly identify at least one bodily or channel-grounded opening role; identity, mention, or alive state is not presence.",
         "participantPresence",
       ));
     }
     if (sourceCharacterIds.length > 1 && !actionableOpening) {
       errors.push(issue(
         "INACTIONABLE_INITIAL_WORLD",
-        "A multi-character source must establish a bodily present opening role through a grounded location, plan, or momentum; a bare alive inventory cannot create a playable scene.",
+        "A multi-character source must establish a bodily or channel-grounded opening role through a grounded location, plan, or momentum; a bare alive inventory cannot create a playable scene.",
         "delta.operations",
       ));
     }
@@ -878,6 +917,7 @@ export class CompilerValidator {
       ...(goal.actionPatterns ?? []).map((value, index) => ({ path: `actionPatterns.${index}`, value })),
     ];
     for (const { path, value } of actions) {
+      for (const candidate of value.expressionCandidates ?? []) candidate.relationshipConditions.forEach(predicate => this.validatePredicate(predicate, entities, rules, errors));
       for (let index = 0; index < (value.participants?.length ?? 0); index += 1) {
         const participant = value.participants![index]!;
         if (!entities.has(participant)) errors.push(issue("UNKNOWN_GOAL_PARTICIPANT", `Unknown goal participant ${participant}`, `${path}.participants.${index}`));
@@ -1084,6 +1124,8 @@ export class CompilerCommitService {
     onProgress?.({ phase: "load", processed, total, accepted: 0, blocked: 0 });
     const deduplicated = selectLogicalCandidates(candidates);
     const eligible = deduplicated.selected;
+    const expressionGroup = expressionDependencyGroup(eligible);
+    const expressionGroupIds = new Set(expressionGroup.map(candidate => candidate.id));
     for (const { candidate, selectedId, identity } of deduplicated.superseded) {
       const errors = [issue("SUPERSEDED_LOGICAL_PROPOSAL", `Proposal is superseded by newer active proposal '${selectedId}' for ${identity}.`)];
       await this.proposals.reject(candidate.id, errors);
@@ -1130,6 +1172,7 @@ export class CompilerCommitService {
       candidate: PendingCanonicalProposal,
       candidateCatalog = catalog,
       graphScope: CompilerCatalogValidationScope = "catalog",
+      expressionProposalIds?: readonly string[],
     ): Promise<CompilerValidation> => this.validateProposal(
       candidate.id,
       candidate.kind,
@@ -1137,7 +1180,7 @@ export class CompilerCommitService {
       candidate.evidence,
       candidate.evidenceAssertions,
       candidateCatalog,
-      { graphScope },
+      { graphScope, expressionProposalIds },
     );
     const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
       const validation = await validateCandidate(candidate);
@@ -1175,7 +1218,7 @@ export class CompilerCommitService {
       "PROPOSITION_DEPENDENCY_CYCLE",
     );
     await processDependencyKind(
-      eligible.filter((item) => item.kind === "attribution"),
+      eligible.filter((item) => item.kind === "attribution" && !expressionGroupIds.has(item.id)),
       catalog.attributions,
       attributionDependencies,
       processCandidate,
@@ -1210,7 +1253,7 @@ export class CompilerCommitService {
       }
     }
     await processDependencyKind(
-      eligible.filter((item) => item.kind === "canonical-event" && !sceneGraphBlockedIds.has(item.id)),
+      eligible.filter((item) => item.kind === "canonical-event" && !sceneGraphBlockedIds.has(item.id) && !expressionGroupIds.has(item.id)),
       catalog.events,
       eventDependencies,
       processCandidate,
@@ -1221,6 +1264,19 @@ export class CompilerCommitService {
       },
       "CAUSAL_CYCLE",
     );
+    if (expressionGroup.length) {
+      const prospective = cloneValidationCatalog(catalog);
+      expressionGroup.forEach(candidate => addToCatalog(prospective, candidate.kind, candidate.payload));
+      const validations = await Promise.all(expressionGroup.map(candidate => validateCandidate(candidate, prospective, "catalog", expressionGroup.map(item => item.id))));
+      const groupIssues = expressionGroupDependencyIssues(prospective);
+      if (expressionGroup.some(candidate => sceneGraphBlockedIds.has(candidate.id))) groupIssues.push(issue("EXPRESSION_GROUP_SCENE_BLOCKED", "Expression occurrence failed scene graph validation; preserve drafts and stop for host repair."));
+      if (!groupIssues.length && validations.every(validation => validation.accepted)) {
+        for (const candidate of expressionGroup) await commitCandidate(candidate);
+      } else {
+        const errors = uniqueIssues([...groupIssues, ...validations.flatMap(validation => validation.errors)]);
+        for (const candidate of expressionGroup) blockCandidate(candidate, errors);
+      }
+    }
     for (const candidate of eligible.filter((item) => item.kind === "action-schema")) await processCandidate(candidate);
     await processDependencyKind(
       eligible.filter((item) => item.kind === "action-constraint"),
@@ -1248,6 +1304,7 @@ export class CompilerCommitService {
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
     for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "semantic-effect")) await processCandidate(candidate);
     const sceneCandidates = eligible.filter((item) =>
       item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
     if (sceneCandidates.length) {
@@ -1358,6 +1415,8 @@ export class CompilerCommitService {
       errors: [issue("SUPERSEDED_LOGICAL_PROPOSAL", `Proposal is superseded by newer active proposal '${selectedId}' for ${identity}.`)],
     }));
     const eligible = deduplicated.selected;
+    const expressionGroup = expressionDependencyGroup(eligible);
+    const expressionGroupIds = new Set(expressionGroup.map(candidate => candidate.id));
     const blockCandidate = (candidate: PendingCanonicalProposal, errors: readonly ValidationIssue[]): void => {
       blocked.push({ id: candidate.id, kind: candidate.kind, errors: uniqueIssues(errors) });
     };
@@ -1398,7 +1457,7 @@ export class CompilerCommitService {
       "PROPOSITION_DEPENDENCY_CYCLE",
     );
     await processDependencyKind(
-      eligible.filter((item) => item.kind === "attribution"),
+      eligible.filter((item) => item.kind === "attribution" && !expressionGroupIds.has(item.id)),
       catalog.attributions,
       attributionDependencies,
       processCandidate,
@@ -1425,7 +1484,7 @@ export class CompilerCommitService {
       });
     }
     await processDependencyKind(
-      eligible.filter((item) => item.kind === "canonical-event" && !sceneGraphBlockedIds.has(item.id)),
+      eligible.filter((item) => item.kind === "canonical-event" && !sceneGraphBlockedIds.has(item.id) && !expressionGroupIds.has(item.id)),
       catalog.events,
       eventDependencies,
       processCandidate,
@@ -1433,6 +1492,19 @@ export class CompilerCommitService {
       () => undefined,
       "CAUSAL_CYCLE",
     );
+    if (expressionGroup.length) {
+      const prospective = cloneValidationCatalog(catalog);
+      expressionGroup.forEach(candidate => addToCatalog(prospective, candidate.kind, candidate.payload));
+      const validations = expressionGroup.map(candidate => validateCandidate(candidate, prospective));
+      const groupIssues = expressionGroupDependencyIssues(prospective);
+      if (expressionGroup.some(candidate => sceneGraphBlockedIds.has(candidate.id))) groupIssues.push(issue("EXPRESSION_GROUP_SCENE_BLOCKED", "Expression occurrence failed scene graph validation; preserve drafts and stop for host repair."));
+      if (!groupIssues.length && validations.every(validation => validation.accepted)) {
+        expressionGroup.forEach(candidate => addToCatalog(catalog, candidate.kind, candidate.payload));
+      } else {
+        const errors = uniqueIssues([...groupIssues, ...validations.flatMap(validation => validation.errors)]);
+        expressionGroup.forEach(candidate => blockCandidate(candidate, errors));
+      }
+    }
     for (const candidate of eligible.filter((item) => item.kind === "action-schema")) await processCandidate(candidate);
     await processDependencyKind(
       eligible.filter((item) => item.kind === "action-constraint"),
@@ -1454,6 +1526,7 @@ export class CompilerCommitService {
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
     for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "semantic-effect")) await processCandidate(candidate);
     const sceneCandidates = eligible.filter((item) =>
       item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
     if (sceneCandidates.length) {
@@ -1539,7 +1612,7 @@ export class CompilerCommitService {
     envelopeEvidence: readonly EvidenceRef[],
     evidenceAssertions: readonly EvidenceAssertion[],
     catalog?: CompilerValidationCatalog,
-    options: { graphScope?: CompilerCatalogValidationScope } = {},
+    options: { graphScope?: CompilerCatalogValidationScope; expressionProposalIds?: readonly string[] } = {},
   ): Promise<CompilerValidation> {
     const validation = catalog
       ? this.validator.validateWithCatalog(kind, payload, catalog, options)
@@ -1550,13 +1623,18 @@ export class CompilerCommitService {
       ? validateEntityNameEvidence(entitySchema.parse(payload), inspected.excerpts)
       : [];
     const artifactId = compilerProposalArtifactId(kind, payload, proposalId);
-    const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
+    const targetIssues = [...entryArtifactEvidenceIssues(kind, payload, evidenceAssertions), ...(kind === "event-execution" ? validateProcessRecoveryEvidence(eventExecutionSchema.parse(payload), evidenceAssertions) : []), ...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : [])];
     const characterEvidenceIssues = kind === "character-model"
       ? [
           ...validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
           ...validateRelationshipOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
         ]
       : [];
+    const acquisitionEvidenceIssues = kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : [];
+    const perceptionEvidenceIssues = kind === "perception-observation" ? [...validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions), ...await validatePerceptionObservationTrace(this.workspaceRoot, perceptionObservationSchema.parse(payload))] : [];
+    const expressionEvidenceIssues = kind === "utterance-expression" ? [...validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions), ...await validateUtteranceExpressionTrace(this.workspaceRoot, utteranceExpressionSchema.parse(payload))] : kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(payload), evidenceAssertions) : [];
+    expressionEvidenceIssues.push(...(kind === "entity" ? validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions) : []));
+    const semanticEvidenceIssues = kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : [];
     const spatialEvidenceIssues = kind === "spatial-relation"
       ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)
       : [];
@@ -1597,6 +1675,7 @@ export class CompilerCommitService {
         this.workspaceRoot,
         sourceIds[0]!,
         attributionSchema.parse(payload),
+        options.expressionProposalIds,
       )).map((message) => issue("INVALID_ATTRIBUTION_TRACE", message, "quotationIds"))
       : [];
     const knowledgeTraceIssues = sourceIds.length === 1
@@ -1612,7 +1691,7 @@ export class CompilerCommitService {
       ...groundingIssues,
       ...targetIssues,
       ...characterEvidenceIssues,
-      ...spatialEvidenceIssues,
+      ...spatialEvidenceIssues, ...semanticEvidenceIssues, ...expressionEvidenceIssues, ...perceptionEvidenceIssues, ...acquisitionEvidenceIssues,
       ...worldRuleEvidenceIssues,
       ...initialWorldEvidenceIssues,
       ...exactInspection.issues,
@@ -1635,6 +1714,10 @@ export class CompilerCommitService {
     else if (kind === "event-participation") await this.canon.putEventParticipation(eventParticipationSchema.parse(payload));
     else if (kind === "event-relation") await this.canon.putEventRelation(eventRelationSchema.parse(payload));
     else if (kind === "scene-occurrence") await this.canon.putSceneOccurrence(sceneOccurrenceSchema.parse(payload));
+    else if (kind === "semantic-effect") await this.canon.putSemanticEffect(semanticEffectSchema.parse(payload));
+    else if (kind === "perception-observation") await this.canon.putPerceptionObservation(perceptionObservationSchema.parse(payload));
+    else if (kind === "acquisition") await this.canon.putAcquisition(acquisitionSchema.parse(payload));
+    else if (kind === "utterance-expression") await this.canon.putUtteranceExpression(utteranceExpressionSchema.parse(payload));
     else if (kind === "event-frame") await this.canon.putEventFrame(eventFrameSchema.parse(payload));
     else if (kind === "event-execution") await this.canon.putEventExecution(eventExecutionSchema.parse(payload));
     else if (kind === "action-schema") await this.canon.putActionSchema(actionSchemaSchema.parse(payload));
@@ -1773,6 +1856,10 @@ function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposa
   if (kind === "event-participation") { const value = eventParticipationSchema.parse(payload); catalog.eventParticipations.set(value.id, value); }
   if (kind === "event-relation") { const value = eventRelationSchema.parse(payload); catalog.eventRelations.set(value.id, value); }
   if (kind === "scene-occurrence") { const value = sceneOccurrenceSchema.parse(payload); catalog.sceneOccurrences.set(value.id, value); }
+  if (kind === "semantic-effect") { const value = semanticEffectSchema.parse(payload); (catalog.semanticEffects ??= new Map()).set(value.id, value); }
+  if (kind === "perception-observation") { const value = perceptionObservationSchema.parse(payload); (catalog.perceptionObservations ??= new Map()).set(value.id, value); }
+  if (kind === "acquisition") { const value = acquisitionSchema.parse(payload); (catalog.acquisitions ??= new Map()).set(value.id, value); }
+  if (kind === "utterance-expression") { const value = utteranceExpressionSchema.parse(payload); (catalog.utteranceExpressions ??= new Map()).set(value.id, value); }
   if (kind === "event-frame") { const value = eventFrameSchema.parse(payload); catalog.eventFrames.set(value.id, value); }
   if (kind === "event-execution") { const value = eventExecutionSchema.parse(payload); (catalog.eventExecutions ??= new Map()).set(value.id, value); }
   if (kind === "action-schema") { const value = actionSchemaSchema.parse(payload); catalog.actionSchemas.set(value.id, value); }
@@ -1796,6 +1883,10 @@ function cloneValidationCatalog(catalog: CompilerValidationCatalog): CompilerVal
     spatialRelations: new Map(catalog.spatialRelations),
     sceneOccurrences: new Map(catalog.sceneOccurrences),
     eventFrames: new Map(catalog.eventFrames),
+    semanticEffects: new Map(catalog.semanticEffects ?? []),
+    perceptionObservations: new Map(catalog.perceptionObservations ?? []),
+    acquisitions: new Map(catalog.acquisitions ?? []),
+    utteranceExpressions: new Map(catalog.utteranceExpressions ?? []),
     actionSchemas: new Map(catalog.actionSchemas),
     eventExecutions: new Map(catalog.eventExecutions ?? []),
     actionConstraints: new Map(catalog.actionConstraints),
@@ -1893,7 +1984,7 @@ function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
-  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "action-schema" || kind === "event-execution" || kind === "action-constraint" || kind === "norm-template" || kind === "process-template" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "semantic-effect" || kind === "perception-observation" || kind === "acquisition" || kind === "utterance-expression" || kind === "action-schema" || kind === "event-execution" || kind === "action-constraint" || kind === "norm-template" || kind === "process-template" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
 }
 function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "entity") return entitySchema;
@@ -1904,6 +1995,10 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "event-participation") return eventParticipationSchema;
   if (kind === "event-relation") return eventRelationSchema;
   if (kind === "scene-occurrence") return sceneOccurrenceSchema;
+  if (kind === "semantic-effect") return semanticEffectSchema;
+  if (kind === "perception-observation") return perceptionObservationSchema;
+  if (kind === "acquisition") return acquisitionSchema;
+  if (kind === "utterance-expression") return utteranceExpressionSchema;
   if (kind === "event-frame") return eventFrameSchema;
   if (kind === "event-execution") return eventExecutionSchema;
   if (kind === "action-schema") return actionSchemaSchema;
@@ -1928,4 +2023,68 @@ function storyTimeDefinitelyBefore(left: StoryTime, right: StoryTime): boolean {
   const leftRange = comparable(left);
   const rightRange = comparable(right);
   return Boolean(leftRange && rightRange && leftRange.scale === rightRange.scale && leftRange.max < rightRange.min);
+}
+
+/** Expression/reference cycles are legal; causal, temporal-anchor and attribution-source cycles are not. */
+function expressionGroupDependencyIssues(catalog: CompilerValidationCatalog): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const check = <T,>(records: ReadonlyMap<string, T>, dependencies: (value: T) => string[], code: string) => {
+    const counts = new Map<string, number>(), children = new Map<string, string[]>();
+    for (const [id, value] of records) {
+      const parents = [...new Set(dependencies(value).filter(parent => records.has(parent)))];
+      counts.set(id, parents.length);
+      for (const parent of parents) children.set(parent, [...(children.get(parent) ?? []), id]);
+    }
+    const ready = [...counts].filter(([, count]) => count === 0).map(([id]) => id);
+    for (let index = 0; index < ready.length; index += 1) for (const child of children.get(ready[index]!) ?? []) {
+      const remaining = counts.get(child)! - 1; counts.set(child, remaining); if (!remaining) ready.push(child);
+    }
+    if (ready.length !== counts.size) issues.push(issue(code, "Expression group contains a forbidden dependency cycle; preserve drafts and correct source-supported references once. Stop if source ordering is unresolved; do not guess or retry unchanged."));
+  };
+  check(catalog.events, eventDependencies, "CAUSAL_CYCLE");
+  check(catalog.attributions, attributionDependencies, "ATTRIBUTION_DEPENDENCY_CYCLE");
+  return issues;
+}
+
+/** Keep connected occurrence/attribution drafts together, including earlier/later event anchors. */
+function expressionDependencyGroup(eligible: readonly PendingCanonicalProposal[]): PendingCanonicalProposal[] {
+  const relevant = eligible.filter(candidate => ["utterance-expression", "perception-observation", "acquisition", "canonical-event", "attribution"].includes(candidate.kind));
+  const byIdentity = new Map(relevant.map(candidate => [`${candidate.kind}:${(candidate.payload as { id: string }).id}`, candidate]));
+  const adjacency = new Map(relevant.map(candidate => [candidate.id, new Set<string>()]));
+  const selected = new Set<string>();
+  for (const candidate of relevant) {
+    const dependencies: string[] = [];
+    if (candidate.kind === "acquisition") {
+      selected.add(candidate.id);
+      const value = acquisitionSchema.parse(candidate.payload);
+      dependencies.push(`canonical-event:${value.canonicalEventId}`, ...value.revisions.map(ref => `${ref.kind}:${ref.id}`));
+    } else if (candidate.kind === "perception-observation") {
+      selected.add(candidate.id);
+      dependencies.push(`canonical-event:${perceptionObservationSchema.parse(candidate.payload).canonicalEventId}`);
+    } else if (candidate.kind === "utterance-expression") {
+      selected.add(candidate.id);
+      dependencies.push(`canonical-event:${utteranceExpressionSchema.parse(candidate.payload).canonicalEventId}`);
+    } else if (candidate.kind === "attribution") {
+      const attribution = attributionSchema.parse(candidate.payload);
+      if (attribution.expressionIds?.length) selected.add(candidate.id);
+      dependencies.push(...(attribution.expressionIds ?? []).map(id => `utterance-expression:${id}`));
+      if (attribution.sourceAttributionId) dependencies.push(`attribution:${attribution.sourceAttributionId}`);
+    } else {
+      dependencies.push(...eventDependencies(canonicalEventSchema.parse(candidate.payload)).map(id => `canonical-event:${id}`));
+      for (const located of findKnowledgeDeltas(candidate.payload)) for (const operation of located.delta.operations) if (operation.op === "learn") {
+        if (operation.attributionId) dependencies.push(`attribution:${operation.attributionId}`);
+        if (operation.acquisitionId) { selected.add(candidate.id); dependencies.push(`acquisition:${operation.acquisitionId}`); }
+        if (operation.perceptionId) { selected.add(candidate.id); dependencies.push(`perception-observation:${operation.perceptionId}`); }
+        if (operation.expressionId) { selected.add(candidate.id); dependencies.push(`utterance-expression:${operation.expressionId}`); }
+      }
+    }
+    for (const dependency of dependencies) {
+      const target = byIdentity.get(dependency);
+      if (!target) continue;
+      adjacency.get(candidate.id)!.add(target.id); adjacency.get(target.id)!.add(candidate.id);
+    }
+  }
+  const queue = [...selected];
+  for (let index = 0; index < queue.length; index += 1) for (const id of adjacency.get(queue[index]!) ?? []) if (!selected.has(id)) { selected.add(id); queue.push(id); }
+  return relevant.filter(candidate => selected.has(candidate.id));
 }

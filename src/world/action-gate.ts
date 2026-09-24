@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { WorldEngine } from "./engine.js";
-import { KnowledgeProjector } from "./knowledge.js";
+import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import { eventProposalSchema, type CommitId, type EventProposal, type ValidationIssue } from "./model.js";
 
 export const knowledgeAwareActionSchema = z
@@ -20,8 +20,17 @@ export type ActionGateReport = {
 
 export async function validateActionKnowledge(engine: WorldEngine, input: KnowledgeAwareAction): Promise<ActionGateReport> {
   const action = knowledgeAwareActionSchema.parse(input);
+  return checkActionKnowledge(engine, action, await engine.branches.readHead(action.proposal.branchId));
+}
+
+/** Read-only knowledge gate at the proposal's immutable cut; commitment still checks the live head. */
+export async function validateActionKnowledgeAtCommit(engine: WorldEngine, input: KnowledgeAwareAction): Promise<ActionGateReport> {
+  const action = knowledgeAwareActionSchema.parse(input);
+  return checkActionKnowledge(engine, action, action.proposal.expectedParentCommit);
+}
+
+async function checkActionKnowledge(engine: WorldEngine, action: KnowledgeAwareAction, head: CommitId): Promise<ActionGateReport> {
   const proposal = action.proposal;
-  const head = await engine.branches.readHead(proposal.branchId);
   const errors: ValidationIssue[] = [];
   if (proposal.expectedParentCommit !== head) {
     errors.push({ code: "STALE_PARENT", message: `Expected ${proposal.expectedParentCommit}, current head is ${head}` });
@@ -32,7 +41,7 @@ export async function validateActionKnowledge(engine: WorldEngine, input: Knowle
   }
   if (proposal.actorId) {
     const view = await new KnowledgeProjector(engine).view(proposal.actorId, head);
-    const known = new Set(view.knowledge.filter((entry) => entry.fact.status !== "disbelieves").map((entry) => entry.fact.claimId));
+    const known = new Set(view.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
     for (const claimId of action.requiresKnowledge) {
       if (!known.has(claimId)) errors.push({ code: "REQUIRED_KNOWLEDGE_MISSING", message: `${proposal.actorId} does not know ${claimId}` });
     }

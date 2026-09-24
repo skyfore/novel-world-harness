@@ -1,3 +1,7 @@
+import { currentPlayModelBudget } from "../runtime/play-model-budget.js";
+import { installModelRequestBudget, type ModelRequestBudget } from "./model-request-budget.js";
+import { currentRuntimeHooks } from "../runtime/hooks.js";
+import { createPiHooksExtension } from "./pi-hooks.js";
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -74,6 +78,8 @@ export type PiAgentSessionOptions = {
   piAgentDir?: string;
   /** Observation-only trace for one isolated Pi invocation. */
   trace?: PiTraceInvocationInput;
+  /** One caller-owned budget shared by all model steps and protocol retries. */
+  requestBudget?: ModelRequestBudget;
 };
 
 export type PiInteractiveOptions = {
@@ -600,6 +606,7 @@ export class PiAgentSession {
     runtime: ModelRuntime,
     model: NonNullable<ReturnType<ModelRuntime["getModel"]>> | undefined,
     private readonly trace?: PiTraceInvocation,
+    private readonly requestBudgets: readonly ModelRequestBudget[] = [],
   ) {
     this.profile = options.profile;
     this.stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
@@ -616,12 +623,15 @@ export class PiAgentSession {
     if (options.sessionId && options.saveSession === false) {
       throw new Error("An explicit session ID cannot be resumed with session persistence disabled.");
     }
+    const inheritedBudget = currentPlayModelBudget()?.budget;
+    const requestBudgets = [...new Set([inheritedBudget, options.requestBudget].filter((value): value is ModelRequestBudget => value !== undefined))];
+    for (const budget of requestBudgets) budget.assertUsable();
     const profile = options.profile ? { ...options.profile } : undefined;
     const stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
     const { runtime, model } = await createModelRuntime(profile, options.piAgentDir);
     const trace = options.trace ? await PiTraceInvocation.start(options.trace) : undefined;
-    const wrapper = new PiAgentSession({ ...options, ...(profile ? { profile } : {}) }, runtime, model, trace);
+    const wrapper = new PiAgentSession({ ...options, ...(profile ? { profile } : {}) }, runtime, model, trace, requestBudgets);
     try {
       await wrapper.initialize(Boolean(options.continueSession));
       return wrapper;
@@ -646,6 +656,10 @@ export class PiAgentSession {
     return (await this.promptWithReport(input)).text;
   }
   async promptWithReport(input: string, options: PiPromptOptions = {}): Promise<PiPromptReport> {
+    return currentRuntimeHooks().run("llm.prompt", "pi.prompt", { workspaceRoot: this.options.workspace.root, sessionId: this.id }, () => this.promptWithReportInternal(input, options));
+  }
+
+  private async promptWithReportInternal(input: string, options: PiPromptOptions = {}): Promise<PiPromptReport> {
     if (this.traceFinished) throw new Error("A traced Pi invocation accepts exactly one prompt.");
     this.activeText = "";
     this.lastAssistantStopReason = undefined;
@@ -659,7 +673,11 @@ export class PiAgentSession {
       await this.trace?.flush();
       const promptMessages = this.session.messages.slice(messageCountBeforePrompt);
       const latest = [...promptMessages].reverse().find((message) => message.role === "assistant");
-      if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) throw new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
+      if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) {
+        const error = new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
+        if (latest.stopReason === "aborted") error.name = "AbortError";
+        throw error;
+      }
       const text = this.activeText || (latest?.role === "assistant"
         ? latest.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("")
         : "");
@@ -776,10 +794,12 @@ export class PiAgentSession {
         : undefined;
       const selectedModelValue = overrideModel ?? savedModel ?? this.resolvedModel;
       const selectedModel = selectedModelValue;
-      const configuredTools = [
+      const toolDefinitions = [
         ...(this.options.includeLocalTools === false ? [] : localTools(this.options.workspace)),
         ...(this.options.additionalTools ?? []),
-      ].map((tool) => withNwhToolRecovery(tool));
+      ];
+      const recoveryScope = { activeToolNames: toolDefinitions.map((tool) => tool.name) };
+      const configuredTools = toolDefinitions.map((tool) => withNwhToolRecovery(tool, () => recoveryScope));
       const contextContract = buildNwhContextContract(this.options, configuredTools);
       const services = await createAgentSessionServices({
         cwd,
@@ -802,6 +822,7 @@ export class PiAgentSession {
             this.stateDir,
           ),
           extensionFactories: [
+            { name: "nwh-hooks", hidden: true, factory: createPiHooksExtension(currentRuntimeHooks(), this.options.workspace.root) },
             ...(this.options.includeNwhExtension === false ? [] : [{
               name: "nwh",
               hidden: true,
@@ -850,6 +871,7 @@ export class PiAgentSession {
           noTools: "builtin",
           customTools: configuredTools,
         });
+      if (this.requestBudgets.length) installModelRequestBudget(created.session.agent, this.requestBudgets);
       if (this.options.trackLastOpenedSession && created.session.sessionFile) {
         await writeLastOpenedSession(this.options.workspace.root, this.stateDir, created.session.sessionFile);
       }
@@ -878,6 +900,7 @@ export class PiAgentSession {
         this.onThinking?.(event.assistantMessageEvent.delta);
       } else if (event.type === "message_end" && event.message.role === "assistant") {
         this.lastAssistantStopReason = event.message.stopReason;
+        for (const budget of this.requestBudgets) budget.observeUsage(event.message.usage);
       } else if (event.type === "message_end" && event.message.role === "custom" && event.message.display) {
         const rendered = `${event.message.content}\n`;
         this.activeText += rendered;

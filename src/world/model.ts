@@ -116,7 +116,33 @@ export type EvidenceAssertion = z.infer<typeof evidenceAssertionSchema>;
 export const entityKindSchema = z.enum(["character", "location", "faction", "artifact", "institution", "relationship", "concept", "other"]);
 export type EntityKind = z.infer<typeof entityKindSchema>;
 
-export const entitySchema = z.object({ id: idSchema, kind: entityKindSchema, canonicalName: z.string().min(1), aliases: z.array(z.string().min(1)), evidence: z.array(evidenceRefSchema) }).strict();
+/** Stable capabilities; current channel availability is derived from committed processes. */
+export const agencyProfileSchema = z.object({
+  ontologyVersion: z.literal("agency-channel-v1"),
+  agency: z.enum(["autonomous", "none", "unknown"]),
+  embodiment: z.enum(["bodily", "mediated", "unknown"]),
+  channels: z.array(z.object({
+    id: idSchema,
+    modality: z.enum(["audio", "audiovisual", "text", "physical-control"]),
+    processTemplateId: idSchema,
+    actorRoleId: idSchema,
+    peerRoleId: idSchema,
+    carrierRoleId: idSchema,
+    activePhaseIds: z.array(idSchema).min(1).max(32),
+    actionSchemaId: idSchema.optional(),
+  }).strict()).max(32),
+}).strict().superRefine((value, ctx) => {
+  if (value.agency !== "autonomous" && value.channels.length) ctx.addIssue({ code: "custom", path: ["channels"], message: "Unknown or absent agency cannot grant operational channels" });
+  if (new Set(value.channels.map(channel => channel.id)).size !== value.channels.length) ctx.addIssue({ code: "custom", path: ["channels"], message: "Agency channel IDs must be unique within the entity" });
+  value.channels.forEach((channel, index) => {
+    if ((channel.modality === "physical-control") !== Boolean(channel.actionSchemaId)) ctx.addIssue({ code: "custom", path: ["channels", index, "actionSchemaId"], message: "Only physical control requires its explicit action mechanism" });
+    if (new Set([channel.actorRoleId, channel.peerRoleId, channel.carrierRoleId]).size !== 3) ctx.addIssue({ code: "custom", path: ["channels", index], message: "Actor, peer and carrier roles must remain distinct" });
+    if (new Set(channel.activePhaseIds).size !== channel.activePhaseIds.length) ctx.addIssue({ code: "custom", path: ["channels", index, "activePhaseIds"], message: "Channel phases must be unique" });
+  });
+});
+export type AgencyProfile = z.infer<typeof agencyProfileSchema>;
+
+export const entitySchema = z.object({ id: idSchema, kind: entityKindSchema, canonicalName: z.string().min(1), aliases: z.array(z.string().min(1)), evidence: z.array(evidenceRefSchema), agencyProfile: agencyProfileSchema.optional() }).strict();
 export type Entity = z.infer<typeof entitySchema>;
 
 export const claimSchema = z
@@ -189,6 +215,7 @@ export const attributionSchema = z
     attitude: z.enum(["asserts", "knows", "believes", "suspects", "reports", "denies", "questions"]),
     certainty: z.number().finite().min(0).max(1),
     sourceAttributionId: idSchema.optional(),
+    expressionIds: z.array(idSchema).min(1).max(64).refine(ids => new Set(ids).size === ids.length, "expressionIds must be unique").optional(),
     quotationIds: z.array(idSchema).min(1).max(64)
       .refine((values) => new Set(values).size === values.length, "quotationIds must be unique")
       .optional(),
@@ -562,6 +589,7 @@ export type StateOperation = z.infer<typeof stateOperationSchema>;
 export const stateDeltaSchema = z.object({ version: z.literal(1), operations: z.array(stateOperationSchema) }).strict();
 export type StateDelta = z.infer<typeof stateDeltaSchema>;
 
+export const knowledgeReceptionSchema = z.object({ received: z.literal(true), understood: z.boolean(), belief: z.enum(["accepted", "rejected", "undecided"]) }).strict();
 export const knowledgeStatusSchema = z.enum(["knows", "believes", "suspects", "heard", "disbelieves"]);
 export const knowledgeAcquisitionModeSchema = z.enum([
   "observed",
@@ -579,6 +607,9 @@ export const knowledgeOperationSchema = z.discriminatedUnion("op", [
     claimId: idSchema,
     propositionId: idSchema.optional(),
     attributionId: idSchema.optional(),
+    expressionId: idSchema.optional(),
+    perceptionId: idSchema.optional(),
+    acquisitionId: idSchema.optional(),
     acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
     status: knowledgeStatusSchema,
     confidence: z.number().min(0).max(1),
@@ -587,7 +618,7 @@ export const knowledgeOperationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("forget"), actorId: idSchema, claimId: idSchema, propositionId: idSchema.optional() }).strict(),
 ]).superRefine((value, ctx) => {
   if (value.op !== "learn") return;
-  const semantic = Boolean(value.propositionId || value.attributionId || value.acquisitionMode);
+  const semantic = Boolean(value.propositionId || value.attributionId || value.acquisitionMode || value.expressionId || value.perceptionId || value.acquisitionId);
   if (semantic && !value.propositionId) {
     ctx.addIssue({ code: "custom", path: ["propositionId"], message: "Semantic knowledge acquisition requires propositionId" });
   }
@@ -620,8 +651,32 @@ export type KnowledgeOperation = z.infer<typeof knowledgeOperationSchema>;
 export const knowledgeDeltaSchema = z.object({ version: z.literal(1), operations: z.array(knowledgeOperationSchema) }).strict();
 export type KnowledgeDelta = z.infer<typeof knowledgeDeltaSchema>;
 
-/** Branch-emergent semantic facts. These records are event-provenanced, not source evidence. */
+export const agencyChannelBindingSchema = z.object({ channelId: idSchema, processId: idSchema }).strict();
+
+/** Branch experience is grounded in the committing event, never a fabricated canonical ID. */
+export const branchAcquisitionPayloadSchema = z.object({
+  ontologyVersion: z.literal("branch-acquisition-v1"),
+  actorId: idSchema, claimId: idSchema, propositionId: idSchema,
+  basis: z.union([
+    z.object({ mode: z.literal("told"), utteranceIndex: z.number().int().min(0).max(31), utteranceEventId: idSchema.optional(), attributionId: idSchema }).strict(),
+    z.object({ mode: z.literal("deceived-misattributed"), utteranceIndex: z.number().int().min(0).max(31), utteranceEventId: idSchema.optional(), attributionId: idSchema, actualSourceActorId: idSchema, believedSourceActorId: idSchema }).strict(),
+    z.object({ mode: z.literal("observed"), locationId: idSchema, entityId: idSchema, field: z.enum(["location.open", "character.location"]), value: z.union([z.boolean(), idSchema]) }).strict(),
+    z.object({ mode: z.literal("read"), expressionId: idSchema, attributionId: idSchema, documentId: idSchema, locationId: idSchema.optional(), channelBinding: agencyChannelBindingSchema.optional() }).strict().superRefine((value, ctx) => {
+      if (Boolean(value.locationId) === Boolean(value.channelBinding)) ctx.addIssue({ code: "custom", message: "Reading requires exactly one physical location or explicit text-channel binding" });
+    }),
+    z.object({ mode: z.literal("read"), origin: z.literal("branch-message"), messageEventId: idSchema, messageIndex: z.number().int().min(0).max(31), attributionId: idSchema }).strict(),
+    z.object({ mode: z.literal("remembered"), priorAcquisitionId: idSchema }).strict(),
+    z.object({ mode: z.literal("inferred"), premiseAcquisitionIds: z.array(idSchema).min(1).max(16).refine(ids => new Set(ids).size === ids.length), rationale: z.string().trim().min(1).max(2000) }).strict(),
+  ]),
+  reception: z.object({ received: z.literal(true), understood: z.boolean(), belief: z.enum(["accepted", "rejected", "undecided"]) }).strict(),
+}).strict().superRefine((value, ctx) => {
+  if (!value.reception.understood && value.reception.belief !== "undecided") ctx.addIssue({ code: "custom", message: "Receipt without understanding cannot establish belief" });
+});
+export const branchAcquisitionSchema = branchAcquisitionPayloadSchema.safeExtend({ id: idSchema });
+export type BranchAcquisition = z.infer<typeof branchAcquisitionSchema>;
+
 export const branchSemanticOperationSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("record-acquisition"), acquisition: branchAcquisitionSchema }).strict(),
   z.object({
     op: z.literal("record-proposition"),
     proposition: z.object({
@@ -738,6 +793,7 @@ export const localSemanticRefSchema = z.string().regex(
 );
 
 export const branchSemanticProposalOperationSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("record-acquisition"), localRef: localSemanticRefSchema, acquisition: branchAcquisitionPayloadSchema }).strict(),
   z.object({
     op: z.literal("record-proposition"),
     localRef: localSemanticRefSchema,
@@ -873,6 +929,7 @@ export const processOperationSchema = z.discriminatedUnion("op", [
       ownerBindings: z.array(processOwnerBindingSchema).min(1).max(32),
       phaseId: idSchema,
       progress: z.number().finite().min(0).max(1).default(0),
+      startedAtElapsedDays: z.number().finite().nonnegative().optional(),
       dueAtElapsedDays: z.number().finite().nonnegative().optional(),
     }).strict(),
   }).strict(),
@@ -1063,8 +1120,14 @@ export type CanonicalAdaptation = z.infer<typeof canonicalAdaptationSchema>;
  * that character can perceive, and readerSetup is presentation-only context.
  */
 /** Complete nonphysical projection at a source-evidenced pre-event checkpoint. */
+export const entryKnowledgeHistorySchema = z.object({
+  version: z.literal(1), actorId: idSchema, beforeCanonicalEventId: idSchema,
+  cutHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type EntryKnowledgeHistory = z.infer<typeof entryKnowledgeHistorySchema>;
 export const entryProjectionSeedSchema = z.object({
   version: z.literal(1),
+  knowledgeHistory: entryKnowledgeHistorySchema.optional(),
   semantics: branchSemanticDeltaSchema,
   processes: processDeltaSchema,
   norms: normDeltaSchema,
@@ -1086,7 +1149,7 @@ export const characterEntryCheckpointSchema = z
   .strict()
   .superRefine((value, ctx) => {
     const seen = new Set<string>();
-    let actorIsPhysical = false;
+    let actorHasEntryPresence = false;
     for (let index = 0; index < value.participantPresence.length; index += 1) {
       const presence = value.participantPresence[index]!;
       if (seen.has(presence.entityId)) {
@@ -1097,12 +1160,12 @@ export const characterEntryCheckpointSchema = z
         });
       }
       seen.add(presence.entityId);
-      if (presence.entityId === value.actorId && presence.mode === "physical") actorIsPhysical = true;
+      if (presence.entityId === value.actorId && (presence.mode === "physical" || presence.mode === "remote" && value.projectionSeed)) actorHasEntryPresence = true;
     }
-    if (!actorIsPhysical) {
+    if (!actorHasEntryPresence) {
       ctx.addIssue({
         code: "custom",
-        message: "An entry checkpoint must establish its selected actor as physically present",
+        message: "An entry checkpoint must establish bodily presence or remote presence with a complete pre-entry projection seed",
         path: ["participantPresence"],
       });
     }
@@ -1123,6 +1186,7 @@ export const progressChannelSchema = z.enum([
   "process",
   "norm",
   "speech",
+  "text",
   "time",
   "scene",
   "relationship",
@@ -1203,6 +1267,7 @@ export const progressCertificateSchema = z.object({
   processOperations: z.array(effectPointerSchema).max(1_024),
   normOperations: z.array(effectPointerSchema).max(1_024),
   utteranceCount: z.number().int().nonnegative(),
+  messageCount: z.number().int().positive().max(32).optional(),
   timeAdvanced: z.boolean(),
   sceneTransition: sceneTransitionSchema.optional(),
   channels: z.array(progressChannelSchema),
@@ -1229,6 +1294,9 @@ export const progressCertificateSchema = z.object({
   }
   if (Boolean(certificate.utteranceCount) !== uniqueChannels.has("speech")) {
     ctx.addIssue({ code: "custom", path: ["channels"], message: "speech channel must exactly match utteranceCount" });
+  }
+  if (Boolean(certificate.messageCount) !== uniqueChannels.has("text")) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "text channel must exactly match messageCount" });
   }
   if (certificate.timeAdvanced !== uniqueChannels.has("time")) {
     ctx.addIssue({ code: "custom", path: ["channels"], message: "time channel must exactly match timeAdvanced" });
@@ -1276,9 +1344,11 @@ export type ActionRoleBinding = z.infer<typeof actionRoleBindingSchema>;
 
 export const actionTravelModeSchema = z.enum(["foot", "mounted", "wheeled", "rail", "water", "air", "climb", "crawl", "portal"]);
 
-const schemaBoundActionInvocationSchema = z.object({
+
+export const schemaBoundActionInvocationSchema = z.object({
   lane: z.literal("schema-bound"),
   schemaId: idSchema,
+  channelBinding: agencyChannelBindingSchema.optional(),
   roleBindings: z.array(actionRoleBindingSchema).max(64),
   parameters: z.record(idSchema, stateValueSchema).default({}),
   travelMode: actionTravelModeSchema.optional(),
@@ -1494,8 +1564,31 @@ export const spokenUtteranceSchema = z.object({
   addresseeIds: z.array(idSchema).min(1).max(16),
   content: z.string().trim().min(1).max(2_000),
   channel: z.literal("audible").default("audible"),
+  channelBinding: agencyChannelBindingSchema.optional(),
+  expressionBinding: z.object({
+    expressionId: idSchema,
+    expressionRevision: objectHashSchema,
+    goalId: idSchema,
+    goalRevision: objectHashSchema,
+    actionIndex: z.number().int().nonnegative(),
+    candidateIndex: z.number().int().nonnegative(),
+    fragmentIndex: z.number().int().nonnegative(),
+  }).strict().optional(),
 }).strict();
 export type SpokenUtterance = z.infer<typeof spokenUtteranceSchema>;
+
+/** Exact branch-authored text, independent of canonical expressions and audible dialogue. */
+export const writtenMessageSchema = z.object({
+  authorId: idSchema,
+  recipientIds: z.array(idSchema).min(1).max(16),
+  content: z.string().min(1).max(8_000).refine(value => value.trim().length > 0, "Message must contain text"),
+  channelBinding: agencyChannelBindingSchema,
+}).strict().superRefine((message, ctx) => {
+  if (new Set(message.recipientIds).size !== message.recipientIds.length) {
+    ctx.addIssue({ code: "custom", path: ["recipientIds"], message: "Message recipients must be unique" });
+  }
+});
+export type WrittenMessage = z.infer<typeof writtenMessageSchema>;
 
 /** Event-scoped affect. Continuity is derived from history; this is not a second mutable character state. */
 export const actorAffectSchema = z.object({
@@ -1517,6 +1610,7 @@ export const eventProposalBaseSchema = z
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
     actorAffects: z.array(actorAffectSchema).max(128).optional(),
     spokenUtterances: z.array(spokenUtteranceSchema).max(32).optional(),
+    writtenMessages: z.array(writtenMessageSchema).max(32).optional(),
     participants: z.array(idSchema),
     participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     proposedTime: storyTimeSchema,
@@ -1555,6 +1649,7 @@ export function validateCanonicalAdaptationProposalEnvelope(
 
 export const eventProposalSchema = eventProposalBaseSchema.superRefine((value, ctx) => {
   validateSpokenUtteranceParticipants(value, ctx);
+  validateWrittenMessageParticipants(value, ctx);
   validateCanonicalAdaptationProposalEnvelope(value, ctx);
   validateCausalRelationProjection(value, ctx);
 });
@@ -1589,8 +1684,11 @@ export const committedEventSchema = z
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
     actorAffects: z.array(actorAffectSchema).max(128).optional(),
     spokenUtterances: z.array(spokenUtteranceSchema).max(32).optional(),
+    writtenMessages: z.array(writtenMessageSchema).max(32).optional(),
     participants: z.array(idSchema),
     participantPresence: z.array(participantPresenceSchema).max(128).optional(),
+    entryKnowledgeHistory: entryKnowledgeHistorySchema.optional(),
+    entryActorId: idSchema.optional(),
     effects: eventEffectsRefSchema,
     progressCertificate: progressCertificateSchema,
     evidence: z.array(evidenceRefSchema),
@@ -1607,6 +1705,7 @@ export const committedEventSchema = z
   })
   .strict()
   .superRefine(validateSpokenUtteranceParticipants)
+  .superRefine(validateWrittenMessageParticipants)
   .superRefine(validateParticipantPresence)
   .superRefine((value, ctx) => {
     validateCausalRelationProjection(value, ctx);
@@ -1640,6 +1739,20 @@ function validateCausalRelationProjection(
   if (JSON.stringify(relationSources) !== JSON.stringify(parentSources)) {
     ctx.addIssue({ code: "custom", path: ["causalParents"], message: "causalParents must exactly project the authoritative causalRelations source IDs" });
   }
+}
+
+function validateWrittenMessageParticipants(
+  value: { participants: string[]; actorId?: string; writtenMessages?: WrittenMessage[] },
+  ctx: z.RefinementCtx,
+): void {
+  value.writtenMessages?.forEach((message, index) => {
+    if (value.actorId && message.authorId !== value.actorId) {
+      ctx.addIssue({ code: "custom", path: ["writtenMessages", index, "authorId"], message: "An actor may only author its own messages" });
+    }
+    if ([message.authorId, ...message.recipientIds].some(id => !value.participants.includes(id))) {
+      ctx.addIssue({ code: "custom", path: ["writtenMessages", index], message: "Message author and recipients must be actual event participants" });
+    }
+  });
 }
 
 function validateSpokenUtteranceParticipants(
@@ -1745,6 +1858,9 @@ export const possibilityBaseSchema = z
     sourceActorId: idSchema.optional(),
     sourceGoalId: idSchema.optional(),
     canonicalEventId: idSchema.optional(),
+    /** Source-support diagnostic only; never a pressure or ranking input. */
+    sourceConfidence: z.number().min(0).max(1).optional(),
+    /** Legacy declaration retained for artifact compatibility; host scheduler derives pressure independently. */
     pressure: z.number().min(0),
     relevance: z.number().min(0),
     proposedDelta: stateDeltaSchema.optional(),
@@ -1832,10 +1948,14 @@ export const knowledgeFactSchema = z.object({
   claimId: idSchema,
   propositionId: idSchema.optional(),
   attributionId: idSchema.optional(),
+  expressionId: idSchema.optional(),
+  perceptionId: idSchema.optional(),
+  acquisitionId: idSchema.optional(),
   acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
   status: knowledgeStatusSchema,
   confidence: z.number().min(0).max(1),
   acquiredAtCommit: idSchema,
+  reception: knowledgeReceptionSchema.optional(),
   sourceActorId: idSchema.optional(),
 }).strict();
 export type KnowledgeFact = z.infer<typeof knowledgeFactSchema>;
@@ -1851,4 +1971,4 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
 export const WORLD_SCHEMA_VERSION = 3;
-export const WORLD_ENGINE_VERSION = "0.4.0";
+export const WORLD_ENGINE_VERSION = "0.35.0";

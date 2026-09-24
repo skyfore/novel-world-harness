@@ -29,10 +29,10 @@ const referenceFields: Readonly<Record<string, ClosureKind>> = {
   documentId: "entity", speakerId: "entity", addresseeIds: "entity", expressionId: "utterance-expression", expressionIds: "utterance-expression", quotationId: "annotation",
   entityId: "entity", actorId: "entity", subjectEntityId: "entity", holderEntityId: "entity", fromActorId: "entity", toActorId: "entity", debtorActorId: "entity", creditorActorId: "entity", beneficiaryActorId: "entity", sourceActorId: "entity", authorityEntityId: "entity", focalActorId: "entity", viewpointActorId: "entity", fromLocationId: "entity", toLocationId: "entity", containerLocationId: "entity", containedLocationId: "entity", locationId: "entity",
   entityIds: "entity", participants: "entity", targetEntityIds: "entity", targetIds: "entity", presentActorIds: "entity", viewpointActorIds: "entity", jurisdictionEntityIds: "entity", locationIds: "entity",
-  propositionId: "proposition", attributionId: "attribution", sourceAttributionId: "attribution", claimId: "claim", knownByClaimIds: "claim", requiresKnowledge: "claim", blockedByKnowledge: "claim", forbidsKnowledge: "claim", focalKnowledgeClaimIds: "claim",
+  propositionId: "proposition", attributionId: "attribution", sourceAttributionId: "attribution", claimId: "claim", knownByClaimIds: "claim", requiresKnowledge: "claim", requiredKnowledgeClaimIds: "claim", blockedByKnowledge: "claim", forbidsKnowledge: "claim", focalKnowledgeClaimIds: "claim",
   afterCanonicalEventIds: "event", afterExperiencedCanonicalEventIds: "event", triggerEventIds: "event", reversalEventIds: "event",
   eventId: "event", canonicalEventId: "event", fromEventId: "event", toEventId: "event", anchorEventId: "event", beforeCanonicalEventId: "event", eventIds: "event", supportingEventIds: "event", establishedByEventIds: "event", retiredByEventIds: "event", causalParents: "event",
-  sceneOccurrenceIds: "scene", frameId: "frame", schemaId: "action", ruleId: "rule", activeRuleIds: "rule", overridesRuleIds: "rule", overridesConstraintIds: "constraint", overridesTemplateIds: "norm",
+  sceneOccurrenceIds: "scene", frameId: "frame", schemaId: "action", actionSchemaId: "action", ruleId: "rule", activeRuleIds: "rule", overridesRuleIds: "rule", overridesConstraintIds: "constraint", overridesTemplateIds: "norm",
   goalId: "goal", parentGoalId: "goal",
   unitIds: "unit", reviewedUnitIds: "unit", basisUnitIds: "unit", resolutionIds: "entity-resolution",
   speakerMentionId: "annotation", viewpointMentionId: "annotation",
@@ -91,7 +91,7 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
       { kind: "event-resolution", id: trace.eventResolutionId, hash: trace.eventResolutionHash },
     ]) if (nodes.get(`${ref.kind}/${ref.id}`)?.revisionHash !== ref.hash) issues.push({ code: "CLOSURE_REVISION_MISMATCH", message: `Perception ${observation.id} requires frozen ${ref.kind}/${ref.id}@${ref.hash}`, path: `perception-observation/${observation.id}` });
   }
-  for (const acquisition of canonical.acquisitions ?? []) for (const ref of acquisition.revisions) if (nodes.get(`${ref.kind === "canonical-event" ? "event" : ref.kind}/${ref.id}`)?.revisionHash !== ref.hash) issues.push({ code: "CLOSURE_REVISION_MISMATCH", message: `Acquisition ${acquisition.id} requires frozen ${ref.kind}/${ref.id}`, path: `acquisition/${acquisition.id}` });
+  for (const acquisition of canonical.acquisitions ?? []) for (const ref of acquisition.revisions) if (nodes.get(`${ref.kind === "canonical-event" ? "event" : ref.kind === "process-template" ? "process" : ref.kind}/${ref.id}`)?.revisionHash !== ref.hash) issues.push({ code: "CLOSURE_REVISION_MISMATCH", message: `Acquisition ${acquisition.id} requires frozen ${ref.kind}/${ref.id}`, path: `acquisition/${acquisition.id}` });
   const link = (node: Node, kind: ClosureKind, id: string, pointer = "") => {
     if (node.kind === kind && node.id === id) return;
     const target = nodes.get(key({ kind, id }));

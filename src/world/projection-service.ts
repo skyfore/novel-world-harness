@@ -1,3 +1,9 @@
+import { committedTextDeliveries, type TextDelivery } from "./text-delivery.js";
+import { committedSpeechDeliveries, type SpeechDelivery } from "./speech-delivery.js";
+import { speechReceiptAccessIssues } from "./branch-acquisition.js";
+import { entryAgencyIssues } from "./entry-agency.js";
+import { branchAcquisitionPairingIssues } from "./branch-acquisition.js";
+import { validateAgencyUse } from "./agency-profile.js";
 import { replayEntryKnowledge } from "./entry-knowledge.js";
 import { contentHash } from "./canonical.js";
 import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateIncapacityChanges } from "./process-capacity.js";
@@ -43,6 +49,7 @@ import type { WorldObjectStore } from "./store.js";
 import type { WorldSnapshotStore } from "./snapshot.js";
 import { assertMonotonicLogicalTime } from "./time.js";
 import { hasMaterialProgress, validateCommittedProgress } from "./progress.js";
+import { validateConditionalUtterances } from "./conditional-expression.js";
 
 export type HistoryCommit = {
   id: CommitId;
@@ -50,6 +57,8 @@ export type HistoryCommit = {
 };
 
 export type ProjectedHistoryEntry = {
+  speechDeliveries?: SpeechDelivery[];
+  textDeliveries?: TextDelivery[];
   commitId: CommitId;
   eventHash: ObjectHash;
   event: CommittedEvent;
@@ -261,7 +270,26 @@ export class ProjectionService {
         if (causality.events[event.eventId]) throw new Error(`Committed event ID is not unique in branch history: ${event.eventId}`);
 
         try {
+          const expressionIssues = validateConditionalUtterances(event, context, { state: eventIndex === 0 ? stateBeforeCommit : state, knowledge, history, processes });
+          if (expressionIssues.length) throw new Error(expressionIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
           const effects = await this.loadEffects(event);
+          if (event.entryActorId && entry.commit.parentCommitId) throw new Error("ENTRY_AGENCY_UNPROVEN: Entry identity is Genesis-only; stop for history review.");
+          const entryActors = !entry.commit.parentCommitId ? new Set([
+            ...(event.entryActorId ? [event.entryActorId] : []),
+            ...(event.actorObservations ?? []).filter(observation => context.entities.get(observation.actorId)?.agencyProfile
+              || event.participantPresence?.some(item => item.entityId === observation.actorId)).map(observation => observation.actorId),
+          ]) : new Set<string>();
+          for (const actorId of entryActors) {
+            const issues = entryAgencyIssues(actorId, { participantPresence: event.participantPresence,
+              knowledge: effects.knowledgeDelta,
+              projectionSeed: { version: 1, semantics: effects.semanticDelta ?? { version: 1, operations: [] },
+                processes: effects.processDelta ?? { version: 1, operations: [] }, norms: effects.normDelta ?? { version: 1, operations: [] },
+                activeRuleIds: [], elapsedDays: entry.commit.logicalTime.elapsedDays ?? 0 } }, context);
+            if (issues.length) throw new Error(issues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+          }
+
+          const agencyIssues = validateAgencyUse(event, effects.delta, context, processes, knowledge);
+          if (agencyIssues.length) throw new Error(agencyIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
           validateCommittedProgress(event, {
             ...(event.effects.stateDeltaHash ? { stateDelta: effects.delta } : {}),
             ...(effects.knowledgeDelta ? { knowledgeDelta: effects.knowledgeDelta } : {}),
@@ -274,6 +302,8 @@ export class ProjectionService {
           }
           const provenance: EffectProvenance = { commitId: entry.id, eventId: event.eventId, eventHash };
           const stateBeforeEffects = state;
+          const knowledgeBeforeEffects = knowledge;
+          const processesBeforeEffects = processes;
           if (effects.delta.operations.length) {
             state = applyStateDelta(state, effects.delta, context.stateSchema, context.entities, context.rules);
           }
@@ -299,13 +329,16 @@ export class ProjectionService {
           }
           if (entry.commit.parentCommitId && effects.processDelta) validateIncapacityChanges(event, effects.processDelta, processes, processContext, eventIndex === 0 ? stateBeforeCommit : stateBeforeEffects, state, provenance, onsets);
           const processesAfter = effects.processDelta ? applyProcessDelta(processes, effects.processDelta, { ...processContext, allowHistoricalStarts: !entry.commit.parentCommitId }, provenance, entry.commit.logicalTime.elapsedDays ?? 0) : processes;
-          const capacityIssues = capacityUseIssues({ ...(entry.commit.parentCommitId ? { actorId: event.actorId, spokenUtterances: event.spokenUtterances, action: event.action } : {}), knowledge: event.entryKnowledgeHistory ? undefined : effects.knowledgeDelta }, processes, processesAfter, processContext.templates, context.perceptionObservations, context.actionSchemas);
+          const capacityIssues = capacityUseIssues({ ...(entry.commit.parentCommitId ? { actorId: event.actorId, spokenUtterances: event.spokenUtterances, writtenMessages: event.writtenMessages, action: event.action } : {}), knowledge: event.entryKnowledgeHistory ? undefined : effects.knowledgeDelta }, processes, processesAfter, processContext.templates, context.perceptionObservations, context.actionSchemas);
           if (capacityIssues.length) throw new Error(capacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+          const acquisitionPairs = branchAcquisitionPairingIssues(semantics, event.eventId, effects.knowledgeDelta);
+          if (acquisitionPairs.length) throw new Error(acquisitionPairs.map(issue => `${issue.code}: ${issue.message}`).join("; "));
           if (event.entryKnowledgeHistory) {
             if (entry.commit.parentCommitId) throw new Error("ENTRY_KNOWLEDGE_HISTORY_INVALID: Historical seed is Genesis-only; stop for history review.");
             knowledge = replayEntryKnowledge(event.entryKnowledgeHistory, context, event.realizesCanonicalEventIds ?? [], effects.knowledgeDelta, entry.id);
           } else if (effects.knowledgeDelta) {
             knowledge = applyKnowledgeDelta(knowledge, effects.knowledgeDelta, entry.id, {
+              sourceId: context.sourceId, processTemplates: context.processTemplates, actionSchemas: context.actionSchemas,
               entities: context.entities,
               claims: context.claims,
               propositions: context.propositions,
@@ -317,6 +350,9 @@ export class ProjectionService {
               perceptionOccurrence: { eventIds: new Set(event.realizesCanonicalEventIds ?? []), before: entry.commit.parentCommitId ? stateBeforeEffects : state, after: state, schema: context.stateSchema },
               realizedCanonicalEventIds: new Set([...history.flatMap(item => item.event.realizesCanonicalEventIds ?? []), ...(event.realizesCanonicalEventIds ?? [])]),
               branchSemantics: semantics,
+              committedSpeech: committedSpeechDeliveries(history),
+              committedText: committedTextDeliveries(history),
+              branchOccurrence: { eventId: event.eventId, processesBefore: entry.commit.parentCommitId ? processes : processesAfter, participants: event.participants, participantPresence: event.participantPresence, spokenUtterances: event.spokenUtterances, before: stateBeforeEffects, after: state },
             });
           }
           processes = processesAfter;
@@ -333,7 +369,16 @@ export class ProjectionService {
             }, provenance);
           }
 
+          const speechDeliveries: SpeechDelivery[] = (event.spokenUtterances ?? []).flatMap((utterance, utteranceIndex) => utterance.addresseeIds.flatMap(recipientId =>
+            speechReceiptAccessIssues(recipientId, utterance, { eventId: event.eventId, participants: event.participants, participantPresence: event.participantPresence,
+              processesBefore: processesBeforeEffects, before: stateBeforeEffects, after: state }, { ...context, branchSemantics: semantics }, knowledgeBeforeEffects).length
+              ? [] : [{ utteranceIndex, recipientId, delivery: utterance.channelBinding ? "remote" as const : "physical" as const }]));
+          // validateAgencyUse proved all recipients against the pre-event text session.
+          const textDeliveries: TextDelivery[] = (event.writtenMessages ?? []).flatMap((message, messageIndex) =>
+            message.recipientIds.map(recipientId => ({ messageIndex, recipientId })));
           history.push({
+            ...(textDeliveries.length ? { textDeliveries } : {}),
+            ...(speechDeliveries.length ? { speechDeliveries } : {}),
             commitId: entry.id,
             eventHash,
             event,

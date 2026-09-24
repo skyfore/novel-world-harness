@@ -30,6 +30,7 @@ export type ProgressCertificateInput = {
   effectiveProcessOperationIndexes?: readonly number[];
   effectiveNormOperationIndexes?: readonly number[];
   utteranceCount: number;
+  messageCount?: number;
   timeAdvanced: boolean;
   sceneTransition?: SceneTransition;
 };
@@ -53,6 +54,7 @@ export function deriveProgressCertificate(input: ProgressCertificateInput): Prog
   if (processOperations.length) channels.add("process");
   if (normOperations.length) channels.add("norm");
   if (input.utteranceCount) channels.add("speech");
+  if (input.messageCount) channels.add("text");
   if (input.timeAdvanced) channels.add("time");
   if (input.sceneTransition) channels.add("scene");
 
@@ -91,6 +93,7 @@ export function deriveProgressCertificate(input: ProgressCertificateInput): Prog
     processOperations,
     normOperations,
     utteranceCount: input.utteranceCount,
+    ...(input.messageCount ? { messageCount: input.messageCount } : {}),
     timeAdvanced: input.timeAdvanced,
     ...(input.sceneTransition ? { sceneTransition: structuredClone(input.sceneTransition) } : {}),
     channels: [...channels],
@@ -104,6 +107,7 @@ export function hasMaterialProgress(certificate: ProgressCertificate): boolean {
     || certificate.processOperations.length > 0
     || certificate.normOperations.length > 0
     || certificate.utteranceCount > 0
+    || (certificate.messageCount ?? 0) > 0
     || certificate.timeAdvanced
     || Boolean(certificate.sceneTransition);
 }
@@ -124,6 +128,7 @@ export function validateCommittedProgress(
     effectiveProcessOperationIndexes: certificate.processOperations.map((pointer) => pointer.operationIndex),
     effectiveNormOperationIndexes: certificate.normOperations.map((pointer) => pointer.operationIndex),
     utteranceCount: event.spokenUtterances?.length ?? 0,
+    messageCount: event.writtenMessages?.length ?? 0,
     timeAdvanced,
     ...(event.progress?.scene ? { sceneTransition: event.progress.scene } : {}),
   });
@@ -133,7 +138,7 @@ export function validateCommittedProgress(
   assertPointerSet(certificate.processOperations, event.effects.processDeltaHash, loaded.processDelta, "process");
   assertPointerSet(certificate.normOperations, event.effects.normDeltaHash, loaded.normDelta, "norm");
   if (contentHash(certificate) !== contentHash(expected)) {
-    throw new Error("Progress certificate does not match committed effects, utterances, time, scene, or derived channels");
+    throw new Error("Progress certificate does not match committed effects, utterances, messages, time, scene, or derived channels");
   }
 }
 

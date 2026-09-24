@@ -228,3 +228,15 @@ describe("Pi player world adjudicator", () => {
     expect(prompt).not.toContain("stable-prior-event-id");
   });
 });
+
+it("rejects a candidate changed after the host scope was bound before calling a provider", async () => {
+  const { withDecisionScope } = await import("../src/world/decision-scope.js");
+  const { contentHash } = await import("../src/world/canonical.js");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-stale-decision-")); roots.push(root);
+  const original = input(), changed = structuredClone(original);
+  changed.candidate.title = "A different decision";
+  const create = vi.spyOn(PiAgentSession, "create");
+  await expect(withDecisionScope({ branchId: "main", headCommitId: "head", actorId: original.actorContext.actorId, candidateHash: contentHash(original.candidate) },
+    () => createPiPlayerWorldAdjudicator({ root })(changed))).rejects.toThrow("DECISION_CANDIDATE_CHANGED");
+  expect(create).not.toHaveBeenCalled();
+});

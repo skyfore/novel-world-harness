@@ -1,3 +1,5 @@
+import { textDeliverySchema } from "./text-delivery.js";
+import { speechDeliverySchema } from "./speech-delivery.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentHash } from "./canonical.js";
@@ -18,8 +20,10 @@ import type { WorldProjectionBundle } from "./projection-service.js";
 
 export const PROJECTION_REDUCER_VERSIONS = {
   state: 1,
-  knowledge: 1,
-  semantics: 2,
+  knowledge: 4,
+  speechDelivery: 1,
+  textDelivery: 1,
+  semantics: 3,
   processes: 2,
   norms: 2,
   scenes: 1,
@@ -141,6 +145,8 @@ function validateProjection(input: unknown, commitId: CommitId): WorldProjection
       throw new Error(`Projection history entry ${index} is invalid`);
     }
     committedEventSchema.parse(raw.event);
+    if (raw.textDeliveries !== undefined) textDeliverySchema.array().parse(raw.textDeliveries);
+    if (raw.speechDeliveries !== undefined) speechDeliverySchema.array().parse(raw.speechDeliveries);
     stateDeltaSchema.parse(raw.delta);
     if (raw.knowledgeDelta !== undefined) knowledgeDeltaSchema.parse(raw.knowledgeDelta);
     if (raw.semanticDelta !== undefined) branchSemanticDeltaSchema.parse(raw.semanticDelta);

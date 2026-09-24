@@ -102,5 +102,5 @@ export function proposalSupportsReconciliationRequirement(requirement: Reconcili
       || ["preconditions", "afterCanonicalEventIds", "afterExperiencedCanonicalEventIds"].some(key => nonempty(record(p.activation)[key]))
       || record(p.activation).storyWindow || (Array.isArray(p.milestones) && p.milestones.some(item => nonempty(record(item).conditions))));
   return proposal.kind === "character-goal" && [p.candidateAction, ...(Array.isArray(p.actionPatterns) ? p.actionPatterns : [])].some(action =>
-    ["proposedDelta", "proposedKnowledge", "proposedSemantics", "proposedNorms", "proposedProcesses"].some(channel => nonempty(record(record(action)[channel]).operations)));
+    nonempty(record(action).expressionCandidates) || ["proposedDelta", "proposedKnowledge", "proposedSemantics", "proposedNorms", "proposedProcesses"].some(channel => nonempty(record(record(action)[channel]).operations)));
 }

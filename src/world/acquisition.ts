@@ -1,8 +1,11 @@
+import type { ProcessTemplate } from "./process-ontology.js";
+import { agencyPresenceIssues, resolveAgencyChannel } from "./agency-profile.js";
 import { z } from "zod";
 import { contentHash } from "./canonical.js";
 import { idSchema, evidenceRefSchema, type Attribution, type CanonicalEvent, type Claim, type Entity, type EvidenceAssertion, type KnowledgeOperation, type Proposition, type ValidationIssue } from "./model.js";
 import { type PerceptionObservation, validatePerceptionAcquisition } from "./perception-observation.js";
 import type { UtteranceExpression } from "./utterance-expression.js";
+import type { BranchAcquisitionOccurrence } from "./branch-acquisition.js";
 import type { KnowledgeState } from "./knowledge.js";
 
 export const ACQUISITION_VERSION = "acquisition-v1" as const;
@@ -13,14 +16,14 @@ export const acquisitionSchema = z.object({
   basis: z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("observed"), perceptionId: idSchema }).strict(),
     z.object({ mode: z.literal("told"), expressionId: idSchema, attributionId: idSchema }).strict(),
-    z.object({ mode: z.literal("read"), expressionId: idSchema, attributionId: idSchema, documentId: idSchema }).strict(),
+    z.object({ mode: z.literal("read"), expressionId: idSchema, attributionId: idSchema, documentId: idSchema, textChannel: z.object({ channelId: idSchema, processTemplateId: idSchema }).strict().optional() }).strict(),
     z.object({ mode: z.literal("inferred"), premiseAcquisitionIds: z.array(idSchema).min(1).max(16), rationale: z.string().trim().min(1).max(2_000) }).strict(),
     z.object({ mode: z.literal("remembered"), priorAcquisitionId: idSchema }).strict(),
     z.object({ mode: z.literal("deceived-misattributed"), expressionId: idSchema, attributionId: idSchema, actualSourceActorId: idSchema, believedSourceActorId: idSchema }).strict(),
   ]),
   reception: z.object({ received: z.literal(true), understood: z.boolean(), belief: z.enum(["accepted", "rejected", "undecided"]) }).strict(),
   // Frozen dependencies are supplied by the host, never inferred from a later store.
-  revisions: z.array(z.object({ kind: z.enum(["canonical-event", "claim", "proposition", "utterance-expression", "perception-observation", "attribution", "acquisition"]), id: idSchema, hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).min(2).max(24),
+  revisions: z.array(z.object({ kind: z.enum(["canonical-event", "claim", "proposition", "utterance-expression", "perception-observation", "attribution", "acquisition", "entity", "process-template"]), id: idSchema, hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).min(2).max(24),
   evidence: z.array(evidenceRefSchema).min(1),
 }).strict().superRefine((value, ctx) => {
   if (!value.reception.understood && value.reception.belief !== "undecided") ctx.addIssue({ code: "custom", path: ["reception"], message: "Receipt without understanding cannot establish belief" });
@@ -29,23 +32,25 @@ export const acquisitionSchema = z.object({
 export type Acquisition = z.infer<typeof acquisitionSchema>;
 export const acquisitionInputSchema = z.object(acquisitionSchema.shape).strict().omit({ revisions: true, evidence: true });
 export type AcquisitionCatalog = {
+  sourceId?: string; processTemplates?: ReadonlyMap<string, ProcessTemplate>;
   sourceEventRevisions?: ReadonlyMap<string, string>;
   entities: ReadonlyMap<string, Entity>; events: ReadonlyMap<string, CanonicalEvent>;
   claims: ReadonlyMap<string, Claim>; propositions: ReadonlyMap<string, Proposition>;
   attributions: ReadonlyMap<string, Attribution>; utteranceExpressions?: ReadonlyMap<string, UtteranceExpression>;
   perceptionObservations?: ReadonlyMap<string, PerceptionObservation>; acquisitions?: ReadonlyMap<string, Acquisition>;
 };
-export function acquisitionDependencies(value: Pick<Acquisition, "canonicalEventId" | "claimId" | "propositionId" | "basis">): Array<{ kind: Acquisition["revisions"][number]["kind"]; id: string }> {
+export function acquisitionDependencies(value: Pick<Acquisition, "actorId" | "canonicalEventId" | "claimId" | "propositionId" | "basis">): Array<{ kind: Acquisition["revisions"][number]["kind"]; id: string }> {
   const refs: ReturnType<typeof acquisitionDependencies> = [{ kind: "canonical-event", id: value.canonicalEventId }, { kind: "claim", id: value.claimId }, { kind: "proposition", id: value.propositionId }];
   const basis = value.basis;
   if ("expressionId" in basis) refs.push({ kind: "utterance-expression", id: basis.expressionId }, { kind: "attribution", id: basis.attributionId });
+  if (basis.mode === "read" && basis.textChannel) refs.push({ kind: "entity", id: value.actorId }, { kind: "entity", id: basis.documentId }, { kind: "process-template", id: basis.textChannel.processTemplateId });
   if (basis.mode === "observed") refs.push({ kind: "perception-observation", id: basis.perceptionId });
   if (basis.mode === "remembered") refs.push({ kind: "acquisition", id: basis.priorAcquisitionId });
   if (basis.mode === "inferred") refs.push(...basis.premiseAcquisitionIds.map(id => ({ kind: "acquisition" as const, id })));
   return refs;
 }
 function dependency(catalog: AcquisitionCatalog, ref: { kind: string; id: string }): unknown {
-  return ({ "canonical-event": catalog.events, claim: catalog.claims, proposition: catalog.propositions, attribution: catalog.attributions, "utterance-expression": catalog.utteranceExpressions, "perception-observation": catalog.perceptionObservations, acquisition: catalog.acquisitions } as Record<string, ReadonlyMap<string, unknown> | undefined>)[ref.kind]?.get(ref.id);
+  return ({ entity: catalog.entities, "process-template": catalog.processTemplates, "canonical-event": catalog.events, claim: catalog.claims, proposition: catalog.propositions, attribution: catalog.attributions, "utterance-expression": catalog.utteranceExpressions, "perception-observation": catalog.perceptionObservations, acquisition: catalog.acquisitions } as Record<string, ReadonlyMap<string, unknown> | undefined>)[ref.kind]?.get(ref.id);
 }
 export function hydrateAcquisition(input: unknown, evidence: Acquisition["evidence"], catalog: AcquisitionCatalog): Acquisition {
   const parsed = acquisitionInputSchema.parse(input);
@@ -78,7 +83,13 @@ export function validateAcquisition(value: Acquisition, catalog: AcquisitionCata
     const expression = catalog.utteranceExpressions?.get(basis.expressionId), attribution = catalog.attributions.get(basis.attributionId);
     if (!expression || expression.propositionId !== value.propositionId || !expression.addresseeIds.includes(value.actorId) || !attribution?.expressionIds?.includes(basis.expressionId) || attribution.propositionId !== value.propositionId) fail("ACQUISITION_CONTENT_MISMATCH", "Acquisition requires this expression's recipient and content with its bound attribution");
     if (basis.mode === "read") {
-      if (expression?.modality !== "writing" || expression.documentId !== basis.documentId || attribution?.holderEntityId !== basis.documentId || !event?.participants.includes(basis.documentId) || !event.participantPresence?.some(item => item.entityId === value.actorId && item.mode === "physical")) fail("ACQUISITION_CONTENT_MISMATCH", "Read acquisition must retain its document expression and reading occurrence");
+      if (expression?.modality !== "writing" || expression.documentId !== basis.documentId || attribution?.holderEntityId !== basis.documentId || !event?.participants.includes(basis.documentId) || !basis.textChannel && !event.participantPresence?.some(item => item.entityId === value.actorId && item.mode === "physical")) fail("ACQUISITION_CONTENT_MISMATCH", "Read acquisition must retain its document expression and reading occurrence");
+      if (basis.textChannel) {
+        const channel = actor?.agencyProfile?.channels.find(item => item.id === basis.textChannel!.channelId);
+        const mode = event?.participantPresence?.find(item => item.entityId === value.actorId)?.mode;
+        if (!channel || channel.modality !== "text" || channel.processTemplateId !== basis.textChannel.processTemplateId
+          || !catalog.processTemplates?.has(channel.processTemplateId) || (mode !== "physical" && mode !== "remote") || agencyPresenceIssues(actor, mode).length) fail("ACQUISITION_TEXT_CHANNEL_INVALID", "Read contract requires the reader’s exact source-backed text channel, process template and live occurrence participation");
+      }
     } else if (expression?.modality !== "speech" || expression.canonicalEventId !== value.canonicalEventId) fail("ACQUISITION_OCCURRENCE_MISMATCH", "Spoken receipt must occur in this speech event; later recollection requires remembered mode");
     if (basis.mode === "deceived-misattributed" && (expression?.speakerId !== basis.actualSourceActorId || !catalog.entities.has(basis.believedSourceActorId))) fail("ACQUISITION_SOURCE_MISMATCH", "Deception must preserve both actual and believed source identities");
   }
@@ -105,14 +116,15 @@ export function validateAcquisition(value: Acquisition, catalog: AcquisitionCata
 }
 export function validateAcquisitionEvidence(value: Acquisition, assertions: readonly EvidenceAssertion[]): ValidationIssue[] {
   const paths = ["/actorId", "/canonicalEventId", "/cut", "/claimId", "/propositionId", "/reception/received", "/reception/understood", "/reception/belief",
-    ...Object.keys(value.basis).map(key => `/basis/${key}`)];
+    ...Object.keys(value.basis).map(key => `/basis/${key}`),
+    ...(value.basis.mode === "read" && value.basis.textChannel ? ["/basis/textChannel/channelId", "/basis/textChannel/processTemplateId"] : [])];
   return paths.filter(pointer => !assertions.some(item => item.target.artifactKind === "acquisition" && item.target.artifactId === value.id && item.target.jsonPointer === pointer && item.relation === "supports" && item.strength !== "weak-inference" && item.anchors.length && item.anchors.every(anchor => value.evidence.some(ref => ref.span.sourceId === anchor.sourceId && ref.span.startByte !== undefined && ref.span.endByte !== undefined && ref.span.startByte <= anchor.startByte && anchor.endByte <= ref.span.endByte))))
     .map(path => ({ code: "ACQUISITION_EVIDENCE_MISSING", message: `Acquisition ${value.id} requires independent occurrence evidence for ${path}`, path }));
 }
 export type AcquisitionReceipt = { acquisitionId: string; revisionHash: string; actorId: string; propositionId: string; acquiredAtCommit: string; reception: Acquisition["reception"] };
 /** Compiler proposals remain dormant; only a committed branch occurrence is experience. */
 export function validateAcquisitionOperation(operation: KnowledgeOperation, catalog: AcquisitionCatalog, runtime?: {
-  knowledge: KnowledgeState; currentEventIds?: ReadonlySet<string>; realizedEventIds?: ReadonlySet<string>;
+  knowledge: KnowledgeState; currentEventIds?: ReadonlySet<string>; realizedEventIds?: ReadonlySet<string>; occurrence?: BranchAcquisitionOccurrence;
 }, canonicalEventId?: string): ValidationIssue[] {
   if (operation.op !== "learn") return [];
   if (!operation.acquisitionId) {
@@ -131,6 +143,22 @@ export function validateAcquisitionOperation(operation: KnowledgeOperation, cata
   if (canonicalEventId && value.canonicalEventId !== canonicalEventId) return fail("ACQUISITION_CUT_NOT_CURRENT", "Acquisition must belong to this acquiring event, not an earlier report or another cut; stop for source review.");
   if (!runtime) return [];
   if (runtime.currentEventIds && !runtime.currentEventIds.has(value.canonicalEventId)) return fail("ACQUISITION_CUT_NOT_CURRENT", "Acquisition requires this branch's current acquiring event cut; preserve head and stop. Future canon is not experience.");
+  if (basis.mode === "read") {
+    const occurrence = runtime.occurrence;
+    const location = occurrence?.after.values[value.actorId]?.["character.location"];
+    if (basis.textChannel) {
+      const mode = occurrence?.participantPresence?.find(item => item.entityId === value.actorId)?.mode;
+      const sessions = occurrence?.processesBefore ? Object.keys(occurrence.processesBefore.instances).flatMap(processId => {
+        const access = resolveAgencyChannel(value.actorId, { channelId: basis.textChannel!.channelId, processId }, occurrence.participants, catalog, occurrence.processesBefore!, runtime.knowledge);
+        return access?.channel.modality === "text" && access.channel.processTemplateId === basis.textChannel!.processTemplateId && access.peers.includes(basis.documentId) ? [access] : [];
+      }) : [];
+      if ((mode !== "physical" && mode !== "remote") || agencyPresenceIssues(catalog.entities.get(value.actorId), mode).length || sessions.length !== 1) return fail("ACQUISITION_TEXT_CHANNEL_UNPROVEN", "Reading requires exactly one disclosed, already-running pre-event text session for this reader, document and carrier. Preserve head and receipt; stop for host reconstruction. Never guess a session, import another branch, start/resume authority in the same event or retry unchanged.");
+    } else if (!occurrence || !occurrence.participants.includes(value.actorId) || !occurrence.participants.includes(basis.documentId)
+      || !occurrence.participantPresence?.some(item => item.entityId === value.actorId && item.mode === "physical")
+      || agencyPresenceIssues(catalog.entities.get(value.actorId), "physical").length
+      || typeof location !== "string" || catalog.entities.get(location)?.kind !== "location"
+      || occurrence.after.values[basis.documentId]?.["artifact.location"] !== location) return fail("ACQUISITION_DOCUMENT_ACCESS_UNPROVEN", "This actual event must prove the physical reader and exact document share a known location. Preserve head and receipt; stop for host state/source review. Original canon, unknown locations and another event’s presence cannot authorize this reading. Never relabel presence, remove provenance or retry unchanged.");
+  }
   if ("expressionId" in basis) {
     const expression = catalog.utteranceExpressions?.get(basis.expressionId);
     if (runtime.realizedEventIds && (!expression || !runtime.realizedEventIds.has(expression.canonicalEventId))) return fail("ACQUISITION_EXPRESSION_NOT_REALIZED", "Expression has not occurred on this branch; stop without importing future canon.");
@@ -143,6 +171,6 @@ export function validateAcquisitionOperation(operation: KnowledgeOperation, cata
   return [];
 }
 
-export function acquisitionCatalog(context: { sourceEventRevisions?: ReadonlyMap<string, string>; entities: AcquisitionCatalog["entities"]; events?: AcquisitionCatalog["events"]; claims?: AcquisitionCatalog["claims"]; propositions?: AcquisitionCatalog["propositions"]; attributions?: AcquisitionCatalog["attributions"]; utteranceExpressions?: AcquisitionCatalog["utteranceExpressions"]; perceptionObservations?: AcquisitionCatalog["perceptionObservations"]; acquisitions?: AcquisitionCatalog["acquisitions"] }): AcquisitionCatalog {
+export function acquisitionCatalog(context: { sourceId?: string; processTemplates?: AcquisitionCatalog["processTemplates"]; sourceEventRevisions?: ReadonlyMap<string, string>; entities: AcquisitionCatalog["entities"]; events?: AcquisitionCatalog["events"]; claims?: AcquisitionCatalog["claims"]; propositions?: AcquisitionCatalog["propositions"]; attributions?: AcquisitionCatalog["attributions"]; utteranceExpressions?: AcquisitionCatalog["utteranceExpressions"]; perceptionObservations?: AcquisitionCatalog["perceptionObservations"]; acquisitions?: AcquisitionCatalog["acquisitions"] }): AcquisitionCatalog {
   return { ...context, events: context.events ?? new Map(), claims: context.claims ?? new Map(), propositions: context.propositions ?? new Map(), attributions: context.attributions ?? new Map() };
 }

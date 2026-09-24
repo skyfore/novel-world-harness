@@ -179,6 +179,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
           atomicSections: new Set([
             "narrativeContract",
             "actor",
+            "agency",
             "selfState",
             "scene",
             "resolvedAct",
@@ -189,6 +190,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
           requiredSections: new Set([
             "narrativeContract",
             "actor",
+            "agency",
             "selfState",
             "scene",
             "presentEntities",
@@ -232,9 +234,10 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       const actorAccess = createActorContextAccess(choiceFrame, {
         query: actorQuery,
         maxModelChars: 40_000,
-        atomicSections: new Set(["actor", "selfState", "scene", "resolvedAct", "turnResolution"]),
+        atomicSections: new Set(["actor", "agency", "selfState", "scene", "resolvedAct", "turnResolution"]),
         requiredSections: new Set([
           "actor",
+          "agency",
           "selfState",
           "scene",
           "presentEntities",
@@ -324,9 +327,10 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       const actorAccess = createActorContextAccess(dramaturgyFrame, {
         query: actorQuery,
         maxModelChars: 56_000,
-        atomicSections: new Set(["actor", "selfState", "scene", "resolvedAct", "turnResolution"]),
+        atomicSections: new Set(["actor", "agency", "selfState", "scene", "resolvedAct", "turnResolution"]),
         requiredSections: new Set([
           "actor",
+          "agency",
           "selfState",
           "scene",
           "presentEntities",

@@ -1,4 +1,5 @@
-import { actorOutcomeShape, copyActorOutcome } from "./actor-outcome.js";
+import { actorOutcomeShape, copyActorOutcome, hasActorOutcome } from "./actor-outcome.js";
+import { conditionalExpressionUtterances, conditionalSpeechEnvelope } from "./conditional-expression.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -71,6 +72,11 @@ const goalActionSchema = z
     preconditions: z.array(predicateSchema),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    expressionCandidates: z.array(z.object({
+      expressionId: idSchema,
+      requiredKnowledgeClaimIds: z.array(idSchema).min(1).max(128),
+      relationshipConditions: z.array(predicateSchema).max(32),
+    }).strict()).min(1).max(16).optional(),
     ...actorOutcomeShape,
     action: actionInvocationSchema.optional(),
     timeAdvance: timeAdvanceSchema.optional(),
@@ -574,6 +580,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
       engine.projector.project(commitId),
       committedHistory(engine, commitId),
     ]);
+    const projection = await engine.projections.project(commitId);
     let activeSourceId: string | undefined;
     try {
       activeSourceId = await resolveCommitSourceId(engine, context, commitId, undefined, "Actor scheduler");
@@ -610,6 +617,9 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
             experiencedCanonicalEventIds,
             storyTime: state.logicalTime.storyTime,
           }).active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;
+          const spokenUtterances = conditionalExpressionUtterances(goal, actionIndex, context, projection);
+          if (!spokenUtterances) continue;
+          const speechEnvelope = conditionalSpeechEnvelope(spokenUtterances, context, projection);
           candidates.push({
             goalId: goal.id,
             priority: goal.priority,
@@ -622,8 +632,9 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
               source: "actor",
               actorId: goal.actorId,
               title: action.title,
-              participants: [...new Set([goal.actorId, ...(action.participants ?? [])])],
-              participantPresence: [{ entityId: goal.actorId, mode: "physical" }],
+              ...(spokenUtterances.length ? { spokenUtterances } : {}),
+              participants: [...new Set([goal.actorId, ...(action.participants ?? []), ...(speechEnvelope?.participants ?? [])])],
+              participantPresence: speechEnvelope?.participantPresence ?? [{ entityId: goal.actorId, mode: "physical" }],
               proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
               preconditions: action.preconditions,
               proposedDelta: action.proposedDelta,
@@ -635,7 +646,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
               evidence: goal.evidence,
               progress: {
                 version: 1,
-                channels: action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["thread", "consequence"],
+                channels: actorActionProgressChannels(action),
                 threadIds: [`goal-${goal.id}`],
                 noveltyKey: `standalone-goal:${goal.id}:${commitId}`,
                 outcome: "succeeded",
@@ -649,13 +660,14 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
     const initiatingActorId = latestPlayerEvent.event.actorId;
     const scene = await projectActorScene(engine, initiatingActorId, commitId, activeSourceId);
     const localActors = new Set(scene.presentEntityIds);
+    const remoteResponders = new Set((latestPlayerEvent.event.spokenUtterances ?? []).filter(utterance => utterance.channelBinding).flatMap(utterance => utterance.addresseeIds));
     localActors.delete(initiatingActorId);
-    if (!localActors.size) return candidates;
+    if (!localActors.size && !remoteResponders.size) return candidates;
     const goals = (context.actorGoals ?? await actors.listGoals())
       .filter((goal) => !excludedActorIds.has(goal.actorId) && belongsToActiveWorld(goal.evidence));
     for (const goal of goals) {
       const entity = context.entities.get(goal.actorId);
-      if (!entity || entity.kind !== "character" || !localActors.has(goal.actorId)) continue;
+      if (!entity || entity.kind !== "character" || !localActors.has(goal.actorId) && !remoteResponders.has(goal.actorId)) continue;
       if (!belongsToActiveWorld(entity.evidence) || !belongsToActiveWorld(goal.evidence)) continue;
       const actorHistory = history.filter((entry) => !entry.event.evidence.length
         || belongsToActiveWorld(entry.event.evidence));
@@ -675,13 +687,17 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
         if (!action || !action.preconditions.every(predicate => evaluatePredicate(state, predicate))
           || !actorActionIsLocal(action, goal.actorId, initiatingActorId, localActors, state, context.entities)
           || !actorActionHasMaterialEffect(action)) continue;
+        const spokenUtterances = conditionalExpressionUtterances(goal, actionIndex, context, projection);
+        if (!spokenUtterances) continue;
+        const speechEnvelope = conditionalSpeechEnvelope(spokenUtterances, context, projection);
+        if (!localActors.has(goal.actorId) && !speechEnvelope) continue;
         const actionParticipants = action.participants ?? goal.targetIds ?? [initiatingActorId];
         const participants = [...new Set([goal.actorId, ...actionParticipants])]
           .filter((participantId) => participantId === goal.actorId || localActors.has(participantId) || participantId === initiatingActorId);
         const proposalId = `goal-${contentHash({ goalId: goal.id, actionIndex, branchId, commitId }).slice(0, 24)}`;
         const progress: NarrativeProgress = {
           version: 1,
-          channels: action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["knowledge", "thread", "consequence"],
+          channels: actorActionProgressChannels(action),
           threadIds: [`goal-${goal.id}`],
           noveltyKey: `actor-goal:${goal.id}:${latestPlayerEvent.event.eventId}`,
           outcome: "succeeded",
@@ -698,8 +714,9 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
             source: "actor",
             actorId: goal.actorId,
             title: action.title,
-            participants,
-            participantPresence: participants
+            ...(spokenUtterances.length ? { spokenUtterances } : {}),
+            participants: [...new Set([...participants, ...(speechEnvelope?.participants ?? [])])],
+            participantPresence: speechEnvelope?.participantPresence ?? participants
               .filter((participantId) => context.entities.get(participantId)?.kind === "character")
               .map((entityId) => ({ entityId, mode: "physical" as const })),
             proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
@@ -726,9 +743,17 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
   };
 }
 
-function actorActionHasMaterialEffect(action: z.infer<typeof goalActionSchema>): boolean {
-  return action.proposedDelta.operations.length > 0
+export function actorActionHasMaterialEffect(action: z.infer<typeof goalActionSchema>): boolean {
+  return hasActorOutcome(action) || action.proposedDelta.operations.length > 0
+    || Boolean(action.expressionCandidates?.length)
     || (action.proposedKnowledge?.operations.length ?? 0) > 0;
+}
+
+function actorActionProgressChannels(action: z.infer<typeof goalActionSchema>): NarrativeProgress["channels"] {
+  const channels: NarrativeProgress["channels"] = ["thread", "consequence"];
+  if (action.proposedKnowledge?.operations.length) channels.unshift("knowledge");
+  if (action.proposedDelta.operations.length) channels.unshift("state");
+  return channels;
 }
 
 export function normalizeActorCoordination(

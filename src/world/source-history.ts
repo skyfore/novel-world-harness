@@ -1,3 +1,4 @@
+import { entryAgencyIssues, remoteEntryOccurrenceIssues } from "./entry-agency.js";
 import { replayEntryKnowledge } from "./entry-knowledge.js";
 import { validateSemanticEffect } from "./semantic-effect.js";
 import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateIncapacityChanges } from "./process-capacity.js";
@@ -56,13 +57,17 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     applyNormDelta(emptyNormState(state.atCommit), seed.norms, { entities: context.entities, templates: context.normTemplates!, postState: state,
       normativeRuleIds: new Set(c.rules.filter(isNormativeWorldRule).map((rule) => rule.id)) }, provenance);
   }
-  const knowledgeContext = { acquisitions: context.acquisitions, utteranceExpressions: context.utteranceExpressions, perceptionObservations: context.perceptionObservations, entities: context.entities, claims: context.claims, propositions: context.propositions, attributions: context.attributions, branchSemantics: semantics };
+  const knowledgeContext = { sourceId: context.sourceId, processTemplates: context.processTemplates, acquisitions: context.acquisitions, utteranceExpressions: context.utteranceExpressions, perceptionObservations: context.perceptionObservations, entities: context.entities, claims: context.claims, propositions: context.propositions, attributions: context.attributions, branchSemantics: semantics };
   let knowledge = emptyKnowledgeState(state.atCommit);
   const initialKnowledge = checkpoint?.knowledge ?? (!checkpoint ? opening.knowledge : undefined);
   const initialCapacityIssues = capacityUseIssues({ knowledge: seed?.knowledgeHistory ? undefined : initialKnowledge }, processes, processes, processContext.templates, context.perceptionObservations);
   if (initialCapacityIssues.length) throw new Error(initialCapacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
   if (seed?.knowledgeHistory) knowledge = replayEntryKnowledge(seed.knowledgeHistory, context, cut.completedEventIds, initialKnowledge, state.atCommit);
   else if (initialKnowledge) knowledge = applyKnowledgeDelta(knowledge, initialKnowledge, state.atCommit, { ...knowledgeContext, currentCanonicalEventIds: new Set<string>(), realizedCanonicalEventIds: new Set<string>() });
+  if (checkpoint) {
+    const issues = [...entryAgencyIssues(checkpoint.actorId, checkpoint, context), ...remoteEntryOccurrenceIssues(checkpoint.actorId, checkpoint, event, context.eventParticipations)];
+    if (issues.length) throw new Error(issues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+  }
   const aliases = new Map(events.map((occurrence) => [occurrence.id, new Set([occurrence.id])]));
   for (const relation of c.eventRelations.filter((item) => item.type === "coreference" && item.status !== "contested")) {
     const group = new Set([...(aliases.get(relation.fromEventId) ?? []), ...(aliases.get(relation.toEventId) ?? [])]);
@@ -84,11 +89,11 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     const useIssues = capacityUseIssues({ actorId: initiator }, processes, processes, processContext.templates);
     if (useIssues.length) throw new Error(useIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
     const result = validateEventProposal({ proposalId: `scene-${occurrence.id}`, branchId: "scene-validation", expectedParentCommit: before.atCommit,
-      source: initiator ? "actor" : "canon-candidate", possibilityId: `canon-${occurrence.id}`, ...(initiator ? { actorId: initiator } : {}), title: occurrence.title, participants: occurrence.participants,
+      source: initiator ? "actor" : "canon-candidate", possibilityId: `canon-${occurrence.id}`, ...(initiator ? { actorId: initiator } : {}), title: occurrence.title, participants: occurrence.participants, participantPresence: occurrence.participantPresence,
       proposedTime: occurrence.storyTime, preconditions: occurrence.preconditions, proposedDelta: occurrence.observedOutcome,
       ...(occurrence.observedKnowledge ? { proposedKnowledge: occurrence.observedKnowledge } : {}), ...(occurrence.action ? { action: occurrence.action } : {}),
       ...(occurrence.timeAdvance ? { timeAdvance: occurrence.timeAdvance } : {}), causalParents: occurrence.causalParents, evidence: occurrence.evidence,
-    }, before.atCommit, before, context, { knowledge, branchSemantics: semantics, realizedCanonicalEventIds: realized, deferMateriality: true });
+    }, before.atCommit, before, context, { knowledge, processes, branchSemantics: semantics, realizedCanonicalEventIds: realized, deferMateriality: true });
     if (!result.report.accepted || !result.postState) throw new Error(result.report.errors.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
     const onsets = incapacityOnsets(context.semanticEffects?.values() ?? [], new Set([occurrence.id]), processContext.templates);
     const processOperations = [...onsets, ...incapacityRecoveries(c.eventExecutions ?? [], new Set([occurrence.id]), processes, processContext.templates, occurrence.action)];
@@ -101,8 +106,9 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     const afterProcesses = applyProcessDelta(processes, processDelta, processContext, eventProvenance, result.postState.logicalTime.elapsedDays ?? 0);
     const receiptIssues = capacityUseIssues({ knowledge: occurrence.observedKnowledge }, processes, afterProcesses, processContext.templates, context.perceptionObservations);
     if (receiptIssues.length) throw new Error(receiptIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+    const beforeProcesses = processes;
     processes = afterProcesses;
-    if (occurrence.observedKnowledge) knowledge = applyKnowledgeDelta(knowledge, occurrence.observedKnowledge, before.atCommit, { ...knowledgeContext, currentCanonicalEventIds: new Set([occurrence.id]), realizedCanonicalEventIds: new Set([...realized, occurrence.id]), perceptionOccurrence: { eventIds: new Set([occurrence.id]), before, after: result.postState, schema: context.stateSchema } });
+    if (occurrence.observedKnowledge) knowledge = applyKnowledgeDelta(knowledge, occurrence.observedKnowledge, before.atCommit, { ...knowledgeContext, branchOccurrence: { eventId: occurrence.id, participants: occurrence.participants, participantPresence: occurrence.participantPresence, before, after: result.postState, processesBefore: beforeProcesses }, currentCanonicalEventIds: new Set([occurrence.id]), realizedCanonicalEventIds: new Set([...realized, occurrence.id]), perceptionOccurrence: { eventIds: new Set([occurrence.id]), before, after: result.postState, schema: context.stateSchema } });
     return result.postState;
   };
   for (const id of cut.replayEventIds) { state = execute(context.events!.get(id)!, state); for (const alias of aliases.get(id) ?? [id]) realized.add(alias); }

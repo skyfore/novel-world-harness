@@ -1,3 +1,6 @@
+import { currentDecisionScope } from "../world/decision-scope.js";
+import { contentHash } from "../world/canonical.js";
+import { createActorContextAccess } from "./actor-context-retrieval.js";
 import { ModelRequestBudget } from "./model-request-budget.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
@@ -52,6 +55,10 @@ export function createPiPlayerWorldAdjudicator(
     options.signal?.throwIfAborted();
     options.onStatus?.("世界正在推演行动后果…");
     const workspace = await LocalFileWorkspace.create(options.root);
+    const scope = currentDecisionScope();
+    if (scope?.candidateHash && scope.candidateHash !== contentHash(input.candidate)) {
+      throw new Error("DECISION_CANDIDATE_CHANGED: Host scope and candidate revision differ. Stop this inference; rebuild the current branch/head decision without reusing a prior manifest or retrying unchanged.");
+    }
     const boundary = createPlayerActionModelBoundary(input.actorContext);
     const currentWorld = {
       entities: input.world.entities.map((entity) => ({
@@ -99,7 +106,11 @@ export function createPiPlayerWorldAdjudicator(
       recentVisibleEvents: structuredClone(input.actorContext.recentVisibleEvents),
       activeThreads: structuredClone(input.actorContext.activeThreads),
     };
+    const actorAccess = createActorContextAccess({ ...boundary.context, intendedCandidate: boundary.encodeCandidate(input.candidate) }, {
+      query: input.utterance, atomicSections: new Set(["selfState", "scene", "intendedCandidate"]),
+    });
     const promptData = {
+      actorDecisionContext: actorAccess.modelContext,
       playerUtterance: input.utterance,
       recentMessages: input.recentMessages ?? [],
       intendedCandidate: boundary.encodeCandidate(input.candidate),
@@ -131,11 +142,12 @@ export function createPiPlayerWorldAdjudicator(
         includeLocalTools: false,
         includeNwhExtension: false,
         systemPromptOverride: PLAYER_WORLD_ADJUDICATION_SYSTEM_PROMPT,
-        additionalTools: [...messageAccess.tools, capture.tool],
+        additionalTools: [...actorAccess.tools, ...messageAccess.tools, capture.tool],
         ...(options.trace ? { trace: {
           parent: options.trace,
           invocationName: `adjudicate-player-world-attempt-${attempt}`,
           attempt,
+          metadata: { decisionContextManifest: actorAccess.decisionManifest },
           parts: [
             {
               id: `player-world-adjudication.${attempt}.system-role`,

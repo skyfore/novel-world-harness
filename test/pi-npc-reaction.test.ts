@@ -70,7 +70,7 @@ function input(): NpcReactionReasoningInput {
 }
 
 describe("Pi NPC reaction reasoner", () => {
-  it("provides latest and on-demand actor-safe context and decodes only opaque handles", async () => {
+  it.each([false, true])("provides actor-safe context and hides incoming channel IDs (remote=%s)", async remote => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-npc-reaction-"));
     roots.push(root);
     const prompts: string[] = [];
@@ -107,7 +107,9 @@ describe("Pi NPC reaction reasoner", () => {
       } as unknown as PiAgentSession;
     });
 
-    const result = await createPiNpcReactionReasoner({ root })(input());
+    const reasoningInput = input();
+    if (remote && reasoningInput.trigger.interaction.kind === "speech") reasoningInput.trigger.interaction.channelBinding = { channelId: "sender-private-channel", processId: "sender-private-session" };
+    const result = await createPiNpcReactionReasoner({ root })(reasoningInput);
 
     expect(result).toMatchObject({
       responseKind: "speak",
@@ -124,5 +126,8 @@ describe("Pi NPC reaction reasoner", () => {
     expect(prompts[0]).not.toContain("npc-secret-id");
     expect(prompts[0]).not.toContain("hero-stable-id");
     expect(prompts[0]).not.toContain("hall-stable-id");
+    expect(prompts[0]).not.toContain("sender-private-channel");
+    expect(prompts[0]).not.toContain("sender-private-session");
+    if (remote) expect(prompts[0]).toContain('"delivery":"remote"');
   });
 });

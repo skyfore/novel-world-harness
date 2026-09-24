@@ -1063,7 +1063,7 @@ export function semanticRepairIsIsolated(audit: CompilerAuditReport): boolean {
     || audit.coverage.openingReaderSetup === 0
     || audit.coverage.openingReaderContext === 0
     || audit.coverage.openingActorObservation === 0
-    || audit.coverage.openingPhysicalPresence === 0
+    || (audit.coverage.openingLivePresence ?? audit.coverage.openingPhysicalPresence) === 0
     || audit.coverage.openingActionability === 0;
   const characterRepair = (audit.coverage.characterDevelopmentCoverage ?? 1) < 0.5;
   const targetable = eventRepairs.some((count) => count > 0) || openingRepair || characterRepair;

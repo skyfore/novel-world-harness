@@ -1,3 +1,5 @@
+import { pendingTextDeliveries } from "./text-delivery.js";
+import { pendingSpeechDeliveries } from "./speech-delivery.js";
 import {
   branchSemanticProposalDeltaSchema, processProposalDeltaSchema, normProposalDeltaSchema,
   type EventProposal, type ValidationIssue,
@@ -30,6 +32,20 @@ export function mapActorOutcome(value: ActorOutcome, entity: (id: string) => str
   const result = copyActorOutcome(value);
   for (const op of result.proposedSemantics?.operations ?? []) {
     switch (op.op) {
+      case "record-acquisition": {
+        const value = op.acquisition;
+        value.actorId = entity(value.actorId); value.claimId = ref(value.claimId); value.propositionId = ref(value.propositionId);
+        const basis = value.basis;
+        if ("attributionId" in basis) basis.attributionId = ref(basis.attributionId);
+        if ((basis.mode === "told" || basis.mode === "deceived-misattributed") && basis.utteranceEventId) basis.utteranceEventId = ref(basis.utteranceEventId);
+        if (basis.mode === "observed") { basis.entityId = entity(basis.entityId); basis.locationId = entity(basis.locationId); if (basis.field === "character.location" && typeof basis.value === "string") basis.value = entity(basis.value); }
+        if (basis.mode === "read" && "messageEventId" in basis) basis.messageEventId = ref(basis.messageEventId);
+        if (basis.mode === "read" && "documentId" in basis) { basis.documentId = entity(basis.documentId); if (basis.locationId) basis.locationId = entity(basis.locationId); basis.expressionId = ref(basis.expressionId); if (basis.channelBinding) basis.channelBinding = { channelId: ref(basis.channelBinding.channelId), processId: ref(basis.channelBinding.processId) }; }
+        if (basis.mode === "deceived-misattributed") { basis.actualSourceActorId = entity(basis.actualSourceActorId); basis.believedSourceActorId = entity(basis.believedSourceActorId); }
+        if (basis.mode === "remembered") basis.priorAcquisitionId = ref(basis.priorAcquisitionId);
+        if (basis.mode === "inferred") basis.premiseAcquisitionIds = basis.premiseAcquisitionIds.map(ref);
+        break;
+      }
       case "record-proposition":
         op.proposition.subjectEntityId = entity(op.proposition.subjectEntityId);
         if (op.proposition.object.kind === "entity") op.proposition.object.entityId = entity(op.proposition.object.entityId);
@@ -94,6 +110,11 @@ export function validateActorOutcomeScope(value: ActorOutcome, scope: {
   const errors: ValidationIssue[] = [];
   const view = scope.decision;
   const refs = new Set(view ? [
+    ...(view.pendingSpeech ?? []).map(item => item.eventId),
+    ...(view.pendingMessages ?? []).map(item => item.eventId),
+    ...(view.readableTexts ?? []).flatMap(item => [item.expressionId, item.propositionId, item.attributionId]),
+    ...(view.agency?.channels ?? []).flatMap(item => [item.id, item.processId]),
+    ...(view.experiences ?? []).flatMap(x => [x.acquisitionId, x.claimId, x.propositionId]),
     ...view.goals.map((x) => x.id), ...view.appraisals.map((x) => x.id),
     ...view.relationships.map((x) => x.id), ...view.obligations.map((x) => x.id),
     ...view.norms.flatMap((x) => [x.id, x.templateId]), ...view.processes.flatMap((x) => [x.id, x.templateId]),
@@ -130,12 +151,20 @@ export function validateActorOutcomeOwnership(proposal: EventProposal, projectio
   for (const [index, op] of (proposal.proposedSemantics?.operations ?? []).entries()) {
     const path = `proposedSemantics.operations.${index}`;
     switch (op.op) {
+      case "record-acquisition": owned(op.acquisition.actorId === actor, path); break;
       case "open-goal": owned(op.goal.actorId === actor, path); introducedGoals.add(op.localRef); break;
       case "close-goal": owned(introducedGoals.has(op.goalId) || projection.semantics.goals[op.goalId]?.actorId === actor, path); break;
       case "record-appraisal": owned(op.appraisal.actorId === actor, path); break;
       case "adjust-relationship": owned(op.fromActorId === actor, path); break;
       case "record-attribution":
-        owned(op.attribution.holderKind === "character" && op.attribution.holderEntityId === actor, path); break;
+        owned(op.attribution.holderKind === "character" && (op.attribution.holderEntityId === actor || op.attribution.attitude === "asserts" && (proposal.proposedSemantics?.operations ?? []).some(receipt => {
+          if (receipt.op !== "record-acquisition" || receipt.acquisition.actorId !== actor || receipt.acquisition.propositionId !== op.attribution.propositionId) return false;
+          const basis = receipt.acquisition.basis;
+          if (basis.mode === "read" && "messageEventId" in basis) return basis.attributionId === op.localRef
+            && pendingTextDeliveries(projection.history, projection.semantics, actor).some(item => item.eventId === basis.messageEventId && item.messageIndex === basis.messageIndex && item.authorId === op.attribution.holderEntityId);
+          return (basis.mode === "told" || basis.mode === "deceived-misattributed") && basis.attributionId === op.localRef
+            && pendingSpeechDeliveries(projection.history, projection.semantics, actor).some(item => item.eventId === basis.utteranceEventId && item.utteranceIndex === basis.utteranceIndex && item.speakerId === op.attribution.holderEntityId);
+        })), path); break;
       case "create-obligation":
         // The debtor's own committed acceptance creates the duty; a request by its creditor does not.
         owned(op.obligation.debtorActorId === actor, path);

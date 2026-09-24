@@ -1,3 +1,4 @@
+import { entryAgencyIssues, remoteEntryOccurrenceIssues, type EntryAgencyCatalog } from "./entry-agency.js";
 import type { ProcessTemplate } from "./process-ontology.js";
 import { z } from "zod";
 import { schemaBoundActionInvocationSchema, characterEntryCheckpointSchema, entryProjectionSeedSchema, evidenceRefSchema, idSchema, type CanonicalEvent, type Entity, type EventParticipation, type ValidationIssue, type EvidenceAssertion } from "./model.js";
@@ -21,6 +22,7 @@ export function validateEventExecutions(bindings: readonly EventExecution[], cat
   events: ReadonlyMap<string, CanonicalEvent>; entities: ReadonlyMap<string, Entity>; actionSchemas: ReadonlyMap<string, ActionSchema>;
   participations?: readonly EventParticipation[];
   processTemplates?: ReadonlyMap<string, ProcessTemplate>;
+  acquisitions?: EntryAgencyCatalog["acquisitions"];
 }): ValidationIssue[] {
   const issues: ValidationIssue[] = [], seen = new Set<string>(), entries = new Set<string>(), recoveries = new Set<string>();
   for (const binding of bindings) {
@@ -62,8 +64,11 @@ export function validateEventExecutions(bindings: readonly EventExecution[], cat
       if (entries.has(entryKey)) fail("EVENT_ENTRY_DUPLICATED", `Event ${event.id} has multiple entry bindings for ${binding.actorId}`);
       entries.add(entryKey);
       if (checkpoint.actorId !== binding.actorId) fail("EVENT_ENTRY_ACTOR_MISMATCH", "The entry checkpoint must belong to the binding's character");
-      if (!event.participantPresence?.some((presence) => presence.entityId === binding.actorId && presence.mode === "physical")
-        && !catalog.participations?.some((participation) => participation.eventId === event.id && participation.entityId === binding.actorId && participation.presence === "physical")) fail("EVENT_ENTRY_PRESENCE_UNPROVEN", "The character entry must precede an actual embodied occurrence");
+      const entryMode = checkpoint.participantPresence.find(item => item.entityId === binding.actorId)?.mode;
+      if (!event.participantPresence?.some((presence) => presence.entityId === binding.actorId && presence.mode === entryMode)
+        && !catalog.participations?.some((participation) => participation.eventId === event.id && participation.entityId === binding.actorId && participation.presence === entryMode)) fail("EVENT_ENTRY_PRESENCE_UNPROVEN", "The character entry requires matching bodily or remote participation in this occurrence");
+      issues.push(...remoteEntryOccurrenceIssues(binding.actorId, checkpoint, event, catalog.participations));
+      issues.push(...entryAgencyIssues(binding.actorId, checkpoint, { ...catalog, sourceId: [...sources][0] }).map(issue => ({ ...issue, path: `${path}/entryCheckpoint/${issue.path}` })));
       for (const presence of checkpoint.participantPresence) if (!event.participants.includes(presence.entityId) || catalog.entities.get(presence.entityId)?.kind !== "character") fail("EVENT_ENTRY_PRESENCE_INVALID", `Checkpoint presence ${presence.entityId} is not a participating character`);
     }
   }

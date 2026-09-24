@@ -1,3 +1,5 @@
+import { entryArtifactEvidenceIssues, remoteEntryOccurrenceIssues } from "../world/entry-agency.js";
+import { entryAgencyIssues, playableEntryActorIds } from "../world/entry-agency.js";
 import { validateIdentityName } from "../world/actor-recognition.js";
 import { validateProcessRecoveryEvidence } from "../world/event-execution.js";
 import { validateIncapacityEvidence } from "../world/process-capacity.js";
@@ -8,6 +10,8 @@ import { perceptionObservationSchema, validatePerceptionObservation, validatePer
 import { validateAttributionExpressions, validateExpressionAcquisition } from "../world/utterance-expression.js";
 import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.js";
 import { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
+import { validateGoalExpressions, validateGoalExpressionEvidence } from "../world/conditional-expression.js";
+import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
 import { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { applyEventExecutions, eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import type { z } from "zod";
@@ -237,11 +241,13 @@ export class CompilerValidator {
     if (kind === "acquisition") errors.push(...validateAcquisition(acquisitionSchema.parse(payload), catalog));
     for (const located of findKnowledgeDeltas(payload)) for (const operation of located.delta.operations) errors.push(...validateAcquisitionOperation(operation, catalog, undefined, kind === "canonical-event" ? canonicalEventSchema.parse(payload).id : undefined));
     if (kind === "utterance-expression") errors.push(...validateUtteranceExpression(utteranceExpressionSchema.parse(payload), catalog));
+    if (kind === "character-goal") errors.push(...validateGoalExpressions(characterGoalSchema.parse(payload), catalog));
     if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors);
+    if (kind === "entity") errors.push(...validateAgencyProfile(entitySchema.parse(payload), catalog));
     if (kind === "proposition") this.validateProposition(propositionSchema.parse(payload), entities, propositions, events, errors);
     if (kind === "attribution") this.validateAttribution(attributionSchema.parse(payload), entities, propositions, attributions, errors);
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
-    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, propositions, attributions, claims, events, eventFrames, actionSchemas, rules, errors);
+    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, propositions, attributions, claims, events, eventFrames, actionSchemas, rules, errors, catalog);
     if (kind === "event-participation") this.validateEventParticipation(eventParticipationSchema.parse(payload), entities, events, eventParticipations, errors);
     if (kind === "event-relation") {
       const relation = eventRelationSchema.parse(payload);
@@ -269,7 +275,7 @@ export class CompilerValidator {
     if (kind === "event-execution") {
       const binding = eventExecutionSchema.parse(payload);
       const bindings = new Map(catalog.eventExecutions ?? []).set(binding.id, binding);
-      errors.push(...validateEventExecutions([...bindings.values()], { entities, events, actionSchemas, processTemplates: catalog.processTemplates, participations: [...eventParticipations.values()] }));
+      errors.push(...validateEventExecutions([...bindings.values()], { entities, events, actionSchemas, acquisitions: catalog.acquisitions, processTemplates: catalog.processTemplates, participations: [...eventParticipations.values()] }));
       const occurrence = events.get(binding.canonicalEventId);
       if (occurrence && binding.entryCheckpoint) {
         const checkpoint = binding.entryCheckpoint, seed = checkpoint.projectionSeed;
@@ -286,7 +292,7 @@ export class CompilerValidator {
               ...(attribution?.holderKind === "character" && attribution.holderEntityId ? { speaker: attribution.holderEntityId } : {}) });
           }
         }
-        this.validateEvent(applyEventExecutions([occurrence], [binding])[0]!, entities, entryPropositions, entryAttributions, entryClaims, events, eventFrames, actionSchemas, rules, errors);
+        this.validateEvent(applyEventExecutions([occurrence], [binding])[0]!, entities, entryPropositions, entryAttributions, entryClaims, events, eventFrames, actionSchemas, rules, errors, catalog);
         for (const operation of seed.processes.operations) if (operation.op === "start-process" && !catalog.processTemplates.has(operation.process.templateId)) errors.push(issue("UNKNOWN_ENTRY_PROCESS_TEMPLATE", `Unknown process template ${operation.process.templateId}`, "entryCheckpoint.projectionSeed.processes"));
         for (const operation of seed.norms.operations) if (operation.op === "instantiate-norm" && !catalog.normTemplates.has(operation.norm.templateId)) errors.push(issue("UNKNOWN_ENTRY_NORM_TEMPLATE", `Unknown norm template ${operation.norm.templateId}`, "entryCheckpoint.projectionSeed.norms"));
         for (const id of seed.activeRuleIds) if (!rules.has(id)) errors.push(issue("UNKNOWN_ENTRY_RULE", `Unknown world rule ${id}`, "entryCheckpoint.projectionSeed.activeRuleIds"));
@@ -358,7 +364,7 @@ export class CompilerValidator {
         rules: prospectiveRules,
       }));
     }
-    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
+    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors, catalog);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, propositions, claims, events, rules, goals, errors);
     return { accepted: errors.length === 0, errors, warnings };
@@ -454,6 +460,7 @@ export class CompilerValidator {
     actionSchemas: ReadonlyMap<string, ActionSchema>,
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
+    catalog: CompilerValidationCatalog,
   ): void {
     if (!event.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event ${event.id} has no source evidence`, "evidence"));
     if (event.observedOutcome.operations.length > 16) {
@@ -549,6 +556,8 @@ export class CompilerValidator {
         errors.push(issue("DUPLICATE_CHARACTER_ENTRY", `Event ${event.id} has multiple entry checkpoints for ${checkpoint.actorId}`, `${prefix}.actorId`));
       }
       entryActors.add(checkpoint.actorId);
+      errors.push(...entryAgencyIssues(checkpoint.actorId, checkpoint, { ...catalog, sourceId: event.evidence[0]?.span.sourceId }).map(issue => ({ ...issue, path: `${prefix}.${issue.path}` })));
+      errors.push(...remoteEntryOccurrenceIssues(checkpoint.actorId, checkpoint, event, catalog.eventParticipations.values()).map(issue => ({ ...issue, path: `${prefix}.${issue.path}` })));
       if (!checkpoint.projectionSeed && checkpoint.delta.operations.length > 16) {
         errors.push(issue("OVERSIZED_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} contains more than 16 state operations`, `${prefix}.delta.operations`));
       }
@@ -640,6 +649,7 @@ export class CompilerValidator {
     events: ReadonlyMap<string, CanonicalEvent>,
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
+    catalog: CompilerValidationCatalog,
   ): void {
     if (!initial.evidence.length) errors.push(issue("MISSING_EVIDENCE", "Initial world has no source evidence", "evidence"));
     if (initial.checkpoint?.beforeCanonicalEventId && !events.has(initial.checkpoint.beforeCanonicalEventId)) {
@@ -662,7 +672,7 @@ export class CompilerValidator {
     const representedCharacters = new Set<string>();
     const explicitlyDead = new Set<string>();
     const openingPresenceIds = new Set<string>();
-    const physicalOpeningIds = new Set<string>();
+    const playableOpeningIds = playableEntryActorIds(initial, catalog);
     for (let index = 0; index < (initial.participantPresence?.length ?? 0); index += 1) {
       const presence = initial.participantPresence![index]!;
       const entity = entities.get(presence.entityId);
@@ -673,7 +683,7 @@ export class CompilerValidator {
         errors.push(issue("DUPLICATE_OPENING_PRESENCE", `Opening presence ${presence.entityId} is duplicated`, `participantPresence.${index}.entityId`));
       }
       openingPresenceIds.add(presence.entityId);
-      if (presence.mode === "physical") physicalOpeningIds.add(presence.entityId);
+      if (presence.mode === "physical") errors.push(...entryAgencyIssues(presence.entityId, initial, catalog));
     }
     const observationActorIds = new Set<string>();
     for (let index = 0; index < (initial.actorObservations?.length ?? 0); index += 1) {
@@ -694,10 +704,10 @@ export class CompilerValidator {
         ));
       }
       observationActorIds.add(observation.actorId);
-      if (!physicalOpeningIds.has(observation.actorId)) {
+      if (!playableOpeningIds.has(observation.actorId)) {
         errors.push(issue(
           "OPENING_OBSERVER_NOT_PHYSICAL",
-          `Opening observer ${observation.actorId} must be physically present at the checkpoint`,
+          `Opening observer ${observation.actorId} must have grounded bodily presence or a live entry channel at the checkpoint`,
           `actorObservations.${index}.actorId`,
         ));
       }
@@ -711,10 +721,10 @@ export class CompilerValidator {
           "readerContext.focalActorId",
         ));
       }
-      if (!physicalOpeningIds.has(initial.readerContext.focalActorId)) {
+      if (!playableOpeningIds.has(initial.readerContext.focalActorId)) {
         errors.push(issue(
           "OPENING_FOCAL_ACTOR_NOT_PHYSICAL",
-          `Opening reader focal actor ${initial.readerContext.focalActorId} must be physically present`,
+          `Opening reader focal actor ${initial.readerContext.focalActorId} must have grounded bodily presence or a live entry channel`,
           "readerContext.focalActorId",
         ));
       }
@@ -793,7 +803,7 @@ export class CompilerValidator {
           ));
         }
       }
-      for (const actorId of physicalOpeningIds) {
+      for (const actorId of playableOpeningIds) {
         if (!observationActorIds.has(actorId)) {
           errors.push(issue(
             "MISSING_OPENING_ACTOR_OBSERVATION",
@@ -833,21 +843,21 @@ export class CompilerValidator {
     const actionableOpening = initial.delta.operations.some((operation) =>
       "entityId" in operation
       && sourceCharacterIds.includes(operation.entityId)
-      && physicalOpeningIds.has(operation.entityId)
+      && playableOpeningIds.has(operation.entityId)
       && !explicitlyDead.has(operation.entityId)
       && ["character.location", "character.plan", "character.momentum"].includes(operation.field)
       && (operation.op !== "set" || operation.value !== null));
-    if (sourceCharacterIds.length > 1 && !physicalOpeningIds.size) {
+    if (sourceCharacterIds.length > 1 && !playableOpeningIds.size) {
       errors.push(issue(
         "MISSING_OPENING_PRESENCE",
-        "A multi-character source must explicitly identify at least one physically present opening role; identity, mention, or alive state is not presence.",
+        "A multi-character source must explicitly identify at least one bodily or channel-grounded opening role; identity, mention, or alive state is not presence.",
         "participantPresence",
       ));
     }
     if (sourceCharacterIds.length > 1 && !actionableOpening) {
       errors.push(issue(
         "INACTIONABLE_INITIAL_WORLD",
-        "A multi-character source must establish a bodily present opening role through a grounded location, plan, or momentum; a bare alive inventory cannot create a playable scene.",
+        "A multi-character source must establish a bodily or channel-grounded opening role through a grounded location, plan, or momentum; a bare alive inventory cannot create a playable scene.",
         "delta.operations",
       ));
     }
@@ -907,6 +917,7 @@ export class CompilerValidator {
       ...(goal.actionPatterns ?? []).map((value, index) => ({ path: `actionPatterns.${index}`, value })),
     ];
     for (const { path, value } of actions) {
+      for (const candidate of value.expressionCandidates ?? []) candidate.relationshipConditions.forEach(predicate => this.validatePredicate(predicate, entities, rules, errors));
       for (let index = 0; index < (value.participants?.length ?? 0); index += 1) {
         const participant = value.participants![index]!;
         if (!entities.has(participant)) errors.push(issue("UNKNOWN_GOAL_PARTICIPANT", `Unknown goal participant ${participant}`, `${path}.participants.${index}`));
@@ -1612,7 +1623,7 @@ export class CompilerCommitService {
       ? validateEntityNameEvidence(entitySchema.parse(payload), inspected.excerpts)
       : [];
     const artifactId = compilerProposalArtifactId(kind, payload, proposalId);
-    const targetIssues = [...(kind === "event-execution" ? validateProcessRecoveryEvidence(eventExecutionSchema.parse(payload), evidenceAssertions) : []), ...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : [])];
+    const targetIssues = [...entryArtifactEvidenceIssues(kind, payload, evidenceAssertions), ...(kind === "event-execution" ? validateProcessRecoveryEvidence(eventExecutionSchema.parse(payload), evidenceAssertions) : []), ...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : [])];
     const characterEvidenceIssues = kind === "character-model"
       ? [
           ...validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
@@ -1621,7 +1632,8 @@ export class CompilerCommitService {
       : [];
     const acquisitionEvidenceIssues = kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : [];
     const perceptionEvidenceIssues = kind === "perception-observation" ? [...validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions), ...await validatePerceptionObservationTrace(this.workspaceRoot, perceptionObservationSchema.parse(payload))] : [];
-    const expressionEvidenceIssues = kind === "utterance-expression" ? [...validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions), ...await validateUtteranceExpressionTrace(this.workspaceRoot, utteranceExpressionSchema.parse(payload))] : [];
+    const expressionEvidenceIssues = kind === "utterance-expression" ? [...validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions), ...await validateUtteranceExpressionTrace(this.workspaceRoot, utteranceExpressionSchema.parse(payload))] : kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(payload), evidenceAssertions) : [];
+    expressionEvidenceIssues.push(...(kind === "entity" ? validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions) : []));
     const semanticEvidenceIssues = kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : [];
     const spatialEvidenceIssues = kind === "spatial-relation"
       ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)

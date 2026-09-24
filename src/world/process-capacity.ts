@@ -18,10 +18,10 @@ export function lacksCapacity(actorId: string, capacity: "action" | "speech" | "
       && instance.ownerBindings.some(binding => binding.roleId === condition.ownerRoleId && binding.entityIds.includes(actorId));
   });
 }
-export function capacityUseIssues(input: Pick<EventProposal, "actorId" | "spokenUtterances" | "action"> & { knowledge?: KnowledgeDelta }, before: ProcessState, after: ProcessState,
+export function capacityUseIssues(input: Pick<EventProposal, "actorId" | "spokenUtterances" | "writtenMessages" | "action"> & { knowledge?: KnowledgeDelta }, before: ProcessState, after: ProcessState,
   templates: ReadonlyMap<string, ProcessTemplate>, perceptions: ReadonlyMap<string, PerceptionObservation> = new Map(), actions: ReadonlyMap<string, ActionSchema> = new Map()): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const actors = new Set(input.actorId ? [input.actorId] : []);
+  const actors = new Set([...(input.actorId ? [input.actorId] : []), ...(input.writtenMessages ?? []).map(message => message.authorId)]);
   if (input.action?.lane === "schema-bound") {
     const roleId = actions.get(input.action.schemaId)?.initiatorRoleId;
     for (const actorId of input.action.roleBindings.find(role => role.roleId === roleId)?.entityIds ?? []) actors.add(actorId);

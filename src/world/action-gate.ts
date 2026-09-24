@@ -20,8 +20,17 @@ export type ActionGateReport = {
 
 export async function validateActionKnowledge(engine: WorldEngine, input: KnowledgeAwareAction): Promise<ActionGateReport> {
   const action = knowledgeAwareActionSchema.parse(input);
+  return checkActionKnowledge(engine, action, await engine.branches.readHead(action.proposal.branchId));
+}
+
+/** Read-only knowledge gate at the proposal's immutable cut; commitment still checks the live head. */
+export async function validateActionKnowledgeAtCommit(engine: WorldEngine, input: KnowledgeAwareAction): Promise<ActionGateReport> {
+  const action = knowledgeAwareActionSchema.parse(input);
+  return checkActionKnowledge(engine, action, action.proposal.expectedParentCommit);
+}
+
+async function checkActionKnowledge(engine: WorldEngine, action: KnowledgeAwareAction, head: CommitId): Promise<ActionGateReport> {
   const proposal = action.proposal;
-  const head = await engine.branches.readHead(proposal.branchId);
   const errors: ValidationIssue[] = [];
   if (proposal.expectedParentCommit !== head) {
     errors.push({ code: "STALE_PARENT", message: `Expected ${proposal.expectedParentCommit}, current head is ${head}` });

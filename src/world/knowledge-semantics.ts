@@ -127,10 +127,16 @@ export function validateKnowledgeSemanticReferences(
       ));
     }
   }
-  if (operation.acquisitionMode === "read" && attribution.holderKind !== "document") {
+  const branchReceipt = operation.acquisitionId ? catalog.branchSemantics?.acquisitions?.[operation.acquisitionId] : undefined;
+  const messageReceipt = branchReceipt?.basis.mode === "read" && "messageEventId" in branchReceipt.basis
+    && branchReceipt.actorId === operation.actorId && branchReceipt.claimId === operation.claimId && branchReceipt.propositionId === operation.propositionId
+    && branchReceipt.basis.attributionId === operation.attributionId;
+  if (operation.acquisitionMode === "read" && (messageReceipt
+    ? attribution.holderKind !== "character" || attribution.attitude !== "asserts"
+    : attribution.holderKind !== "document")) {
     errors.push(issue(
       "READ_SOURCE_ATTRIBUTION_MISMATCH",
-      `Read acquisition requires a document attribution; ${attribution.id} has holder kind ${attribution.holderKind}`,
+      `Read acquisition requires its typed document or branch-message author attribution; ${attribution.id} has holder kind ${attribution.holderKind}`,
       `${path}.attributionId`,
     ));
   }

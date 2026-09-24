@@ -1,9 +1,12 @@
+import { entryArtifactEvidenceIssues } from "../world/entry-agency.js";
 import { validateIncapacityEvidence } from "../world/process-capacity.js";
 import { acquisitionSchema, validateAcquisitionEvidence, type Acquisition } from "../world/acquisition.js";
 import { validatePerceptionObservationTrace } from "./perception-observation-trace.js";
 import { perceptionObservationSchema, validatePerceptionObservationEvidence } from "../world/perception-observation.js";
 import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.js";
 import { utteranceExpressionSchema, validateUtteranceExpressionEvidence } from "../world/utterance-expression.js";
+import { validateGoalExpressionEvidence } from "../world/conditional-expression.js";
+import { validateAgencyProfileEvidence } from "../world/agency-profile.js";
 import { semanticEffectSchema, validateSemanticEffectEvidence } from "../world/semantic-effect.js";
 import { upstreamRepairCheckpointSchema, captureUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointState, assertUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointRestorable, restoreUpstreamRepairCheckpoint, type UpstreamRepairCheckpoint } from "./upstream-repair-checkpoint.js";
 import { UpstreamRepairLedger, upstreamRepairJournalSchema, type UpstreamRepairRecord } from "./upstream-repair-ledger.js";
@@ -1597,7 +1600,7 @@ async function assertPreparedInitialWorldEvidence(
   bundle: PreparedNovelBundle,
 ): Promise<void> {
   const initialWorld = bundle.canonical.initialWorld;
-  if (!initialWorld.readerContext && !initialWorld.actorObservations?.length) return;
+  if (!initialWorld.readerContext && !initialWorld.actorObservations?.length && !(initialWorld.projectionSeed && initialWorld.participantPresence?.some(item => item.mode === "remote"))) return;
   const snapshotBinding = bundle.compilerSnapshot.evidenceBindings.find((candidate) =>
     candidate.artifactKind === "initial-world" && candidate.artifactId === "initial-world");
   const binding = snapshotBinding
@@ -1650,6 +1653,23 @@ async function assertPreparedCompilerSnapshotEvidence(
         resolutions: new Map(bundle.compilerSnapshot.entityResolutions.map(item => [item.mentionId, item])),
       })];
     if (!binding || binding.artifactHash !== contentHash(expression) || issues.length) throw new Error(`Utterance expression exact evidence is incomplete or stale: ${expression.id}: ${issues.map(item => item.message).join("; ")}`);
+  }
+  for (const goal of bundle.canonical.goals) {
+    if (![goal.candidateAction, ...(goal.actionPatterns ?? [])].some(action => action?.expressionCandidates?.length)) continue;
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "character-goal" && item.artifactId === goal.id);
+    const issues = validateGoalExpressionEvidence(goal, binding?.assertions ?? []);
+    if (!binding || binding.artifactHash !== contentHash(goal) || issues.length) throw new Error(`Conditional expression goal evidence is incomplete or stale: ${goal.id}`);
+  }
+  for (const entity of bundle.canonical.entities) {
+    if (!entity.agencyProfile) continue;
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "entity" && item.artifactId === entity.id);
+    if (!binding || binding.artifactHash !== contentHash(entity) || validateAgencyProfileEvidence(entity, binding.assertions).length) throw new Error(`Agency profile exact evidence is incomplete or stale: ${entity.id}`);
+  }
+  for (const [kind, artifacts] of [["canonical-event", bundle.canonical.events], ["event-execution", bundle.canonical.eventExecutions ?? []]] as const) for (const artifact of artifacts) {
+    // Empty assertions identify artifacts requiring remote-entry bindings.
+    if (!entryArtifactEvidenceIssues(kind, artifact, []).length) continue;
+    const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === kind && item.artifactId === artifact.id);
+    if (!binding || binding.artifactHash !== contentHash(artifact) || entryArtifactEvidenceIssues(kind, artifact, binding.assertions).length) throw new Error(`Remote entry exact evidence is incomplete or stale: ${artifact.id}`);
   }
   for (const execution of bundle.canonical.eventExecutions ?? []) if (execution.processRecoveries?.length) {
     const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "event-execution" && item.artifactId === execution.id);

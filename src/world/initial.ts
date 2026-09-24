@@ -1,3 +1,4 @@
+import { remoteEntryEvidenceIssues } from "./entry-agency.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -197,7 +198,7 @@ export const initialWorldSchema = z
     readerSetup: z.string().trim().min(1).max(2000).optional(),
     /** Structured presentation authority. It never becomes actor knowledge or branch state. */
     readerContext: openingReaderContextSchema.optional(),
-    /** Character appearance mode at the opening checkpoint; only physical roles are playable there. */
+    /** Character appearance mode at the opening checkpoint; playable roles need bodily presence or verified live entry channels. */
     participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     /** Direct checkpoint perception copied into the committed Genesis event. */
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
@@ -222,9 +223,10 @@ export function validateInitialWorldEvidenceAssertions(
   initial: InitialWorld,
   assertions: readonly EvidenceAssertion[],
 ): ValidationIssue[] {
-  if (!initial.readerContext && !initial.actorObservations?.length) return [];
+  const entryIssues = remoteEntryEvidenceIssues(initial, assertions);
+  if (!initial.readerContext && !initial.actorObservations?.length) return entryIssues;
   const supported = exactSupportPaths(assertions);
-  const issues: ValidationIssue[] = [];
+  const issues: ValidationIssue[] = [...entryIssues];
   const requirePath = (path: string) => {
     if (!supported.has(path)) {
       issues.push({

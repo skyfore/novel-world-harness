@@ -1,3 +1,7 @@
+import { committedTextDeliveries } from "./text-delivery.js";
+import { committedSpeechDeliveries } from "./speech-delivery.js";
+import { entryAgencyIssues } from "./entry-agency.js";
+import { branchAcquisitionPairingIssues, hasBranchAcquisitionContract, validateBranchAcquisitionOperation } from "./branch-acquisition.js";
 import { replayEntryKnowledge } from "./entry-knowledge.js";
 import type { InitialWorld } from "./initial.js";
 import type { EventExecution } from "./event-execution.js";
@@ -13,6 +17,8 @@ import { emptyBranchSemanticState } from "./semantic-effects.js";
 import { emptyProcessState } from "./process-effects.js";
 import { emptyNormState } from "./norm-effects.js";
 import { validateActorOutcomeOwnership } from "./actor-outcome.js";
+import { validateConditionalUtterances } from "./conditional-expression.js";
+import { validateAgencyProfile, validateAgencyUse } from "./agency-profile.js";
 import { contentHash } from "./canonical.js";
 import type { CharacterGoal, CharacterModel } from "./actors.js";
 import {
@@ -98,7 +104,7 @@ import type { ProcessTemplate } from "./process-ontology.js";
 import { materializeProcessProposal, validateProcessTemplateCatalog } from "./process-ontology.js";
 import { validateActorProcessDelta } from "./process-authority.js";
 import { mechanismIsDisclosed } from "./mechanism-visibility.js";
-import { applyProcessDelta } from "./process-effects.js";
+import { applyProcessDelta, type ProcessState } from "./process-effects.js";
 import { deriveAutomaticNormDelta, materializeNormProposal, validateNormTemplateCatalog } from "./norm-ontology.js";
 import { applyNormDelta } from "./norm-effects.js";
 import {
@@ -185,6 +191,7 @@ function hasNonStateMateriality(proposal: EventProposal, timeChanged: boolean): 
     || Boolean(proposal.proposedProcesses?.operations.length)
     || Boolean(proposal.proposedNorms?.operations.length)
     || Boolean(proposal.spokenUtterances?.length)
+    || Boolean(proposal.writtenMessages?.length)
     || Boolean(proposal.progress?.scene);
 }
 
@@ -193,7 +200,7 @@ export function validateEventProposal(
   head: CommitId,
   state: WorldState,
   context: WorldModelContext,
-  options: { knowledge?: KnowledgeState; branchSemantics?: BranchSemanticState; deferMateriality?: boolean; realizedCanonicalEventIds?: ReadonlySet<string> } = {},
+  options: { knowledge?: KnowledgeState; processes?: ProcessState; committedSpeech?: ReturnType<typeof committedSpeechDeliveries>; committedText?: ReturnType<typeof committedTextDeliveries>; branchSemantics?: BranchSemanticState; deferMateriality?: boolean; realizedCanonicalEventIds?: ReadonlySet<string> } = {},
 ): { report: ValidationReport; postState?: WorldState } {
   const proposal = normalizeActorProposal(eventProposalSchema.parse(proposalInput));
   const errors: ValidationIssue[] = [];
@@ -383,8 +390,17 @@ export function validateEventProposal(
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
       postState = applyStateDelta(evaluationState, delta, context.stateSchema, context.entities, context.rules);
-      for (const operation of proposal.proposedKnowledge?.operations ?? []) errors.push(...validateAcquisitionOperation(operation, acquisitionCatalog(context), { knowledge: options.knowledge ?? emptyKnowledgeState(state.atCommit), currentEventIds: realized, realizedEventIds: new Set([...(options.realizedCanonicalEventIds ?? []), ...realized]) }));
-      for (const operation of proposal.proposedKnowledge?.operations ?? []) errors.push(...validatePerceptionAcquisition(operation, { observations: context.perceptionObservations ?? new Map(), propositions: context.propositions ?? new Map() }, { eventIds: realized, before: evaluationState, after: postState, schema: context.stateSchema }));
+      const branchSemantics = options.branchSemantics ?? emptyBranchSemanticState(state.atCommit);
+      const knowledgeContext = { ...context, branchSemantics, committedSpeech: options.committedSpeech, committedText: options.committedText, branchOccurrence: { eventId: "pending-event", processesBefore: options.processes, participants: proposal.participants, participantPresence: proposal.participantPresence, spokenUtterances: proposal.spokenUtterances, before: evaluationState, after: postState },
+        realizedCanonicalEventIds: new Set([...(options.realizedCanonicalEventIds ?? []), ...realized]) };
+      errors.push(...branchAcquisitionPairingIssues(branchSemantics, "pending-event", proposal.proposedKnowledge));
+      for (const operation of proposal.proposedKnowledge?.operations ?? []) {
+        if (hasBranchAcquisitionContract(operation, branchSemantics)) errors.push(...validateBranchAcquisitionOperation(operation, knowledgeContext, options.knowledge ?? emptyKnowledgeState(state.atCommit)));
+        else {
+          errors.push(...validateAcquisitionOperation(operation, acquisitionCatalog(context), { knowledge: options.knowledge ?? emptyKnowledgeState(state.atCommit), currentEventIds: realized, realizedEventIds: knowledgeContext.realizedCanonicalEventIds, occurrence: knowledgeContext.branchOccurrence }));
+          errors.push(...validatePerceptionAcquisition(operation, { observations: context.perceptionObservations ?? new Map(), propositions: context.propositions ?? new Map() }, { eventIds: realized, before: evaluationState, after: postState, schema: context.stateSchema }));
+        }
+      }
       errors.push(...validateEffectObligations({ proposal, before: state, after: postState, effectBaseline: evaluationState, context,
         realizedCanonicalEventIds: options.realizedCanonicalEventIds }));
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
@@ -519,14 +535,6 @@ export class WorldEngine {
     const suppliedPresence = (genesisOptions.participantPresence ?? [])
       .map((presence) => participantPresenceSchema.parse(presence));
     if (suppliedPresence.length > 128) throw new Error("Genesis participant presence exceeds 128 entries.");
-    if (
-      genesisOptions.entryActorId
-      && suppliedPresence.length
-      && !suppliedPresence.some((presence) =>
-        presence.entityId === genesisOptions.entryActorId && presence.mode === "physical")
-    ) {
-      throw new Error(`Genesis entry actor ${genesisOptions.entryActorId} must be physically present at its entry checkpoint.`);
-    }
     const participantPresence = suppliedPresence.length
       ? suppliedPresence
       : genesisOptions.entryActorId
@@ -541,6 +549,10 @@ export class WorldEngine {
       if (presenceIds.has(presence.entityId)) throw new Error(`Genesis presence is duplicated: ${presence.entityId}`);
       presenceIds.add(presence.entityId);
     }
+    if (genesisOptions.entryActorId) {
+      const entryIssues = entryAgencyIssues(genesisOptions.entryActorId, { participantPresence, projectionSeed: completeSeed, knowledge }, this.context);
+      if (entryIssues.length) throw new Error(entryIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+    }
     const actorObservations = (genesisOptions.actorObservations ?? [])
       .map((observation) => actorEventObservationSchema.parse(observation));
     if (actorObservations.length > 128) throw new Error("Genesis actor observations exceed 128 entries.");
@@ -552,6 +564,10 @@ export class WorldEngine {
       }
       if (observationActors.has(observation.actorId)) {
         throw new Error(`Genesis observer is duplicated: ${observation.actorId}`);
+      }
+      if (actor.agencyProfile || participantPresence.some(item => item.entityId === observation.actorId)) {
+        const issues = entryAgencyIssues(observation.actorId, { participantPresence, projectionSeed: completeSeed, knowledge }, this.context);
+        if (issues.length) throw new Error(issues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
       }
       observationActors.add(observation.actorId);
     }
@@ -572,12 +588,14 @@ export class WorldEngine {
       canonicalGoalIds: new Set(this.context.actorGoals?.map((goal) => goal.id) ?? []), canonicalEventIds: new Set(this.context.events?.keys() ?? []),
       knownCommittedEventIds: new Set(),
     }, seedProvenance) : undefined;
+    const genesisSeedProcesses = completeSeed ? applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map(), allowHistoricalStarts: true }, seedProvenance, logicalTime.elapsedDays ?? 0) : emptyProcessState("genesis");
+    const genesisOccurrence = { processesBefore: genesisSeedProcesses, eventId: "genesis", participants: [...new Set([...Object.values(genesisSeedProcesses.instances).flatMap(process => process.ownerBindings.flatMap(binding => binding.entityIds)), ...touchedEntities(initialDelta), ...touchedKnowledgeEntities(knowledge), ...participantPresence.map(item => item.entityId), ...actorObservations.map(item => item.actorId)])], participantPresence, before: initialState, after: initialState };
     if (knowledge && !completeSeed?.knowledgeHistory) applyKnowledgeDelta(emptyKnowledgeState("genesis"), knowledge, "genesis", {
-      entities: this.context.entities, claims: this.context.claims, propositions: this.context.propositions,
-      attributions: this.context.attributions, acquisitions: this.context.acquisitions, utteranceExpressions: this.context.utteranceExpressions, perceptionObservations: this.context.perceptionObservations, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
+      sourceId: this.context.sourceId, processTemplates: this.context.processTemplates, entities: this.context.entities, claims: this.context.claims, propositions: this.context.propositions,
+      attributions: this.context.attributions, acquisitions: this.context.acquisitions, utteranceExpressions: this.context.utteranceExpressions, perceptionObservations: this.context.perceptionObservations, branchOccurrence: genesisOccurrence, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
     });
     if (completeSeed) {
-      const seedProcesses = applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map(), allowHistoricalStarts: true }, seedProvenance, logicalTime.elapsedDays ?? 0);
+      const seedProcesses = genesisSeedProcesses;
       const seedCapacityIssues = capacityUseIssues({ knowledge: completeSeed.knowledgeHistory ? undefined : knowledge }, seedProcesses, seedProcesses, this.context.processTemplates ?? new Map(), this.context.perceptionObservations);
       if (seedCapacityIssues.length) throw new Error(seedCapacityIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
       applyNormDelta(emptyNormState("genesis"), completeSeed.norms, { entities: this.context.entities, templates: this.context.normTemplates ?? new Map(), postState: initialState,
@@ -651,7 +669,7 @@ export class WorldEngine {
       if (genesisOptions.entryActorId && completeSeed.knowledgeHistory.actorId !== genesisOptions.entryActorId) throw new Error("ENTRY_KNOWLEDGE_HISTORY_INVALID: Entry actor does not match historical cut; stop for host review.");
       replayEntryKnowledge(completeSeed.knowledgeHistory, this.context, realizesCanonicalEventIds, knowledge, "genesis");
     }
-    const acquisitionIssues = (completeSeed?.knowledgeHistory ? [] : knowledge?.operations ?? []).flatMap(operation => validateAcquisitionOperation(operation, acquisitionCatalog(this.context), { knowledge: emptyKnowledgeState("genesis"), currentEventIds: new Set(realizesCanonicalEventIds), realizedEventIds: new Set(realizesCanonicalEventIds) }));
+    const acquisitionIssues = (completeSeed?.knowledgeHistory ? [] : knowledge?.operations ?? []).flatMap(operation => validateAcquisitionOperation(operation, acquisitionCatalog(this.context), { knowledge: emptyKnowledgeState("genesis"), currentEventIds: new Set(realizesCanonicalEventIds), realizedEventIds: new Set(realizesCanonicalEventIds), occurrence: genesisOccurrence }));
     if (acquisitionIssues.length) throw new Error(acquisitionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
     const perceptionIssues = (completeSeed?.knowledgeHistory ? [] : knowledge?.operations ?? []).flatMap(operation => validatePerceptionAcquisition(operation, { observations: this.context.perceptionObservations ?? new Map(), propositions: this.context.propositions ?? new Map() }, { eventIds: new Set(realizesCanonicalEventIds), before: initialState, after: initialState, schema: this.context.stateSchema }));
     if (perceptionIssues.length) throw new Error(perceptionIssues.map(item => `${item.code}: ${item.message}`).join("; "));
@@ -672,6 +690,7 @@ export class WorldEngine {
       actorObservations,
     });
     const participants = [...new Set([
+      ...Object.values(genesisSeedProcesses.instances).flatMap(process => process.ownerBindings.flatMap(binding => binding.entityIds)),
       ...touchedEntities(initialDelta),
       ...touchedKnowledgeEntities(knowledge),
       ...participantPresence.map((presence) => presence.entityId),
@@ -684,6 +703,7 @@ export class WorldEngine {
       branchId,
       logicalTime,
       title: "Genesis",
+      ...(genesisOptions.entryActorId ? { entryActorId: genesisOptions.entryActorId } : {}),
       ...(completeSeed?.knowledgeHistory ? { entryKnowledgeHistory: completeSeed.knowledgeHistory } : {}),
       ...(actorObservations.length ? { actorObservations } : {}),
       participants,
@@ -714,14 +734,20 @@ export class WorldEngine {
     return this.evaluateProposal(proposal, false);
   }
 
+  /** Read-only affordance validation at an immutable cut, including an ancestor of a fork. */
+  async previewProposalAtCommit(proposal: EventProposal): Promise<CommitProposalResult> {
+    return this.evaluateProposal(proposal, false, proposal.expectedParentCommit);
+  }
+
   async commitProposal(proposal: EventProposal): Promise<CommitProposalResult> {
     return this.evaluateProposal(proposal, true);
   }
 
-  private async evaluateProposal(proposal: EventProposal, persist: boolean): Promise<CommitProposalResult> {
+  private async evaluateProposal(proposal: EventProposal, persist: boolean, previewHead?: CommitId): Promise<CommitProposalResult> {
+    if (persist && previewHead) throw new Error("Historical previews cannot commit; validate against the live branch head.");
     let parsed = normalizeActorProposal(eventProposalSchema.parse(proposal));
     const branch = await this.branches.read(parsed.branchId);
-    const head = branch.headCommitId;
+    const head = previewHead ?? branch.headCommitId;
     const context = await this.contextForCommit(head);
     if (branch.sourceId && context.sourceId && branch.sourceId !== context.sourceId) {
       throw new Error(`Branch source '${branch.sourceId}' does not match committed context '${context.sourceId}'.`);
@@ -745,6 +771,8 @@ export class WorldEngine {
     const onsets = incapacityOnsets(context.semanticEffects?.values() ?? [], realizedForCapacity, context.processTemplates ?? new Map());
     if (onsets.length) parsed = eventProposalSchema.parse({ ...parsed, proposedProcesses: { version: 1, operations: [...(parsed.proposedProcesses?.operations ?? []), ...onsets.filter(onset => onset.op !== "start-process" || !(parsed.proposedProcesses?.operations ?? []).some(operation => operation.op === "start-process" && operation.process.templateId === onset.process.templateId && contentHash(operation.process.ownerBindings) === contentHash(onset.process.ownerBindings)))] } });
     const recoveryErrors: ValidationIssue[] = [];
+    recoveryErrors.push(...validateAgencyUse(parsed, parsed.proposedDelta, context, projection.processes, projection.knowledge));
+    recoveryErrors.push(...validateConditionalUtterances(parsed, context, projection));
     try {
       const recoveries = incapacityRecoveries(context.eventExecutions?.values() ?? [], realizedForCapacity, projection.processes, context.processTemplates ?? new Map(), parsed.action);
       if (recoveries.length) parsed = eventProposalSchema.parse({ ...parsed, proposedProcesses: { version: 1, operations: [...(parsed.proposedProcesses?.operations ?? []), ...recoveries.filter(operation => !(parsed.proposedProcesses?.operations ?? []).some(existing => contentHash(existing) === contentHash(operation)))] } });
@@ -801,7 +829,8 @@ export class WorldEngine {
           canonicalEventIds: context.events ? new Set(context.events.keys()) : undefined,
           knownCommittedEventIds: new Set(Object.keys(projection.causality.events)),
         }, provisionalProvenance);
-        if (parsed.proposedKnowledge) {
+        if (parsed.proposedKnowledge && !semanticDelta.operations.some(op => op.op === "record-acquisition")
+          && !parsed.proposedKnowledge.operations.some(op => op.op === "learn" && op.acquisitionId && context.acquisitions?.get(op.acquisitionId)?.basis.mode === "read")) {
           applyKnowledgeDelta(projection.knowledge, parsed.proposedKnowledge, head, {
             entities: context.entities,
             claims: context.claims,
@@ -824,6 +853,9 @@ export class WorldEngine {
     const { report: baseReport, postState } = validateEventProposal(parsed, head, state, context, {
       branchSemantics: stagedSemantics,
       knowledge: projection.knowledge,
+      processes: projection.processes,
+      committedSpeech: committedSpeechDeliveries(projection.history),
+      committedText: committedTextDeliveries(projection.history),
       deferMateriality: true,
       realizedCanonicalEventIds: new Set(projection.history.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? [])),
     });
@@ -1068,7 +1100,7 @@ export class WorldEngine {
       ? effectiveStateOperationIndexes(stateBeforeDelta, parsed.proposedDelta, context)
       : [];
     const effectiveKnowledgeIndexes = parsed.proposedKnowledge
-      ? effectiveKnowledgeOperationIndexes(projection.knowledge, parsed.proposedKnowledge, context.acquisitions)
+      ? effectiveKnowledgeOperationIndexes(projection.knowledge, parsed.proposedKnowledge, context.acquisitions, stagedSemantics)
       : [];
     const timeAdvanced = (postState.logicalTime.elapsedDays ?? 0) > (state.logicalTime.elapsedDays ?? 0)
       || JSON.stringify(postState.logicalTime.storyTime) !== JSON.stringify(state.logicalTime.storyTime);
@@ -1078,6 +1110,7 @@ export class WorldEngine {
       || Boolean(processDelta?.operations.length)
       || Boolean(normDelta?.operations.length)
       || Boolean(parsed.spokenUtterances?.length)
+      || Boolean(parsed.writtenMessages?.length)
       || Boolean(parsed.progress?.scene)
       || timeAdvanced;
     if (!hasMaterialCandidate) {
@@ -1128,6 +1161,7 @@ export class WorldEngine {
       effectiveStateOperationIndexes: effectiveStateIndexes,
       effectiveKnowledgeOperationIndexes: effectiveKnowledgeIndexes,
       utteranceCount: parsed.spokenUtterances?.length ?? 0,
+      messageCount: parsed.writtenMessages?.length ?? 0,
       timeAdvanced,
       ...(parsed.progress?.scene ? { sceneTransition: parsed.progress.scene } : {}),
     });
@@ -1157,6 +1191,7 @@ export class WorldEngine {
       actorObservations: parsed.actorObservations,
       actorAffects: parsed.actorAffects,
       spokenUtterances: parsed.spokenUtterances,
+      writtenMessages: parsed.writtenMessages,
       action: parsed.action,
       causalRelationProposals,
     });
@@ -1177,6 +1212,7 @@ export class WorldEngine {
       ...(parsed.actorObservations ? { actorObservations: structuredClone(parsed.actorObservations) } : {}),
       ...(parsed.actorAffects ? { actorAffects: structuredClone(parsed.actorAffects) } : {}),
       ...(parsed.spokenUtterances ? { spokenUtterances: structuredClone(parsed.spokenUtterances) } : {}),
+      ...(parsed.writtenMessages ? { writtenMessages: structuredClone(parsed.writtenMessages) } : {}),
       participants: parsed.participants,
       ...(parsed.participantPresence ? { participantPresence: structuredClone(parsed.participantPresence) } : {}),
       effects,
@@ -1360,7 +1396,7 @@ function effectiveStateOperationIndexes(
   return stateFactsChanged(input, current) ? effective : [];
 }
 
-function effectiveKnowledgeOperationIndexes(input: KnowledgeState, delta: KnowledgeDelta, acquisitions?: ReadonlyMap<string, Acquisition>): number[] {
+function effectiveKnowledgeOperationIndexes(input: KnowledgeState, delta: KnowledgeDelta, acquisitions?: ReadonlyMap<string, Acquisition>, semantics?: BranchSemanticState): number[] {
   const actors = structuredClone(input.actors);
   const before = knowledgeFactsHash(actors);
   const effective: number[] = [];
@@ -1381,7 +1417,7 @@ function effectiveKnowledgeOperationIndexes(input: KnowledgeState, delta: Knowle
       ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
       ...(operation.expressionId ? { expressionId: operation.expressionId } : {}),
       ...(operation.perceptionId ? { perceptionId: operation.perceptionId } : {}),
-      ...(operation.acquisitionId ? { acquisitionId: operation.acquisitionId, reception: acquisitions?.get(operation.acquisitionId)?.reception } : {}),
+      ...(operation.acquisitionId ? { acquisitionId: operation.acquisitionId, reception: semantics?.acquisitions?.[operation.acquisitionId]?.reception ?? acquisitions?.get(operation.acquisitionId)?.reception } : {}),
       ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
       status: operation.status,
       confidence: operation.confidence,
@@ -1410,6 +1446,7 @@ function withoutAcquisitionCommit<T extends { acquiredAtCommit?: string }>(fact:
 
 function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
   const ontologyIssues = [
+    ...[...context.entities.values()].flatMap(entity => validateAgencyProfile(entity, context)),
     ...[...(context.acquisitions?.values() ?? [])].flatMap(value => validateAcquisition(value, acquisitionCatalog(context))),
     ...[...(context.perceptionObservations?.values() ?? [])].flatMap(observation => validatePerceptionObservation(observation, { entities: context.entities, events: context.events ?? new Map() })),
     ...[...(context.utteranceExpressions?.values() ?? [])].flatMap(expression => validateUtteranceExpression(expression, { entities: context.entities, events: context.events ?? new Map(), propositions: context.propositions ?? new Map() })),

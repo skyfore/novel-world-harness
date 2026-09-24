@@ -362,7 +362,7 @@ export class WorldContextStore {
     const utteranceExpressions = await Promise.all((snapshot.utteranceExpressions ?? []).map(ref => this.canon.getUtteranceExpressionRevision(ref.id, ref.hash)));
     assertSemanticEffectProjection({ entities, events, eventExecutions, semanticEffects, actionSchemas, eventParticipations, processTemplates });
     assertPerceptionObservationProjection({ entities, events, perceptionObservations });
-    assertAcquisitionProjection({ entities, events, claims, propositions, attributions, utteranceExpressions, perceptionObservations, acquisitions });
+    assertAcquisitionProjection({ entities, events, claims, propositions, attributions, utteranceExpressions, perceptionObservations, acquisitions, processTemplates });
     assertUtteranceExpressionProjection({ entities, events, propositions, attributions, utteranceExpressions });
     if (snapshot.sourceId) {
       if (snapshot.initialWorld) assertEvidenceExclusiveToSource(snapshot.initialWorld.evidence, snapshot.sourceId, "Frozen opening baseline");
@@ -406,7 +406,7 @@ export class WorldContextStore {
       processTemplates,
     });
     const participationIndex = eventParticipationsByEvent(eventParticipations);
-    const executionIssues = validateEventExecutions(eventExecutions, { participations: eventParticipations, events: new Map(events.map((event) => [event.id, event])), entities: new Map(entities.map((entity) => [entity.id, entity])), actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])), processTemplates: new Map(processTemplates.map(template => [template.id, template])) });
+    const executionIssues = validateEventExecutions(eventExecutions, { acquisitions: new Map(acquisitions.map(item => [item.id, item])), participations: eventParticipations, events: new Map(events.map((event) => [event.id, event])), entities: new Map(entities.map((entity) => [entity.id, entity])), actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])), processTemplates: new Map(processTemplates.map(template => [template.id, template])) });
     if (executionIssues.length) throw new Error(executionIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
     const projectedEvents = applyEventExecutions(events, eventExecutions).map((event) =>
       projectEventParticipations(event, participationIndex.get(event.id) ?? []));
@@ -606,9 +606,9 @@ function assertPerceptionObservationProjection(artifacts: Pick<ScopedWorldArtifa
   if (issues.length) throw new Error(`Invalid perception observation projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);
 }
 
-function assertAcquisitionProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "claims" | "propositions" | "attributions" | "utteranceExpressions" | "perceptionObservations" | "acquisitions">): void {
+function assertAcquisitionProjection(artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "claims" | "propositions" | "attributions" | "utteranceExpressions" | "perceptionObservations" | "acquisitions" | "processTemplates">): void {
   const map = <T extends { id: string }>(items: readonly T[]) => new Map(items.map(item => [item.id, item]));
-  const catalog = { entities: map(artifacts.entities), events: map(artifacts.events), claims: map(artifacts.claims), propositions: map(artifacts.propositions), attributions: map(artifacts.attributions), utteranceExpressions: map(artifacts.utteranceExpressions ?? []), perceptionObservations: map(artifacts.perceptionObservations ?? []), acquisitions: map(artifacts.acquisitions ?? []) };
+  const catalog = { processTemplates: map(artifacts.processTemplates ?? []), entities: map(artifacts.entities), events: map(artifacts.events), claims: map(artifacts.claims), propositions: map(artifacts.propositions), attributions: map(artifacts.attributions), utteranceExpressions: map(artifacts.utteranceExpressions ?? []), perceptionObservations: map(artifacts.perceptionObservations ?? []), acquisitions: map(artifacts.acquisitions ?? []) };
   const issues = (artifacts.acquisitions ?? []).flatMap(value => validateAcquisition(value, catalog));
   if (issues.length) throw new Error(`Invalid acquisition projection: ${issues.map(item => `${item.code}: ${item.message}`).join("; ")}`);
 }

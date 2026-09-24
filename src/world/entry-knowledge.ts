@@ -1,3 +1,4 @@
+import { entryAgencyIssues, remoteEntryOccurrenceIssues } from "./entry-agency.js";
 import { contentHash } from "./canonical.js";
 import { entryKnowledgeHistorySchema, type EntryKnowledgeHistory, type KnowledgeDelta } from "./model.js";
 import { executeSceneEvent } from "./source-history.js";
@@ -15,7 +16,7 @@ export function replayEntryKnowledge(input: EntryKnowledgeHistory, context: Worl
   const target = context.events?.get(history.beforeCanonicalEventId);
   if (!target || context.entities.get(history.actorId)?.kind !== "character") return stop("Entry occurrence or character is outside the frozen scope");
   const checkpoint = target.characterEntryCheckpoints?.find(item => item.actorId === history.actorId);
-  if (!checkpoint?.participantPresence.some(item => item.entityId === history.actorId && item.mode === "physical")) return stop("Entry character has no grounded embodied checkpoint");
+  if (!checkpoint) return stop("Entry character has no grounded checkpoint");
   const bundle = { source: { id: context.sourceId }, canonical: {
     initialWorld: opening, entities: [...context.entities.values()], events: [...(context.events?.values() ?? [])], rules: [...context.rules.values()],
     claims: [...(context.claims?.values() ?? [])], propositions: [...(context.propositions?.values() ?? [])], attributions: [...(context.attributions?.values() ?? [])],
@@ -27,9 +28,13 @@ export function replayEntryKnowledge(input: EntryKnowledgeHistory, context: Worl
   } } as unknown as PreparedNovelBundle;
   const result = executeSceneEvent(bundle, target, undefined, { beforeOnly: true, ignoreCheckpoint: true, sourceEventRevisions: context.sourceEventRevisions });
   if (result.cut.hash !== history.cutHash || contentHash([...result.cut.completedEventIds].sort()) !== contentHash([...new Set(realized)].sort())) return stop("Entry cut is stale or imports a future/unrealized occurrence");
-  const checkpointKnowledge = checkpoint.projectionSeed?.knowledgeHistory ? undefined : checkpoint.knowledge;
-  const operations = [...(opening.knowledge?.operations ?? []), ...result.cut.replayEventIds.flatMap(id => context.events!.get(id)!.observedKnowledge?.operations ?? []), ...(checkpointKnowledge?.operations ?? [])];
+  const inheritedOperations = [...(opening.knowledge?.operations ?? []), ...result.cut.replayEventIds.flatMap(id => context.events!.get(id)!.observedKnowledge?.operations ?? [])];
+  const checkpointKnowledge = checkpoint.projectionSeed?.knowledgeHistory ? undefined : checkpoint.participantPresence.some(item => item.entityId === history.actorId && item.mode === "remote")
+    ? entryKnowledgeSupplement(inheritedOperations, checkpoint.knowledge) : checkpoint.knowledge;
+  const operations = [...inheritedOperations, ...(checkpointKnowledge?.operations ?? [])];
   if (contentHash({ version: 1, operations }) !== contentHash(expected ?? { version: 1, operations: [] })) return stop("Entry knowledge differs from the exact frozen historical operations");
+  const agencyIssues = [...entryAgencyIssues(history.actorId, { ...checkpoint, knowledge: expected }, context), ...remoteEntryOccurrenceIssues(history.actorId, checkpoint, target, context.eventParticipations)];
+  if (agencyIssues.length) return stop(agencyIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
   let knowledge = result.beforeKnowledge;
   if (checkpointKnowledge) knowledge = applyKnowledgeDelta(knowledge, checkpointKnowledge, commitId, {
     ...context, currentCanonicalEventIds: new Set(), realizedCanonicalEventIds: new Set(result.cut.completedEventIds),
@@ -40,4 +45,11 @@ export function replayEntryKnowledge(input: EntryKnowledgeHistory, context: Worl
   for (const facts of Object.values(knowledge.actors)) for (const fact of Object.values(facts)) fact.acquiredAtCommit = commitId;
   for (const receipt of Object.values(knowledge.acquisitions ?? {})) receipt.acquiredAtCommit = commitId;
   return knowledge;
+}
+
+/** An identical historical acquisition is a snapshot reference, never a second receipt. */
+export function entryKnowledgeSupplement(inherited: KnowledgeDelta["operations"], checkpoint: KnowledgeDelta | undefined): KnowledgeDelta | undefined {
+  if (!checkpoint) return undefined;
+  const historicalReceipts = new Set(inherited.filter(operation => operation.op === "learn" && operation.acquisitionId).map(operation => contentHash(operation)));
+  return { version: 1, operations: checkpoint.operations.filter(operation => !(operation.op === "learn" && operation.acquisitionId && historicalReceipts.has(contentHash(operation)))) };
 }

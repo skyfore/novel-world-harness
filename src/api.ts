@@ -500,3 +500,5 @@ export { acquisitionSchema, validateAcquisition, validateAcquisitionEvidence, AC
 
 export { withPlayModelBudget, currentPlayModelBudget, PLAY_MODEL_REQUEST_LIMITS } from "./runtime/play-model-budget.js";
 export { ModelRequestBudget, ModelRequestBudgetError, type ModelRequestLimits } from "./runtime/model-request-budget.js";
+
+export { branchAcquisitionSchema, type BranchAcquisition } from "./world/model.js";

@@ -1,7 +1,7 @@
-import { validateActionKnowledge } from "./action-gate.js";
+import { validateActionKnowledgeAtCommit } from "./action-gate.js";
 import { evaluateCharacterGoal, type CharacterGoal } from "./actors.js";
 import { contentHash } from "./canonical.js";
-import { validateEventProposal, type WorldEngine } from "./engine.js";
+import { type WorldEngine } from "./engine.js";
 import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
 import { AUTONOMOUS_BACKGROUND_KINDS } from "./model.js";
 import type {
@@ -377,6 +377,7 @@ async function preflightPlayerAffordance(
     expectedParentCommit: commitId,
     utterance: affordance.action,
     candidate: affordance.candidate,
+    agency: scoped.decision?.agency,
   });
   action.proposal.progress = {
     ...structuredClone(affordance.progress),
@@ -396,11 +397,9 @@ async function preflightPlayerAffordance(
   const requestedTimeAdvance = affordance.candidate.intent?.requestedTimeAdvance
     ?? (affordance.intent === "wait" ? { amount: 5 as const, unit: "minute" as const } : undefined);
   if (requestedTimeAdvance) action.proposal.timeAdvance = structuredClone(requestedTimeAdvance);
-  const gate = await validateActionKnowledge(engine, action);
+  const gate = await validateActionKnowledgeAtCommit(engine, action);
   if (!gate.accepted) return gate.errors;
-  const state = await engine.projector.project(commitId);
-  const context = await engine.contextForCommit(commitId);
-  return validateEventProposal(action.proposal, commitId, state, context).report.errors;
+  return (await engine.previewProposalAtCommit(action.proposal)).report.errors;
 }
 
 function addCanonicalAffordances(

@@ -1,3 +1,5 @@
+import { entryKnowledgeSupplement } from "./entry-knowledge.js";
+import { entryAgencyIssues, remoteEntryOccurrenceIssues } from "./entry-agency.js";
 import { applyProcessDelta, emptyProcessState } from "./process-effects.js";
 import { applyStateDelta, emptyWorldState, StateSchemaRegistry, DEFAULT_STATE_FIELDS, evaluatePredicateTruth, advanceTemporalState } from "./state.js";
 import { resolveActionInvocation } from "./action-ontology.js";
@@ -137,10 +139,10 @@ export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): Charac
       };
     } else {
       const event = orderedEvents.find((candidate) =>
-        eventEmbodiesActor(candidate, character.id)
+        eventOffersEntry(candidate, character.id, bundle)
         && completeReaderContextBefore.has(candidate.id));
       if (event) {
-        const checkpoint = entryCheckpointFor(event, character.id)!;
+        const checkpoint = entryCheckpointFor(event, character.id, bundle)!;
         entry = {
           actorId: character.id,
           kind: "canonical-scene",
@@ -178,7 +180,7 @@ export function deriveCharacterEntrySeed(
   const targetEvent = option.entry.canonicalEventId
     ? orderedEvents.find((event) => event.id === option.entry.canonicalEventId)
     : undefined;
-  const entryCheckpoint = targetEvent ? entryCheckpointFor(targetEvent, actorId) : undefined;
+  const entryCheckpoint = targetEvent ? entryCheckpointFor(targetEvent, actorId, bundle) : undefined;
   let projectionSeed = entryCheckpoint?.projectionSeed ?? (option.entry.kind === "opening" ? bundle.canonical.initialWorld.projectionSeed : undefined);
   const openingSeed = bundle.canonical.initialWorld.projectionSeed;
   if (option.entry.kind !== "opening" && !entryCheckpoint?.projectionSeed && openingSeed
@@ -201,11 +203,25 @@ export function deriveCharacterEntrySeed(
     ...forwardEvents.flatMap((event) => structuredClone(event.observedOutcome.operations)),
     ...structuredClone(entryCheckpoint?.delta.operations ?? []),
   ];
-  const knowledgeOperations = [
+  let knowledgeOperations = [
     ...(useOpening ? structuredClone(bundle.canonical.initialWorld.knowledge?.operations ?? []) : []),
     ...forwardEvents.flatMap((event) => structuredClone(event.observedKnowledge?.operations ?? [])),
     ...structuredClone(entryCheckpoint?.knowledge?.operations ?? []),
   ];
+  if (targetEvent && entryCheckpoint?.projectionSeed && entryCheckpoint.participantPresence.some(item => item.entityId === actorId && item.mode === "remote")) {
+    // A complete process/state snapshot does not replace the actor's actual learning history.
+    const historicalCut = deriveEntryCut({ events: bundle.canonical.events, relations: bundle.canonical.eventRelations ?? [],
+      beforeEventId: targetEvent.id, storyTime: targetEvent.storyTime,
+      baselineEventId: bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId,
+      baselineTime: bundle.canonical.initialWorld.checkpoint?.storyTime });
+    if (historicalCut.issues.length) throw new Error(historicalCut.issues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
+    knowledgeOperations = [
+      ...structuredClone(bundle.canonical.initialWorld.knowledge?.operations ?? []),
+      ...historicalCut.replayEventIds.flatMap(id => structuredClone(bundle.canonical.events.find(event => event.id === id)!.observedKnowledge?.operations ?? [])),
+    ];
+    knowledgeOperations.push(...structuredClone(entryCheckpoint.projectionSeed.knowledgeHistory ? [] : entryKnowledgeSupplement(knowledgeOperations, entryCheckpoint.knowledge)?.operations ?? []));
+    projectionSeed = { ...entryCheckpoint.projectionSeed, knowledgeHistory: { version: 1, actorId, beforeCanonicalEventId: targetEvent.id, cutHash: historicalCut.hash } };
+  }
   if (!projectionSeed) {
     const activeRuleIds = new Set(openingSeed?.activeRuleIds ?? []);
     for (const operation of stateOperations) {
@@ -410,26 +426,35 @@ function initialWorldRepresentsActor(
 ): boolean {
   const actorOperations = bundle.canonical.initialWorld.delta.operations.filter((operation) =>
     "entityId" in operation && operation.entityId === actorId);
-  const physicallyPresent = bundle.canonical.initialWorld.participantPresence?.some((presence) =>
-    presence.entityId === actorId && presence.mode === "physical") ?? false;
-  if (physicallyPresent && actorOperations.some((operation) =>
+  const playablePresence = !entryAgencyIssues(actorId, bundle.canonical.initialWorld, {
+    sourceId: bundle.source.id, entities: new Map(bundle.canonical.entities.map(entity => [entity.id, entity])),
+    acquisitions: new Map((bundle.canonical.acquisitions ?? []).map(item => [item.id, item])),
+    processTemplates: new Map((bundle.canonical.processTemplates ?? []).map(template => [template.id, template])),
+    actionSchemas: new Map((bundle.canonical.actionSchemas ?? []).map(action => [action.id, action])),
+  }).length;
+  if (playablePresence && actorOperations.some((operation) =>
     "entityId" in operation
     && ["character.location", "character.plan", "character.momentum"].includes(operation.field))) return true;
-  return allowSoleAliveFallback && actorOperations.some((operation) =>
+  return allowSoleAliveFallback && !bundle.canonical.entities.find(entity => entity.id === actorId)?.agencyProfile && actorOperations.some((operation) =>
     operation.op === "set" && operation.field === "character.alive" && operation.value === true);
 }
 
-function eventEmbodiesActor(event: CanonicalEvent, actorId: string): boolean {
+function eventOffersEntry(event: CanonicalEvent, actorId: string, bundle: PreparedNovelBundle): boolean {
   const mode = event.narrativeContext?.mode;
   if (mode && mode !== "scene") return false;
-  return Boolean(entryCheckpointFor(event, actorId));
+  return Boolean(entryCheckpointFor(event, actorId, bundle));
 }
 
-function entryCheckpointFor(event: CanonicalEvent, actorId: string): CharacterEntryCheckpoint | undefined {
+function entryCheckpointFor(event: CanonicalEvent, actorId: string, bundle: PreparedNovelBundle): CharacterEntryCheckpoint | undefined {
   return event.characterEntryCheckpoints?.find((checkpoint) =>
     checkpoint.actorId === actorId
-    && checkpoint.participantPresence.some((presence) =>
-      presence.entityId === actorId && presence.mode === "physical")
+    && !remoteEntryOccurrenceIssues(actorId, checkpoint, event, bundle.canonical.eventParticipations).length
+    && !entryAgencyIssues(actorId, checkpoint, {
+      sourceId: bundle.source.id, entities: new Map(bundle.canonical.entities.map(item => [item.id, item])),
+      processTemplates: new Map((bundle.canonical.processTemplates ?? []).map(item => [item.id, item])),
+      actionSchemas: new Map((bundle.canonical.actionSchemas ?? []).map(item => [item.id, item])),
+      acquisitions: new Map((bundle.canonical.acquisitions ?? []).map(item => [item.id, item])),
+    }).length
     && checkpoint.delta.operations.some((operation) =>
       "entityId" in operation
       && operation.entityId === actorId

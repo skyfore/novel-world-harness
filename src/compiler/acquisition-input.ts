@@ -1,3 +1,4 @@
+import { processTemplateSchema } from "../world/process-ontology.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { acquisitionInputSchema, acquisitionSchema, hydrateAcquisition, type AcquisitionCatalog } from "../world/acquisition.js";
 import { propositionSchema, claimSchema, attributionSchema, canonicalEventSchema, entitySchema, type EvidenceRef } from "../world/model.js";
@@ -7,6 +8,7 @@ import { perceptionObservationSchema } from "../world/perception-observation.js"
 export async function hydrateAcquisitionInput(root: string, input: unknown, evidence: EvidenceRef[], proposalIds: readonly string[]) {
   const canon = new CanonicalModelStore(root), proposals = new ProposalStore(root);
   const catalog = {
+    processTemplates: new Map((await canon.listProcessTemplates()).map(item => [item.id, item])),
     entities: new Map((await canon.listEntities()).map(item => [item.id, item])),
     events: new Map((await canon.listEvents()).map(item => [item.id, item])),
     claims: new Map((await canon.listClaims()).map(item => [item.id, item])),
@@ -18,6 +20,7 @@ export async function hydrateAcquisitionInput(root: string, input: unknown, evid
   } satisfies AcquisitionCatalog;
   for (const id of proposalIds) {
     const envelope = await proposals.readEnvelope("pending", id);
+    if (envelope.kind === "process-template") { const value = processTemplateSchema.parse(envelope.payload); catalog.processTemplates.set(value.id, value); }
     if (envelope.kind === "entity") { const value = entitySchema.parse(envelope.payload); catalog.entities.set(value.id, value); }
     if (envelope.kind === "canonical-event") { const value = canonicalEventSchema.parse(envelope.payload); catalog.events.set(value.id, value); }
     if (envelope.kind === "claim") { const value = claimSchema.parse(envelope.payload); catalog.claims.set(value.id, value); }

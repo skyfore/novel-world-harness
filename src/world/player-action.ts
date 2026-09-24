@@ -1,3 +1,7 @@
+import { pendingTextDeliveries } from "./text-delivery.js";
+import { pendingSpeechDeliveries } from "./speech-delivery.js";
+import { projectAgencyChannels, type AgencyDecisionView } from "./agency-profile.js";
+import { withDecisionScope } from "./decision-scope.js";
 import { projectActorEntityNames } from "./actor-recognition.js";
 import { actorOutcomeShape, copyActorOutcome, hasActorOutcome, mapActorOutcome, validateActorOutcomeScope } from "./actor-outcome.js";
 import { z } from "zod";
@@ -7,6 +11,7 @@ import { validateEventProposal, type WorldEngine, type WorldModelContext } from 
 import { actorKnowledgeBelongsToSource, isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import {
   actionInvocationSchema,
+  agencyChannelBindingSchema,
   claimSchema,
   entityKindSchema,
   eventProposalSchema,
@@ -120,6 +125,7 @@ export const playerInteractionSchema = z.discriminatedUnion("kind", [
     content: z.string().trim().min(1).max(800),
     addresseeIds: z.array(idSchema).min(1).max(4),
     channel: z.literal("audible").default("audible"),
+    channelBinding: agencyChannelBindingSchema.optional(),
   }).strict(),
   z.object({
     kind: z.literal("gesture"),
@@ -494,7 +500,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
   );
   const reverseEntities = new Map<string, string>([...entityHandles].map(([id, handle]) => [handle, id]));
   const reverseClaims = new Map<string, string>([...claimHandles].map(([id, handle]) => [handle, id]));
-  const semanticHandles = new Map(decisionReferenceIds(context.decision).map((id, index) => [id, `semantic-${String(index + 1).padStart(3, "0")}`]));
+  const semanticHandles = new Map(decisionReferenceIds(context.decision).map((id, index) => [id, claimHandles.get(id) ?? `semantic-${String(index + 1).padStart(3, "0")}`]));
   const reverseSemantics = new Map([...semanticHandles].map(([id, handle]) => [handle, id]));
   const semanticHandle = (id: string) => id.startsWith("local-") ? id : semanticHandles.get(id) ?? "semantic-unavailable";
   const writableFields = new Map(context.writableStateFields.map((field) => [field.key, field]));
@@ -539,6 +545,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
       const schemaId = candidate.action.lane === "schema-bound" ? candidate.action.schemaId : undefined;
       candidate.action = mapActionInvocationEntities(candidate.action, scopedEntityHandle, context.decision?.capabilities.actions.find((schema) => schema.id === schemaId)?.parameters);
       if (candidate.action.lane === "schema-bound") candidate.action.schemaId = semanticHandle(candidate.action.schemaId);
+      if (candidate.action.lane === "schema-bound" && candidate.action.channelBinding) {
+        candidate.action.channelBinding = { channelId: semanticHandle(candidate.action.channelBinding.channelId), processId: semanticHandle(candidate.action.channelBinding.processId) };
+      }
     }
     candidate.participants = candidate.participants.map(scopedEntityHandle);
     candidate.preconditions = candidate.preconditions.map(encodePredicate);
@@ -555,6 +564,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
         actorId: scopedEntityHandle(operation.actorId),
         ...(operation.op === "learn" && operation.propositionId ? { propositionId: semanticHandle(operation.propositionId) } : {}),
         ...(operation.op === "learn" && operation.attributionId ? { attributionId: semanticHandle(operation.attributionId) } : {}),
+        ...(operation.op === "learn" && operation.expressionId ? { expressionId: semanticHandle(operation.expressionId) } : {}),
+        ...(operation.op === "learn" && operation.perceptionId ? { perceptionId: semanticHandle(operation.perceptionId) } : {}),
+        ...(operation.op === "learn" && operation.acquisitionId ? { acquisitionId: semanticHandle(operation.acquisitionId) } : {}),
         claimId: scopedClaimHandle(operation.claimId),
         ...(operation.op === "learn" && operation.sourceActorId
           ? { sourceActorId: scopedEntityHandle(operation.sourceActorId) }
@@ -580,6 +592,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
       const interaction = candidate.intent.controlledAct?.interaction;
       if (interaction) {
         interaction.addresseeIds = interaction.addresseeIds.map(scopedEntityHandle);
+        if (interaction.kind === "speech" && interaction.channelBinding) interaction.channelBinding = { channelId: semanticHandle(interaction.channelBinding.channelId), processId: semanticHandle(interaction.channelBinding.processId) };
       }
     }
     return playerActionCandidateSchema.parse(candidate);
@@ -686,6 +699,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
       Object.assign(candidate, mapActorOutcome(candidate, decodeEntity, decodeSemantic));
       if (candidate.action) {
         if (candidate.action.lane === "schema-bound") candidate.action.schemaId = decodeSemantic(candidate.action.schemaId);
+        if (candidate.action.lane === "schema-bound" && candidate.action.channelBinding) {
+          candidate.action.channelBinding = { channelId: decodeSemantic(candidate.action.channelBinding.channelId), processId: decodeSemantic(candidate.action.channelBinding.processId) };
+        }
         const schemaId = candidate.action.lane === "schema-bound" ? candidate.action.schemaId : undefined;
         candidate.action = mapActionInvocationEntities(candidate.action, decodeEntity, context.decision?.capabilities.actions.find((schema) => schema.id === schemaId)?.parameters);
       }
@@ -707,6 +723,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
           actorId: decodeEntity(operation.actorId),
         ...(operation.op === "learn" && operation.propositionId ? { propositionId: decodeSemantic(operation.propositionId) } : {}),
         ...(operation.op === "learn" && operation.attributionId ? { attributionId: decodeSemantic(operation.attributionId) } : {}),
+        ...(operation.op === "learn" && operation.expressionId ? { expressionId: decodeSemantic(operation.expressionId) } : {}),
+        ...(operation.op === "learn" && operation.perceptionId ? { perceptionId: decodeSemantic(operation.perceptionId) } : {}),
+        ...(operation.op === "learn" && operation.acquisitionId ? { acquisitionId: decodeSemantic(operation.acquisitionId) } : {}),
           claimId: decodeClaim(operation.claimId),
           ...(operation.op === "learn" && operation.sourceActorId
             ? { sourceActorId: decodeEntity(operation.sourceActorId) }
@@ -732,6 +751,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
         const interaction = candidate.intent.controlledAct?.interaction;
         if (interaction) {
           interaction.addresseeIds = interaction.addresseeIds.map(decodeEntity);
+          if (interaction.kind === "speech" && interaction.channelBinding) interaction.channelBinding = { channelId: decodeSemantic(interaction.channelBinding.channelId), processId: decodeSemantic(interaction.channelBinding.processId) };
         }
       }
       return playerActionCandidateSchema.parse(candidate);
@@ -926,6 +946,19 @@ export async function buildActorScopedActionContext(
     }
   }
 
+  // A committed session owned by this actor admits its anonymous endpoints,
+  // not their names, world state, or physical presence.
+  const projection = await engine.projections.project(commitId);
+  const ownChannels = projectAgencyChannels(actorEntity, projection.processes, context, {
+    sourceId: effectiveSourceId,
+    visibleEntityIds: new Set([...context.entities.values()].filter(entity => evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId)).map(entity => entity.id)),
+    knownClaimIds: new Set(visibleKnowledge.filter(entry => isActionableKnowledge(entry.fact)).map(entry => entry.fact.claimId)),
+  });
+  for (const channel of ownChannels?.channels ?? []) for (const id of [...channel.peerEntityIds, ...channel.carrierEntityIds]) referenceable.add(id);
+
+  for (const item of pendingTextDeliveries(projection.history, projection.semantics, actorId).slice(-16)) addExistingEntity(referenceable, item.authorId, context.entities, effectiveSourceId);
+  for (const item of pendingSpeechDeliveries(projection.history, projection.semantics, actorId).slice(-16)) addExistingEntity(referenceable, item.speakerId, context.entities, effectiveSourceId);
+
   const referenceableEntities = projectActorEntityNames(actorId, [...referenceable]
     .map((id) => context.entities.get(id))
     .filter((entity): entity is Entity => Boolean(entity)), visibleKnowledge);
@@ -1028,6 +1061,8 @@ export function validatePlayerActionScope(
   const candidate = playerActionCandidateSchema.parse(candidateInput);
   const actorContext = actorScopedActionContextSchema.parse(actorContextInput);
   const issues: ValidationIssue[] = [];
+  try { playerCandidateChannels(candidate, actorContext.decision?.agency); }
+  catch (error) { issues.push(issue("AGENCY_CHANNEL_UNAVAILABLE", String(error), "intent.controlledAct.interaction.channelBinding")); }
   const referenceable = new Set(actorContext.referenceableEntities.map((entity) => entity.id));
   const writable = new Set(actorContext.writableEntityIds);
   const visibleClaims = new Set(actorContext.knowledge.map((entry) => entry.claimId));
@@ -1222,6 +1257,35 @@ function validatePlayerIntentConsistency(
   )];
 }
 
+/** Resolve only a binding explicitly selected from this head's actor view. */
+export function playerCandidateChannels(candidate: PlayerActionCandidate, agency: AgencyDecisionView | undefined): AgencyDecisionView["channels"] {
+  const selected: AgencyDecisionView["channels"] = [];
+  const speech = candidate.intent?.controlledAct?.interaction;
+  const action = candidate.action;
+  for (const [binding, kind] of [
+    [speech?.kind === "speech" ? speech.channelBinding : undefined, "speech"],
+    [action?.lane === "schema-bound" ? action.channelBinding : undefined, "control"],
+  ] as const) {
+    if (!binding) continue;
+    const channel = agency?.channels.find(channel => channel.id === binding.channelId && channel.processId === binding.processId);
+    if (!channel || (kind === "speech" ? !["audio", "audiovisual"].includes(channel.modality)
+      || speech?.addresseeIds.some(id => !channel.peerEntityIds.includes(id))
+      : channel.modality !== "physical-control" || action?.lane !== "schema-bound" || channel.actionSchemaId !== action.schemaId)) {
+      throw new Error("AGENCY_CHANNEL_UNAVAILABLE: Selected binding is absent from this actor/head view or does not authorize this interaction. Preserve the head and stop for host reconstruction; do not guess IDs, widen scope or retry unchanged.");
+    }
+    selected.push(channel);
+  }
+  for (const operation of candidate.proposedSemantics?.operations ?? []) {
+    if (operation.op !== "record-acquisition" || operation.acquisition.basis.mode !== "read" || !("channelBinding" in operation.acquisition.basis) || !operation.acquisition.basis.channelBinding) continue;
+    const basis = operation.acquisition.basis, binding = basis.channelBinding!;
+    const channel = agency?.channels.find(item => item.id === binding.channelId && item.processId === binding.processId);
+    if (!channel || channel.modality !== "text" || !channel.peerEntityIds.includes(basis.documentId)) throw new Error("AGENCY_CHANNEL_UNAVAILABLE: Reading requires the exact offered text channel and document peer. Preserve head and stop; never guess or retry unchanged.");
+    if (!selected.some(item => item.id === channel.id && item.processId === channel.processId)) selected.push(channel);
+  }
+  if (selected.length && speech && speech.kind !== "speech") throw new Error("AGENCY_CHANNEL_UNAVAILABLE: This remote interaction adapter supports exact speech, not unverified gestures or bodily contact. Preserve the head and stop; do not relabel the interaction or retry unchanged.");
+  return selected;
+}
+
 /**
  * Host-only physical interaction gate. Naming an entity makes its identity
  * referenceable, but never proves that a distant character is present. The
@@ -1240,6 +1304,12 @@ export async function validatePlayerActionSpatialScope(
     engine.contextForCommit(commitId),
     engine.projector.project(commitId),
   ]);
+  const scoped = await buildActorScopedActionContext(engine, actorId, commitId, undefined, sourceId);
+  let channels: AgencyDecisionView["channels"];
+  try { channels = playerCandidateChannels(candidate, scoped.decision?.agency); }
+  catch (error) { return [issue("AGENCY_CHANNEL_UNAVAILABLE", String(error), "intent.controlledAct.interaction.channelBinding")]; }
+  const physicalChanges = candidate.proposedDelta.operations.some(op => !(op.op === "set" && op.entityId === actorId && op.field === "character.plan"));
+  const remotePeers = new Set(channels.filter(channel => channel.modality === "physical-control" || channel.modality !== "text" && !physicalChanges).flatMap(channel => channel.peerEntityIds));
   const interactionCharacters = new Set<EntityId>();
   for (const participant of candidate.participants) {
     if (participant !== actorId && context.entities.get(participant)?.kind === "character") interactionCharacters.add(participant);
@@ -1258,7 +1328,12 @@ export async function validatePlayerActionSpatialScope(
   for (const operation of candidate.proposedKnowledge?.operations ?? []) {
     if (operation.op === "learn" && operation.sourceActorId && operation.sourceActorId !== actorId
       && context.entities.get(operation.sourceActorId)?.kind === "character") {
-      interactionCharacters.add(operation.sourceActorId);
+      const receipt = candidate.proposedSemantics?.operations.find(op => op.op === "record-acquisition" && op.localRef === operation.acquisitionId);
+      const basis = receipt?.op === "record-acquisition" && receipt.acquisition.actorId === actorId && operation.actorId === actorId ? receipt.acquisition.basis : undefined;
+      const priorDelivery = basis && (basis.mode === "told" || basis.mode === "deceived-misattributed")
+        && scoped.decision?.pendingSpeech?.some(item => item.eventId === basis.utteranceEventId && item.utteranceIndex === basis.utteranceIndex && item.speakerId === operation.sourceActorId);
+      // A source attribution for an already delivered message is not a new physical interaction.
+      if (!priorDelivery) interactionCharacters.add(operation.sourceActorId);
     }
   }
   const actorLocation = state.values[actorId]?.["character.location"];
@@ -1312,6 +1387,7 @@ export async function validatePlayerActionSpatialScope(
     }
   }
   for (const characterId of [...interactionCharacters].sort()) {
+    if (remotePeers.has(characterId)) continue;
     const characterLocation = state.values[characterId]?.["character.location"];
     if (typeof actorLocation === "string" && typeof characterLocation === "string"
       && !spatialLocationsMayOverlap(activeRelations, actorLocation, characterLocation)) {
@@ -1341,6 +1417,7 @@ export function playerActionToKnowledgeAwareAction(input: {
   expectedParentCommit: CommitId;
   utterance: string;
   candidate: PlayerActionCandidate;
+  agency?: AgencyDecisionView;
   proposedTime?: StoryTime;
   timeAdvance?: TimeAdvance;
   eventTitle?: string;
@@ -1359,6 +1436,10 @@ export function playerActionToKnowledgeAwareAction(input: {
     summary: input.actorObservation ?? playerIntentObservation(input.utterance),
   }];
   const interaction = candidate.intent?.controlledAct?.interaction;
+  const channels = playerCandidateChannels(candidate, input.agency);
+  const channelParticipants = [...new Set(channels.flatMap(channel => [...channel.peerEntityIds, ...channel.carrierEntityIds]))];
+  const remoteParticipants = new Set(channels.length ? [input.actorId, ...channels.filter(channel => channel.modality !== "text").flatMap(channel => channel.peerEntityIds)] : []);
+  if (input.agency && input.agency.embodiment !== "bodily") remoteParticipants.add(input.actorId);
   const physicalParticipantIds = [...new Set([
     input.actorId,
     ...(interaction?.addresseeIds ?? []),
@@ -1366,7 +1447,7 @@ export function playerActionToKnowledgeAwareAction(input: {
   for (const addresseeId of [...new Set(interaction?.addresseeIds ?? [])].sort()) {
     if (addresseeId === input.actorId) continue;
     const perceived = interaction?.kind === "speech"
-      ? `面前的人对你说：“${interaction.content}”`
+      ? `${interaction.channelBinding ? "通信渠道中的声音" : "面前的人"}对你说：“${interaction.content}”`
       : interaction?.kind === "gesture"
         ? `面前的人向你做出动作：${interaction.description}`
         : interaction?.kind === "physical"
@@ -1399,12 +1480,13 @@ export function playerActionToKnowledgeAwareAction(input: {
             speakerId: input.actorId,
             addresseeIds: [...new Set(interaction.addresseeIds)].sort(),
             content: interaction.content,
+            ...(interaction.channelBinding ? { channelBinding: interaction.channelBinding } : {}),
             channel: "audible" as const,
           }],
         }
       : {}),
-    participants: [...new Set([input.actorId, ...candidate.participants])],
-    participantPresence: physicalParticipantIds.map((entityId) => ({ entityId, mode: "physical" as const })),
+    participants: [...new Set([input.actorId, ...candidate.participants, ...channelParticipants])],
+    participantPresence: [...new Set([...physicalParticipantIds, ...remoteParticipants])].map(entityId => ({ entityId, mode: remoteParticipants.has(entityId) ? "remote" as const : "physical" as const })),
     proposedTime: input.proposedTime ?? { kind: "unknown" },
     ...(input.timeAdvance ? { timeAdvance: input.timeAdvance } : {}),
     preconditions: candidate.preconditions,
@@ -1553,7 +1635,7 @@ export class PlayerTurnService {
     for (let attempt = 1; attempt <= 2 && !intendedCandidate; attempt += 1) {
       let translated: unknown;
       try {
-        translated = await this.translator(deepFreeze({
+        translated = await withDecisionScope({ branchId: input.branchId, headCommitId: previousHead, actorId: input.actorId }, () => this.translator(deepFreeze({
           utterance: input.utterance,
           context: playerActionTranslationContext(contextBefore),
           recentMessages,
@@ -1561,7 +1643,7 @@ export class PlayerTurnService {
           ...(contextState.supplement?.translation.length
             ? { contextSupplement: structuredClone(contextState.supplement.translation) }
             : {}),
-        }));
+        })));
       } catch (error) {
         if (isAbortError(error)) throw error;
         return reject("translation", [
@@ -1638,6 +1720,7 @@ export class PlayerTurnService {
         expectedParentCommit: previousHead,
         utterance: input.utterance,
         candidate: intendedCandidate,
+        agency: contextBefore.decision?.agency,
         ...(intendedTiming.proposedTime ? { proposedTime: intendedTiming.proposedTime } : {}),
         ...(intendedTiming.timeAdvance ? { timeAdvance: intendedTiming.timeAdvance } : {}),
       });
@@ -1686,7 +1769,7 @@ export class PlayerTurnService {
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         let proposedResolution: unknown;
         try {
-          proposedResolution = await this.adjudicator(deepFreeze({
+          proposedResolution = await withDecisionScope({ branchId: input.branchId, headCommitId: previousHead, actorId: input.actorId, candidateHash: contentHash(intendedCandidate) }, () => this.adjudicator!(deepFreeze({
             utterance: input.utterance,
             candidate: structuredClone(intendedCandidate),
             actorContext: playerActionTranslationContext(contextBefore),
@@ -1696,7 +1779,7 @@ export class PlayerTurnService {
             ...(contextState.supplement?.adjudication.length
               ? { contextSupplement: structuredClone(contextState.supplement.adjudication) }
               : {}),
-          }));
+          })));
         } catch (error) {
           if (isAbortError(error)) throw error;
           resolutionFailure = [
@@ -1835,6 +1918,7 @@ export class PlayerTurnService {
       expectedParentCommit: previousHead,
       utterance: input.utterance,
       candidate,
+      agency: contextBefore.decision?.agency,
       ...(timing.proposedTime ? { proposedTime: timing.proposedTime } : {}),
       ...(timing.timeAdvance ? { timeAdvance: timing.timeAdvance } : {}),
       ...(eventTitle ? { eventTitle } : {}),

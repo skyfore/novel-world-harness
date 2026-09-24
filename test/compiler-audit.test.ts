@@ -1156,10 +1156,12 @@ describe("compiler audit", () => {
     expect(report.coverage).toMatchObject({
       openingReaderContext: 0,
       openingActorObservation: 0,
+      openingPhysicalPresence: 1,
+      openingLivePresence: 1,
     });
     expect(report.consistency.semanticIssues).toEqual(expect.arrayContaining([
       expect.stringContaining("structured unread-reader context"),
-      expect.stringContaining("direct-perception Genesis observation"),
+      expect.stringContaining("source-supported Genesis observation within their physical or channel access"),
     ]));
     expect(report.semanticRepairTargets.initialWorld).toBe(true);
   });

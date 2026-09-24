@@ -1659,3 +1659,26 @@ describe("player action capture tool", () => {
     })).toBe(false);
   });
 });
+
+describe("decision audit host identity", () => {
+  it("binds translation and adjudication to the actual branch head without exposing it in callback data", async () => {
+    const { currentDecisionScope } = await import("../src/world/decision-scope.js");
+    const { contentHash } = await import("../src/world/canonical.js");
+    const { engine, head } = await fixture();
+    let translations = 0, adjudications = 0;
+    const service = new PlayerTurnService(engine, input => {
+      translations++;
+      expect(currentDecisionScope()).toEqual({ branchId: "main", headCommitId: head, actorId: "hero" });
+      expect(JSON.stringify(input)).not.toContain(head);
+      return deterministicPlayerIntentCandidate("observe", input);
+    }, undefined, undefined, undefined, input => {
+      adjudications++;
+      expect(currentDecisionScope()).toEqual({ branchId: "main", headCommitId: head, actorId: "hero", candidateHash: contentHash(input.candidate) });
+      expect(JSON.stringify(input)).not.toContain(head);
+      return { decision: "realize", status: "succeeded", eventTitle: "The hero observes", actorObservation: "You examine the scene." };
+    });
+    await service.turn({ branchId: "main", actorId: "hero", utterance: "Observe." });
+    expect(translations).toBe(1); expect(adjudications).toBe(1);
+    expect(currentDecisionScope()).toBeUndefined();
+  });
+});

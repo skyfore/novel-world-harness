@@ -1,3 +1,5 @@
+import { entryAgencyIssues } from "../src/world/entry-agency.js";
+import { processTemplateSchema, materializeProcessProposal } from "../src/world/process-ontology.js";
 import { UpstreamRepairLedger } from "../src/compiler/upstream-repair-ledger.js";
 import { repairForEvent } from "./helpers/upstream-repair.js";
 import { executeSceneEvent } from "../src/compiler/scene-state.js";
@@ -150,6 +152,40 @@ it.each(scenes.flatMap(scene => [false, true].map(repair => ({ ...scene, repair 
   expect(inferredLate.report.errors).toEqual([]);
   await new WorldRuntime(lateEngine, () => []).forkBranch("late", lateHead, "late-fork", "Only the earlier warning");
   expect((await lateEngine.projections.project(lateHead, { fresh: true, useCheckpoints: false })).knowledge.acquisitions?.["infer-passage"]).toBeUndefined();
+  // Explicit host module tests composition with real historical receipts, not source induction of radio capability.
+  const remoteBundle = structuredClone(lateBundle);
+  const radio = processTemplateSchema.parse({ ontologyVersion: "process-template-v1", id: "test-radio", name: "Test radio",
+    ownerRoles: [{ id: "actor", label: "Actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 },
+      { id: "peer", label: "Peer", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 },
+      { id: "carrier", label: "Carrier", allowedEntityKinds: ["artifact"], minCardinality: 1, maxCardinality: 1 }],
+    phases: [{ id: "open", label: "Open", terminal: false }, { id: "closed", label: "Closed", terminal: true }], initialPhaseId: "open", transitions: [{ fromPhaseId: "open", toPhaseId: "closed", minimumProgress: 1 }], outcomeIds: ["closed"],
+    visibility: "knowledge", knownByClaimIds: ["claim"], induction: { kind: "domain-module", moduleId: "test-radio", moduleVersion: "1" }, evidence: [] });
+  remoteBundle.canonical.processTemplates.push(radio);
+  remoteBundle.canonical.entities.push({ id: "test-radio-device", kind: "artifact", canonicalName: "Test receiver", aliases: [], evidence: source.evidence(scene.text) });
+  remoteBundle.canonical.entities.find(item => item.id === "listener")!.agencyProfile = {
+    ontologyVersion: "agency-channel-v1", agency: "autonomous", embodiment: "bodily", channels: [{ id: "radio", modality: "audio", processTemplateId: radio.id, actorRoleId: "actor", peerRoleId: "peer", carrierRoleId: "carrier", activePhaseIds: ["open"] }],
+  };
+  const remoteEvent = remoteBundle.canonical.events.find(item => item.id === "entry")!;
+  remoteEvent.participantPresence = [{ entityId: "listener", mode: "remote" }, { entityId: "speaker", mode: "physical" }];
+  const remoteCheckpoint = remoteEvent.characterEntryCheckpoints![0]!;
+  remoteCheckpoint.participantPresence = [{ entityId: "listener", mode: "remote" }];
+  remoteCheckpoint.delta = lateSeed.delta;
+  remoteCheckpoint.knowledge = { version: 1, operations: [received as never] };
+  remoteCheckpoint.projectionSeed = { version: 1, elapsedDays: 0, activeRuleIds: [], semantics: { version: 1, operations: [] }, norms: { version: 1, operations: [] },
+    processes: materializeProcessProposal({ version: 1, operations: [{ op: "start-process", localRef: "local-radio", process: { templateId: radio.id, ownerBindings: [{ roleId: "actor", entityIds: ["listener"] }, { roleId: "peer", entityIds: ["speaker"] }, { roleId: "carrier", entityIds: ["test-radio-device"] }], progress: 0 } }] }, { branchId: "remote-late", parentCommitId: lateHead, templates: new Map([[radio.id, radio]]), elapsedDays: 0 }).delta };
+  expect(entryAgencyIssues("listener", remoteCheckpoint, { sourceId: source.source.id, entities: new Map(remoteBundle.canonical.entities.map(item => [item.id, item])), processTemplates: new Map(remoteBundle.canonical.processTemplates.map(item => [item.id, item])), actionSchemas: new Map(remoteBundle.canonical.actionSchemas.map(item => [item.id, item])), acquisitions: new Map(remoteBundle.canonical.acquisitions.map(item => [item.id, item])) })).toEqual([]);
+  const remoteSeed = deriveCharacterEntrySeed(remoteBundle, "listener");
+  expect(remoteSeed.knowledge!.operations.filter(item => item.op === "learn" && item.acquisitionId === "heard-warning")).toHaveLength(1);
+  const remoteContext = await contexts.capturePrepared(source.source.id, contentHash(remoteBundle), remoteBundle.canonical);
+  const remoteEngine = new WorldEngine(cloneRoot, remoteContext);
+  const remoteHead = await remoteEngine.createBranch("remote-late", "Historical radio entry", remoteSeed.delta, remoteSeed.knowledge, undefined, undefined, remoteSeed.evidence, { storyTime: remoteSeed.storyTime }, { entryActorId: "listener", participantPresence: remoteSeed.participantPresence, projectionSeed: remoteSeed.projectionSeed, realizesCanonicalEventIds: remoteSeed.realizesCanonicalEventIds });
+  const remoteProjection = await remoteEngine.projections.project(remoteHead, { fresh: true, useCheckpoints: false });
+  expect(remoteProjection.knowledge.acquisitions?.["heard-warning"]).toMatchObject({ actorId: "listener", acquiredAtCommit: remoteHead });
+  expect(remoteProjection.knowledge.acquisitions?.["infer-passage"]).toBeUndefined();
+  expect(remoteProjection.history[0]!.event.participantPresence).toEqual([{ entityId: "listener", mode: "remote" }]);
+  const staleKnowledgeBundle = structuredClone(remoteBundle);
+  staleKnowledgeBundle.canonical.events.find(item => item.id === "entry")!.characterEntryCheckpoints![0]!.knowledge!.operations[0] = { ...received, status: "disbelieves" } as never;
+  expect(() => deriveCharacterEntrySeed(staleKnowledgeBundle, "listener")).toThrow();
   const badCut = structuredClone(lateSeed); badCut.projectionSeed!.knowledgeHistory!.cutHash = "0".repeat(64);
   await expect(createLate("bad-cut", badCut)).rejects.toThrow("ENTRY_KNOWLEDGE_HISTORY_INVALID");
   const badKnowledge = structuredClone(lateSeed); badKnowledge.knowledge!.operations.push(inference as never);
@@ -200,37 +236,63 @@ it.each(scenes.flatMap(scene => [false, true].map(repair => ({ ...scene, repair 
   await expect(canon.getEvent("new-unverified")).rejects.toMatchObject({ code: "ENOENT" });
 });
 it.each(scenes)("separates reading, uncomprehended receipt and mistaken sources: $speaker", async original => {
-  for (const mode of ["read", "deceived-misattributed", "ununderstood"] as const) {
-    const text = mode === "read" ? `${original.speaker} writes a notice for ${original.listener}: "${original.quote}". ${original.listener} reads, understands and believes it.`
+  for (const mode of ["read", "remote-read", "deceived-misattributed", "ununderstood"] as const) {
+    const reading = mode === "read" || mode === "remote-read";
+    const text = mode === "remote-read" ? `${original.speaker} writes a notice for ${original.listener}: "${original.quote}". ${original.listener} at the ${original.subject} reads it through an already-open terminal text session and understands and believes it; the document remains in the remote archive.`
+      : mode === "read" ? `${original.speaker} writes a notice for ${original.listener}: "${original.quote}". ${original.listener} reads, understands and believes it. Both are at the ${original.subject}.`
       : mode === "deceived-misattributed" ? `${original.speaker}, impersonating Ivo, tells ${original.listener}: "${original.quote}". ${original.listener} understands, believes it, and mistakes the speaker for Ivo.`
       : `${original.speaker} tells ${original.listener} in an unfamiliar language: "${original.quote}". ${original.listener} hears the sounds but does not understand or form a belief.`;
     const scene = { ...original, text, receipt: text };
     const { root, source, canon, event, expression, quotation, proposition, paths } = await setup(scene);
     const toolset = createCompilerProposalToolset(root); await toolset.beginBatch([], mode, source.source.id);
     const invoke = (name: string, input: unknown) => toolset.tools.find(tool => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
-    if (mode === "read") {
+    if (reading) {
       await canon.putEntity({ id: "notice", kind: "artifact", canonicalName: "notice", aliases: [], evidence: source.evidence("notice") });
       await canon.putEvent({ ...event, participants: [...event.participants, "notice"] });
     }
+    if (mode === "remote-read") {
+      for (const [id, kind] of [["terminal", "artifact"], ["archive", "location"]] as const) await canon.putEntity({ id, kind, canonicalName: id, aliases: [], evidence: source.evidence(text) });
+      await canon.putProcessTemplate(processTemplateSchema.parse({ ontologyVersion: "process-template-v1", id: "text-access", name: "Document terminal", ownerRoles: [
+        { id: "reader", label: "Reader", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 },
+        ...["document", "carrier"].map(id => ({ id, label: id, allowedEntityKinds: ["artifact"], minCardinality: 1, maxCardinality: 1 })),
+      ], phases: [{ id: "open", label: "Open", terminal: false }, { id: "closed", label: "Closed", terminal: true }], initialPhaseId: "open", transitions: [{ fromPhaseId: "open", toPhaseId: "closed", minimumProgress: 1 }], outcomeIds: ["closed"], visibility: "public", induction: { kind: "domain-module", moduleId: "test-text-access", moduleVersion: "1" }, evidence: [] }));
+      const { evidence: _entityEvidence, ...reader } = await canon.getEntity("listener");
+      const profile = { ontologyVersion: "agency-channel-v1", agency: "autonomous", embodiment: "bodily", channels: [{ id: "screen", modality: "text", processTemplateId: "text-access", actorRoleId: "reader", peerRoleId: "document", carrierRoleId: "carrier", activePhaseIds: ["open"] }] };
+      const selectors = ["/agencyProfile/agency", "/agencyProfile/embodiment", ...["modality", "processTemplateId", "actorRoleId", "peerRoleId", "carrierRoleId", "activePhaseIds/0"].map(key => `/agencyProfile/channels/0/${key}`)];
+      await invoke("propose_entity", { proposal_id: "reader-profile", payload: { ...reader, agencyProfile: profile }, evidence_segment_ids: [source.segmentId], evidence_selectors: selectors.map(target_path => ({ segment_id: source.segmentId, exact: text, target_path, relation: "supports", strength: "explicit" })) });
+      await canon.putEvent({ ...event, participants: [...event.participants, "notice", "terminal"], participantPresence: [{ entityId: "speaker", mode: "physical" }, { entityId: "listener", mode: "remote" }], observedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "listener", claimId: "claim", propositionId: "content", acquisitionId: "received", expressionId: expression.id, attributionId: "report", acquisitionMode: "read", status: "believes", confidence: 1 }] } });
+    }
     if (mode === "deceived-misattributed") await canon.putEntity({ id: "ivo", kind: "character", canonicalName: "Ivo", aliases: [], evidence: source.evidence("Ivo") });
     const { evidence: _source, ...base } = expression;
-    await invoke("propose_utterance_expression", { proposal_id: "expression", payload: { ...base, ...(mode === "read" ? { modality: "writing", documentId: "notice" } : {}), quotation: { quotationId: quotation.id }, propositions: [{ propositionId: proposition.id }], fragments: [{ segment_id: source.segmentId, exact: scene.quote }] }, evidence_segment_ids: [source.segmentId], evidence_selectors: [...paths, ...(mode === "read" ? ["/documentId"] : [])].map(target_path => ({ segment_id: source.segmentId, exact: target_path === "/documentId" ? "notice" : scene.quote, target_path, relation: "supports", strength: "explicit" })) });
+    await invoke("propose_utterance_expression", { proposal_id: "expression", payload: { ...base, ...(reading ? { modality: "writing", documentId: "notice" } : {}), quotation: { quotationId: quotation.id }, propositions: [{ propositionId: proposition.id }], fragments: [{ segment_id: source.segmentId, exact: scene.quote }] }, evidence_segment_ids: [source.segmentId], evidence_selectors: [...paths, ...(reading ? ["/documentId"] : [])].map(target_path => ({ segment_id: source.segmentId, exact: target_path === "/documentId" ? "notice" : scene.quote, target_path, relation: "supports", strength: "explicit" })) });
     const { evidence: _report, ...report } = await canon.getAttribution("report");
-    await invoke("propose_attribution", { proposal_id: "report", payload: { ...report, expressionIds: [expression.id], ...(mode === "read" ? { holderKind: "document", holderEntityId: "notice" } : {}) }, evidence_segment_ids: [source.segmentId] });
-    const basis = mode === "read" ? { mode, expressionId: expression.id, attributionId: "report", documentId: "notice" }
+    await invoke("propose_attribution", { proposal_id: "report", payload: { ...report, expressionIds: [expression.id], ...(reading ? { holderKind: "document", holderEntityId: "notice" } : {}) }, evidence_segment_ids: [source.segmentId] });
+    const basis = reading ? { mode: "read", expressionId: expression.id, attributionId: "report", documentId: "notice", ...(mode === "remote-read" ? { textChannel: { channelId: "screen", processTemplateId: "text-access" } } : {}) }
       : mode === "deceived-misattributed" ? { mode, expressionId: expression.id, attributionId: "report", actualSourceActorId: "speaker", believedSourceActorId: "ivo" }
       : { mode: "told", expressionId: expression.id, attributionId: "report" };
     const reception = { received: true, understood: mode !== "ununderstood", belief: mode === "ununderstood" ? "undecided" : "accepted" };
     const payload = { ontologyVersion: "acquisition-v1", id: "received", actorId: "listener", canonicalEventId: event.id, cut: "event-end", claimId: "claim", propositionId: "content", basis, reception };
-    const fields = ["/actorId", "/canonicalEventId", "/cut", "/claimId", "/propositionId", "/reception/received", "/reception/understood", "/reception/belief", ...Object.keys(basis).map(key => `/basis/${key}`)];
+    const fields = ["/actorId", "/canonicalEventId", "/cut", "/claimId", "/propositionId", "/reception/received", "/reception/understood", "/reception/belief", ...Object.keys(basis).map(key => `/basis/${key}`), ...(mode === "remote-read" ? ["/basis/textChannel/channelId", "/basis/textChannel/processTemplateId"] : [])];
+    if (mode === "remote-read") {
+      await expect(invoke("propose_acquisition", { proposal_id: "received", payload, evidence_segment_ids: [source.segmentId], evidence_selectors: fields.filter(pointer => pointer !== "/basis/textChannel/channelId").map(target_path => ({ segment_id: source.segmentId, exact: text, target_path, relation: "supports", strength: "explicit" })) })).rejects.toThrow("ACQUISITION_EVIDENCE_MISSING");
+      expect(await canon.listAcquisitions()).toEqual([]);
+    }
     await invoke("propose_acquisition", { proposal_id: "received", payload, evidence_segment_ids: [source.segmentId], evidence_selectors: fields.map(target_path => ({ segment_id: source.segmentId, exact: text, target_path, relation: "supports", strength: "explicit" })) });
     await invoke("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent reception without truth promotion" });
     expect((await convergeWorldProposals(root, source.source.id)).canonical.blocked).toEqual([]);
     const context = await new WorldContextStore(root).captureCurrent(source.source.id), engine = new WorldEngine(root, context);
     const initial = { version: 1 as const, operations: [{ op: "set" as const, entityId: "speaker", field: "character.alive", value: true }, { op: "set" as const, entityId: "listener", field: "character.alive", value: true }] };
-    const head = await engine.createBranch("main", "Before receipt", initial, undefined, undefined, undefined, [], {}, { realizesCanonicalEventIds: [] });
-    const operation = { op: "learn", actorId: "listener", claimId: "claim", propositionId: "content", acquisitionId: payload.id, expressionId: expression.id, attributionId: "report", acquisitionMode: basis.mode, status: mode === "ununderstood" ? "heard" : "believes", confidence: 1, ...(mode === "read" ? {} : { sourceActorId: "speaker" }) };
-    const proposal = { proposalId: "receive", branchId: "main", expectedParentCommit: head, source: "canon-candidate", title: "Receive content", participants: (await canon.getEvent(event.id)).participants, participantPresence: event.participantPresence, preconditions: [], proposedTime: { kind: "unknown" }, proposedDelta: event.observedOutcome, proposedKnowledge: { version: 1, operations: [operation] }, possibilityId: "canon-utterance", causalParents: [], evidence: [] };
+    const readingInitial = reading ? { version: 1 as const, operations: [...initial.operations,
+      { op: "set" as const, entityId: "listener", field: "character.location", value: "place" },
+      { op: "set" as const, entityId: "notice", field: "artifact.location", value: mode === "remote-read" ? "archive" : "place" },
+    ] } : initial;
+    let head = await engine.createBranch("main", "Before receipt", readingInitial, undefined, undefined, undefined, [], {}, { realizesCanonicalEventIds: [] });
+    if (mode === "remote-read") {
+      const started = await engine.commitProposal({ proposalId: "open-text", branchId: "main", expectedParentCommit: head, source: "background", title: "Open terminal", participants: ["listener", "notice", "terminal"], proposedTime: { kind: "unknown" }, preconditions: [], proposedDelta: { version: 1, operations: [] }, causalParents: [], evidence: [], proposedProcesses: { version: 1, operations: [{ op: "start-process", localRef: "local-text", process: { templateId: "text-access", ownerBindings: [{ roleId: "reader", entityIds: ["listener"] }, { roleId: "document", entityIds: ["notice"] }, { roleId: "carrier", entityIds: ["terminal"] }], progress: 0 } }] } });
+      expect(started.report.errors).toEqual([]); head = started.newHead;
+    }
+    const operation = { op: "learn", actorId: "listener", claimId: "claim", propositionId: "content", acquisitionId: payload.id, expressionId: expression.id, attributionId: "report", acquisitionMode: basis.mode, status: mode === "ununderstood" ? "heard" : "believes", confidence: 1, ...(reading ? {} : { sourceActorId: "speaker" }) };
+    const proposal = { proposalId: "receive", branchId: "main", expectedParentCommit: head, source: "canon-candidate", title: "Receive content", participants: (await canon.getEvent(event.id)).participants, participantPresence: (await canon.getEvent(event.id)).participantPresence, preconditions: [], proposedTime: { kind: "unknown" }, proposedDelta: event.observedOutcome, proposedKnowledge: { version: 1, operations: [operation] }, possibilityId: "canon-utterance", causalParents: [], evidence: [] };
     const wrongProposal = { ...proposal, proposedKnowledge: { version: 1, operations: [{ ...operation, status: "knows" }] } };
     if (mode === "deceived-misattributed") await expect(engine.commitProposal(wrongProposal as never)).rejects.toThrow("knows");
     else expect((await engine.commitProposal(wrongProposal as never)).report.errors.some(item => item.code === "ACQUISITION_RECEPTION_MISMATCH")).toBe(true);
@@ -243,6 +305,78 @@ it.each(scenes)("separates reading, uncomprehended receipt and mistaken sources:
       expect(projection.knowledge.actors.listener?.claim?.sourceActorId).toBe("speaker");
       expect(view.knowledge[0]?.fact.sourceActorId).toBe("ivo");
       expect(view.knowledge[0]?.attribution?.holderEntityId).toBe("ivo");
+    }
+    if (mode === "remote-read") {
+      const stored = context.acquisitions!.get("received")!;
+      const changedReader = { ...context.entities.get("listener")!, canonicalName: "Changed identity revision" };
+      expect(validateAcquisition(stored, acquisitionCatalog({ ...context, entities: new Map(context.entities).set("listener", changedReader) })).some(issue => issue.code === "ACQUISITION_REVISION_MISMATCH")).toBe(true);
+      const seedProcesses = materializeProcessProposal({ version: 1, operations: [{ op: "start-process", localRef: "local-opening-text", process: { templateId: "text-access", ownerBindings: [{ roleId: "reader", entityIds: ["listener"] }, { roleId: "document", entityIds: ["notice"] }, { roleId: "carrier", entityIds: ["terminal"] }], progress: 0 } }] }, { branchId: "opening", parentCommitId: "opening", proposalHash: contentHash(text), templates: context.processTemplates!, elapsedDays: 0 }).delta;
+      const seed = { version: 1 as const, semantics: { version: 1 as const, operations: [] }, processes: seedProcesses, norms: { version: 1 as const, operations: [] }, activeRuleIds: [], elapsedDays: 0 };
+      await new InitialWorldStore(root).put({ version: 1, evidence: source.evidence(text), delta: readingInitial, participantPresence: [{ entityId: "listener", mode: "physical" }], projectionSeed: seed });
+      await new CompilerBatchStore(root).replaceCompleted(source.source.id, (await prepareCompilerBatches(root, source.source)).map(item => item.id));
+      const cacheRoot = path.join(root, "text-cache"), cache = new PreparedNovelCache(root, cacheRoot);
+      const bundle = await cache.candidateSnapshot(source.source);
+      expect(buildPreparedClosure(bundle).issues).toEqual([]);
+      const archived = await cache.archiveCandidate(source.source);
+      const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-text-acquisition-clone-")); roots.push(cloneRoot);
+      const cloneSource = await createEvidenceFixture(cloneRoot, text);
+      await new PreparedNovelCache(cloneRoot, cacheRoot).restoreCompilerCheckpoint(cloneSource.source, archived.bundleHash!);
+      const cloneContext = await new WorldContextStore(cloneRoot).captureCurrent(cloneSource.source.id), clone = new WorldEngine(cloneRoot, cloneContext);
+      const cloneHead = await clone.createBranch("rebuilt", "Rebuilt", readingInitial, undefined, cloneSource.source.id, undefined, source.evidence(text), {}, { realizesCanonicalEventIds: [], participantPresence: [{ entityId: "listener", mode: "physical" }], projectionSeed: seed });
+      const rebuiltReceipt = await clone.commitProposal({ ...proposal, branchId: "rebuilt", expectedParentCommit: cloneHead } as never);
+      expect(rebuiltReceipt.report.errors).toEqual([]);
+      const rebuiltReplay = await new WorldEngine(cloneRoot, cloneContext).projections.project(rebuiltReceipt.newHead, { fresh: true, useCheckpoints: false });
+      expect(rebuiltReplay.knowledge.acquisitions?.received?.actorId).toBe("listener");
+      expect(rebuiltReplay.state.values.notice?.["artifact.location"]).toBe("archive");
+      await expect(clone.createBranch("bad-receipt-opening", "Missing session", readingInitial, { version: 1, operations: [operation] } as never, cloneSource.source.id, undefined, source.evidence(text), {}, { realizesCanonicalEventIds: [event.id], participantPresence: [{ entityId: "listener", mode: "remote" }] })).rejects.toThrow("ACQUISITION_TEXT_CHANNEL_UNPROVEN");
+      const receivedOpening = await clone.createBranch("received-opening", "Received at opening", readingInitial, { version: 1, operations: [operation] } as never, cloneSource.source.id, undefined, source.evidence(text), {}, { realizesCanonicalEventIds: [event.id], participantPresence: [{ entityId: "listener", mode: "remote" }], projectionSeed: seed });
+      const openingReplay = await new WorldEngine(cloneRoot, cloneContext).projections.project(receivedOpening, { fresh: true, useCheckpoints: false });
+      expect(openingReplay.knowledge.acquisitions?.received?.actorId).toBe("listener");
+      expect(openingReplay.history[0]!.event.participants).toContain("terminal");
+      const lateBundle = structuredClone(bundle);
+      lateBundle.canonical.initialWorld.participantPresence = [{ entityId: "speaker", mode: "physical" }];
+      lateBundle.canonical.initialWorld.delta.operations = lateBundle.canonical.initialWorld.delta.operations.filter(op => !("entityId" in op && op.entityId === "listener" && "field" in op && op.field === "character.location"));
+      lateBundle.canonical.initialWorld.checkpoint = { mode: "chronological", rationale: "Before the reading", beforeCanonicalEventId: event.id, storyTime: event.storyTime };
+      const entry = canonicalEventSchema.parse({ id: "after-reading", title: "After the reading", readerSummary: "The reader considers the notice", participants: ["listener", "notice", "terminal"], participantPresence: [{ entityId: "listener", mode: "remote" }], storyTime: { kind: "unknown" }, preconditions: [], observedOutcome: { version: 1, operations: [{ op: "set", entityId: "listener", field: "character.plan", value: "future-canon-plan" }] }, causalParents: [], confidence: 1, evidence: source.evidence(text),
+        characterEntryCheckpoints: [{ actorId: "listener", readerSetup: "The notice was already read", actorObservation: "You consider the text you read", participantPresence: [{ entityId: "listener", mode: "remote" }], delta: readingInitial, projectionSeed: seed }] });
+      lateBundle.canonical.events.push(entry);
+      lateBundle.canonical.eventRelations = [{ id: "read-before-entry", fromEventId: event.id, toEventId: entry.id, type: "before", operationality: "non-operational", status: "explicit", confidence: 1, evidence: source.evidence(text) }];
+      const lateSeed = deriveCharacterEntrySeed(lateBundle, "listener");
+      expect(lateSeed.projectionSeed?.knowledgeHistory).toMatchObject({ beforeCanonicalEventId: entry.id, actorId: "listener" });
+      const lateContext = await new WorldContextStore(cloneRoot).capturePrepared(cloneSource.source.id, contentHash(lateBundle), lateBundle.canonical);
+      const late = new WorldEngine(cloneRoot, lateContext);
+      const lateHead = await late.createBranch("late-text", "After reading", lateSeed.delta, lateSeed.knowledge, cloneSource.source.id, undefined, lateSeed.evidence, {}, { entryActorId: "listener", participantPresence: lateSeed.participantPresence, projectionSeed: lateSeed.projectionSeed, realizesCanonicalEventIds: lateSeed.realizesCanonicalEventIds });
+      const historyReplay = await new WorldEngine(cloneRoot, lateContext).projections.project(lateHead, { fresh: true, useCheckpoints: false });
+      expect(historyReplay.knowledge.acquisitions?.received).toMatchObject({ actorId: "listener", acquiredAtCommit: lateHead });
+      expect(historyReplay.state.values.listener?.["character.plan"]).not.toBe("future-canon-plan");
+      expect(historyReplay.knowledge.actors.speaker).toBeUndefined();
+      expect(lateSeed.realizesCanonicalEventIds).not.toContain(entry.id);
+      for (const historyCase of ["missing", "paused"] as const) {
+      const missingHistoricalChannel = structuredClone(lateBundle);
+      if (historyCase === "missing") missingHistoricalChannel.canonical.initialWorld.projectionSeed!.processes.operations = [];
+      else {
+        const start = seed.processes.operations.find(op => op.op === "start-process")!;
+        if (start.op === "start-process") missingHistoricalChannel.canonical.initialWorld.projectionSeed!.processes.operations.push({ op: "pause-process", processId: start.process.id, reasonId: "closed" });
+      }
+      const missingSeed = deriveCharacterEntrySeed(missingHistoricalChannel, "listener");
+      const missingContext = await new WorldContextStore(cloneRoot).capturePrepared(cloneSource.source.id, contentHash(missingHistoricalChannel), missingHistoricalChannel.canonical);
+      const missingEngine = new WorldEngine(cloneRoot, missingContext);
+      await expect(missingEngine.createBranch("missing-history-text", "Missing history", missingSeed.delta, missingSeed.knowledge, cloneSource.source.id, undefined, missingSeed.evidence, {}, { entryActorId: "listener", participantPresence: missingSeed.participantPresence, projectionSeed: missingSeed.projectionSeed, realizesCanonicalEventIds: missingSeed.realizesCanonicalEventIds })).rejects.toThrow("ACQUISITION_TEXT_CHANNEL_UNPROVEN");
+      await expect(missingEngine.branches.read("missing-history-text")).rejects.toThrow();
+      }
+      const changedCut = structuredClone(lateSeed.projectionSeed!);
+      changedCut.knowledgeHistory!.cutHash = "0".repeat(64);
+      await expect(late.createBranch("bad-text-cut", "Bad cut", lateSeed.delta, lateSeed.knowledge, cloneSource.source.id, undefined, lateSeed.evidence, {}, { entryActorId: "listener", participantPresence: lateSeed.participantPresence, projectionSeed: changedCut, realizesCanonicalEventIds: lateSeed.realizesCanonicalEventIds })).rejects.toThrow("ENTRY_KNOWLEDGE_HISTORY_INVALID");
+      await expect(late.branches.read("bad-text-cut")).rejects.toThrow();
+      await late.branches.create({ id: "late-text-fork", name: "Alternate after reading", parentBranchId: "late-text", forkCommitId: lateHead, headCommitId: lateHead });
+      const alternate = await late.commitProposal({ proposalId: "choose-alternate", branchId: "late-text-fork", expectedParentCommit: lateHead, source: "player", actorId: "listener", title: "Choose a different plan", participants: ["listener"], participantPresence: [{ entityId: "listener", mode: "remote" }], proposedTime: { kind: "unknown" }, preconditions: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: "listener", field: "character.plan", value: "alternate-plan" }] }, causalParents: [], evidence: [] });
+      expect(alternate.report.errors).toEqual([]);
+      expect(await late.branches.readHead("late-text")).toBe(lateHead);
+      const forkReplay = await new WorldEngine(cloneRoot, lateContext).projections.project(alternate.newHead, { fresh: true, useCheckpoints: false });
+      expect(forkReplay.knowledge.acquisitions?.received?.actorId).toBe("listener");
+      expect(forkReplay.state.values.listener?.["character.plan"]).toBe("alternate-plan");
+      expect(forkReplay.history.flatMap(item => item.event.realizesCanonicalEventIds ?? [])).not.toContain(entry.id);
+
     }
     expect(projection.state.values.place).toBeUndefined();
   }

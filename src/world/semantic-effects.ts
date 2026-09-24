@@ -1,5 +1,6 @@
 import { validateIdentityName } from "./actor-recognition.js";
 import type {
+  BranchAcquisition,
   BranchSemanticDelta,
   BranchSemanticOperation,
   BranchSemanticProposalDelta,
@@ -51,6 +52,7 @@ export type BranchObligation = Introduced<CreatedObligation> & {
 export type BranchSemanticState = {
   version: 1;
   atCommit: CommitId;
+  acquisitions?: Record<string, Introduced<BranchAcquisition>>;
   propositions: Record<string, Introduced<RecordedProposition>>;
   attributions: Record<string, Introduced<RecordedAttribution>>;
   claims: Record<string, Introduced<RecordedClaim>>;
@@ -70,7 +72,7 @@ export type SemanticReducerContext = {
   knownCommittedEventIds?: ReadonlySet<string>;
 };
 
-type SemanticBindingKind = "proposition" | "attribution" | "claim" | "goal" | "appraisal" | "relationship" | "obligation";
+type SemanticBindingKind = "acquisition" | "proposition" | "attribution" | "claim" | "goal" | "appraisal" | "relationship" | "obligation";
 export type SemanticLocalBinding = { id: string; kind: SemanticBindingKind };
 export type MaterializedBranchSemantics = {
   delta: BranchSemanticDelta;
@@ -120,6 +122,17 @@ export function materializeBranchSemanticProposal(
 
   proposal.operations.forEach((operation, operationIndex) => {
     switch (operation.op) {
+      case "record-acquisition": {
+        const id = introduce(operation.localRef, "acquisition", operationIndex, operation.acquisition);
+        const acquisition = structuredClone(operation.acquisition), basis = acquisition.basis;
+        acquisition.claimId = resolve(acquisition.claimId, "claim");
+        acquisition.propositionId = resolve(acquisition.propositionId, "proposition");
+        if ("attributionId" in basis) basis.attributionId = resolve(basis.attributionId, "attribution");
+        if (basis.mode === "remembered") basis.priorAcquisitionId = resolve(basis.priorAcquisitionId, "acquisition");
+        if (basis.mode === "inferred") basis.premiseAcquisitionIds = basis.premiseAcquisitionIds.map(ref => resolve(ref, "acquisition"));
+        operations.push({ op: operation.op, acquisition: { id, ...acquisition } });
+        break;
+      }
       case "record-proposition": {
         const id = introduce(operation.localRef, "proposition", operationIndex, operation.proposition);
         const object = operation.proposition.object.kind === "proposition"
@@ -229,6 +242,7 @@ export function resolveSemanticKnowledgeRefs(
     operations: input.operations.map((operation) => ({
       ...structuredClone(operation),
       claimId: resolve(operation.claimId, "claim"),
+      ...(operation.op === "learn" && operation.acquisitionId ? { acquisitionId: resolve(operation.acquisitionId, "acquisition") } : {}),
       ...(operation.propositionId ? { propositionId: resolve(operation.propositionId, "proposition") } : {}),
       ...(operation.op === "learn" && operation.attributionId
         ? { attributionId: resolve(operation.attributionId, "attribution") }
@@ -267,6 +281,19 @@ export function applyBranchSemanticDelta(
 
   for (const operation of delta.operations) {
     switch (operation.op) {
+      case "record-acquisition": {
+        const value = operation.acquisition;
+        const acquisitions = output.acquisitions ??= {};
+        assertUnusedId(value.id, acquisitions, undefined, "acquisition");
+        if (!value.id.startsWith("branch-acquisition-")) throw new Error("Branch acquisition IDs must be host allocated");
+        requireCharacter(context.entities, value.actorId, "Acquisition recipient");
+        if (!hasProposition(value.propositionId) || (!output.claims[value.claimId] && !context.canonicalClaimIds?.has(value.claimId))) throw new Error("Branch acquisition content is outside this history");
+        if ("attributionId" in value.basis && !hasAttribution(value.basis.attributionId)) throw new Error("Branch acquisition attribution is outside this history");
+        if ((value.basis.mode === "told" || value.basis.mode === "deceived-misattributed") && value.basis.utteranceEventId && !context.knownCommittedEventIds?.has(value.basis.utteranceEventId)) throw new Error("BRANCH_SPEECH_HISTORY_UNAVAILABLE: Prior utterance is outside this branch history. Preserve head and stop; never guess an event ID or retry unchanged.");
+        if (value.basis.mode === "read" && "messageEventId" in value.basis && !context.knownCommittedEventIds?.has(value.basis.messageEventId)) throw new Error("BRANCH_TEXT_HISTORY_UNAVAILABLE: Message is outside this branch history. Preserve head and stop; never guess or import another branch.");
+        acquisitions[value.id] = { ...structuredClone(value), introducedBy: provenance };
+        break;
+      }
       case "record-proposition": {
         const nameIssues = validateIdentityName(operation.proposition.relationId, operation.proposition.object.kind === "literal" ? operation.proposition.object.value : undefined);
         if (nameIssues.length) throw new Error(nameIssues.map(issue => issue.message).join("; "));

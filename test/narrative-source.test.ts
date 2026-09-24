@@ -22,7 +22,7 @@ describe("narrator-safe source prose", () => {
       workspaceRoot: root,
       sourceId: fixture.source.id,
       candidates: [{
-        evidence: fixture.evidence(quote),
+        evidence: fixture.evidence(quote), admittedTexts: [quote],
         relevance: ["actor-visible committed event"],
         anchors: ["福贵"],
       }],
@@ -56,9 +56,9 @@ describe("narrator-safe source prose", () => {
       sourceId: fixture.source.id,
       forbiddenNames: ["秘密人"],
       candidates: [
-        { evidence: forged, relevance: ["forged"], anchors: ["福贵"] },
-        { evidence: fixture.evidence(forbiddenQuote), relevance: ["future leak"], anchors: ["福贵"] },
-        { evidence: fixture.evidence(oversized), relevance: ["unanchored"], anchors: ["并不存在的锚点"] },
+        { evidence: forged, admittedTexts: [forbiddenQuote], relevance: ["forged"], anchors: ["福贵"] },
+        { evidence: fixture.evidence(forbiddenQuote), admittedTexts: [forbiddenQuote], relevance: ["future leak"], anchors: ["福贵"] },
+        { evidence: fixture.evidence(oversized), admittedTexts: [oversized], relevance: ["unanchored"], anchors: ["并不存在的锚点"] },
       ],
     })).resolves.toEqual([]);
   });
@@ -73,7 +73,7 @@ describe("narrator-safe source prose", () => {
       workspaceRoot: root,
       sourceId: fixture.source.id,
       candidates: [{
-        evidence: fixture.evidence(oversized),
+        evidence: fixture.evidence(oversized), admittedTexts: [oversized],
         relevance: ["current committed scene"],
         anchors: ["福贵按住门闩"],
       }],

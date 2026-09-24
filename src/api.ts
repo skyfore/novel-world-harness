@@ -503,3 +503,5 @@ export { ModelRequestBudget, ModelRequestBudgetError, type ModelRequestLimits } 
 
 export { branchAcquisitionSchema, type BranchAcquisition } from "./world/model.js";
 export { migrateLegacyAcquisitions, acquisitionMigrationManifestSchema, type AcquisitionMigrationManifest } from "./compiler/acquisition-migration.js";
+
+export { buildLiteraryReferenceIndex, type LiteraryReferenceIndex, type LiteraryReferenceRecord } from "./world/literary-reference.js";

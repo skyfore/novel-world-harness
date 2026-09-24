@@ -111,6 +111,12 @@ it.each(scenes.flatMap(scene => [false, true].map(repair => ({ ...scene, repair 
   const proposal = { proposalId: "receive", branchId: "main", expectedParentCommit: head, source: "canon-candidate", title: "Receive warning", participants: event.participants, participantPresence: event.participantPresence, preconditions: [], proposedTime: { kind: "unknown" }, proposedDelta: event.observedOutcome, proposedKnowledge: { version: 1, operations: [received] }, possibilityId: "canon-utterance", causalParents: [], evidence: [] };
   const receipt = await engine.commitProposal(proposal as never); expect(receipt.report.errors).toEqual([]);
   const learned = await engine.projections.project(receipt.newHead, { fresh: true, useCheckpoints: false });
+  const { buildLiteraryReferenceIndex } = await import("../src/world/literary-reference.js");
+  const literary = await buildLiteraryReferenceIndex({ engine, workspaceRoot: cloneRoot, branchId: "main", atCommit: receipt.newHead, actorId: "listener", sourceId: source.source.id });
+  expect(literary.references.map(value => value.text)).toEqual([scene.quote]);
+  expect(literary.index.records[0]!.visibility).toMatchObject({ basis: "understood-expression", acquisitionId: payload.id, expressionId: expression.id });
+  expect(JSON.stringify(literary.index)).not.toContain(scene.quote);
+
   expect(learned.knowledge.acquisitions?.[payload.id]).toMatchObject({ actorId: "listener", reception });
   const remembered = { op: "learn", actorId: "listener", claimId: "claim", propositionId: "content", acquisitionId: "remember-warning", acquisitionMode: "remembered", status: "believes", confidence: 1 };
   const recallProposal = { ...proposal, proposalId: "remember", expectedParentCommit: receipt.newHead, proposedDelta: { version: 1, operations: [] }, proposedKnowledge: { version: 1, operations: [remembered] }, possibilityId: "canon-remember" };

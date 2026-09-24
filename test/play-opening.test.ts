@@ -267,7 +267,7 @@ describe("player opening narration", () => {
   it("injects exact act, source prose, play prose, and committed outcomes with explicit authority", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-literary-packet-"));
     roots.push(root);
-    const sourceLine = "雨丝斜斜地擦过檐角，福贵看着见证人，话到嘴边反而放得很轻。";
+    const sourceLine = "雨丝斜斜地擦过檐角，福贵看着见证人，话到嘴边反而放得很轻。“门外是谁？”";
     const evidence = await createEvidenceFixture(root, `${sourceLine}\n`, "literary-context.txt");
     const canon = new CanonicalModelStore(root);
     await canon.putEntity({
@@ -359,13 +359,10 @@ describe("player opening narration", () => {
         mode: "verbatim",
       }],
     });
-    expect(frame.sourceReferences).toEqual([
-      expect.objectContaining({
-        text: sourceLine,
-        authority: "style-only",
-        safety: "actor-visible-committed-evidence",
-      }),
-    ]);
+    // The wide event evidence contains descriptive prose never explicitly
+    // exposed in the committed actor observation or speech. It is not style access.
+    expect(frame.sourceReferences).toEqual([expect.objectContaining({ text: "门外是谁？", authority: "style-only" })]);
+    expect(frame.literaryReferenceIndex?.records[0]?.visibility.basis).toBe("committed-utterance");
     expect(frame.playContinuity?.map(({ role, text, authority }) => ({ role, text, authority }))).toEqual([
       { role: "scene", text: "雨还没有落稳，檐角先暗了下来。", authority: "presentation-only" },
       { role: "player", text: "我抬头对见证人说：“门外是谁？”", authority: "untrusted-player-text" },
@@ -384,7 +381,9 @@ describe("player opening narration", () => {
         avoid: ["事件摘要"],
       },
     });
-    expect(prompt).toContain(sourceLine);
+    expect(prompt).not.toContain(sourceLine);
+    expect(prompt).toContain("门外是谁？");
+    expect(prompt).not.toContain("literaryReferenceIndex");
     expect(prompt).toContain("雨还没有落稳，檐角先暗了下来。");
     expect(prompt).toContain("我抬头对见证人说");
     expect(prompt).toContain("你问见证人门外是谁。");

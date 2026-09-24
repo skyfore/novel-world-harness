@@ -1,5 +1,6 @@
 import type { AgencyDecisionView } from "./agency-profile.js";
 import { observeCommittedEvent } from "./actor-visible.js";
+import { buildLiteraryReferenceIndex, type LiteraryReferenceIndex } from "./literary-reference.js";
 import { committedUtteranceId, renderNarrationBlocks, type LockedUtterance, type NarrationBlocks } from "./utterance-rendering.js";
 import { buildActorScopedActionContext } from "./player-action.js";
 import { NarrativeRenderer } from "./narrative.js";
@@ -8,7 +9,6 @@ import { buildNarrativeDirection, publicNarrativeThread, publicPlayerAffordance,
 import { committedHistory, type ActorSceneProjection } from "./scene.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import {
-  buildNarrativeSourceReferences,
   type NarrativeSourceReference,
 } from "./narrative-source.js";
 import { goalSupportedInCurrentPhase } from "./actors.js";
@@ -135,6 +135,7 @@ export type PlayOpeningFrame = {
   /** Exact source excerpts admitted solely as literary style evidence. */
   sourceReferences?: NarrativeSourceReference[];
   /** Host-only source pointers and actor visibility proofs. */
+  literaryReferenceIndex?: LiteraryReferenceIndex;
   /** Bounded exact prose excerpts for local branch/style continuity. */
   playContinuity?: PlayerNarrativePlayExcerpt[];
   /** Source-grounded human orientation for a fresh instance; never actor knowledge. */
@@ -320,31 +321,12 @@ export async function buildPlayOpeningFrame(
         .filter((entity) => evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId))
         .flatMap((entity) => [entity.canonicalName, ...entity.aliases])
     : [];
-  const sourceCandidates = [...history].reverse().flatMap((entry) => {
-    if (!entry.event.evidence.length || !entry.event.participants.includes(actorId)) return [];
-    if (entry.event.title === "Genesis"
-      && !entry.event.actorObservations?.some((observation) => observation.actorId === actorId)) return [];
-    const observation = observeCommittedEvent(entry.event, actorId);
-    if (!observation) return [];
-    const participantNames = entry.event.participants.flatMap((entityId) => {
-      if (!referenceableIds.has(entityId)) return [];
-      const entity = context.entities.get(entityId);
-      return entity ? [entity.canonicalName, ...entity.aliases] : [];
-    });
-    return [{
-      evidence: entry.event.evidence,
-      relevance: ["actor-visible committed event", observation.summary],
-      anchors: [actor.canonicalName, ...participantNames, observation.summary],
-    }];
-  });
   let sourceReferences: NarrativeSourceReference[] = [];
+  let literaryReferenceIndex: LiteraryReferenceIndex | undefined;
   try {
-    sourceReferences = await buildNarrativeSourceReferences({
-      workspaceRoot: root,
-      sourceId: effectiveSourceId,
-      candidates: sourceCandidates,
-      forbiddenNames,
-    });
+    const admitted = await buildLiteraryReferenceIndex({ engine, workspaceRoot: root, branchId, atCommit: head, actorId, sourceId: effectiveSourceId, forbiddenNames });
+    sourceReferences = admitted.references;
+    literaryReferenceIndex = admitted.index;
   } catch {
     // Literary evidence is optional. Source integrity remains enforced by the
     // compiler and world model; a missing style excerpt must not hide an
@@ -415,6 +397,7 @@ export async function buildPlayOpeningFrame(
     recentMessages: modelPlayConversation(recentPlayConversation(messageHistory)),
     ...(resolvedAct ? { resolvedAct } : {}),
     sourceReferences,
+    ...(literaryReferenceIndex ? { literaryReferenceIndex } : {}),
     playContinuity,
     ...(readerPrelude ? { readerPrelude } : {}),
   };

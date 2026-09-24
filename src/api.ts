@@ -502,3 +502,4 @@ export { withPlayModelBudget, currentPlayModelBudget, PLAY_MODEL_REQUEST_LIMITS 
 export { ModelRequestBudget, ModelRequestBudgetError, type ModelRequestLimits } from "./runtime/model-request-budget.js";
 
 export { branchAcquisitionSchema, type BranchAcquisition } from "./world/model.js";
+export { migrateLegacyAcquisitions, acquisitionMigrationManifestSchema, type AcquisitionMigrationManifest } from "./compiler/acquisition-migration.js";

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from "node:path";
+import fs from "node:fs/promises";
 import { HookCommand as Command } from "./runtime/hook-command.js";
 import type { TuiMode } from "@earendil-works/pi-coding-agent";
 import { resolveConfigPath } from "./config/load.js";
@@ -19,6 +20,7 @@ import { compileSourceCommand } from "./commands/compile-source.js";
 import { prepareCommand } from "./commands/prepare.js";
 import { prepareAllCommand } from "./commands/prepare-all.js";
 import { reparseCommand } from "./commands/reparse.js";
+import { migrateLegacyAcquisitions } from "./compiler/acquisition-migration.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
 import { WorkspaceOperationLock } from "./util/workspace-lock.js";
@@ -490,6 +492,15 @@ program
   .description("resume or rebuild the core novel world into an immutable candidate without publishing Play")
   .action(async (options) => withCompilerSignals((signal) => rebuildCommand({ root: rootFor(options), configPath: configFor(options), sourceId: options.source, chapters: options.chapters,
     fromRevision: options.fromRevision, replaceStaging: options.replaceStaging, model: options.model ?? program.opts().model, signal })));
+
+program.command("migrate-acquisitions")
+  .argument("<manifest>", "reviewed v1 migration JSON with exact source evidence selectors")
+  .option("--root <path>", "local novel workspace")
+  .description("fork a prepared revision and archive an evidence-validated legacy acquisition candidate")
+  .action(async (manifest, options) => {
+    const result = await migrateLegacyAcquisitions({ root: rootFor(options), manifest: JSON.parse(await fs.readFile(manifest, "utf8")) });
+    console.log(JSON.stringify(result, null, 2));
+  });
 
 program
   .command("repair-existing")

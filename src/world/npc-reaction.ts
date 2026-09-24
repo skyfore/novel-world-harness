@@ -1,4 +1,5 @@
 import { withDecisionScope } from "./decision-scope.js";
+import { committedTextDeliveries } from "./text-delivery.js";
 import { actorOutcomeShape, copyActorOutcome, hasActorOutcome } from "./actor-outcome.js";
 import { z } from "zod";
 import { validateActionKnowledge } from "./action-gate.js";
@@ -39,7 +40,7 @@ import { modelVisibleRelationshipOntology, type ModelVisibleRelationshipOntology
 import { deepFreeze } from "../util/immutable.js";
 import { modelVisibleWorldRules, resolveEffectiveWorldRules } from "./world-rule-ontology.js";
 
-const npcResponseKindSchema = z.enum(["speak", "gesture", "refuse", "ignore", "other"]);
+const npcResponseKindSchema = z.enum(["speak", "text", "gesture", "refuse", "ignore", "other"]);
 export type NpcResponseKind = z.infer<typeof npcResponseKindSchema>;
 
 export const npcReactionEmotionSchema = actorAffectSchema.omit({ actorId: true });
@@ -66,6 +67,9 @@ export const npcReactionCandidateSchema = z.object({
   forbidsKnowledge: z.array(z.string().min(1)).max(64).default([]),
   rationale: z.string().trim().min(1).max(1_000).optional(),
 }).strict().superRefine((value, ctx) => {
+  if (value.responseKind === "text" && value.interaction?.kind !== "text") {
+    ctx.addIssue({ code: "custom", message: "A text response requires an exact text interaction", path: ["interaction"] });
+  }
   if (value.responseKind === "speak" && value.interaction?.kind !== "speech") {
     ctx.addIssue({ code: "custom", message: "A speak response requires an exact speech interaction", path: ["interaction"] });
   }
@@ -232,12 +236,18 @@ async function respondOneNpc(input: {
   }
   const playerIdentity = [...actorContext.presentEntities, ...actorContext.referenceableEntities]
     .find((entity) => entity.id === input.playerId);
+  const textInteraction = input.interaction.kind === "text" ? input.interaction : undefined;
+  const deliveredText = Boolean(textInteraction && history.some(entry => contentHash(entry.event) === contentHash(input.triggerEvent))
+    && committedTextDeliveries(history, input.npcId).some(delivery => delivery.eventId === input.triggerEvent.eventId
+      && delivery.authorId === input.playerId && delivery.content === textInteraction.content
+      && contentHash(input.triggerEvent.writtenMessages?.[delivery.messageIndex]?.channelBinding) === contentHash(textInteraction.channelBinding)));
+  if (textInteraction && !deliveredText) throw new Error("BRANCH_TEXT_HISTORY_UNAVAILABLE: Trigger does not match this actor's committed text delivery. Preserve head and stop for host reconstruction; never substitute text, borrow another branch or retry unchanged.");
   const receivedSessionIds = new Set(input.triggerEvent.spokenUtterances?.filter(utterance => utterance.speakerId === input.playerId
     && utterance.addresseeIds.includes(input.npcId) && utterance.channelBinding).map(utterance => utterance.channelBinding!.processId));
   const remoteTrigger = Boolean(receivedSessionIds.size && history.some(entry => contentHash(entry.event) === contentHash(input.triggerEvent))
     && actorContext.decision?.agency?.channels.some(channel => receivedSessionIds.has(channel.processId)
       && ["audio", "audiovisual"].includes(channel.modality) && channel.peerEntityIds.includes(input.playerId)));
-  if (!playerIdentity || !actorContext.presentEntities.some((entity) => entity.id === input.playerId) && !remoteTrigger) {
+  if (!playerIdentity || !actorContext.presentEntities.some((entity) => entity.id === input.playerId) && !remoteTrigger && !deliveredText) {
     throw new Error(`NPC '${input.npcId}' cannot currently perceive the player as present or through an authorized active session.`);
   }
   const triggerObservation = observeCommittedEvent(input.triggerEvent, input.npcId);
@@ -351,7 +361,7 @@ async function respondOneNpc(input: {
   const selectedChannels = playerCandidateChannels(scopedCandidate, actorContext.decision?.agency);
   const channelParticipants = [...new Set(selectedChannels.flatMap(channel => [...channel.peerEntityIds, ...channel.carrierEntityIds]))];
   const remoteParticipants = new Set(selectedChannels.length ? [input.npcId, ...selectedChannels.flatMap(channel => channel.peerEntityIds)] : []);
-  if (input.interaction.kind === "speech" && input.interaction.channelBinding) { remoteParticipants.add(input.npcId); remoteParticipants.add(input.playerId); }
+  if ((input.interaction.kind === "speech" || input.interaction.kind === "text") && input.interaction.channelBinding) { remoteParticipants.add(input.npcId); remoteParticipants.add(input.playerId); }
   if (actorContext.decision?.agency && actorContext.decision.agency.embodiment !== "bodily") remoteParticipants.add(input.npcId);
   const communicated = [...new Set(reaction.communicatedClaimIds)].map((claimId) => {
     const known = actorContext.knowledge.find((entry) => entry.claimId === claimId && entry.status !== "disbelieves");
@@ -398,6 +408,7 @@ async function respondOneNpc(input: {
       { actorId: input.npcId, summary: boundedText(reaction.npcObservation) },
       { actorId: input.playerId, summary: playerVisibleReaction(reaction, remoteParticipants.has(input.npcId)) },
     ],
+    ...(reaction.interaction?.kind === "text" ? { writtenMessages: [{ authorId: input.npcId, recipientIds: [input.playerId], content: reaction.interaction.content, channelBinding: reaction.interaction.channelBinding }] } : {}),
     ...(reaction.interaction?.kind === "speech"
       ? {
           spokenUtterances: [{
@@ -508,6 +519,7 @@ function reactionAsPlayerCandidate(reaction: NpcReactionCandidate, playerId: str
 }
 
 function playerVisibleReaction(reaction: NpcReactionCandidate, remotePresence = false): string {
+  if (reaction.interaction?.kind === "text") return "通信渠道收到一条文字回复。";
   const remote = remotePresence || reaction.interaction?.kind === "speech" && Boolean(reaction.interaction.channelBinding);
   if (remote && !reaction.interaction) return "通信渠道暂未传来回应。";
   const speaker = remote ? "通信渠道中的声音" : "面前的人";

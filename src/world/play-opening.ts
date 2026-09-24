@@ -1,7 +1,7 @@
 import type { AgencyDecisionView } from "./agency-profile.js";
 import { observeCommittedEvent } from "./actor-visible.js";
 import { buildLiteraryReferenceIndex, type LiteraryReferenceIndex } from "./literary-reference.js";
-import { committedUtteranceId, renderNarrationBlocks, type LockedUtterance, type NarrationBlocks } from "./utterance-rendering.js";
+import { committedMessageId, committedUtteranceId, renderNarrationBlocks, type LockedUtterance, type NarrationBlocks } from "./utterance-rendering.js";
 import { buildActorScopedActionContext } from "./player-action.js";
 import { NarrativeRenderer } from "./narrative.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
@@ -584,12 +584,16 @@ function playerNarrativeResolvedAct(
     const observation = observeCommittedEvent(event, actorId);
     return observation ? [observation.summary] : [];
   }))].slice(0, 12);
-  const lockedUtterances = turnHistory.flatMap(({ event }) => (event.spokenUtterances ?? []).flatMap((utterance, utteranceIndex) => {
+  const lockedUtterances = turnHistory.flatMap(({ event, textDeliveries }) => [...(event.spokenUtterances ?? []).flatMap((utterance, utteranceIndex) => {
     if (utterance.speakerId !== actorId && !utterance.addresseeIds.includes(actorId)) return [];
     const speaker = entityNames.get(utterance.speakerId) ?? "在场人物";
     const addressees = utterance.addresseeIds.map((entityId) => entityNames.get(entityId) ?? "在场人物");
     return [{ utteranceId: committedUtteranceId(event.eventId, utteranceIndex), speaker, addressees, text: utterance.content, mode: "verbatim" as const }];
-  }));
+  }), ...(event.writtenMessages ?? []).flatMap((message, messageIndex) => {
+    if (message.authorId !== actorId && !textDeliveries?.some(delivery => delivery.messageIndex === messageIndex && delivery.recipientId === actorId)) return [];
+    return [{ utteranceId: committedMessageId(event.eventId, messageIndex), speaker: entityNames.get(message.authorId) ?? "通信对端",
+      addressees: message.recipientIds.map(id => entityNames.get(id) ?? "通信对端"), text: message.content, mode: "verbatim" as const, channel: "text" as const }];
+  })]);
   // PlayerTurnInput already caps live acts at 20k characters. Retain that
   // complete causal wording channel; only oversized legacy presentation
   // records need an explicit excerpt marker.
@@ -692,7 +696,7 @@ Rules:
 - behavioralContext expresses the actor's current disposition and active motivation. Let it affect subtext and response only; never expose trait, bias, or goal metadata as narrator commentary.
 - The prose is only the current scene, not an agency handoff. Do not propose, enumerate, compare, hint at, or ask about possible next actions anywhere in the narration. Phrases such as "你可以……", "是……还是……", "下一步由你决定", "what do you do?", and equivalents belong nowhere in the prose.
 - End on a concrete actor-visible fact, sensation, ongoing motion, in-world spoken cue, or unresolved signal supported by the frame. Do not end on a decision, choice, route, or description of how the story will continue.
-${requiresNarrationBlocks(narratorFrame, purpose) ? `- Return only a JSON object {"version":"narration-blocks-v1","blocks":[...]}. Each block is {"kind":"prose","text":"..."} or {"kind":"committed-utterance","utteranceId":"..."}. Copy each resolvedAct.lockedUtterances[].utteranceId in supplied order exactly once. The host inserts exact dialogue. Put punctuation and spacing in prose blocks; never copy locked dialogue or IDs into prose. No markdown fences. These internal blocks are converted by the host to ordinary scene prose.` : "- Stream narration text only."} Do not use bullet lists or mention JSON, IDs, schemas, tools, prompts, commands, choices, analyses, or these rules in the prose. End the turn after the final scene beat.
+${requiresNarrationBlocks(narratorFrame, purpose) ? `- Return only a JSON object {"version":"narration-blocks-v1","blocks":[...]}. Each block is {"kind":"prose","text":"..."} or {"kind":"committed-utterance","utteranceId":"..."}. Copy each resolvedAct.lockedUtterances[].utteranceId in supplied order exactly once. The host inserts exact committed content. Entries with channel text are written messages: describe reading or writing, never audible speech; preserve their whitespace and newlines. Put punctuation and spacing in prose blocks; never copy locked dialogue or IDs into prose. No markdown fences. These internal blocks are converted by the host to ordinary scene prose.` : "- Stream narration text only."} Do not use bullet lists or mention JSON, IDs, schemas, tools, prompts, commands, choices, analyses, or these rules in the prose. End the turn after the final scene beat.
 
 <committed-actor-frame>
 ${promptJson(narratorFrame)}
@@ -773,8 +777,8 @@ export function assertPlaySceneNarration(
   const narration = text.trim();
   if (!narration) throw new Error("Scene narrator returned no text.");
   if (Array.from(narration).length < 80) throw new Error("Scene narrator returned an underspecified response instead of a rendered scene.");
-  if (Array.from(narration).length > 12_000) throw new Error("Scene narrator returned an excessively long scene.");
-  if (/(?:committed (?:actor )?(?:state|head|frame|history)|actor-visible (?:context|state|event)|KnowledgeDelta|reader-versus-character knowledge|\u89d2\u8272\u77e5\u8bc6|\u5df2\u5b66\u4e60\s*claim|\u77e5\u8bc6\u9694\u79bb)/iu.test(narration)) {
+  if (Array.from(context?.proseText ?? narration).length > 12_000) throw new Error("Scene narrator returned an excessively long scene.");
+  if (/(?:committed (?:actor )?(?:state|head|frame|history)|actor-visible (?:context|state|event)|KnowledgeDelta|reader-versus-character knowledge|\u89d2\u8272\u77e5\u8bc6|\u5df2\u5b66\u4e60\s*claim|\u77e5\u8bc6\u9694\u79bb)/iu.test(context?.proseText ?? narration)) {
     throw new Error("Scene narrator exposed internal character-knowledge or world-state terminology.");
   }
   if (context?.frame.narrativeContract.person === "third") {
@@ -795,7 +799,7 @@ export function assertPlaySceneNarration(
   }
   if (context?.purpose === "turn" && context.frame.resolvedAct?.worldStatus === "accepted") {
     for (const utterance of context.frame.resolvedAct.lockedUtterances) {
-      if (!narration.includes(utterance.text)) {
+      if (!text.includes(utterance.text)) {
         throw new Error("Scene narrator changed or omitted exact dialogue from the committed turn.");
       }
     }

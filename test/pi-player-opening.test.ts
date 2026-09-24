@@ -25,6 +25,7 @@ function frame(): PlayOpeningFrame {
     development: { elapsedDays: 0, recentExperiences: [] },
     ownedEntityState: {},
     knowledge: [],
+    spatialRelations: [],
     presentEntities: [hero],
     referenceableEntities: [hero],
     visibleEntities: [hero],
@@ -360,10 +361,10 @@ describe("Pi player scene narrator", () => {
 });
 
 describe("committed utterance block boundary", () => {
-  it("withholds native/provider drafts and retries only rendering against the same ordered IDs", async () => {
+  it.each(["speech", "text"] as const)("withholds native/provider drafts and retries only %s rendering against the same ordered IDs", async channel => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-typed-narration-")); roots.push(root);
     const supplied = playerSceneModelFrame(frame());
-    const first = { ...supplied.resolvedAct!.lockedUtterances[0]!, utteranceId: "event-a:0" };
+    const first = { ...supplied.resolvedAct!.lockedUtterances[0]!, utteranceId: "event-a:0", ...(channel === "text" ? { channel, text: "  改走北门。\n等我回来。  " } : {}) };
     supplied.resolvedAct!.lockedUtterances = [first, { ...first, utteranceId: "event-b:0" }];
     const before = structuredClone(supplied);
     const document = { version: "narration-blocks-v1", blocks: [
@@ -373,6 +374,7 @@ describe("committed utterance block boundary", () => {
       { kind: "committed-utterance", utteranceId: "event-b:0" },
       { kind: "prose", text: "”最后一个字落下，门板后仍是一片沉静。" },
     ] };
+    if (channel === "text") for (const block of document.blocks) if (block.kind === "prose") block.text = block.text!.replace("他开口道", "屏幕上的文字写着").replace("他又问", "另一条消息接着写道").replace("最后一个字落下", "最后一行显示完毕");
     const deltas: string[] = [], nativeEvents: unknown[] = [], attempts: number[] = [];
     let renders = 0;
     vi.spyOn(PiAgentSession, "create").mockImplementation(async options => ({
@@ -422,7 +424,7 @@ it("retains both malformed rendering errors and stops after one correction witho
       return { text: "not a JSON document" } as never;
     },
   }) as unknown as PiAgentSession);
-  const error = await createPiPlayerOpeningNarrator({ root })(supplied, "turn", { onText: text => deltas.push(text) }).catch(error => error);
+  const error = await Promise.resolve(createPiPlayerOpeningNarrator({ root })(supplied, "turn", { onText: text => deltas.push(text) })).catch(error => error);
   expect(error).toBeInstanceOf(AggregateError);
   expect(error.message).toContain("stop this rendering task");
   expect(error.errors).toHaveLength(2);

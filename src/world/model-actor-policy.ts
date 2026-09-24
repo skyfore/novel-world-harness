@@ -548,7 +548,7 @@ function actorCandidateFromAction(input: {
   proposedTime?: ActorProposalCandidate["proposal"]["proposedTime"];
 }): ActorProposalCandidate {
   const interaction = input.candidate.intent?.controlledAct?.interaction;
-  const transported = interaction || input.candidate.action?.lane === "schema-bound" && input.candidate.action.channelBinding
+  const transported = interaction || input.agency && input.candidateSource === "model-reasoner" || input.candidate.action?.lane === "schema-bound" && input.candidate.action.channelBinding
     || input.candidate.proposedSemantics?.operations.some(op => op.op === "record-acquisition" && op.acquisition.basis.mode === "read" && "channelBinding" in op.acquisition.basis && op.acquisition.basis.channelBinding)
     ? playerActionToKnowledgeAwareAction({ branchId: input.branchId, actorId: input.goal.actorId, expectedParentCommit: input.commitId,
       utterance: input.candidate.intent?.summary ?? input.candidate.title, candidate: input.candidate, agency: input.agency }).proposal
@@ -579,6 +579,7 @@ function actorCandidateFromAction(input: {
       participants,
       ...(transported ? { participantPresence: transported.participantPresence, actorObservations: transported.actorObservations,
         ...(transported.spokenUtterances?.length ? { spokenUtterances: transported.spokenUtterances } : {}),
+        ...(transported.writtenMessages?.length ? { writtenMessages: transported.writtenMessages } : {}),
         ...(transported.action ? { action: transported.action } : {}),
       } : {}),
       ...(speechEnvelope ? { participantPresence: speechEnvelope.participantPresence } : {}),
@@ -598,7 +599,7 @@ function actorCandidateFromAction(input: {
 }
 
 function candidateHasMaterialEffect(candidate: ReturnType<typeof playerActionCandidateSchema.parse>): boolean {
-  return candidate.intent?.controlledAct?.interaction?.kind === "speech" || hasActorOutcome(candidate) || candidate.proposedDelta.operations.length > 0
+  return candidate.intent?.controlledAct?.interaction?.kind === "speech" || candidate.intent?.controlledAct?.interaction?.kind === "text" || hasActorOutcome(candidate) || candidate.proposedDelta.operations.length > 0
     || (candidate.proposedKnowledge?.operations.length ?? 0) > 0 || Boolean(candidate.intent?.requestedTimeAdvance);
 }
 

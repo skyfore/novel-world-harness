@@ -34,6 +34,7 @@ function input(): NpcReactionReasoningInput {
       selfState: { "character.alive": true, "character.location": "hall-stable-id" },
       ownedEntityState: {},
       knowledge: [],
+    spatialRelations: [],
       presentEntities: [
         { id: "npc-secret-id", kind: "character", name: "Witness" },
         { id: "hero-stable-id", kind: "character", name: "Visitor" },
@@ -70,7 +71,7 @@ function input(): NpcReactionReasoningInput {
 }
 
 describe("Pi NPC reaction reasoner", () => {
-  it.each([false, true])("provides actor-safe context and hides incoming channel IDs (remote=%s)", async remote => {
+  it.each([false, true, "text"] as const)("provides actor-safe context and hides incoming channel IDs (remote=%s)", async remote => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-npc-reaction-"));
     roots.push(root);
     const prompts: string[] = [];
@@ -109,6 +110,7 @@ describe("Pi NPC reaction reasoner", () => {
 
     const reasoningInput = input();
     if (remote && reasoningInput.trigger.interaction.kind === "speech") reasoningInput.trigger.interaction.channelBinding = { channelId: "sender-private-channel", processId: "sender-private-session" };
+    if (remote === "text") reasoningInput.trigger.interaction = { kind: "text", content: "Where did the letter come from?", channel: "text", addresseeIds: ["npc-secret-id"], channelBinding: { channelId: "sender-private-channel", processId: "sender-private-session" } };
     const result = await createPiNpcReactionReasoner({ root })(reasoningInput);
 
     expect(result).toMatchObject({

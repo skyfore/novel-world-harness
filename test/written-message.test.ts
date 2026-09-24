@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import { eventProposalSchema, writtenMessageSchema, type Entity, type EventProposal } from "../src/world/model.js";
 import { processTemplateSchema } from "../src/world/process-ontology.js";
@@ -14,7 +14,7 @@ import { decisionContextRequirements } from "../src/agent/decision-context.js";
 import type { ActorDecisionView } from "../src/world/actor-decision-view.js";
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
 const scenes = [
   { source: "Mara and Eli exchange messages through a terminal; the live connection is open.", text: "  Take the north gate.\nWait for me.  " },
   { source: "岚与青通过终端互发文字，此刻连接已经开启。", text: "  改走北门。\n等我回来。  " },
@@ -36,7 +36,7 @@ async function fixture(scene = scenes[0]!, configure?: (context: WorldModelConte
   configure?.(context);
   const engine = new WorldEngine(root, context);
   const genesis = await engine.createBranch("main", "Messages", { version: 1, operations: [] }, undefined, source.source.id);
-  const base: EventProposal = { proposalId: "open", branchId: "main", expectedParentCommit: genesis, source: "background", title: "Open connection", participants: ["author", "recipient", "terminal"], participantPresence: [{ entityId: "author", mode: "remote" }, { entityId: "recipient", mode: "remote" }], proposedTime: { kind: "unknown" }, preconditions: [], proposedDelta: { version: 1, operations: [] }, causalParents: [], evidence: [] };
+  const base: EventProposal = { proposalId: "open", branchId: "main", expectedParentCommit: genesis, source: "background", title: "Open connection", participants: ["author", "recipient", "terminal"], participantPresence: [{ entityId: "author", mode: "remote" }, { entityId: "recipient", mode: "remote" }], proposedTime: { kind: "unknown" }, preconditions: [], proposedDelta: { version: 1, operations: [] }, causalParents: [], evidence };
   const start = { op: "start-process" as const, localRef: "local-session", process: { templateId: template.id, ownerBindings: ["author", "recipient", "terminal"].map(id => ({ roleId: id, entityIds: [id] })), phaseId: "open", progress: 0 } };
   const opened = await engine.commitProposal({ ...base, proposedProcesses: { version: 1, operations: [start] } });
   expect(opened.report.errors).toEqual([]);
@@ -127,7 +127,7 @@ it("keeps deliveries on their ancestry, preserves repeats, and revalidates the s
 
 it("cannot omit actorId to let an action-incapacitated author send text", async () => {
   const f = await fixture(scenes[0]!, context => {
-    context.processTemplates!.set("restricted", processTemplateSchema.parse({
+    context.processTemplates = new Map(context.processTemplates).set("restricted", processTemplateSchema.parse({
       ontologyVersion: "process-template-v1", id: "restricted", name: "Cannot act", ownerRoles: [{ id: "patient", label: "patient", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
       phases: [{ id: "impaired", label: "Impaired", terminal: false }, { id: "recovered", label: "Recovered", terminal: true }], initialPhaseId: "impaired", transitions: [{ fromPhaseId: "impaired", toPhaseId: "recovered", minimumProgress: 1 }], outcomeIds: ["recovered"], visibility: "public", induction: { kind: "domain-module", moduleId: "test-action-restriction", moduleVersion: "1" }, evidence: [],
       incapacity: { version: "incapacity-process-v1", ownerRoleId: "patient", capacity: "action", recoveryPhaseId: "recovered", duration: { kind: "unknown" } },
@@ -232,4 +232,169 @@ it("rejects a foreign recipient, branch, index, source, and represented reader w
   }
   expect(buildNwhToolRecoveryAdvice("propose_player_action", "BRANCH_TEXT_HISTORY_UNAVAILABLE")).toMatchObject({ category: "lookup-miss", retryable: true });
   expect(buildNwhToolRecoveryAdvice("propose_player_action", "BRANCH_TEXT_ALREADY_RECEIVED")).toMatchObject({ category: "scope-or-lifecycle", retryable: false });
+});
+
+function sendCandidate(content: string, channel: { id: string; processId: string; peerEntityIds: string[] }) {
+  return playerActionCandidateSchema.parse({ title: "Send text", participants: channel.peerEntityIds, proposedDelta: { version: 1, operations: [] },
+    intent: { kind: "act", summary: "Send a written message", controlledAct: { eventTitle: "Send text", actorObservation: "You send a written message.", interactionMode: "direct",
+      interaction: { kind: "text", channel: "text", content, addresseeIds: channel.peerEntityIds, channelBinding: { channelId: channel.id, processId: channel.processId } } } } });
+}
+
+it.each(scenes)("sends and independently reads/replies through player and NPC boundaries: $source", async scene => {
+  const { respondToNpcInteractions } = await import("../src/world/npc-reaction.js");
+  const f = await fixture(scene, context => {
+    context.entities.get("recipient")!.agencyProfile = { ontologyVersion: "agency-channel-v1", agency: "autonomous", embodiment: "mediated", channels: [{ id: "reply", modality: "text", processTemplateId: "messaging", actorRoleId: "recipient", peerRoleId: "author", carrierRoleId: "terminal", activePhaseIds: ["open"] }] };
+  });
+  const before = await buildActorScopedActionContext(f.engine, "author", f.opened.newHead);
+  const candidate = sendCandidate(scene.text, before.decision!.agency!.channels[0]!);
+  const boundary = createPlayerActionModelBoundary(before);
+  const encoded = boundary.encodeCandidate(candidate);
+  expect(JSON.stringify(encoded)).not.toContain(f.session);
+  expect(boundary.decodeCandidate(encoded)).toEqual(candidate);
+  expect(decisionContextRequirements({ ...boundary.context, intendedCandidate: encoded })?.dependencyEdges.some(edge => edge.reason === "candidate-channel")).toBe(true);
+  const sent = await new PlayerTurnService(f.engine, () => candidate, () => "Sent").turn({ branchId: "main", actorId: "author", utterance: "Send this text" });
+  expect(sent.issues).toEqual([]);
+  expect(sent.accepted).toBe(true);
+  const trigger = (await f.engine.projections.project(sent.newHead)).history.at(-1)!.event;
+  expect(trigger.writtenMessages?.[0]?.content).toBe(scene.text);
+  expect(trigger.spokenUtterances).toBeUndefined();
+  expect(trigger.participantPresence).toContainEqual({ entityId: "recipient", mode: "remote" });
+  let calls = 0;
+  const reasoner = (input: import("../src/world/npc-reaction.js").NpcReactionReasoningInput) => {
+    calls++;
+    const message = input.actorContext.decision!.pendingMessages![0]!;
+    const receipt = receiveCandidate("recipient", message);
+    const reply = sendCandidate(scene.text, input.actorContext.decision!.agency!.channels[0]!);
+    return { responseKind: "text", eventTitle: "Read and reply", npcObservation: "You read and reply.", playerObservation: "A written reply arrives.", emotion: { label: "calm", intensity: 0.2 },
+      interaction: reply.intent!.controlledAct!.interaction, proposedDelta: { version: 1, operations: [] }, proposedSemantics: receipt.proposedSemantics, proposedKnowledge: receipt.proposedKnowledge };
+  };
+  const args = { engine: f.engine, branchId: "main", playerId: "author", playerCandidate: candidate, triggerEvent: trigger, reasoner };
+  const replied = await respondToNpcInteractions(args);
+  expect(replied.failures).toEqual([]);
+  expect(replied.responses).toHaveLength(1);
+  const cold = await new WorldEngine(f.root, f.context).projections.project(replied.newHead, { fresh: true, useCheckpoints: false });
+  expect(cold.history.at(-1)!.event.writtenMessages?.[0]).toMatchObject({ authorId: "recipient", content: scene.text, channelBinding: { channelId: "reply", processId: f.session } });
+  expect(cold.history.at(-1)!.event.spokenUtterances).toBeUndefined();
+  expect(Object.values(cold.semantics.acquisitions ?? {})).toHaveLength(1);
+  expect((await buildActorScopedActionContext(f.engine, "recipient", replied.newHead)).decision?.pendingMessages).toBeUndefined();
+  expect((await respondToNpcInteractions(args)).newHead).toBe(replied.newHead);
+  expect(calls).toBe(1);
+  const forged = await respondToNpcInteractions({ ...args, triggerEvent: { ...trigger, eventId: "forged-trigger" } });
+  expect(forged.failures[0]?.error).toContain("BRANCH_TEXT_HISTORY_UNAVAILABLE");
+  expect(calls).toBe(1);
+  expect(await f.engine.branches.readHead("main")).toBe(replied.newHead);
+});
+
+it.each(scenes)("schedules model text and rejects paused sends: $source", async scene => {
+  const { modelActorProposalSource } = await import("../src/world/model-actor-policy.js");
+  const { WorldRuntime } = await import("../src/world/runtime.js");
+  const f = await fixture(scene, context => { context.actorGoals = [{ id: "send-goal", actorId: "author", description: "Send the instructions", priority: 1, requiresKnowledge: [], targetIds: ["recipient"], evidence: context.entities.get("author")!.evidence }]; });
+  const source = modelActorProposalSource(f.engine, { goals: async () => [], modelFor: async () => null, reasoner: input => {
+    expect(JSON.stringify(input)).not.toContain(f.session);
+    const channel = input.actor.decision?.agency?.channels.find(item => item.modality === "text");
+    if (!channel) return null;
+    const { requiresKnowledge: _requires, forbidsKnowledge: _forbids, ...template } = sendCandidate(scene.text, channel);
+    return template;
+  } });
+  const candidates = await source({ branchId: "main", commitId: f.opened.newHead });
+  expect(candidates).toHaveLength(1);
+  expect(candidates[0]!.proposal.writtenMessages?.[0]?.content).toBe(scene.text);
+  expect((await f.engine.previewProposal(candidates[0]!.proposal)).report.errors).toEqual([]);
+  const runtime = new WorldRuntime(f.engine, () => [], () => "Sent", source);
+  const moved = await runtime.move({ branchId: "main", maxActorCandidates: 1, maxBackgroundCandidates: 0 });
+  expect(moved.rejectedProposals).toEqual([]);
+  expect(moved.committedEvents).toHaveLength(1);
+  const cold = await new WorldEngine(f.root, f.context).projections.project(moved.newHead, { fresh: true, useCheckpoints: false });
+  expect(cold.history.at(-1)!.event.writtenMessages?.[0]?.content).toBe(scene.text);
+  const paused = await f.engine.commitProposal({ ...f.base, expectedParentCommit: moved.newHead, proposalId: "pause-model-text", proposedProcesses: { version: 1, operations: [{ op: "pause-process", processRef: f.session, reasonId: "closed" }] } });
+  expect(paused.report.errors).toEqual([]);
+  expect((await f.engine.commitProposal({ ...candidates[0]!.proposal, expectedParentCommit: paused.newHead })).report.accepted).toBe(false);
+  expect(await f.engine.branches.readHead("main")).toBe(paused.newHead);
+});
+
+it.each(scenes)("renders committed text exactly and retries presentation without a new event: $source", async scene => {
+  const { PlayConversationStore } = await import("../src/world/play-conversation.js");
+  const { buildPlayOpeningFrame, playScenePrompt } = await import("../src/world/play-opening.js");
+  const { renderNarrationBlocks } = await import("../src/world/utterance-rendering.js");
+  const f = await fixture(scene);
+  const sent = await f.engine.commitProposal(f.send);
+  const history = (await f.engine.projections.project(sent.newHead)).history;
+  const event = history.at(-1)!.event;
+  const contexts = await import("../src/world/workspace-runtime.js");
+  const { WorldRuntime } = await import("../src/world/runtime.js");
+  // This fixture supplies an explicit host module; reuse its engine rather than claiming a persisted compiler snapshot.
+  const runtime = new WorldRuntime(f.engine, () => []);
+  vi.spyOn(contexts, "openWorkspaceWorld").mockResolvedValue({ engine: f.engine, runtime } as Awaited<ReturnType<typeof contexts.openWorkspaceWorld>>);
+  const conversations = new PlayConversationStore(f.root);
+  for (const actorId of ["author", "recipient", "outsider"]) {
+    await conversations.append({ branchId: "main", actorId, atCommit: sent.newHead, eventId: event.eventId, role: "player", status: "accepted", text: "Continue" });
+    const frame = await buildPlayOpeningFrame(f.root, "main", actorId, f.context.sourceId);
+    const locked = frame.resolvedAct!.lockedUtterances;
+    if (actorId === "outsider") { expect(locked).toEqual([]); continue; }
+    expect(locked).toEqual([expect.objectContaining({ text: scene.text, channel: "text", mode: "verbatim" })]);
+    expect(playScenePrompt(frame, "turn")).toContain("written messages");
+    const id = locked[0]!.utteranceId!;
+    expect(() => renderNarrationBlocks({ version: "narration-blocks-v1", blocks: [{ kind: "committed-utterance", utteranceId: "wrong" }] }, locked)).toThrow("unknown, duplicate, or out-of-order");
+    const blocks = { version: "narration-blocks-v1", blocks: [{ kind: "prose", text: "Written message:\n" }, { kind: "committed-utterance", utteranceId: id }] };
+    expect(renderNarrationBlocks(blocks, locked)).toBe(`Written message:\n${scene.text}`);
+    expect(renderNarrationBlocks(blocks, locked)).toBe(`Written message:\n${scene.text}`);
+    expect(await f.engine.branches.readHead("main")).toBe(sent.newHead);
+  }
+});
+
+it.each(scenes)("reads a delivered message autonomously after disconnection without sending or leaking belief: $source", async scene => {
+  const { modelActorProposalSource } = await import("../src/world/model-actor-policy.js");
+  const { WorldRuntime } = await import("../src/world/runtime.js");
+  const f = await fixture(scene, context => {
+    context.entities.get("recipient")!.agencyProfile = { ontologyVersion: "agency-channel-v1", agency: "autonomous", embodiment: "mediated", channels: [] };
+    context.actorGoals = [{ id: "read-goal", actorId: "recipient", description: "Consider the instructions", priority: 1, requiresKnowledge: [], targetIds: [], evidence: context.entities.get("recipient")!.evidence }];
+  });
+  const sent = await f.engine.commitProposal(f.send);
+  const paused = await f.engine.commitProposal({ ...f.base, expectedParentCommit: sent.newHead, proposalId: "pause-before-read", proposedProcesses: { version: 1, operations: [{ op: "pause-process", processRef: f.session, reasonId: "closed" }] } });
+  expect(paused.report.errors).toEqual([]);
+  const source = modelActorProposalSource(f.engine, { goals: async () => [], modelFor: async () => null, reasoner: input => {
+    const message = input.actor.decision?.pendingMessages?.[0];
+    if (!message) return null;
+    const { requiresKnowledge: _requires, forbidsKnowledge: _forbids, ...template } = receiveCandidate(input.actor.actorId, message, true, false);
+    return template;
+  } });
+  const runtime = new WorldRuntime(f.engine, () => [], () => "Read", source);
+  const read = await runtime.move({ branchId: "main", maxActorCandidates: 1, maxBackgroundCandidates: 0 });
+  expect(read.rejectedProposals).toEqual([]);
+  expect(read.committedEvents).toHaveLength(1);
+  const replay = await new WorldEngine(f.root, f.context).projections.project(read.newHead, { fresh: true, useCheckpoints: false });
+  expect(replay.history.at(-1)!.event.writtenMessages).toBeUndefined();
+  expect(replay.history.at(-1)!.event.spokenUtterances).toBeUndefined();
+  expect(Object.values(replay.semantics.acquisitions ?? {})[0]?.reception).toEqual({ received: true, understood: true, belief: "rejected" });
+  expect((await buildActorScopedActionContext(f.engine, "author", read.newHead)).decision?.experiences).toBeUndefined();
+  expect((await source({ branchId: "main", commitId: read.newHead }))).toEqual([]);
+});
+
+it.each(scenes)("lets an NPC read after disconnection but rejects borrowing the sender's channel: $source", async scene => {
+  const { respondToNpcInteractions } = await import("../src/world/npc-reaction.js");
+  const f = await fixture(scene);
+  const before = await buildActorScopedActionContext(f.engine, "author", f.opened.newHead);
+  const candidate = sendCandidate(scene.text, before.decision!.agency!.channels[0]!);
+  const sent = await new PlayerTurnService(f.engine, () => candidate, () => "Sent").turn({ branchId: "main", actorId: "author", utterance: "Send" });
+  expect(sent.accepted).toBe(true);
+  const triggerEvent = (await f.engine.projections.project(sent.newHead)).history.at(-1)!.event;
+  const paused = await f.engine.commitProposal({ ...f.base, expectedParentCommit: sent.newHead, proposalId: "pause-npc-text", proposedProcesses: { version: 1, operations: [{ op: "pause-process", processRef: f.session, reasonId: "closed" }] } });
+  expect(paused.report.errors).toEqual([]);
+  const args = { engine: f.engine, branchId: "main", playerId: "author", playerCandidate: candidate, triggerEvent };
+  const refused = await respondToNpcInteractions({ ...args, reasoner: () => ({ responseKind: "text", eventTitle: "Invalid reply", npcObservation: "Reply", playerObservation: "Reply", emotion: { label: "calm", intensity: 0.1 },
+    interaction: { kind: "text", channel: "text", content: "Reply", addresseeIds: ["author"], channelBinding: { channelId: "keyboard", processId: f.session } }, proposedDelta: { version: 1, operations: [] } }) });
+  expect(refused.responses).toEqual([]);
+  expect(refused.failures[0]?.error).toContain("AGENCY_CHANNEL_UNAVAILABLE");
+  expect(refused.newHead).toBe(paused.newHead);
+  const read = await respondToNpcInteractions({ ...args, reasoner: input => {
+    const receipt = receiveCandidate("recipient", input.actorContext.decision!.pendingMessages![0]!, false, false);
+    return { responseKind: "ignore", eventTitle: "Receive text", npcObservation: "The symbols are not understood.", playerObservation: "No reply", emotion: { label: "uncertain", intensity: 0.1 },
+      proposedDelta: { version: 1, operations: [] }, proposedSemantics: receipt.proposedSemantics, proposedKnowledge: receipt.proposedKnowledge };
+  } });
+  expect(read.failures).toEqual([]);
+  expect(read.responses).toHaveLength(1);
+  const projection = await new WorldEngine(f.root, f.context).projections.project(read.newHead, { fresh: true, useCheckpoints: false });
+  expect(Object.values(projection.semantics.acquisitions ?? {})[0]?.reception).toEqual({ received: true, understood: false, belief: "undecided" });
+  expect(projection.history.at(-1)!.event.actorObservations?.find(item => item.actorId === "author")?.summary).toBe("通信渠道暂未传来回应。");
+  expect(projection.history.at(-1)!.event.writtenMessages).toBeUndefined();
 });

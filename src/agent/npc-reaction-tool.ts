@@ -31,8 +31,8 @@ export function createNpcReactionCaptureTool(stateFields: readonly string[]): Np
     description: "Capture one explicit actor-scoped NPC response to a perceived player interaction. The host validates causality, knowledge, state scope, and world rules before commit.",
     promptSnippet: "Submit one explicit NPC response proposal",
     promptGuidelines: [
-      "Choose speak, gesture, refuse, ignore, or other; silence and refusal must still be explicit perceptible responses.",
-      "For speech, include exact words in interaction.content and address only the triggering player handle.",
+      "Choose speak, text, gesture, refuse, ignore, or other. A private receipt may have no outward interaction; never invent a remote facial expression or reply.",
+      "For speech or text, include exact content and address only the triggering player handle. Text requires channel text and your own offered channelBinding; preserve whitespace and never borrow the sender's binding.",
       "Ground motivation in current actor knowledge, development, goals, affect continuity, and perceived history; never use future canon or player-only narration.",
       "communicatedClaimIds may contain only claim handles already known by this NPC and actually expressed in the response.",
       "Propose only this NPC's controlled state/knowledge changes. The host owns participants, time, causal parents, progress, and commit authority.",

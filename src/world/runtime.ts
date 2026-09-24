@@ -1472,6 +1472,7 @@ function actorProposalHasMaterialEffect(proposal: EventProposal): boolean {
     || (proposal.proposedProcesses?.operations.length ?? 0) > 0
     || (proposal.proposedNorms?.operations.length ?? 0) > 0
     || (proposal.spokenUtterances?.length ?? 0) > 0
+    || (proposal.writtenMessages?.length ?? 0) > 0
     || Boolean(proposal.timeAdvance)
     || Boolean(proposal.progress?.scene);
 }

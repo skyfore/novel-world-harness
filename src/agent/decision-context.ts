@@ -63,7 +63,7 @@ export function decisionContextRequirements(
     dependencyEdges.push({ from: "intendedCandidate", to: `decision:capabilities:actions:${actionIndex}`, reason: "candidate-action" });
   }
   const interaction = candidate?.intent?.controlledAct?.interaction;
-  const bindings = [interaction?.kind === "speech" ? interaction.channelBinding : undefined,
+  const bindings = [(interaction?.kind === "speech" || interaction?.kind === "text") ? interaction.channelBinding : undefined,
     candidate?.action?.lane === "schema-bound" ? candidate.action.channelBinding : undefined,
     ...(candidate?.proposedSemantics?.operations.flatMap(op => op.op === "record-acquisition" && op.acquisition.basis.mode === "read" && "channelBinding" in op.acquisition.basis && op.acquisition.basis.channelBinding ? [op.acquisition.basis.channelBinding] : []) ?? [])];
   for (const binding of bindings) {

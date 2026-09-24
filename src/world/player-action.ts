@@ -121,6 +121,13 @@ export type PlayerIntentSceneTransition = z.infer<typeof playerIntentSceneTransi
 
 export const playerInteractionSchema = z.discriminatedUnion("kind", [
   z.object({
+    kind: z.literal("text"),
+    content: z.string().min(1).max(8_000).refine(value => value.trim().length > 0, "Message must contain text"),
+    addresseeIds: z.array(idSchema).min(1).max(4).refine(ids => new Set(ids).size === ids.length, "Message recipients must be unique"),
+    channel: z.literal("text"),
+    channelBinding: agencyChannelBindingSchema,
+  }).strict(),
+  z.object({
     kind: z.literal("speech"),
     content: z.string().trim().min(1).max(800),
     addresseeIds: z.array(idSchema).min(1).max(4),
@@ -592,7 +599,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
       const interaction = candidate.intent.controlledAct?.interaction;
       if (interaction) {
         interaction.addresseeIds = interaction.addresseeIds.map(scopedEntityHandle);
-        if (interaction.kind === "speech" && interaction.channelBinding) interaction.channelBinding = { channelId: semanticHandle(interaction.channelBinding.channelId), processId: semanticHandle(interaction.channelBinding.processId) };
+        if ((interaction.kind === "speech" || interaction.kind === "text") && interaction.channelBinding) interaction.channelBinding = { channelId: semanticHandle(interaction.channelBinding.channelId), processId: semanticHandle(interaction.channelBinding.processId) };
       }
     }
     return playerActionCandidateSchema.parse(candidate);
@@ -751,7 +758,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
         const interaction = candidate.intent.controlledAct?.interaction;
         if (interaction) {
           interaction.addresseeIds = interaction.addresseeIds.map(decodeEntity);
-          if (interaction.kind === "speech" && interaction.channelBinding) interaction.channelBinding = { channelId: decodeSemantic(interaction.channelBinding.channelId), processId: decodeSemantic(interaction.channelBinding.processId) };
+          if ((interaction.kind === "speech" || interaction.kind === "text") && interaction.channelBinding) interaction.channelBinding = { channelId: decodeSemantic(interaction.channelBinding.channelId), processId: decodeSemantic(interaction.channelBinding.processId) };
         }
       }
       return playerActionCandidateSchema.parse(candidate);
@@ -1263,12 +1270,12 @@ export function playerCandidateChannels(candidate: PlayerActionCandidate, agency
   const speech = candidate.intent?.controlledAct?.interaction;
   const action = candidate.action;
   for (const [binding, kind] of [
-    [speech?.kind === "speech" ? speech.channelBinding : undefined, "speech"],
+    [speech?.kind === "speech" || speech?.kind === "text" ? speech.channelBinding : undefined, "communication"],
     [action?.lane === "schema-bound" ? action.channelBinding : undefined, "control"],
   ] as const) {
     if (!binding) continue;
     const channel = agency?.channels.find(channel => channel.id === binding.channelId && channel.processId === binding.processId);
-    if (!channel || (kind === "speech" ? !["audio", "audiovisual"].includes(channel.modality)
+    if (!channel || (kind === "communication" ? !(speech?.kind === "text" ? ["text"] : ["audio", "audiovisual"]).includes(channel.modality)
       || speech?.addresseeIds.some(id => !channel.peerEntityIds.includes(id))
       : channel.modality !== "physical-control" || action?.lane !== "schema-bound" || channel.actionSchemaId !== action.schemaId)) {
       throw new Error("AGENCY_CHANNEL_UNAVAILABLE: Selected binding is absent from this actor/head view or does not authorize this interaction. Preserve the head and stop for host reconstruction; do not guess IDs, widen scope or retry unchanged.");
@@ -1282,7 +1289,7 @@ export function playerCandidateChannels(candidate: PlayerActionCandidate, agency
     if (!channel || channel.modality !== "text" || !channel.peerEntityIds.includes(basis.documentId)) throw new Error("AGENCY_CHANNEL_UNAVAILABLE: Reading requires the exact offered text channel and document peer. Preserve head and stop; never guess or retry unchanged.");
     if (!selected.some(item => item.id === channel.id && item.processId === channel.processId)) selected.push(channel);
   }
-  if (selected.length && speech && speech.kind !== "speech") throw new Error("AGENCY_CHANNEL_UNAVAILABLE: This remote interaction adapter supports exact speech, not unverified gestures or bodily contact. Preserve the head and stop; do not relabel the interaction or retry unchanged.");
+  if (selected.length && speech && speech.kind !== "speech" && speech.kind !== "text") throw new Error("AGENCY_CHANNEL_UNAVAILABLE: This remote interaction adapter supports exact speech or text, not unverified gestures or bodily contact. Preserve the head and stop; do not relabel the interaction or retry unchanged.");
   return selected;
 }
 
@@ -1309,7 +1316,7 @@ export async function validatePlayerActionSpatialScope(
   try { channels = playerCandidateChannels(candidate, scoped.decision?.agency); }
   catch (error) { return [issue("AGENCY_CHANNEL_UNAVAILABLE", String(error), "intent.controlledAct.interaction.channelBinding")]; }
   const physicalChanges = candidate.proposedDelta.operations.some(op => !(op.op === "set" && op.entityId === actorId && op.field === "character.plan"));
-  const remotePeers = new Set(channels.filter(channel => channel.modality === "physical-control" || channel.modality !== "text" && !physicalChanges).flatMap(channel => channel.peerEntityIds));
+  const remotePeers = new Set(channels.filter(channel => channel.modality === "physical-control" || !physicalChanges).flatMap(channel => channel.peerEntityIds));
   const interactionCharacters = new Set<EntityId>();
   for (const participant of candidate.participants) {
     if (participant !== actorId && context.entities.get(participant)?.kind === "character") interactionCharacters.add(participant);
@@ -1440,13 +1447,16 @@ export function playerActionToKnowledgeAwareAction(input: {
   const channelParticipants = [...new Set(channels.flatMap(channel => [...channel.peerEntityIds, ...channel.carrierEntityIds]))];
   const remoteParticipants = new Set(channels.length ? [input.actorId, ...channels.filter(channel => channel.modality !== "text").flatMap(channel => channel.peerEntityIds)] : []);
   if (input.agency && input.agency.embodiment !== "bodily") remoteParticipants.add(input.actorId);
+  if (interaction?.kind === "text") for (const id of interaction.addresseeIds) remoteParticipants.add(id);
   const physicalParticipantIds = [...new Set([
     input.actorId,
     ...(interaction?.addresseeIds ?? []),
   ])].sort();
   for (const addresseeId of [...new Set(interaction?.addresseeIds ?? [])].sort()) {
     if (addresseeId === input.actorId) continue;
-    const perceived = interaction?.kind === "speech"
+    const perceived = interaction?.kind === "text"
+      ? "通信渠道收到一条文字消息。"
+      : interaction?.kind === "speech"
       ? `${interaction.channelBinding ? "通信渠道中的声音" : "面前的人"}对你说：“${interaction.content}”`
       : interaction?.kind === "gesture"
         ? `面前的人向你做出动作：${interaction.description}`
@@ -1474,6 +1484,7 @@ export function playerActionToKnowledgeAwareAction(input: {
     }),
     title: input.eventTitle ?? playerIntentTitle(input.utterance),
     actorObservations,
+    ...(interaction?.kind === "text" ? { writtenMessages: [{ authorId: input.actorId, recipientIds: [...interaction.addresseeIds], content: interaction.content, channelBinding: interaction.channelBinding }] } : {}),
     ...(interaction?.kind === "speech"
       ? {
           spokenUtterances: [{
@@ -2390,7 +2401,7 @@ async function derivePlayerProgress(
       ...(sceneTransition ? { scene: sceneTransition } : {}),
     });
   }
-  const hasCommittedSpeech = intent.controlledAct?.interaction?.kind === "speech";
+  const hasCommittedSpeech = intent.controlledAct?.interaction?.kind === "speech" || intent.controlledAct?.interaction?.kind === "text";
   if (
     !progress.scene
     && intent.kind === "act"

@@ -7,11 +7,17 @@ export type LockedUtterance = {
   addressees: string[];
   text: string;
   mode: "verbatim";
+  /** Text is displayed as writing, never performed as audible dialogue. */
+  channel?: "text";
 };
 
 export function committedUtteranceId(eventId: string, index: number): string {
   if (!eventId || !Number.isSafeInteger(index) || index < 0) throw new Error("Invalid committed utterance identity");
   return `${eventId}:${index}`;
+}
+
+export function committedMessageId(eventId: string, index: number): string {
+  return `${committedUtteranceId(eventId, index)}:text`;
 }
 
 export const narrationBlocksSchema = z.object({

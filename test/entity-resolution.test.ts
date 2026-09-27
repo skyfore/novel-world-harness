@@ -297,6 +297,78 @@ describe("entity mention resolution", () => {
     await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ canonicalName: "Hero" });
   });
 
+  it("replays an accepted current creation decision after its same-batch entity becomes canonical", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-accepted-replay-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Zero arrived.\n");
+    const sourceId = fixture.source.id;
+    const observationBatch = `batch-${sourceId}-00001-observation-accepted-replay`;
+    const semanticBatch = `batch-${sourceId}-00001-semantic-accepted-replay`;
+
+    const observation = createCompilerProposalToolset(root);
+    await observation.beginBatch([fixture.segmentId], observationBatch, sourceId);
+    await observation.tools.find((tool) => tool.name === "propose_entity_mention")!.execute("mention", {
+      proposal_id: "proposal-mention-zero-accepted-replay",
+      annotation_id: "mention-zero-accepted-replay",
+      selector: { segment_id: fixture.segmentId, exact: "Zero" },
+      surface: "Zero",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 1,
+    } as never, undefined, undefined, context);
+    await finishOnly(observation, fixture.segmentId, "Recorded the source mention.");
+
+    const original = createCompilerProposalToolset(root);
+    await original.beginBatch([fixture.segmentId], semanticBatch, sourceId);
+    const originalTool = (name: string) => original.tools.find((tool) => tool.name === name)!;
+    await originalTool("propose_entity").execute("entity", {
+      proposal_id: "proposal-entity-zero-accepted-replay",
+      payload: { id: "zero-accepted-replay", kind: "character", canonicalName: "Zero", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await originalTool("propose_entity_resolution").execute("resolution", resolutionInput({
+      proposalId: "proposal-resolution-zero-accepted-replay",
+      resolutionId: "resolution-zero-accepted-replay",
+      mentionId: "mention-zero-accepted-replay",
+      status: "new-entity",
+      entityId: "zero-accepted-replay",
+      confidence: 1,
+    }) as never, undefined, undefined, context);
+    await finishOnly(original, fixture.segmentId, "Introduced Zero with its creation decision.");
+    await expect(new CompilerCommitService(root).accept("entity", "proposal-entity-zero-accepted-replay"))
+      .resolves.toMatchObject({ accepted: true, errors: [] });
+    await new CompilerFinishReceipts(root, sourceId, semanticBatch).archive("Exercise current-version accepted replay");
+
+    const retry = createCompilerProposalToolset(root);
+    await retry.beginBatch([fixture.segmentId], semanticBatch, sourceId);
+    const candidateResult = JSON.parse(resultText(await retry.tools.find((tool) => tool.name === "find_entity_resolution_candidates")!.execute(
+      "find-canonical-zero",
+      { mention_id: "mention-zero-accepted-replay" } as never,
+      undefined,
+      undefined,
+      context,
+    ))) as { candidates: Array<Record<string, unknown>> };
+    expect(candidateResult.candidates).toContainEqual(expect.objectContaining({
+      entityId: "zero-accepted-replay",
+      availability: "canonical",
+      resolutionMode: "resolved",
+    }));
+    await expect(retry.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute(
+      "finish-accepted-creation-replay",
+      finishInput(fixture.segmentId, "Replayed the immutable accepted creation decision."),
+      undefined,
+      undefined,
+      context,
+    )).resolves.toMatchObject({
+      details: {
+        compilerBatchFinished: true,
+        proposalIds: ["proposal-resolution-zero-accepted-replay"],
+      },
+    });
+    await expect(new EntityResolutionStore(root).currentForMention(sourceId, "mention-zero-accepted-replay"))
+      .resolves.toMatchObject({ id: "resolution-zero-accepted-replay", status: "new-entity" });
+  });
+
   it("retains accepted creation provenance after a later batch supersedes the current identity ref", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-origin-provenance-"));
     roots.push(root);

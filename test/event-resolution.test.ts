@@ -369,6 +369,82 @@ describe("event mention resolution", () => {
       .resolves.toMatchObject({ accepted: true, errors: [] });
   });
 
+  it("replays an accepted current event-creation decision after its same-batch event becomes canonical", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-resolution-accepted-replay-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Rain began.\n");
+    const sourceId = fixture.source.id;
+    const observationBatch = `batch-${sourceId}-00001-observation-accepted-replay`;
+    const semanticBatch = `batch-${sourceId}-00001-semantic-accepted-replay`;
+
+    const observation = createCompilerProposalToolset(root);
+    await observation.beginBatch([fixture.segmentId], observationBatch, sourceId);
+    await proposeEventMention(observation, fixture.segmentId, {
+      proposalId: "proposal-mention-rain-accepted-replay",
+      mentionId: "mention-rain-accepted-replay",
+      trigger: "began",
+      extent: "Rain began.",
+      types: ["natural-process"],
+      salience: "major",
+    });
+    await finishOnly(observation, fixture.segmentId, "Recorded the rain event mention.");
+
+    const original = createCompilerProposalToolset(root);
+    await original.beginBatch([fixture.segmentId], semanticBatch, sourceId);
+    await original.tools.find((tool) => tool.name === "propose_canonical_event")!.execute("event", {
+      proposal_id: "proposal-event-rain-accepted-replay",
+      payload: {
+        id: "rain-accepted-replay",
+        title: "Rain begins",
+        participants: [],
+        participantPresence: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        causalParents: [],
+        confidence: 1,
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await original.tools.find((tool) => tool.name === "propose_event_resolution")!.execute("resolution", eventResolutionInput({
+      proposalId: "proposal-resolution-rain-accepted-replay",
+      resolutionId: "resolution-rain-accepted-replay",
+      mentionIds: ["mention-rain-accepted-replay"],
+      status: "new-event",
+      canonicalEventId: "rain-accepted-replay",
+      relation: "coreference",
+    }) as never, undefined, undefined, context);
+    await finishOnly(original, fixture.segmentId, "Introduced the rain event with its creation decision.");
+    await expect(new CompilerCommitService(root).accept("canonical-event", "proposal-event-rain-accepted-replay"))
+      .resolves.toMatchObject({ accepted: true, errors: [] });
+    await new CompilerFinishReceipts(root, sourceId, semanticBatch).archive("Exercise current-version accepted replay");
+
+    const retry = createCompilerProposalToolset(root);
+    await retry.beginBatch([fixture.segmentId], semanticBatch, sourceId);
+    await expect(retry.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute(
+      "finish-accepted-event-creation-replay",
+      {
+        outcome: "complete",
+        reviewed_segments: [{
+          segment_id: fixture.segmentId,
+          disposition: "proposed",
+          summary: "Replayed the immutable accepted event-creation decision.",
+        }],
+        summary: "Replayed the immutable accepted event-creation decision.",
+      } as never,
+      undefined,
+      undefined,
+      context,
+    )).resolves.toMatchObject({
+      details: {
+        compilerBatchFinished: true,
+        proposalIds: ["proposal-resolution-rain-accepted-replay"],
+      },
+    });
+    await expect(new EventResolutionStore(root).currentForMention(sourceId, "mention-rain-accepted-replay"))
+      .resolves.toMatchObject({ id: "resolution-rain-accepted-replay", status: "new-event" });
+  });
+
   it("preserves ambiguous candidates instead of merging events from overlap alone", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-resolution-ambiguous-"));
     roots.push(root);

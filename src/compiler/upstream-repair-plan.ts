@@ -1,13 +1,20 @@
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
-import { idSchema } from "../world/model.js";
+import { canonicalEventSchema, eventParticipationSchema, idSchema, textAnchorSchema } from "../world/model.js";
+import { predicateReferences, stateOperationReferences } from "../world/state-references.js";
+import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { sourceAnnotationSchema } from "./annotations.js";
 import { identityResolutionSchema } from "./entity-resolution.js";
 import { eventResolutionSchema } from "./event-resolution.js";
+import {
+  sourcePatternObligationRequirementId,
+  sourcePatternObligationRequirementSetHash,
+  sourcePatternUpstreamAuthoritySchema,
+} from "./proposal-obligations.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const text = z.string().trim().min(1);
-export const upstreamRepairKindSchema = z.enum(["entity-mention", "event-mention", "quotation", "discourse-segment", "entity-resolution", "event-resolution"]);
+export const upstreamRepairKindSchema = z.enum(["entity-mention", "event-mention", "quotation", "discourse-segment", "entity-resolution", "event-resolution", "canonical-event", "event-participation"]);
 export type UpstreamRepairKind = z.infer<typeof upstreamRepairKindSchema>;
 const fields: Record<UpstreamRepairKind, readonly string[]> = {
   "entity-mention": ["anchor", "surface", "form", "kindCandidates", "sceneId", "confidence", "interpretation"],
@@ -16,6 +23,11 @@ const fields: Record<UpstreamRepairKind, readonly string[]> = {
   "discourse-segment": ["kind", "anchors", "viewpointMentionId", "confidence", "interpretation"],
   "entity-resolution": ["mentionId", "status", "entityId", "intendedEntityId", "candidates", "aliasType", "validStoryTime", "supersedesResolutionId", "rationale"],
   "event-resolution": ["eventMentionIds", "status", "canonicalEventId", "relation", "candidates", "supersedesResolutionIds", "rationale"],
+  // Semantic upstream repair currently permits fresh exact slots only. A
+  // revision policy needs separate field-level review and is intentionally not
+  // implied by the creation capability.
+  "canonical-event": [],
+  "event-participation": [],
 };
 const refSchema = z.object({ kind: upstreamRepairKindSchema, id: idSchema }).strict();
 export const upstreamRepairReadableRefSchema = z.object({ kind: z.enum([...upstreamRepairKindSchema.options, "entity", "canonical-event", "proposition", "attribution", "claim", "event-participation", "event-relation", "scene-occurrence", "event-frame", "spatial-relation", "action-schema", "event-execution", "action-constraint", "norm-template", "process-template", "world-rule", "character-goal", "character-model", "possibility", "initial-world", "source-segment", "evidence-assertion", "structural-discourse", "semantic-effect", "utterance-expression", "perception-observation", "acquisition"]), id: idSchema }).strict();
@@ -41,6 +53,7 @@ const writeSchema = refSchema.extend({ pointers: z.array(text).min(1).max(32) })
 const identitySchema = z.object({
   version: z.literal(1), planId: idSchema, batchId: idSchema,
   requirementSetHash: hash, requirementIds: z.array(text).min(1).max(128),
+  proposalObligation: sourcePatternUpstreamAuthoritySchema.optional(),
   predecessorReceiptRefs: z.array(hash).max(128),
   sourceScope: z.object({ sourceId: idSchema, sourceSha256: hash, segmentIds: z.array(idSchema).min(1).max(128) }).strict(),
   baselineRefs: z.array(upstreamRepairReadableRefSchema.extend({ revisionHash: hash }).strict()).max(256),
@@ -50,6 +63,20 @@ const identitySchema = z.object({
   resolutionAbsences: z.array(z.object({ kind: z.enum(["entity-resolution", "event-resolution"]), id: idSchema, mentionId: idSchema }).strict()).max(128).optional(),
   resolutionRevisions: z.array(z.object({ kind: z.enum(["entity-resolution", "event-resolution"]), id: idSchema,
     predecessorId: idSchema, mentionIds: z.array(idSchema).min(1).max(128) }).strict()).max(128).optional(),
+  semanticEventCreations: z.array(z.object({
+    requirementId: text,
+    eventMentionId: idSchema,
+    eventResolutionId: idSchema,
+    canonicalEventId: idSchema,
+    triggerAnchor: textAnchorSchema,
+    extentAnchors: z.array(textAnchorSchema).min(1).max(32),
+    participants: z.array(z.object({
+      mentionId: idSchema,
+      resolutionId: idSchema,
+      entityId: idSchema,
+      participationId: idSchema,
+    }).strict()).min(1).max(64),
+  }).strict()).max(32).optional(),
   readableRefs: z.array(upstreamRepairReadableRefSchema).max(256), citableEvidenceRefs: z.array(idSchema).min(1).max(128),
   dependencyEdges: z.array(z.object({ from: text, to: text, purpose: z.enum(["source-evidence", "identity", "quotation", "requirement"]) }).strict()).max(512),
   postconditionIds: z.array(text).min(1).max(128), authorizationRef: text, retryBudgetRef: idSchema,
@@ -63,6 +90,18 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
   for (const values of [plan.requirementIds, plan.predecessorReceiptRefs, plan.sourceScope.segmentIds, plan.citableEvidenceRefs, plan.postconditionIds,
     plan.baselineRefs.map(key), plan.allowedWrites.map(key), plan.allowedCreations.map(key), plan.readableRefs.map(key)]) if (!unique(values)) fail("Duplicate repair plan member");
   if (!plan.allowedWrites.length && !plan.allowedCreations.length) fail("Repair plan has no bounded mutation");
+  if (plan.proposalObligation) {
+    const requirementId = sourcePatternObligationRequirementId(plan.proposalObligation);
+    if (plan.sourceScope.sourceId !== plan.proposalObligation.sourceId
+      || plan.batchId === plan.proposalObligation.batchId
+      || plan.requirementSetHash !== sourcePatternObligationRequirementSetHash(plan.proposalObligation)
+      || contentHash(plan.requirementIds) !== contentHash([requirementId])) fail("Proposal-obligation repair authority differs from its exact source, requirement or upstream batch scope");
+    if (plan.allowedWrites.length || plan.resolutionAbsences?.length || plan.resolutionRevisions?.length
+      || !plan.semanticEventCreations?.length) fail("Proposal-obligation repair may only create reviewed missing-event dependencies");
+    if (plan.proposalObligation.originalSupportingEventIds.some(id => !plan.baselineRefs.some(ref => ref.kind === "canonical-event" && ref.id === id))) {
+      fail("Proposal-obligation repair does not freeze every original supporting event");
+    }
+  }
   if (!unique((plan.resolutionAbsences ?? []).map(ref => `${ref.kind}:${ref.mentionId}`))) fail("Duplicate resolution absence guard");
   for (const ref of plan.resolutionAbsences ?? []) {
     if (!plan.allowedCreations.some(slot => slot.kind === ref.kind && slot.id === ref.id)
@@ -75,6 +114,32 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
       || ref.mentionIds.some(id => !plan.baselineRefs.some(base => base.kind === (ref.kind === "entity-resolution" ? "entity-mention" : "event-mention") && base.id === id))) fail("Resolution revision lacks frozen predecessor, mentions or fresh successor slot");
   }
   if (!unique((plan.resolutionRevisions ?? []).map(key)) || !unique((plan.resolutionRevisions ?? []).flatMap(ref => ref.mentionIds.map(id => `${ref.kind}:${id}`)))) fail("Duplicate resolution revision scope");
+  const semanticSlots = new Set<string>();
+  for (const event of plan.semanticEventCreations ?? []) {
+    const slots = [
+      `event-mention:${event.eventMentionId}`,
+      `event-resolution:${event.eventResolutionId}`,
+      `canonical-event:${event.canonicalEventId}`,
+      ...event.participants.map(item => `event-participation:${item.participationId}`),
+    ];
+    if (!plan.requirementIds.includes(event.requirementId)
+      || new Set(event.participants.map(item => item.mentionId)).size !== event.participants.length
+      || new Set(event.participants.map(item => item.entityId)).size !== event.participants.length
+      || new Set(event.participants.map(item => item.participationId)).size !== event.participants.length
+      || slots.some(slot => semanticSlots.has(slot))) fail("Semantic event creation has duplicate or unknown scope");
+    slots.forEach(slot => semanticSlots.add(slot));
+    if (slots.some(slot => !plan.allowedCreations.some(ref => key(ref) === slot))) fail("Semantic event creation lacks an exact creation slot");
+    for (const participant of event.participants) for (const ref of [
+      `entity-mention:${participant.mentionId}`,
+      `entity-resolution:${participant.resolutionId}`,
+      `entity:${participant.entityId}`,
+    ]) if (!plan.baselineRefs.some(base => key(base) === ref)) fail("Semantic event participant lacks a frozen identity trace");
+  }
+  for (const creation of plan.allowedCreations) if (["canonical-event", "event-participation"].includes(creation.kind)
+    && !semanticSlots.has(key(creation))) fail("Semantic creation lacks its reviewed event contract");
+  if (plan.proposalObligation && plan.allowedCreations.some(creation => !semanticSlots.has(key(creation)))) {
+    fail("Proposal-obligation repair contains a creation outside its reviewed missing-event contract");
+  }
   const annotationSlots = [...plan.allowedWrites, ...plan.allowedCreations].filter(ref => ["entity-mention", "event-mention", "quotation", "discourse-segment"].includes(ref.kind));
   if (!unique(annotationSlots.map(ref => ref.id))) fail("Annotation write slots share a logical ID across types");
   if (plan.citableEvidenceRefs.some(id => !plan.sourceScope.segmentIds.includes(id))) fail("Citable evidence escapes source scope");
@@ -113,6 +178,8 @@ export function assertUpstreamResolutionAbsences(plan: UpstreamRepairPlan, paylo
 function payloadFor(kind: UpstreamRepairKind, raw: unknown) {
   if (kind === "entity-resolution") return identityResolutionSchema.parse(raw);
   if (kind === "event-resolution") return eventResolutionSchema.parse(raw);
+  if (kind === "canonical-event") return canonicalEventSchema.parse(raw);
+  if (kind === "event-participation") return eventParticipationSchema.parse(raw);
   const parsed = sourceAnnotationSchema.parse(raw);
   if (parsed.annotationType !== kind) throw new Error("Repair payload kind mismatch");
   return parsed;
@@ -133,6 +200,45 @@ export function upstreamRepairReferencedKeys(kind: UpstreamRepairKind, raw: unkn
     add("canonical-event", [value.canonicalEventId, ...value.candidates.map(item => item.canonicalEventId)]);
     add("evidence-assertion", value.candidates.flatMap(item => item.evidenceAssertionIds));
     add("event-resolution", value.supersedesResolutionIds);
+  } else if (kind === "canonical-event") {
+    const value = canonicalEventSchema.parse(raw);
+    const fields = new Map(DEFAULT_STATE_FIELDS.map(field => [field.key, field]));
+    add("entity", value.participants);
+    add("entity", (value.participantPresence ?? []).map(item => item.entityId));
+    add("canonical-event", value.causalParents);
+    if (value.storyTime.kind === "relative") add("canonical-event", [value.storyTime.anchorEventId]);
+    for (const predicate of value.preconditions) for (const ref of predicateReferences(predicate, fields)) add(ref.kind === "event" ? "canonical-event" : ref.kind === "rule" ? "world-rule" : "entity", [ref.id]);
+    for (const operation of value.observedOutcome.operations) for (const ref of stateOperationReferences(operation, fields)) add(ref.kind === "event" ? "canonical-event" : ref.kind === "rule" ? "world-rule" : "entity", [ref.id]);
+    for (const operation of value.observedKnowledge?.operations ?? []) {
+      add("entity", [operation.actorId, operation.op === "learn" ? operation.sourceActorId : undefined]);
+      add("claim", [operation.claimId]);
+      add("proposition", [operation.propositionId]);
+      if (operation.op === "learn") {
+        add("attribution", [operation.attributionId]);
+        add("utterance-expression", [operation.expressionId]);
+        add("perception-observation", [operation.perceptionId]);
+        add("acquisition", [operation.acquisitionId]);
+      }
+    }
+    add("scene-occurrence", value.sceneOccurrenceIds ?? []);
+    add("event-frame", [value.frameInstance?.frameId]);
+    if (value.action?.lane === "schema-bound") {
+      add("action-schema", [value.action.schemaId]);
+      add("entity", value.action.roleBindings.flatMap(role => role.entityIds));
+    }
+    for (const checkpoint of value.characterEntryCheckpoints ?? []) {
+      add("entity", [checkpoint.actorId, ...checkpoint.participantPresence.map(item => item.entityId)]);
+      for (const operation of checkpoint.delta.operations) for (const ref of stateOperationReferences(operation, fields)) add(ref.kind === "event" ? "canonical-event" : ref.kind === "rule" ? "world-rule" : "entity", [ref.id]);
+      for (const operation of checkpoint.knowledge?.operations ?? []) {
+        add("entity", [operation.actorId, operation.op === "learn" ? operation.sourceActorId : undefined]);
+        add("claim", [operation.claimId]);
+        add("proposition", [operation.propositionId]);
+      }
+    }
+  } else if (kind === "event-participation") {
+    const value = eventParticipationSchema.parse(raw);
+    add("canonical-event", [value.eventId]);
+    add("entity", [value.entityId]);
   } else {
     const value = sourceAnnotationSchema.parse(raw);
     if (value.annotationType !== "discourse-segment") add("discourse-segment", [value.sceneId]);
@@ -155,7 +261,7 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
   for (const ref of plan.baselineRefs) if (input.activeRevisions.get(key(ref)) !== ref.revisionHash) stop(`Active baseline changed: ${key(ref)}`);
   if (!input.citedSegmentIds.length || input.citedSegmentIds.some(id => !plan.citableEvidenceRefs.includes(id))) stop("Evidence is not citable under this plan");
   const next = payloadFor(input.kind, input.payload);
-  if (next.id !== input.id || next.sourceId !== plan.sourceScope.sourceId) stop("Payload identity or source escapes plan");
+  if (next.id !== input.id || ("sourceId" in next && next.sourceId !== plan.sourceScope.sourceId)) stop("Payload identity or source escapes plan");
   const absence = plan.resolutionAbsences?.find(ref => ref.kind === input.kind && ref.id === input.id);
   if (absence) {
     const actualMentions = input.kind === "entity-resolution" ? [identityResolutionSchema.parse(next).mentionId] : eventResolutionSchema.parse(next).eventMentionIds;
@@ -175,7 +281,33 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
     }
     if (!plan.readableRefs.some(ref => key(ref) === reference) || !plan.baselineRefs.some(ref => key(ref) === reference)) stop(`Unfrozen dependency reference: ${reference}`);
   }
-  if (contentHash(next.derivation) !== contentHash(input.hostDerivation) || next.derivation.runId !== plan.batchId || next.derivation.compilerBatchId !== plan.batchId) stop("Derivation differs from host batch provenance");
+  if ("derivation" in next && (contentHash(next.derivation) !== contentHash(input.hostDerivation) || next.derivation.runId !== plan.batchId || next.derivation.compilerBatchId !== plan.batchId)) stop("Derivation differs from host batch provenance");
+  const semantic = plan.semanticEventCreations?.find(item => item.eventMentionId === input.id
+    || item.eventResolutionId === input.id || item.canonicalEventId === input.id
+    || item.participants.some(participant => participant.participationId === input.id));
+  if (["event-mention", "event-resolution", "canonical-event", "event-participation"].includes(input.kind) && semantic) {
+    if (input.kind === "event-mention") {
+      const mention = sourceAnnotationSchema.parse(next);
+      if (mention.annotationType !== "event-mention"
+        || contentHash(mention.triggerAnchor) !== contentHash(semantic.triggerAnchor)
+        || contentHash(mention.extentAnchors) !== contentHash(semantic.extentAnchors)
+        || contentHash([...mention.participantMentionIds].sort()) !== contentHash(semantic.participants.map(item => item.mentionId).sort())) stop("Event mention differs from the reviewed source occurrence");
+    } else if (input.kind === "event-resolution") {
+      const resolution = eventResolutionSchema.parse(next), candidate = resolution.candidates[0];
+      if (resolution.status !== "new-event" || resolution.canonicalEventId !== semantic.canonicalEventId
+        || resolution.relation !== "coreference" || contentHash(resolution.eventMentionIds) !== contentHash([semantic.eventMentionId])
+        || resolution.candidates.length !== 1 || candidate?.canonicalEventId !== semantic.canonicalEventId
+        || candidate.relation !== "coreference" || contentHash(candidate.basisEventMentionIds) !== contentHash([semantic.eventMentionId])
+        || resolution.supersedesResolutionIds.length) stop("Event resolution differs from the reviewed new-event trace");
+    } else if (input.kind === "canonical-event") {
+      const event = canonicalEventSchema.parse(next);
+      if (contentHash([...event.participants].sort()) !== contentHash(semantic.participants.map(item => item.entityId).sort())) stop("Canonical event participants differ from the reviewed identity trace");
+    } else {
+      const participation = eventParticipationSchema.parse(next);
+      const binding = semantic.participants.find(item => item.participationId === participation.id);
+      if (!binding || participation.eventId !== semantic.canonicalEventId || participation.entityId !== binding.entityId) stop("Event participation differs from the reviewed event/identity slot");
+    }
+  }
   const target = key(input);
   if (input.baseline === null) {
     const annotationKinds = ["entity-mention", "event-mention", "quotation", "discourse-segment"];
@@ -186,7 +318,8 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
   const write = plan.allowedWrites.find(ref => key(ref) === target);
   const baseline = payloadFor(input.kind, input.baseline);
   const ref = plan.baselineRefs.find(ref => key(ref) === target);
-  if (!write || !ref || contentHash(baseline) !== ref.revisionHash || baseline.id !== input.id || baseline.sourceId !== next.sourceId) stop("Mutation lacks exact frozen baseline");
+  if (!write || !ref || contentHash(baseline) !== ref.revisionHash || baseline.id !== input.id
+    || ("sourceId" in baseline && "sourceId" in next && baseline.sourceId !== next.sourceId)) stop("Mutation lacks exact frozen baseline");
   const allowed = write!.pointers.map(repairPointerTokens);
   const before = baseline as Record<string, unknown>, after = next as Record<string, unknown>;
   for (const field of new Set([...Object.keys(before), ...Object.keys(after)])) {

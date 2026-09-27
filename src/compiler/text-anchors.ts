@@ -26,7 +26,7 @@ const modelEvidenceSelectorBase = {
   target_path: z.string().min(1).refine(
     (value) => /^(?:\/(?:[^~/]|~[01])*)*$/.test(value),
     "target_path must be an RFC 6901 JSON Pointer",
-  ),
+  ).describe("RFC 6901 JSON Pointer relative to the proposal payload root. Use /canonicalEventId, never /payload/canonicalEventId."),
   relation: z.enum(["supports", "contradicts", "contextualizes"]),
 };
 

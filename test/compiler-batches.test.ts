@@ -26,6 +26,7 @@ import { initialWorldSchema } from "../src/world/initial.js";
 import { characterGoalSchema, characterModelSchema } from "../src/world/actors.js";
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { EntityResolutionStore } from "../src/compiler/entity-resolution.js";
 import { buildNwhToolRecoveryAdvice, NWH_TOOL_RECOVERY_MARKER } from "../src/agent/tool-recovery.js";
 
@@ -441,6 +442,7 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("finish_compiler_batch"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("only compiler pass guaranteed"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("reviewed_segments"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("omit target_reviews entirely"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("peek_adjacent_evidence"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("defer_boundary_artifact"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("context-only"))).toBe(true);
@@ -464,6 +466,13 @@ describe("compiler batches", () => {
     ))).toBe(true);
     expect(semanticBatches.every((batch) => batch.prompt.includes(
       "Do not perform a second observation sweep, create quotations or discourse segments",
+    ))).toBe(true);
+    const executableBatches = batches.filter((batch) => batch.semanticStage === "executable");
+    expect(executableBatches.every((batch) => batch.prompt.includes(
+      "An ad-hoc action remains only on its canonical occurrence and must not be submitted as an event-execution action",
+    ))).toBe(true);
+    expect(executableBatches.every((batch) => batch.prompt.includes(
+      "leave the canonical ad-hoc occurrence unchanged and do not call propose_event_execution",
     ))).toBe(true);
     expect(batches[0]!.prompt).toContain("Use your semantic reading");
     expect(batches[0]!.prompt).toContain("do not use a regular-expression convention");
@@ -530,6 +539,94 @@ describe("compiler batches", () => {
     expect(hydrated.prompt).toContain('"logicalId":"person-recovered"');
     expect(hydrated.prompt).toContain("this is a recovery attempt");
     expect(hydrated.prompt).toContain("start recovery by calling finish_compiler_batch once");
+  });
+
+  it("hydrates schema preflight failures as unresolved without interpreting diagnostic prose", async () => {
+    const { root, source } = await fixture();
+    const batch = (await prepareCompilerBatches(root, source))
+      .find((candidate) => candidate.semanticStage === "executable")!;
+    const ledger = new CompilerProposalObligations(root, source.id, batch.id);
+    ledger.record("propose_event_execution", {
+      proposal_id: "ad-hoc-execution",
+      payload: {
+        id: "ad-hoc-execution",
+        canonicalEventId: "canonical-event",
+        actorId: "actor",
+        action: {
+          lane: "ad-hoc",
+          actionKindId: "announce",
+          description: "Actor announces boarding.",
+          footprint: { reads: [], writes: [], resources: [] },
+        },
+        roleBindings: [],
+      },
+      evidence_segment_ids: batch.segmentIds,
+    }, "failed", 'Validation failed for tool "propose_event_execution":\n  - payload.action.lane: must be equal to constant');
+
+    const hydrated = await hydrateCompilerBatch(root, batch);
+
+    expect(hydrated.prompt).toContain('"proposalId":"ad-hoc-execution"');
+    expect(hydrated.prompt).toContain("<unresolved-proposal-obligations>[");
+    expect(hydrated.prompt).toContain("Missing evidence or a repeated failure requires host review");
+  });
+
+  it("hydrates exhausted execution failures without silently settling them", async () => {
+    const { root, source } = await fixture();
+    const batch = (await prepareCompilerBatches(root, source))
+      .find((candidate) => candidate.semanticStage === "executable")!;
+    const proposalId = "empty-execution-correction";
+    const ledger = new CompilerProposalObligations(root, source.id, batch.id);
+    ledger.record("propose_event_execution", {
+      proposal_id: proposalId,
+      payload: {
+        id: proposalId, canonicalEventId: "canonical-event", actorId: "actor",
+        action: { lane: "ad-hoc", actionKindId: "announce", description: "Actor announces boarding.", footprint: { reads: [], writes: [], resources: [] } },
+        roleBindings: [],
+      },
+      evidence_segment_ids: batch.segmentIds,
+    }, "failed", 'Validation failed for tool "propose_event_execution":\n  - payload.action.lane: must be equal to constant');
+    const correction = {
+      proposal_id: proposalId,
+      payload: { id: proposalId, canonicalEventId: "canonical-event", actorId: "actor" },
+      evidence_segment_ids: batch.segmentIds,
+      evidence_selectors: [{ segment_id: batch.segmentIds[0]!, exact: "人物", target_path: "/payload/canonicalEventId", relation: "supports" as const, strength: "explicit" as const }],
+    };
+    ledger.record("propose_event_execution", correction, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
+    ledger.record("propose_event_execution", correction, "failed", "Evidence selector 1 target_path '/payload/canonicalEventId' does not exist in the proposal payload.");
+
+    const hydrated = await hydrateCompilerBatch(root, batch);
+
+    expect(hydrated.prompt).toContain('"proposalId":"empty-execution-correction"');
+    expect(hydrated.prompt).toContain('"status":"failed"');
+    expect(hydrated.prompt).toContain("<unresolved-proposal-obligations>[");
+  });
+
+  it("hydrates exact-batch retired proposal ids and rejection diagnostics before model mutation", async () => {
+    const { root, source } = await fixture();
+    const batch = (await prepareCompilerBatches(root, source))
+      .find((candidate) => candidate.semanticStage === "executable")!;
+    const service = new CompilerProposalService(root);
+    await service.submit("entity", {
+      proposalId: "entity-person-retired",
+      payload: {
+        id: "person-retired",
+        kind: "character",
+        canonicalName: "人物",
+        aliases: [],
+        evidence: batch.evidence,
+      },
+      generatedBy: { worker: "test", compilerBatchId: batch.id },
+    });
+    await service.withdraw("entity-person-retired", "Typed agency remained unsupported.");
+
+    const hydrated = await hydrateCompilerBatch(root, batch);
+
+    expect(hydrated.prompt).toContain("<current-batch-retired-proposals>");
+    expect(hydrated.prompt).toContain('"proposalId":"entity-person-retired"');
+    expect(hydrated.prompt).toContain('"proposalStatus":"rejected"');
+    expect(hydrated.prompt).toContain("Typed agency remained unsupported.");
+    expect(hydrated.prompt).toContain("copy results[].readArguments.ref into read_compiler_artifact.ref");
+    expect(hydrated.prompt).toContain("Never reuse a listed proposalId");
   });
 
   it("hydrates only recoverable resolution leaves and labels accepted replay state", async () => {

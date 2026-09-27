@@ -10,6 +10,12 @@ import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { freezeUpstreamRepairPlan, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import { verifyUpstreamRepairPlan, upstreamRepairHostError } from "./upstream-repair-preflight.js";
+import {
+  CompilerProposalObligations,
+  sourcePatternObligationRequirementId,
+  sourcePatternObligationRequirementSetHash,
+  sourcePatternUpstreamAuthoritySchema,
+} from "./proposal-obligations.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const text = z.string().trim().min(1);
@@ -20,6 +26,7 @@ export const upstreamRepairReviewSchema = z.object({
   version: z.literal(1), sourceId: idSchema, sourceSha256: hash,
   planId: idSchema, batchId: idSchema, requirementSetHash: hash,
   requirementIds: z.array(text).min(1).max(128), predecessorReceiptRefs: z.array(hash).max(128),
+  proposalObligation: sourcePatternUpstreamAuthoritySchema.optional(),
   segmentIds: z.array(idSchema).min(1).max(128), citableEvidenceRefs: z.array(idSchema).min(1).max(128),
   authorizationRef: text, retryBudgetRef: idSchema,
   diagnostics: z.array(z.discriminatedUnion("code", [
@@ -29,6 +36,9 @@ export const upstreamRepairReviewSchema = z.object({
     z.object({ code: z.literal("EVENT_RESOLUTION_MISSING"), mentionId: idSchema, revisionHash: hash, requirementId: text, candidates }).strict(),
     z.object({ code: z.literal("ENTITY_RESOLUTION_REVISION"), mentionId: idSchema, revisionHash: hash, resolutionId: idSchema, resolutionHash: hash, requirementId: text, candidates }).strict(),
     z.object({ code: z.literal("EVENT_RESOLUTION_REVISION"), mentionId: idSchema, revisionHash: hash, resolutionId: idSchema, resolutionHash: hash, requirementId: text, candidates }).strict(),
+    z.object({ code: z.literal("CANONICAL_EVENT_MISSING"), requirementId: text, triggerAnchor: textAnchorSchema,
+      extentAnchors: z.array(textAnchorSchema).min(1).max(32), participantMentionIds: z.array(idSchema).min(1).max(64)
+        .refine(ids => new Set(ids).size === ids.length, "Duplicate participant mention") }).strict(),
     z.object({ code: z.literal("SEMANTIC_MODULE_REQUIRED"), requirementId: text, semanticKind: text }).strict(),
   ])).min(1).max(128),
 }).strict();
@@ -37,6 +47,20 @@ export const upstreamRepairReviewSchema = z.object({
 export async function planUpstreamRepair(root: string, raw: unknown) {
   const review = upstreamRepairReviewSchema.parse(raw), reviewHash = contentHash(review);
   if (review.diagnostics.some(item => !review.requirementIds.includes(item.requirementId))) throw upstreamRepairHostError("Diagnostic escapes the selected independent requirements");
+  if (review.proposalObligation) {
+    const authority = new CompilerProposalObligations(root, review.proposalObligation.sourceId, review.proposalObligation.batchId)
+      .verifySourcePatternUpstreamAuthority(review.proposalObligation);
+    const requirementId = sourcePatternObligationRequirementId(review.proposalObligation);
+    if (authority.correction) throw upstreamRepairHostError("The durable proposal obligation already has a host correction; preserve it instead of opening another upstream plan");
+    if (review.sourceId !== review.proposalObligation.sourceId || review.batchId === review.proposalObligation.batchId
+      || review.requirementSetHash !== sourcePatternObligationRequirementSetHash(review.proposalObligation)
+      || contentHash(review.requirementIds) !== contentHash([requirementId])) {
+      throw upstreamRepairHostError("Proposal-obligation review differs from the exact same-scope discovery result");
+    }
+    if (review.diagnostics.some(item => item.code !== "CANONICAL_EVENT_MISSING" || item.requirementId !== requirementId)) {
+      throw upstreamRepairHostError("Proposal-obligation authority may only schedule reviewed missing canonical-event dependencies");
+    }
+  }
   const source = await WorkspaceStore.openReadOnly(root).getSource(review.sourceId);
   if (!source || source.contentSha256 !== review.sourceSha256) throw upstreamRepairHostError("Reviewed source revision is no longer registered");
   const bytes = await readSourceMaterial(root, source);
@@ -46,6 +70,7 @@ export async function planUpstreamRepair(root: string, raw: unknown) {
   const creations = new Map<string, UpstreamRepairPlan["allowedCreations"][number]>();
   const absences = new Map<string, NonNullable<UpstreamRepairPlan["resolutionAbsences"]>[number]>();
   const revisions: NonNullable<UpstreamRepairPlan["resolutionRevisions"]> = [];
+  const semanticEventCreations: NonNullable<UpstreamRepairPlan["semanticEventCreations"]> = [];
   const edges = new Map<string, UpstreamRepairPlan["dependencyEdges"][number]>();
   const edge = (from: string, to: string, purpose: UpstreamRepairPlan["dependencyEdges"][number]["purpose"]) => edges.set(`${from}\0${to}`, { from, to, purpose });
   const unsupported = review.diagnostics.filter(item => item.code === "SEMANTIC_MODULE_REQUIRED");
@@ -54,8 +79,60 @@ export async function planUpstreamRepair(root: string, raw: unknown) {
     new EntityResolutionStore(root).list(review.sourceId), new EventResolutionStore(root).list(review.sourceId),
     loadCompilerArtifactRecords(root, review.sourceId),
   ]);
+  for (const eventId of review.proposalObligation?.originalSupportingEventIds ?? []) {
+    const event = records.find(item => item.status === "canonical" && item.kind === "canonical-event" && item.logicalId === eventId);
+    if (!event) throw upstreamRepairHostError(`Original source-pattern dependency is no longer canonical: ${eventId}`);
+    baselines.set(`canonical-event:${event.logicalId}`, { kind: "canonical-event", id: event.logicalId, revisionHash: contentHash(event.payload) });
+  }
   for (const diagnostic of review.diagnostics) {
     if (diagnostic.code === "SEMANTIC_MODULE_REQUIRED") continue;
+    if (diagnostic.code === "CANONICAL_EVENT_MISSING") {
+      const anchors = [diagnostic.triggerAnchor, ...diagnostic.extentAnchors];
+      if (anchors.some(anchor => anchor.sourceId !== source.id
+        || contentHash(anchor) !== contentHash(textAnchorForByteRange(source.id, bytes, anchor.startByte, anchor.endByte)))) throw upstreamRepairHostError("Reviewed missing-event anchor differs from immutable source bytes");
+      const participants = [];
+      for (const mentionId of diagnostic.participantMentionIds) {
+        const mention = annotations.find(item => item.id === mentionId && item.annotationType === "entity-mention");
+        const resolution = entityResolutions.find(item => item.mentionId === mentionId && item.entityId);
+        const entity = resolution?.entityId ? records.find(item => item.status === "canonical" && item.kind === "entity" && item.logicalId === resolution.entityId) : undefined;
+        if (!mention || !resolution?.entityId || !entity) throw upstreamRepairHostError("Reviewed missing-event participant lacks a current mention, selected identity resolution or canonical entity; discover source annotations/resolutions and copy their exact IDs into a new host review");
+        baselines.set(`entity-mention:${mention.id}`, { kind: "entity-mention", id: mention.id, revisionHash: contentHash(mention) });
+        baselines.set(`entity-resolution:${resolution.id}`, { kind: "entity-resolution", id: resolution.id, revisionHash: contentHash(resolution) });
+        baselines.set(`entity:${entity.logicalId}`, { kind: "entity", id: entity.logicalId, revisionHash: contentHash(entity.payload) });
+        participants.push({ mentionId: mention.id, resolutionId: resolution.id, entityId: entity.logicalId });
+      }
+      if (new Set(participants.map(item => item.entityId)).size !== participants.length) throw upstreamRepairHostError("Reviewed missing-event participant mentions do not resolve to a unique canonical participant inventory");
+      const occurrenceHash = contentHash({ sourceId: source.id, triggerAnchor: diagnostic.triggerAnchor,
+        extentAnchors: diagnostic.extentAnchors, participantMentionIds: [...diagnostic.participantMentionIds].sort() });
+      const eventMentionId = `repair-event-mention-${occurrenceHash.slice(0, 32)}`;
+      const eventResolutionId = `repair-event-resolution-${occurrenceHash.slice(0, 32)}`;
+      const canonicalEventId = `repair-canonical-event-${occurrenceHash.slice(0, 32)}`;
+      if (semanticEventCreations.some(item => item.eventMentionId === eventMentionId)) throw upstreamRepairHostError("One reviewed source occurrence cannot allocate duplicate semantic event repairs");
+      const boundParticipants = participants.map(participant => ({ ...participant,
+        participationId: `repair-event-participation-${contentHash({ sourceId: source.id, canonicalEventId, entityId: participant.entityId }).slice(0, 32)}` }));
+      const slots = [
+        { kind: "event-mention" as const, id: eventMentionId },
+        { kind: "canonical-event" as const, id: canonicalEventId },
+        { kind: "event-resolution" as const, id: eventResolutionId },
+        ...boundParticipants.map(item => ({ kind: "event-participation" as const, id: item.participationId })),
+      ];
+      for (const slot of slots) {
+        creations.set(`${slot.kind}:${slot.id}`, { ...slot, maxCount: 1, dependencyOf: diagnostic.requirementId });
+        edge(`requirement:${diagnostic.requirementId}`, `${slot.kind}:${slot.id}`, "requirement");
+      }
+      edge(`canonical-event:${canonicalEventId}`, `event-mention:${eventMentionId}`, "source-evidence");
+      edge(`event-resolution:${eventResolutionId}`, `event-mention:${eventMentionId}`, "identity");
+      edge(`event-resolution:${eventResolutionId}`, `canonical-event:${canonicalEventId}`, "identity");
+      for (const participant of boundParticipants) {
+        edge(`event-mention:${eventMentionId}`, `entity-mention:${participant.mentionId}`, "identity");
+        edge(`canonical-event:${canonicalEventId}`, `entity:${participant.entityId}`, "identity");
+        edge(`event-participation:${participant.participationId}`, `canonical-event:${canonicalEventId}`, "identity");
+        edge(`event-participation:${participant.participationId}`, `entity:${participant.entityId}`, "identity");
+      }
+      semanticEventCreations.push({ requirementId: diagnostic.requirementId, eventMentionId, eventResolutionId, canonicalEventId,
+        triggerAnchor: diagnostic.triggerAnchor, extentAnchors: diagnostic.extentAnchors, participants: boundParticipants });
+      continue;
+    }
     if ("mentionId" in diagnostic) {
       const entity = diagnostic.code.startsWith("ENTITY_");
       const mentionKind = entity ? "entity-mention" : "event-mention", resolutionKind = entity ? "entity-resolution" : "event-resolution";
@@ -122,11 +199,13 @@ export async function planUpstreamRepair(root: string, raw: unknown) {
   const ordered = <T extends { kind: string; id: string }>(items: Iterable<T>) => [...items].sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
   const plan = freezeUpstreamRepairPlan({ version: 1, planId: review.planId, batchId: review.batchId,
     requirementSetHash: review.requirementSetHash, requirementIds: review.requirementIds, predecessorReceiptRefs: review.predecessorReceiptRefs,
+    ...(review.proposalObligation ? { proposalObligation: review.proposalObligation } : {}),
     sourceScope: { sourceId: source.id, sourceSha256: review.sourceSha256, segmentIds: review.segmentIds },
     baselineRefs: ordered(baselines.values()), readableRefs: ordered(baselines.values()).map(({ kind, id }) => ({ kind, id })),
     allowedWrites: ordered(writes.values()), allowedCreations: ordered(creations.values()),
     ...(revisions.length ? { resolutionRevisions: revisions } : {}),
     ...(absences.size ? { resolutionAbsences: ordered(absences.values()) } : {}),
+    ...(semanticEventCreations.length ? { semanticEventCreations } : {}),
     citableEvidenceRefs: review.citableEvidenceRefs, dependencyEdges: [...edges.values()].sort((a, b) => `${a.from}:${a.to}`.localeCompare(`${b.from}:${b.to}`)),
     postconditionIds: review.requirementIds, authorizationRef: `${review.authorizationRef}#review=${reviewHash}`, retryBudgetRef: review.retryBudgetRef,
   });
@@ -137,6 +216,12 @@ export async function planUpstreamRepair(root: string, raw: unknown) {
       const segment = verified.payloads.get(`source-segment:${id}`) as { startByte: number; endByte: number } | undefined;
       return segment && segment.startByte <= anchor.startByte && segment.endByte >= anchor.endByte;
     })) throw upstreamRepairHostError("Reviewed quotation extension lies outside citable source evidence");
+  }
+  for (const semantic of semanticEventCreations) for (const anchor of [semantic.triggerAnchor, ...semantic.extentAnchors]) {
+    if (!review.citableEvidenceRefs.some(id => {
+      const segment = verified.payloads.get(`source-segment:${id}`) as { startByte: number; endByte: number } | undefined;
+      return segment && segment.startByte <= anchor.startByte && segment.endByte >= anchor.endByte;
+    })) throw upstreamRepairHostError("Reviewed missing-event evidence lies outside citable source evidence");
   }
   return { authority: "diagnostic-only" as const, status: "ready-for-host-authorization" as const, reviewHash, diagnostics: review.diagnostics, plan };
 }

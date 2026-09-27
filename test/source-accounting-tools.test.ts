@@ -283,6 +283,98 @@ describe("source-unit accounting tools", () => {
     } as never, undefined, undefined, {} as never)).rejects.toThrow("exactly one input mode");
   });
 
+  it("preserves blocking accounting history while projecting a fresh nonblocking successor", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-refinement-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "The travelers continue toward the gate.\nTheir prior mission remains unchanged.");
+    const batch = (await prepareCompilerBatches(root, fixture.source)).find((item) => item.semanticStage === "executable")!;
+    const set = createCompilerProposalToolset(root);
+    await set.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+    const call = (name: string, input: unknown) => set.tools.find((tool) => tool.name === name)!
+      .execute(name, input as never, undefined, undefined, {} as never);
+    const discover = async () => {
+      const result = await call("find_source_accounting_units", { status: "unresolved", offset: 0, max_results: 20 });
+      return JSON.parse((result.content[0] as { text: string }).text) as {
+        pageToken?: string;
+        units: Array<{ unitId: string; status: string; pending?: { proposalId: string; status: string } }>;
+      };
+    };
+    const first = await discover();
+    await call("account_source_units", {
+      proposal_id: "blocking-review",
+      page_token: first.pageToken,
+      page_default: { status: "unresolved", reason: "Executable meaning remains open after the first review." },
+      page_overrides: first.units.length > 1 ? [{
+        unit_index: 2,
+        status: "intentionally-deferred",
+        reason: "This unit remains deliberately open pending the next review pass.",
+      }] : undefined,
+    });
+    const blocking = await discover();
+    expect(blocking.units).toHaveLength(first.units.length);
+    expect(blocking.units.every((unit) => unit.pending?.proposalId === "blocking-review")).toBe(true);
+    expect(blocking.units.some((unit) => unit.status === "intentionally-deferred")).toBe(first.units.length > 1);
+    await call("account_source_units", {
+      proposal_id: "resolved-review",
+      page_token: blocking.pageToken,
+      page_default: { status: "background-only", reason: "Reviewed continuation with no additional semantic artifact." },
+    });
+    expect((await discover()).units).toEqual([]);
+
+    const accounting = new SourceAccountingStore(root);
+    const original = await accounting.readProposal(fixture.source.id, "pending", "blocking-review");
+    const successor = await accounting.readProposal(fixture.source.id, "pending", "resolved-review");
+    expect(original.decisions.some((decision) => decision.status === "unresolved")).toBe(true);
+    expect(successor.refinements).toEqual([{
+      proposalId: original.id,
+      proposalHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      unitIds: first.units.map((unit) => unit.unitId).sort(),
+    }]);
+
+    await expect(call("finish_compiler_batch", {
+      outcome: "complete",
+      reviewed_segments: batch.segmentIds.map((segment_id) => ({
+        segment_id,
+        disposition: "proposed",
+        summary: "Every source unit received a completed accounting review.",
+      })),
+      summary: "Blocking source accounting was refined without deleting its history.",
+    })).resolves.toMatchObject({ details: { compilerBatchFinished: true }, terminate: true });
+    expect((await accounting.readProposal(fixture.source.id, "accepted", "blocking-review")).decisions).toEqual(original.decisions);
+    expect((await accounting.readProposal(fixture.source.id, "accepted", "resolved-review")).refinements).toEqual(successor.refinements);
+    const manifest = await accounting.read(fixture.source.id);
+    expect(first.units.every((unit) => manifest?.records.find((record) => record.unitId === unit.unitId)?.status === "background-only")).toBe(true);
+  });
+
+  it("rejects blocking successors and attempts to overwrite nonblocking accounting", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-refinement-guards-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "One unit remains open.\nOne unit is ordinary background.");
+    const batch = (await prepareCompilerBatches(root, fixture.source)).find((item) => item.semanticStage === "executable")!;
+    const set = createCompilerProposalToolset(root);
+    await set.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+    const tool = (name: string) => set.tools.find((candidate) => candidate.name === name)!;
+    const call = (name: string, input: unknown) => tool(name).execute(name, input as never, undefined, undefined, {} as never);
+    const result = await call("find_source_accounting_units", { status: "unresolved", offset: 0, max_results: 20 });
+    const page = JSON.parse((result.content[0] as { text: string }).text) as { units: Array<{ unitId: string }> };
+    expect(page.units.length).toBeGreaterThanOrEqual(2);
+    await call("account_source_units", {
+      proposal_id: "mixed-review",
+      decisions: [
+        { unit_id: page.units[0]!.unitId, status: "unresolved", reason: "This unit remains open." },
+        { unit_id: page.units[1]!.unitId, status: "background-only", reason: "This unit is reviewed background." },
+      ],
+    });
+    await expect(call("account_source_units", {
+      proposal_id: "still-blocking",
+      decisions: [{ unit_id: page.units[0]!.unitId, status: "intentionally-deferred", reason: "Still not resolved." }],
+    })).rejects.toThrow("coverage changed");
+    await expect(call("account_source_units", {
+      proposal_id: "overwrite-complete",
+      decisions: [{ unit_id: page.units[1]!.unitId, status: "paratext", reason: "Invalid overwrite." }],
+    })).rejects.toThrow("coverage changed");
+  });
+
   it("blocks a novel-scale proposal-bearing finish until every unrepresented unit is dispositioned", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-tool-"));
     roots.push(root);

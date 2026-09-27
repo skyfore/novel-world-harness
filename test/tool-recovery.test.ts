@@ -34,7 +34,20 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("read payload.id into action.schemaId");
     expect(advice.steps.join(" ")).toContain("never copy an event's ad-hoc action");
     expect(advice.steps.join(" ")).toContain("Retry once after concrete correction");
+    expect(advice.steps.join(" ")).toContain("do not call propose_event_execution again");
+    expect(advice.retryCondition).toContain("otherwise do not retry this proposal");
     expect(buildNwhToolRecoveryAdvice("propose_event_execution", "requires schema-bound", { activeToolNames: ["propose_event_execution"] })).toMatchObject({ retryable: false, category: "scope-or-lifecycle" });
+  });
+  it("treats a payload-prefixed evidence pointer as an argument error rather than an ID miss", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "propose_event_execution",
+      "Evidence selector 1 target_path '/payload/canonicalEventId' does not exist in the proposal payload.",
+    );
+    expect(advice).toMatchObject({ category: "invalid-arguments", retryable: true });
+    expect(advice.suggestedCall).toBeUndefined();
+    expect(advice.steps.join(" ")).toContain("Use '/canonicalEventId' instead of '/payload/canonicalEventId'");
+    expect(advice.steps.join(" ")).toContain("IDs alone are not a binding");
+    expect(advice.steps.join(" ")).toContain("never submit a third input");
   });
   it("turns a stale read ref into an exact paired-discovery SOP", () => {
     const advice = buildNwhToolRecoveryAdvice(
@@ -521,6 +534,11 @@ it.each([
   expect(advice).toMatchObject({ category: "host-repair-required", retryable: false });
   expect(advice.steps.join(" ")).toContain("Retain the failed obligation");
   expect(advice.steps.join(" ")).toContain("find_compiler_artifacts");
+  expect(advice.steps.join(" ")).toContain("results[].readArguments.ref");
+  expect(advice.suggestedCall).toEqual({
+    tool: "find_compiler_artifacts",
+    arguments: { query: "p", status: message.startsWith("Pending") ? "pending" : "rejected", max_results: 20 },
+  });
 });
 
 it('directs a bare quotation-ID miss to exact-ID discovery rather than neighboring prose', () => {

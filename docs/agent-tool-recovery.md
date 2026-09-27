@@ -23,19 +23,118 @@ reuse retired IDs. A short quotation anchor supports only its exact content, not
 adjacent dialogue. Original deferrals still require their source-wide host review
 before publication even after a supplement succeeds.
 
-Model-facing tool failures are part of the agent protocol, not terminal exception strings. A failure must remain a real error for audit, circuit-breaker, and checkpoint logic, while also telling the agent how to make bounded progress.
+Model-facing tool failures are part of the agent protocol, not terminal exception strings. A failure must remain a real error for audit, circuit-breaker, and checkpoint logic, while also telling the agent how to make bounded progress. A typed `ProposalIdentityCollisionError` is still a model-facing error and durable proposal obligation even when the proposal store rejected it before writing. Exact-batch lifecycle discovery should prevent the retired ID from being submitted; the tool must never translate the collision into proposal success.
 
 Compiler recovery also consults the persisted proposal journal before session creation, after a batch report, and after a thrown timeout/network error. An interrupted mutation or two distinct failed inputs requires host review even when other proposals succeeded. `host-repair-required` metadata (including the tagged JSON on older Pi error paths) forbids fresh-session recovery. A single failed input remains eligible for one concrete correction under the same exact tool and `proposal_id`; a new ID or an unrelated successful draft never clears that obligation.
 
-Source-accounting discovery persists a protocol receipt for each issued unresolved page: source hash, batch, segment IDs, exact ordered unit IDs and eventual consumer. This is audit metadata, not a source disposition or world mutation. If new evidence or valid accounting covers any submitted unit, `account_source_units` rejects the entire call with `coverage-changed`, listing `representedUnitIds`, `accountedUnits` and `remainingUnitIds`. Preserve the failed `proposal_id`, call same-batch `find_source_accounting_units` with `status=unresolved, offset=0`, copy the returned `pageToken`, review the fresh page and make at most one corrected call. Never reuse indexes without inspecting that page. If no units remain, stop for host coverage review rather than submit an empty array or withdraw valid coverage. Receipts survive fresh sessions; consumed tokens stay single-use.
+Ordinary hydrated batches include the exact batch's accepted/rejected world-proposal envelope inventory and rejection diagnostics. Retired IDs are immutable and never active truth. Inspect one with same-source `find_compiler_artifacts`, passing its exact `proposalId` as `query` and exact `proposalStatus` as `status`, then copy `results[].readArguments.ref` into `read_compiler_artifact.ref`. A same-batch immutable-ID collision is refused before any proposal-store write, remains a failed tool call, and must not be retried. Diagnostic prose never settles a durable obligation. This applies equally to legacy no-write collisions and current failures: inspect retained state and use an explicit, audited host disposition when the original proposal is unsupported. An earlier successful invocation is not authority to erase a later failure.
+
+Source-accounting discovery persists a protocol receipt for each issued unresolved page: source hash, batch, segment IDs, exact ordered unit IDs and eventual consumer. This is audit metadata, not a source disposition or world mutation. `status=unresolved` includes active `unresolved` and `intentionally-deferred` decisions because both remain preparation blockers. After later review supports a nonblocking disposition, submit the fresh page under a **new** `proposal_id`; the compiler preserves the blocking proposal and records a hash-bound refinement edge. A refinement may replace only a blocking decision with `background-only`, `paratext`, or `duplicate-description`; it cannot overwrite valid nonblocking accounting or replace one blocker with another. If new evidence or nonblocking accounting covers a submitted unit, `account_source_units` rejects the entire call with `coverage-changed`, listing `representedUnitIds`, `accountedUnits` and `remainingUnitIds`. Preserve the failed `proposal_id`, call same-batch `find_source_accounting_units` with `status=unresolved, offset=0`, copy the returned `pageToken`, review the fresh page and make at most one corrected call. Never reuse indexes without inspecting that page. If no units remain, stop for host coverage review rather than submit an empty array or withdraw valid coverage. Receipts survive fresh sessions; consumed tokens stay single-use.
+
+An exhausted accounting identity with a proven blocking-predecessor refinement requires the host-only `reviewAccountingRefinementObligation` API. Eligibility is verified from exact inputs, page receipts, predecessor decisions and absence of output, not error-message wording. First call it read-only with the exact source, batch, failed proposal, predecessor settlement IDs, a genuinely changed `correctedInput` retaining the latest failed page token, any accepted semantic proposal IDs supporting `duplicate-description` decisions, reason, and audit reference. Inspect its source text, proposed dispositions, and bound support dependencies, then pass the returned `authorityHash` as `expectedAuthorityHash` to one apply call. The operation rechecks immutable source/structure, exact batch segments, all failed input/page hashes, active accounting and semantic baselines, checkpoints, finish receipts, predecessor histories, and every current accepted support revision plus exact overlapping evidence under the compiler lock. It submits the reviewed correction through normal `account_source_units` validation, preserves every old attempt/proposal, settles only the explicitly bound predecessor obligations after the successor is durable, and refuses unchanged, unsupported, changed, repeated, accepted, checkpointed, or receipt-frozen state. An interruption may complete the same retained reviewed intent only when its exact pending output, dependency graph and page-consumption markers remain unambiguous.
+
+The workflow is implemented in `src/compiler/accounting-refinement-review.ts`
+and remains re-exported from `accounting-review.ts`. The host CLI
+`nwh compiler-obligations review-accounting-refinement --review FILE` previews
+the same typed review; `--apply` requires its exact `expectedAuthorityHash`.
+Preview first; do not apply until the returned source excerpts, dispositions and dependencies have been reviewed:
+
+```ts
+import { reviewAccountingRefinementObligation } from "./src/compiler/accounting-review.js";
+
+const options = {
+  sourceId,
+  batchId,
+  proposalId,
+  settleProposalIds: [blockingProposalId],
+  duplicateSupportProposalIds: [acceptedSupportProposalId],
+  correctedInput: {
+    proposal_id: proposalId,
+    page_token: latestFailedPageToken,
+    page_default: { status: "background-only", reason: "Reviewed attribution or context." },
+    page_overrides: [{ unit_index: 1, status: "duplicate-description", reason: "Exact accepted evidence already represents this unit." }],
+  },
+  reason: "Host reviewed the exhausted same-page refinement.",
+  auditRef,
+};
+const preview = await reviewAccountingRefinementObligation(workspaceRoot, options);
+const result = await reviewAccountingRefinementObligation(
+  workspaceRoot,
+  { ...options, expectedAuthorityHash: preview.authorityHash },
+  true,
+);
+```
 
 Host-only coverage adjudication uses `nwh compiler-obligations review-accounting --source <exact-id> --batch <exact-id> --proposal <failed-id> --reason <text> --audit-ref <ref>`. The default is a read-only proof preview; `--apply` verifies again under the compiler lock and records `superseded-by-coverage`. Missing legacy page receipts additionally require `--from-run <original-run-id>`; the host verifies the blob hashes, same-session discovery, identical failed input, failed result, exact source text and unit boundaries. No model tool exposes this adjudication. Every original failed input/unit must be included, with current-batch evidence/annotation anchors or nonblocking successor accounting decisions. Prior-stage coverage alone is deliberately insufficient for this settlement path. The journal retains every failure and binds the proof to source bytes, unit hashes, dependency contents, and audit references. Dependency withdrawal, revision ambiguity or source changes makes the proof invalid and requires host review again. Repeating the same valid host review is idempotent. A settlement never accepts world proposals, writes a checkpoint or certifies executable semantics.
 
+Novel compiler schemas expose only `source-pattern` induction for action schemas,
+action constraints, norm templates and process templates. `domain-module` remains
+a canonical/runtime contract for host-managed mechanics and must not appear in a
+model-facing proposal schema. An exhausted source-pattern proposal is not reopened
+for another model retry merely because a later source review finds a missing
+supporting occurrence.
+
+When that missing occurrence is outside the failed batch and no independent scene
+or core-role requirement set exists, use the read-only same-scope discovery command
+`nwh compiler-obligations inspect-upstream-authority --source <exact-id> --batch
+<exact-id> --tool <exact-tool> --proposal <exact-id>`. Copy its complete
+`proposalObligation`, `requirementSetHash`, and sole `requirementIds[]` value into
+one typed `requirements plan-upstream-repair` review. The authority is derived from
+the immutable unreviewed failure prefix, including every distinct failed input,
+the original source-pattern support and original citation segments. It permits
+only `CANONICAL_EVENT_MISSING` creations in a different upstream batch. Changed,
+truncated, ambiguous, already reviewed or singly failed histories stop; never
+invent a requirement ID or register an unrelated requirement merely to obtain a
+repair denominator.
+
+After a `CANONICAL_EVENT_MISSING` upstream repair has completed and converged, an
+independent host may use `nwh compiler-obligations review-source-pattern --review
+FILE`. The typed file contains `version`, exact `sourceId`, `batchId`, `tool`,
+`proposalId`, every distinct `failedInputHashes` value, exact
+`upstreamPlanHash`, exact `upstreamReceiptFingerprint`, `reason`, `auditRef`, and
+the complete corrected `input`. The default is read-only. It verifies immutable
+current canonical event revisions, the plan's semantic-event creation, completed
+finish receipt, convergence record, all original failures, the unchanged original
+batch citation scope, source-pattern support retention, payload schema and exact
+selectors. Inspect the preview's `binding`, `evidencePreview`, and
+`upstreamEvidence`; then add `--apply` only for that unchanged review. Apply
+rechecks under the compiler lock and submits the same failed identity once through
+its normal proposal tool. It preserves every failed attempt and records the plan,
+receipt, convergence and added event revisions in `hostReview`. A failed apply
+cannot be repeated, and this operation never finishes or checkpoints the batch,
+accepts the proposal, or certifies executable closure.
+
 Use `nwh status --json --source <exact-id>` for a read-only recovery snapshot. It verifies immutable source bytes and the deterministic segment layout, intersects effective-version checkpoints with the shared compiler plan, reports each stage and durable obligation, and links the latest audit run. It separately lists hash-verified archived candidates and their stored closure assessments; it does not run a new assessment, activate a revision, initialize traces, migrate storage, or infer readiness from counts. A lock record is shown as a record, without claiming its PID is live. Missing or stale evidence/layout produces unknown plan counts rather than a false completed state.
 
-Scoped `finish_compiler_batch` now freezes a durable intent after validation and before cross-file acceptance. It binds the original finish arguments, pipeline/source/segment identity, proposal content hashes and title/chapter/role-review metadata. A prepared receipt freezes mutations and blocks model retries, including fresh sessions. Stop and preserve it on `Compiler finish requires host review`; inspect `status --json` and resume the same compiler scope through the host. The host holds the compiler lock, revalidates the exact original finish and replays idempotent acceptance/review operations before writing its completed receipt. Production source-batch checkpoints require that receipt. Input changes, withdrawn/revised dependencies or newly failing validation require inspection; never delete the receipt, change IDs, or rewrite the finish summary to bypass it. Receipt recovery does not certify world semantics or playability.
+Scoped `finish_compiler_batch` now freezes a durable intent after validation and before cross-file acceptance. It binds the original finish arguments, pipeline/source/segment identity, proposal content hashes and title/chapter/role-review metadata. Automatic pipeline-upgrade retirement is limited to completed older ordinary receipts whose source bytes and dependencies still verify. Prepared, newer-pipeline and specialized receipts are preserved for compatible recovery; no new model session may replace an unfinished commit. A prepared receipt freezes mutations and blocks model retries, including fresh sessions. Stop and preserve it on `Compiler finish requires host review`; inspect `status --json` and resume the same compiler scope through the host. The host holds the compiler lock, revalidates the exact original finish and replays idempotent acceptance/review operations before writing its completed receipt. Production source-batch checkpoints require that receipt. Input changes, withdrawn/revised dependencies or newly failing validation require inspection; never delete the receipt, change IDs, or rewrite the finish summary to bypass it. Receipt recovery does not certify world semantics or playability.
+
+The provider-facing finish schema is also batch-scoped. Ordinary source-review,
+boundary, and structure batches omit `target_reviews`; the field is exposed only
+after batch initialization verifies a versioned reconciliation or knowledge-repair
+scope with exact targets. If argument preflight rejects `target_reviews` as an
+unknown field in an ordinary batch, remove only that field and retry the finish at
+most once. If execution instead reports that `target_reviews` is outside scope,
+stop for host review because the advertised schema and verified scope disagree.
+
+An accepted, still-current `new-entity` or `new-event` resolution remains the
+immutable creation decision when its same-finish dependency has since become
+canonical. A recovery finish replays that accepted decision without withdrawing
+or rewriting it. Candidate discovery may now report `resolved` for a hypothetical
+new revision because the dependency is canonical; that does not retroactively
+invalidate the accepted creation history. This exception never applies to a new
+pending `new-*` proposal, a superseded resolution, or a missing dependency; those
+retain the normal same-finish and graph-closure checks.
 
 Explicit reparse, `resume=false`, and prepared-revision materialization archive replaced finish receipts with a reason; original receipt history remains on disk. Legacy checkpoints without receipts remain readable, but every new production finish/checkpoint follows the new protocol. Atomic rename supports process-interruption recovery; this is not a filesystem power-loss transaction or a multi-file database commit. Read-only status reports receipt checksums and timestamps; host recovery performs the full dependency and finish validation.
+
+When effective pipeline migration reopens a batch from the current deterministic
+source plan, its older active finish receipt cannot authorize the new checkpoint.
+The lock-owning source loop archives that receipt with the exact old/new pipeline
+versions, retains it in finish history, and opens the plan-selected batch for a
+new current-pipeline finish. It never replays the legacy finish or treats its
+checksum as dependency validation. Direct receipt recovery and versioned
+reconciliation, upstream-repair, and role-review scopes still stop on a pipeline
+mismatch; they cannot use this bounded source-plan retirement authority.
 
 ## Contract
 
@@ -55,7 +154,7 @@ The recovery block controls only tool invocation. It is not source evidence, wor
 | Unknown/stale opaque `ref`, ID, or path | Name the paired `find_*`/`list_*` tool, refresh within the same active scope, and copy the exact returned field | One corrected retry; never guess an ID |
 | Unknown compiler dependency | Find the source-scoped artifact, read it when exact payload matters, and distinguish `ref` from logical/domain/proposal IDs | Submit a genuinely new dependency first or retry once; preserve unresolved semantics when absent |
 | Unknown actor/player opaque handle | Re-read only the current isolated prompt/options and copy an offered handle | One corrected retry; never search outside actor scope |
-| Invalid JSON/schema/path/enum | Point to the first failing field and correct the smallest invalid part | One corrected retry |
+| Invalid JSON/schema/path/enum | Point to the first failing field and correct the smallest invalid part. Evidence-selector `target_path` is relative to the proposal payload (`/canonicalEventId`, never `/payload/canonicalEventId`) | One corrected retry |
 | Invalid event-execution envelope/action | Keep evidence_segment_ids/evidence_selectors beside payload, not inside it. Find an action-schema in the active source, read its returned ref and copy payload.id into action.schemaId; an ad-hoc occurrence cannot be copied or relabeled as a mechanism | One corrected retry; if no supported mechanism exists, preserve the occurrence without inventing an execution binding |
 | Incomplete compiler finish graph/trace | Treat the full finish diagnostic as one report; repair every listed dependency while preserving valid drafts | One retry after concrete proposal progress; an unchanged full diagnostic stops |
 | Accounting review conflicts with no-artifacts | Correct the named reviewed_segments.disposition to proposed; preserve existing semantic coverage and all valid accounting pages. No new mechanism does not mean no source artifacts | One corrected finish retry; never withdraw whole pages to satisfy the mistaken review label |
@@ -63,7 +162,7 @@ The recovery block controls only tool invocation. It is not source evidence, wor
 | Source-annotation dangling reference | Read the finish inventory or call `find_source_annotations`; copy the exact returned `annotationId`, repair/withdraw only named proposals, and preserve every unlisted draft | One finish retry after concrete repair; never substitute `ref`/`proposalId`, mass-withdraw, or escape through `no-artifacts` |
 | Cross-batch logical supersession in an ordinary source batch | Withdraw only the named current-batch replacement, repair one-sided current dependencies, then peek/defer a confirmed adjacent artifact to the existing two-segment calibration pass; never withdraw the checkpointed prior proposal | One finish retry after concrete withdrawal and deferral; only the calibration batch may replace the prior proposal |
 | Invalid page offset | Reuse the exact returned `nextOffset`, or restart at `0` | One corrected retry; never estimate offsets |
-| Unknown/stale source-accounting page token or index | Refetch `find_source_accounting_units` with `status=unresolved, offset=0`, copy the exact `pageToken`/`unitIndex`, and review the complete page | One corrected retry; never guess, copy long unit IDs, or reuse a consumed page token |
+| Unknown/stale source-accounting page token or index | Refetch `find_source_accounting_units` with `status=unresolved, offset=0`, copy the exact `pageToken`/`unitIndex`, and review the complete page | One corrected retry; never guess, copy long unit IDs, or reuse a consumed page token. Use a fresh proposal ID only when refining an already-successful blocking disposition |
 | Duplicate proposal | Keep the accepted draft, or use the supported withdraw/replace workflow for a genuinely defective draft | Never create duplicate IDs just to bypass the guard |
 | Single-use capture, finished batch, tool scope block | Stop calling that tool and use the accepted result/current active tools | No retry in the same turn |
 | Budget/circuit breaker | Stop the tool loop and resume only through a fresh host-started turn | No retry in the same turn |
@@ -105,6 +204,20 @@ reference, preserves failed history, and does not certify executable coverage.
 For older runs predating the journal, the host must import the exact failed tool
 input and diagnosis from the audit using `record` before resuming that batch.
 These host operations require the workspace compiler lock.
+
+Argument-preflight errors retain their failed input and diagnostic like other
+proposal failures. No diagnostic text, payload shape, or absence of a pending
+file automatically settles them. Correct the exact proposal once when evidence
+supports it; otherwise stop for an explicit host disposition. `reviewUnsupported`
+retains the failure and records the host's reason and audit reference without
+certifying executable coverage. It applies to the selected identity only and
+never disables valid execution bindings elsewhere in the batch.
+
+The event-execution provider schema requires at least one of `action`, non-empty
+`processRecoveries`, or `entryCheckpoint`, and selectors use payload-relative
+paths. A canonical ad-hoc action is not an execution binding. Discover a supported
+schema before proposing a binding; never fabricate an entry checkpoint or
+mechanism to satisfy a failed proposal.
 
 For a source-supported selector mistake after model retry exhaustion, the host
 may use `withHostSelectorCorrection` under that lock. Review every original
@@ -299,12 +412,15 @@ successful draft via a validated new envelope and withdrawal of its superseded
 predecessor, preserving stable artifact identity and all unaffected fields.
 After withdrawal, subsequent repairs must follow the active successor, never the
 retired ID. A never-staged failed call still requires its original ID; these are
-different lifecycle states. An attempted overwrite/revival that has itself
-failed creates a durable obligation: stop for host review before any replacement.
-The storage error's old generic suggestion to use a new ID is not authorization
-to bypass that obligation. New reconciliation prompts include the exact-batch
-pending/accepted/rejected identity inventory. Existing source and publication
-validation remains unchanged.
+different lifecycle states. A typed, same-batch immutable-envelope collision is
+a deterministic no-write storage refusal but remains a failed model tool call:
+inspect the exact retained history and do not retry that ID. A legacy post-success collision also requires explicit host adjudication;
+reading its diagnostic cannot exclude it from obligation recovery. Any untyped, cross-source, cross-batch, missing-state, or
+interrupted overwrite/revival remains a durable obligation and requires host
+review before replacement. The storage error's generic suggestion to use a
+new ID is never authorization by itself. Ordinary and reconciliation prompts
+include the applicable exact-batch pending/accepted/rejected identity inventory.
+Existing source and publication validation remains unchanged.
 
 ### Quotation retrieval and knowledge-repair deferrals
 
@@ -538,8 +654,9 @@ in force.
 
 ### Upstream repair plan validation (not an execution capability)
 
-`upstream-repair-plan.ts` defines a strict frozen host policy input for existing
-annotation and identity/event-resolution types. Freezing the plan does not
+`upstream-repair-plan.ts` defines a strict frozen host policy input for source
+annotations, identity/event resolutions and the bounded missing-event semantic
+chain described below. Freezing the plan does not
 persist authorization, consume a retry budget, open model tools or permit
 finish. The executor must add those gates before using it for mutation.
 
@@ -586,15 +703,16 @@ plan retains the previous requirement failure counts. Missing/corrupt journal
 records or a missing head with retained records stop for host storage repair;
 never initialize a new budget or delete the retained directory.
 
-This stage does not expose model execution. Successful staging, typed proposal
-integration, finish authorization/recovery and candidate snapshot preservation
-must be implemented before these host records can authorize an executing model
-session. Existing tool recovery and evidence checks must remain in that path.
+The ledger itself exposes no model execution. The staging, isolated-slot, finish,
+checkpoint and convergence services below must consume its exact retained records;
+none may infer authorization from a plan object or reset its failure budget.
+Existing tool recovery and evidence checks remain in that path.
 
 ### Host-guarded upstream staging and draft recovery
 
 `stageUpstreamRepair` reserves the exact original tool input before preparation,
-then invokes an existing narrow annotation/resolution tool through
+then invokes an existing narrow annotation/resolution or authorized semantic
+event tool through
 `withNwhToolRecovery`. The common staging boundary rechecks actual dependencies,
 source anchors, citable ranges, host provenance and authorized field differences.
 It appends `attempt-validated` with the normalized payload hash before writing
@@ -615,10 +733,11 @@ proposal ID to replace its draft.
 Managed upstream batch IDs reject ordinary toolset initialization without their
 exact active authorization. Failed initialization leaves that toolset unusable
 until the host establishes a valid batch; catching the error cannot permit later
-tool execution. Even the host staging path currently rejects ordinary finish,
-world proposals, retrieval and unrelated metadata tools. There is no autonomous
-repair-session entrypoint yet. The host finish executor described below is
-separate from staging; live draft snapshot recovery remains outstanding.
+tool execution. The host staging path rejects ordinary finish, retrieval,
+unrelated metadata and every world proposal except an exact planned
+`canonical-event` or `event-participation` creation in a reviewed missing-event
+contract. Those world records remain pending proposals. The host finish executor
+described below is separate from staging.
 
 ### Consuming staged upstream dependencies
 
@@ -641,6 +760,46 @@ extraneous dependency slots. Consumer recovery checks the same closure without
 executing tools. These references provide staged compiler inputs only; ordinary
 finish remains unavailable to staging tools. Only the host's frozen finish
 executor may commit this exact authorized batch; publication is a later gate.
+
+### Host-reviewed pre-receipt finish graph revision
+
+When normal finish validation stops an otherwise settled upstream plan before
+any finish receipt or accepted output exists, the compiler-lock owner may inspect
+the exact retained graph with `inspectUpstreamRepairFinishRevisionAuthority`.
+Copy its `failedFinishRef`, `originalIntentHash`, `originalGraphHash`, and each
+corrected slot's `originalAttemptRef`, `originalProposalId`, and
+`originalInputHash` into one `authorizeUpstreamRepairFinishRevision` call. The
+review must provide a new proposal ID and complete typed tool input for every
+materially changed slot and every transitive consumer of a changed dependency.
+It must not include unrelated slots or widen the frozen source scope.
+
+Authorization appends one durable host-only revision intent. It does not accept
+an old draft, erase a failed finish, open a model session, or grant another model
+retry. `continueUpstreamRepairFinishRevision` rejects only the superseded pending
+drafts into retained history, runs every replacement through the normal typed
+proposal, evidence, cross-record, and dependency validators, and freezes a new
+effective finish graph while preserving the original finish intent, tool inputs,
+baselines, review text, and logical artifact IDs. Unchanged slots are reused only
+when their dependency hashes remain valid. A changed dependency requires a fresh
+validated descendant draft even when that descendant's semantic fields do not
+otherwise change.
+
+If continuation is interrupted after its revision intent or validated write is
+durable, call `continueUpstreamRepairFinishRevision` again with the same returned
+`revisionHash`; never authorize another revision or rotate proposal IDs. Any
+receipt, accepted or ambiguous output, open model session, changed source/plan/
+baseline/dependency graph, unchanged correction, wrong slot, extra slot, failed
+replacement, consumed revision, or mismatched hash stops for host review. After
+continuation returns its revised finish intent, use the ordinary
+`executeUpstreamRepairFinish` and convergence path; the revision API itself never
+commits canonical truth.
+
+Managed semantic staging also checks presence before writing a pending draft. A
+canonical event must explicitly project one evidence-supported presence mode for
+every character participant and none for artifacts or other non-characters. Each
+character participation must copy the staged event's mode exactly; a
+non-character participation must omit presence. These mismatches are corrected
+explicitly and are never silently normalized.
 
 ### Upstream history in prepared candidates
 
@@ -688,9 +847,11 @@ not recreate pending drafts. Actual execution uses the separate host gate below.
 `plans[].plan.planHash`; it takes no replacement model input. It runs the existing
 compiler finish graph/source/lifecycle validators, then writes a v3 receipt
 binding the complete frozen upstream intent before committing annotations or
-resolutions. Unrelated metadata, world proposals and source-accounting writes
-remain outside this authorization. A failed graph validation stops the plan for
-host review before any commit; do not retry it unchanged or restart the model.
+resolutions. Exact planned semantic-event world proposals are included in that
+receipt but stay pending for ordinary deterministic world convergence. All other
+world proposals, unrelated metadata and source-accounting writes remain outside
+this authorization. A failed graph validation stops the plan for host review
+before any commit; do not retry it unchanged or restart the model.
 
 After a storage interruption, preserve the original receipt, journal and draft
 envelopes. `recoverCompilerFinish` routes v3 receipts to this same host executor.
@@ -701,18 +862,22 @@ receipt is already durable. An unrelated revision, missing envelope or changed
 input requires host review, never an overwrite or a new proposal namespace.
 The mutation guard still compares against the frozen original baseline payload.
 
-Completion verifies every output is active, then records the exact completed
-receipt fingerprint as `finished`. Recovery after receipt completion resumes
-journal recording without rerunning mutation tools. Finished records and their
-original receipts are retained in candidate history and still block certification
-until convergence and current independent requirement evaluation have succeeded.
+Completion verifies every source annotation/resolution output is active and every
+semantic world envelope still matches its original validated pending or accepted
+draft, then records the exact completed receipt fingerprint as `finished`.
+Recovery after receipt completion resumes journal recording without rerunning
+mutation tools. Finished records and their original receipts are retained in
+candidate history and still block certification until deterministic convergence
+has made every semantic output active and current independent requirement
+evaluation has succeeded.
 
 ### Portable upstream draft and finish checkpoints
 
 Candidates may retain `upstreamRepairCheckpoint` for live staging, frozen,
-finished, converged or evaluated plans. It contains every original staged envelope, pending/accepted
-status and explicitly active v3 receipt. Other pending compiler or world work
-still prevents capture. An unresolved reserved attempt must first use local
+finished, converged or evaluated plans. It contains every original staged source
+or semantic world envelope, its pending/accepted status and the explicitly active
+v3 receipt. Unrelated pending compiler or world work still prevents capture. An
+unresolved reserved attempt must first use local
 draft recovery; do not rerun the model to manufacture a replacement envelope.
 The full original journal, requirement history and retained receipts remain
 mandatory. This is a compiler checkpoint, not a publishable Play revision.
@@ -762,10 +927,14 @@ historical receipts to claim convergence; preserve them for host review.
 
 `nwh requirements evaluate-upstream --source <id>` runs under the compiler lock
 after an observed convergence. It reads the actual candidate and uses the existing
-scene and core-role evaluators; it accepts no model-provided result or replacement
-requirement list. `prepare-all` also settles eligible repairs at its candidate
-stage. Each `evaluated` record binds the original plan/definition, completed
-receipt, convergence record, subject hash and every selected requirement result.
+scene and core-role evaluators. For proposal-obligation plans it instead requires
+the original compiler batch, the exact accepted source-pattern mechanism, every
+original supporting event, and every newly compiled semantic event in the current
+candidate. It accepts no model-provided result or replacement requirement list.
+`prepare-all` also settles eligible repairs at its candidate stage. Each
+`evaluated` record binds the original plan/definition or durable obligation,
+completed receipt, convergence record, subject hash and every selected requirement
+result.
 Blocked, unknown and unmapped results remain unresolved; the CLI exits 2 for
 remaining upstream issues. Other world, role and quality gates stay independent.
 
@@ -793,7 +962,7 @@ evaluation is idempotent, and portable checkpoints preserve evaluated state.
 ### Isolated upstream model slot
 
 `runUpstreamRepairModelSlot` is a host API called under the compiler lock for
-one previously authorized slot. It reserves a durable model session before Pi
+one previously authorized typed dependency slot. It reserves a durable model session before Pi
 construction. The fresh session has no project instructions, local file tools,
 NWH extensions or resumed transcript. Its only tools are
 `read_upstream_repair_context` and the selected original narrow proposal tool.
@@ -902,6 +1071,11 @@ source and requirement revisions, stable plan/batch/budget identities, explicit
 read/citation segment scope, audit reference and typed diagnostics. The result
 remains `authority: diagnostic-only`. Save its `plan` member as the exact JSON
 input for `register-upstream-plan`; planning does not register or authorize it.
+For a compiler proposal obligation, the optional `proposalObligation` replaces an
+otherwise absent independent scene/core definition without weakening source
+review: its hash-derived requirement identity is single-purpose, its original
+supporting events are frozen as baselines, and every authorized write is part of
+the reviewed missing-event creation DAG.
 
 Currently supported diagnostic policies are:
 
@@ -913,6 +1087,15 @@ Currently supported diagnostic policies are:
   an absent speaker mention. Its existing typed reference fixes the creation ID;
   one entity-mention slot and explicit dependency edges are generated. No absent
   speaker ID is invented from prose, and collisions with any annotation kind fail.
+- `CANONICAL_EVENT_MISSING`: a host review supplies exact immutable-byte trigger
+  and extent anchors plus current entity-mention IDs for one genuinely omitted
+  source occurrence. The planner resolves and freezes each mention's current
+  identity and canonical entity, then deterministically allocates one event
+  mention, one `new-event` resolution, one canonical event and a complete typed
+  event-participation inventory. Every semantic draft must cite exact evidence
+  inside the reviewed occurrence; broad segment evidence cannot widen that scope.
+  The model cannot change the occurrence anchors, participant identities, event
+  identity, resolution relation or participation event/entity bindings.
 - `SEMANTIC_MODULE_REQUIRED`: returns `needs-host-review`, no plan and exit 2.
   A mixed review containing unsupported semantics grants no partial authority.
 
@@ -924,10 +1107,12 @@ quotation data, use same-source `find_source_annotations`, copy `annotationId`
 and obtain a new exact host review; never guess IDs or change a revision hash to
 silence the conflict. An unchanged failed review must stop.
 
-This is a typed review-to-plan converter, not yet automatic discovery of all
-compiler diagnostic classes. Resolution revision, expression/perception and executable
-repair policies remain unsupported by this converter; missing-resolution creation
-is supported below. Independent requirement
+This is a typed review-to-plan converter, not automatic discovery of all compiler
+diagnostic classes. `CANONICAL_EVENT_MISSING` requires an explicit host-reviewed
+source occurrence; the planner does not infer it from an event-catalog miss or a
+flat coverage metric. Generic semantic modules, resolution revision,
+expression/perception and executable repair policies remain unsupported by this
+converter; missing-resolution creation is supported below. Independent requirement
 evaluation and downstream closure checks still determine repair success.
 
 ### Missing resolution discovery and negative dependencies
@@ -1648,3 +1833,21 @@ Text narration uses the same ordered committed-content blocks as dialogue, with
 once; never speak written content, replace its whitespace, invent IDs, or repeat
 the player action after a rendering failure. One corrected rendering uses the
 same committed head and content identities; a second failure stops.
+
+Upstream semantic-slot contexts expose `reviewedOccurrences.triggerExact` and
+`extentExact` extracted from frozen source byte anchors. Copy these strings and
+all frozen participant IDs literally; do not paraphrase or normalize whitespace.
+An exhausted slot remains stopped until owning-host review. The host-only
+`authorizeHostCorrection` operation binds one failed attempt and exact new input
+hash, with an audit and reason, preserving all prior failures. It grants one
+additional failure allowance (maximum five grants per plan), permits only that
+same-slot/same-proposal host submission first, and cannot start a model session.
+Normal tool validation, proposal obligations, staging, finish and convergence
+still apply. A failed host-reviewed identity is not eligible for another domain
+correction. Do not expose this authorization operation as a model tool.
+
+A missing/mismatched character presence projection or presence on an artifact is
+an argument error before staging. Preserve the real failure and allow at most one
+materially corrected input under the same proposal ID. It is not by itself a
+host-state stop. Missing dependency authority, changed scope, consumed budgets,
+receipts and ambiguous writes still require the explicit host recovery protocol.

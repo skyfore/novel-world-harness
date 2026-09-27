@@ -37,7 +37,9 @@ const identitySchema = z.object({
   if ((identity.version === 3) !== Boolean(identity.upstreamRepairIntent)) ctx.addIssue({ code: "custom", message: "Finish upstream scope/version mismatch" });
   const upstream = identity.upstreamRepairIntent;
   if (upstream) {
-    const expected = upstream.proposals.map(p => ({ store: p.artifactKind.endsWith("resolution") ? p.artifactKind : "annotation", proposalId: p.proposalId, hash: p.proposalHash })).sort((a, b) => `${a.store}:${a.proposalId}`.localeCompare(`${b.store}:${b.proposalId}`));
+    const expected = upstream.proposals.map(p => ({ store: p.artifactKind.endsWith("resolution") ? p.artifactKind
+      : p.artifactKind === "canonical-event" || p.artifactKind === "event-participation" ? "world" as const : "annotation" as const,
+    proposalId: p.proposalId, hash: p.proposalHash })).sort((a, b) => `${a.store}:${a.proposalId}`.localeCompare(`${b.store}:${b.proposalId}`));
     if (identity.requirementScope || identity.requirementAttempts || Object.keys(identity.metadata).length || upstream.sourceId !== identity.sourceId || upstream.sourceSha256 !== identity.sourceSha256 || contentHash(upstream.input) !== contentHash(identity.input)
       || contentHash(expected) !== contentHash(identity.dependencies.slice().sort((a, b) => `${a.store}:${a.proposalId}`.localeCompare(`${b.store}:${b.proposalId}`)))) ctx.addIssue({ code: "custom", message: "Finish differs from frozen upstream authority" });
   }
@@ -118,10 +120,25 @@ export class CompilerFinishReceipts {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; return reader("accepted"); }
   }
   async verify(receipt: CompilerFinishReceipt): Promise<void> {
+    return this.verifyRetained(receipt, COMPILER_PIPELINE_VERSION);
+  }
+  /** Upgrade retirement never abandons partial writes or a newer compiler's intent. */
+  async retireSupersededPipelineReceipt(): Promise<void> {
+    const receipt = await this.read();
+    if (!receipt || receipt.state !== "completed"
+      || receipt.identity.pipelineVersion >= COMPILER_PIPELINE_VERSION
+      || receipt.identity.upstreamRepairIntent || receipt.identity.requirementScope
+      || receipt.identity.metadata.roleReview) {
+      throw finishHostError("cannot retire an unfinished, newer-pipeline or specialized finish; preserve its original receipt and recover with its compatible compiler before recompilation");
+    }
+    await this.verifyRetained(receipt, receipt.identity.pipelineVersion);
+    await this.archive(`Compiler pipeline ${receipt.identity.pipelineVersion} was superseded by pipeline ${COMPILER_PIPELINE_VERSION}; current-plan compilation requires a new finish`);
+  }
+  private async verifyRetained(receipt: CompilerFinishReceipt, pipelineVersion: number): Promise<void> {
     try {
       compilerFinishReceiptSchema.parse(receipt);
       const identity = receipt.identity;
-      if (identity.pipelineVersion !== COMPILER_PIPELINE_VERSION) throw new Error("finish compiler pipeline changed");
+      if (identity.pipelineVersion !== pipelineVersion) throw new Error("finish compiler pipeline changed");
       if (identity.sourceId !== this.sourceId || identity.batchId !== this.batchId) throw new Error("finish scope mismatch");
       if (identity.upstreamRepairIntent) {
         const { verifyUpstreamRepairFinish } = await import("./upstream-repair-finish.js");

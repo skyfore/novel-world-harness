@@ -33,6 +33,40 @@ afterEach(async () => {
 });
 
 describe("compiler proposal tools", () => {
+  it("omits target_reviews from ordinary batch finish schemas", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-finish-scope-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero enters.\n");
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch(
+      [fixture.segmentId],
+      `batch-${fixture.source.id}-00001-semantic-test`,
+      fixture.source.id,
+    );
+    const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    const input = {
+      outcome: "no-artifacts",
+      reviewed_segments: [{
+        segment_id: fixture.segmentId,
+        disposition: "no-artifacts",
+        summary: "No supported semantic artifact.",
+      }],
+      summary: "Reviewed the ordinary source batch.",
+    };
+
+    expect(JSON.stringify(finish.parameters)).not.toContain("target_reviews");
+    expect(Compile(finish.parameters).Check(input)).toBe(true);
+    expect(Compile(finish.parameters).Check({
+      ...input,
+      target_reviews: [{
+        target: "semantic-content",
+        disposition: "unsupported",
+        evidence_segment_ids: [fixture.segmentId],
+        summary: "Out-of-scope review metadata.",
+      }],
+    })).toBe(false);
+  });
+
   it("exposes payload semantics but only host-issued evidence handles to the model", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-schema-"));
     roots.push(root);
@@ -322,6 +356,73 @@ describe("compiler proposal tools", () => {
       "find_source_accounting_units",
       "account_source_units",
     ]));
+    const eventExecution = tools.find((tool) => tool.name === "propose_event_execution")!;
+    expect(eventExecution.description).toContain("Never submit the canonical event's ad-hoc action");
+    expect(eventExecution.promptGuidelines?.join(" ")).toContain("do not call propose_event_execution");
+    const eventExecutionSchema = JSON.stringify(eventExecution.parameters);
+    expect(eventExecutionSchema).toContain("IDs alone are not an execution binding");
+    expect(eventExecutionSchema).toContain("never /payload/canonicalEventId");
+    const eventExecutionValidator = Compile(eventExecution.parameters);
+    const eventExecutionBase = {
+      proposal_id: "empty-event-execution",
+      payload: { id: "empty-event-execution", canonicalEventId: "canonical-event", actorId: "actor" },
+      evidence_segment_ids: ["source-segment"],
+    };
+    expect(eventExecutionValidator.Check(eventExecutionBase)).toBe(false);
+    expect(() => eventExecution.prepareArguments!({
+      ...eventExecutionBase,
+      evidence_selectors: [{
+        segment_id: "source-segment",
+        exact: "Board now",
+        target_path: "/payload/canonicalEventId",
+        relation: "supports",
+        strength: "explicit",
+      }],
+    })).toThrow(/IDs alone are not executable content[\s\S]*use '\/canonicalEventId' instead of '\/payload\/canonicalEventId'/u);
+    expect(eventExecutionValidator.Check({
+      ...eventExecutionBase,
+      payload: {
+        ...eventExecutionBase.payload,
+        action: { lane: "schema-bound", schemaId: "supported-schema", roleBindings: [], parameters: {} },
+      },
+    })).toBe(true);
+    const mechanismTools = [
+      "propose_action_schema",
+      "propose_action_constraint",
+      "propose_norm_template",
+      "propose_process_template",
+    ].map(name => tools.find(tool => tool.name === name)!);
+    for (const tool of mechanismTools) {
+      expect(JSON.stringify(tool.parameters), tool.name).toContain('"source-pattern"');
+      expect(JSON.stringify(tool.parameters), tool.name).not.toContain('"domain-module"');
+    }
+    const actionSchema = mechanismTools[0]!;
+    const sourcePatternAction = {
+      proposal_id: "source-pattern-action",
+      payload: {
+        ontologyVersion: "action-schema-v1",
+        id: "source-pattern-action",
+        name: "Actor triggers artifact recovery",
+        visibility: "public",
+        roles: [{ id: "actor", label: "Actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+        initiatorRoleId: "actor",
+        parameters: [],
+        preconditions: [],
+        stateEffects: [],
+        effectEnvelope: { maxStateOperations: 0, allowedStateFields: [], allowsKnowledge: false, allowsTimeAdvance: false, allowsSceneTransition: false },
+        induction: { kind: "source-pattern", supportingEventIds: ["event-one", "event-two"] },
+      },
+      evidence_segment_ids: ["source-segment"],
+    };
+    const actionSchemaValidator = Compile(actionSchema.parameters);
+    expect(actionSchemaValidator.Check(sourcePatternAction)).toBe(true);
+    expect(actionSchemaValidator.Check({
+      ...sourcePatternAction,
+      payload: {
+        ...sourcePatternAction.payload,
+        induction: { kind: "domain-module", moduleId: "invented-module", moduleVersion: "1" },
+      },
+    })).toBe(false);
     for (const tool of tools.filter((candidate) => candidate.name.startsWith("propose_"))) {
       const validator = Compile(tool.parameters);
       expect(tool.executionMode).toBe("sequential");

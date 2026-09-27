@@ -633,14 +633,21 @@ export function buildNwhToolRecoveryAdvice(
   }
 
   if (COMPILER_PROPOSAL_TOOLS.has(toolName) && /(?:pending proposal .* already exists with different content|proposal .* already exists in (?:accepted|rejected) history)/u.test(lower)) {
+    const pendingCollision = /pending proposal ([A-Za-z0-9][A-Za-z0-9._-]*) already exists with different content/iu.exec(errorText);
+    const historyCollision = /proposal ([A-Za-z0-9][A-Za-z0-9._-]*) already exists in (accepted|rejected) history/iu.exec(errorText);
+    const proposalId = pendingCollision?.[1] ?? historyCollision?.[1];
+    const status = pendingCollision ? "pending" : historyCollision?.[2]?.toLowerCase();
     return {
       version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
       retryCondition: "Stop this identity's retries; the host must review the persisted failed mutation before any replacement.",
       steps: [
         "The proposal ID belongs to an existing immutable draft or history entry. This is not a never-staged validation failure; the same-ID correction rule cannot overwrite or revive it.",
-        "Retain the failed obligation and every valid draft. Use find_compiler_artifacts in this source, copy the returned pending ref into read_compiler_artifact, and inspect the current active successor for the same logical artifact. Do not guess IDs or retry a retired ID.",
+        `Retain the failed obligation and every valid draft. Use find_compiler_artifacts in this source${proposalId && status ? ` with query=${JSON.stringify(proposalId)} and status=${JSON.stringify(status)}` : ""}; copy results[].readArguments.ref into read_compiler_artifact.ref and inspect the exact envelope lifecycle. Do not guess IDs or retry a retired ID.`,
         "After host adjudication, keep an unchanged valid active draft. Only a specifically diagnosed defective successful draft may be replaced through normal proposal validation and withdrawal, preserving its stable artifact ID. Never change IDs to clear this failed obligation.",
       ],
+      ...(proposalId && status ? {
+        suggestedCall: { tool: "find_compiler_artifacts", arguments: { query: proposalId, status, max_results: 20 } },
+      } : {}),
     };
   }
 
@@ -937,6 +944,26 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const payloadPrefixedPointer = /target_path '(\/payload(?:\/[^']*)?)' does not exist in the proposal payload/u.exec(errorText)?.[1];
+  if (COMPILER_PROPOSAL_TOOLS.has(toolName) && payloadPrefixedPointer) {
+    const correctedPointer = payloadPrefixedPointer.slice("/payload".length) || "";
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "One corrected retry under the same proposal_id only when its retry budget is not already exhausted and the proposal payload is otherwise supported.",
+      steps: [
+        `target_path is relative to the payload object itself. Use '${correctedPointer}' instead of '${payloadPrefixedPointer}'; do not move evidence_selectors inside payload.`,
+        "Correct every payload-prefixed selector together. This is a JSON Pointer shape error, not a missing compiler artifact or permission to change a logical ID, so do not call artifact discovery merely to repair the pointer.",
+        toolName === "propose_event_execution"
+          ? "An event-execution still requires a schema-bound action, non-empty processRecoveries, or a complete entryCheckpoint. IDs alone are not a binding; if none is independently supported, do not retry the proposal and finish while preserving the canonical occurrence."
+          : "Preserve the payload, source scope, proposal_id, relation and strength while correcting only the pointer prefix.",
+        "If this call was already the identity's corrected attempt, stop for durable host review; never submit a third input or rotate the proposal ID.",
+      ],
+    };
+  }
+
   if (toolName === "propose_event_execution" && /validation|schema-bound|compiled mechanism|evidence_segment_ids|additional propert/u.test(lower)) {
     if (scope && (!scope.activeToolNames.includes("find_compiler_artifacts") || !scope.activeToolNames.includes("read_compiler_artifact"))) {
       return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
@@ -945,13 +972,13 @@ export function buildNwhToolRecoveryAdvice(
     }
     return {
       version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
-      retryCondition: "One corrected retry only after fixing the envelope and using a source-supported compiled mechanism or complete entry checkpoint.",
+      retryCondition: "One corrected retry only when same-source discovery supports a schema-bound mechanism or an independently complete entry/process binding; otherwise do not retry this proposal.",
       steps: [
         "Place proposal_id, payload, evidence_segment_ids and evidence_selectors beside each other in the outer argument object; never nest evidence_segment_ids/evidence_selectors inside payload.",
         "An action binding requires action.lane=schema-bound; never copy an event's ad-hoc action or relabel it without a real mechanism.",
         "Call find_compiler_artifacts with kind=action-schema in the same active source. Copy its returned ref into read_compiler_artifact, then copy the read payload.id into action.schemaId and use its exact role IDs. A retrieval ref is not a schema ID.",
-        "If no supported schema exists, propose one only when source evidence satisfies the induction contract; otherwise preserve the occurrence without an action binding. Use entryCheckpoint only for a separately supported complete embodied entry, never to bypass a missing mechanism.",
-        "Retry once after concrete correction. If the same diagnostic repeats, stop and report it; never guess schema IDs or submit unchanged proposals.",
+        "If no supported schema exists, propose one only when source evidence satisfies the induction contract; otherwise preserve the canonical ad-hoc occurrence and do not call propose_event_execution again. Use entryCheckpoint or processRecoveries only when separately complete and supported, never to bypass a missing mechanism.",
+        "Retry once after concrete correction only when such a binding exists. Otherwise stop for an explicit host disposition of this failed proposal; a no-write diagnostic alone cannot settle its obligation or certify executable closure. If a corrected call fails, stop and report it; never guess schema IDs or submit unchanged proposals.",
       ],
       suggestedCall: { tool: "find_compiler_artifacts", arguments: { kind: "action-schema", query: "*", max_results: 20 } },
     };

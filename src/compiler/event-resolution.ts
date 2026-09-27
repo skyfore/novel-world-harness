@@ -601,15 +601,17 @@ export async function validateEventResolutionClosure(
   const proposalIds = uniqueParsedIds(eventResolutionProposalIdsInput);
   if (!proposalIds.length) return [];
   const store = new EventResolutionStore(workspaceRoot);
-  const [current, allPending, annotations, identities, events] = await Promise.all([
+  const [current, allPending, allAccepted, annotations, identities, events] = await Promise.all([
     store.list(sourceId),
     store.listProposals(sourceId, "pending"),
+    store.listProposals(sourceId, "accepted"),
     loadAnnotationCatalog(workspaceRoot, sourceId, annotationProposalIdsInput),
     loadIdentityCatalog(workspaceRoot, sourceId, entityResolutionProposalIdsInput),
     loadResolutionEventCatalog(workspaceRoot, sourceId, worldProposalIdsInput),
   ]);
   const currentByMention = indexEventResolutions(current);
   const currentById = new Map(current.map((resolution) => [resolution.id, resolution]));
+  const acceptedProposalIds = new Set(allAccepted.map((proposal) => proposal.id));
   const staged: EventResolutionProposal[] = [];
   const issues = new Set<string>();
   for (const proposalId of proposalIds) {
@@ -697,7 +699,14 @@ export async function validateEventResolutionClosure(
       && !events.checkpointedPending.has(resolution.canonicalEventId)) {
       issues.add(`${proposal.id}: resolved event '${resolution.canonicalEventId}' must be canonical or an active canonical-event proposal from a previously checkpointed source batch; use new-event for a same-finish proposal`);
     }
-    if (resolution.status === "new-event" && resolution.canonicalEventId && !events.selectedPending.has(resolution.canonicalEventId)) {
+    const acceptedCreationReplay = resolution.status === "new-event"
+      && resolution.canonicalEventId !== undefined
+      && alreadyCurrent
+      && acceptedProposalIds.has(proposal.id)
+      && events.canonical.has(resolution.canonicalEventId);
+    if (resolution.status === "new-event" && resolution.canonicalEventId
+      && !events.selectedPending.has(resolution.canonicalEventId)
+      && !acceptedCreationReplay) {
       issues.add(`${proposal.id}: new-event '${resolution.canonicalEventId}' requires a same-finish canonical-event proposal`);
     }
     if ((resolution.status === "ambiguous" || resolution.status === "unresolved")

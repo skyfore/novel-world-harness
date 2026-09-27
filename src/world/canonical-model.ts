@@ -54,6 +54,17 @@ export type ProposalRejectionReport = {
   errors: ValidationIssue[];
 };
 
+export type ProposalIdentityCollisionStatus = ProposalStatus;
+
+export class ProposalIdentityCollisionError extends Error {
+  constructor(readonly proposalId: string, readonly status: ProposalIdentityCollisionStatus) {
+    super(status === "pending"
+      ? `Pending proposal ${proposalId} already exists with different content; submit the correction under a new proposal id.`
+      : `Proposal ${proposalId} already exists in ${status} history; submit a new proposal id.`);
+    this.name = "ProposalIdentityCollisionError";
+  }
+}
+
 function safeId(id: string): string {
   if (!SAFE_ID.test(id)) throw new Error(`Unsafe artifact id: ${id}`);
   return id;
@@ -298,7 +309,7 @@ export class ProposalStore {
     try {
       const existing = artifactProposalSchema(payloadSchema).parse(JSON.parse(await fs.readFile(filePath, "utf8")));
       if (canonicalJson(proposalIdentity(existing)) === canonicalJson(proposalIdentity(parsed))) return;
-      throw new Error(`Pending proposal ${parsed.id} already exists with different content; submit the correction under a new proposal id.`);
+      throw new ProposalIdentityCollisionError(parsed.id, "pending");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -309,7 +320,7 @@ export class ProposalStore {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw error;
       }
-      throw new Error(`Proposal ${parsed.id} already exists in ${status} history; submit a new proposal id.`);
+      throw new ProposalIdentityCollisionError(parsed.id, status);
     }
     await writeImmutable(filePath, parsed);
   }

@@ -7,18 +7,136 @@ import { worldStorageRoot } from "../world/paths.js";
 import { accountingCoverageProofSchema, accountingCoverageProofFailure, type AccountingCoverageProof } from "./accounting-coverage-proof.js";
 import { CompilerAccountingPages } from "./accounting-pages.js";
 import { contentHash } from "../world/canonical.js";
+import { idSchema } from "../world/model.js";
 
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+export const sourcePatternProposalToolSchema = z.enum([
+  "propose_action_schema",
+  "propose_action_constraint",
+  "propose_norm_template",
+  "propose_process_template",
+]);
+export const sourcePatternUpstreamAuthoritySchema = z.object({
+  version: z.literal(1),
+  sourceId: idSchema,
+  batchId: idSchema,
+  tool: sourcePatternProposalToolSchema,
+  proposalId: idSchema,
+  attemptCount: z.number().int().positive(),
+  historyHash: sha256Schema,
+  failedInputHashes: z.array(sha256Schema).min(2).refine(values => new Set(values).size === values.length, "Duplicate failed input hash"),
+  originalInputHash: sha256Schema,
+  originalSupportingEventIds: z.array(idSchema).min(1).refine(values => new Set(values).size === values.length, "Duplicate original supporting event"),
+  originalEvidenceSegmentIds: z.array(idSchema).min(1).refine(values => new Set(values).size === values.length, "Duplicate original evidence segment"),
+}).strict();
+export type SourcePatternUpstreamAuthority = z.infer<typeof sourcePatternUpstreamAuthoritySchema>;
+export function sourcePatternObligationRequirementId(authorityInput: Pick<SourcePatternUpstreamAuthority, "sourceId" | "batchId" | "tool" | "proposalId">): string {
+  const authority = sourcePatternUpstreamAuthoritySchema.pick({ sourceId: true, batchId: true, tool: true, proposalId: true }).parse({
+    sourceId: authorityInput.sourceId,
+    batchId: authorityInput.batchId,
+    tool: authorityInput.tool,
+    proposalId: authorityInput.proposalId,
+  });
+  return `compiler-proposal-obligation-${contentHash(authority).slice(0, 32)}`;
+}
+export function sourcePatternObligationRequirementSetHash(authorityInput: SourcePatternUpstreamAuthority): string {
+  return contentHash(sourcePatternUpstreamAuthoritySchema.parse(authorityInput));
+}
+export const sourcePatternDependencyCorrectionSchema = z.object({
+  version: z.literal(1),
+  sourceId: idSchema,
+  batchId: idSchema,
+  tool: sourcePatternProposalToolSchema,
+  proposalId: idSchema,
+  inputHash: sha256Schema,
+  failedInputHashes: z.array(sha256Schema).min(2),
+  upstreamPlanHash: sha256Schema,
+  upstreamAuthorizationRef: z.string().trim().min(1),
+  receiptFingerprint: sha256Schema,
+  convergenceRef: sha256Schema,
+  originalSupportingEventIds: z.array(idSchema).min(1),
+  correctedSupportingEventIds: z.array(idSchema).min(1),
+  addedDependencies: z.array(z.object({
+    kind: z.literal("canonical-event"),
+    id: idSchema,
+    revisionHash: sha256Schema,
+  }).strict()).min(1),
+}).strict();
+export type SourcePatternDependencyCorrection = z.infer<typeof sourcePatternDependencyCorrectionSchema>;
+export const accountingRefinementCorrectionSchema = z.object({
+  version: z.literal(1),
+  sourceId: idSchema,
+  batchId: idSchema,
+  proposalId: idSchema,
+  inputHash: sha256Schema,
+  failedInputHashes: z.array(sha256Schema).min(2)
+    .refine(values => new Set(values).size === values.length, "Duplicate failed accounting input hash"),
+  historyHash: sha256Schema,
+  authorityHash: sha256Schema,
+  sourceSha256: sha256Schema,
+  structureHash: sha256Schema,
+  batchSegmentIds: z.array(idSchema).min(1),
+  activeAccountingGraphHash: sha256Schema,
+  semanticBaselineHash: sha256Schema,
+  batchProgressHash: sha256Schema,
+  pageReceipts: z.array(z.object({ token: z.string().regex(/^acctpg-[a-f0-9]{16}$/), hash: sha256Schema }).strict()).min(2),
+  unitIds: z.array(idSchema).min(1).max(512),
+  predecessorDecisions: z.array(z.object({
+    unitId: idSchema,
+    proposalId: idSchema,
+    proposalHash: sha256Schema,
+    status: z.enum(["unresolved", "intentionally-deferred"]),
+  }).strict()).min(1),
+  proposalIdentityHash: sha256Schema,
+  settlementObligations: z.array(z.object({
+    proposalId: idSchema,
+    historyHash: sha256Schema,
+    unitIds: z.array(idSchema).min(1)
+      .refine(values => new Set(values).size === values.length, "Duplicate settlement unit ID"),
+  }).strict()).refine(values => new Set(values.map(value => value.proposalId)).size === values.length,
+    "Duplicate accounting settlement proposal ID"),
+  duplicateSupportDependencies: z.array(z.object({
+    proposalId: idSchema,
+    proposalHash: sha256Schema,
+    artifactKind: idSchema,
+    artifactId: idSchema,
+    artifactRevisionHash: sha256Schema,
+    unitIds: z.array(idSchema).min(1)
+      .refine(values => new Set(values).size === values.length, "Duplicate supported unit ID"),
+    evidenceAssertionIds: z.array(idSchema).min(1)
+      .refine(values => new Set(values).size === values.length, "Duplicate support evidence assertion ID"),
+  }).strict()).refine(values => new Set(values.map(value => value.proposalId)).size === values.length,
+    "Duplicate semantic support proposal ID"),
+}).strict();
+export type AccountingRefinementCorrection = z.infer<typeof accountingRefinementCorrectionSchema>;
+const hostReviewSchema = z.object({
+  reason: z.string().min(1),
+  auditRef: z.string().min(1),
+  sourcePatternDependencyCorrection: sourcePatternDependencyCorrectionSchema.optional(),
+  accountingRefinementCorrection: accountingRefinementCorrectionSchema.optional(),
+}).strict();
 const attemptSchema = z.object({
   tool: z.string(), proposalId: z.string(), inputHash: z.string(), input: z.unknown(),
   status: z.enum(["running", "failed", "succeeded", "unsupported", "superseded-by-coverage"]),
   diagnostic: z.string(), updatedAt: z.string(),
-  hostReview: z.object({ reason: z.string().min(1), auditRef: z.string().min(1) }).optional(),
+  hostReview: hostReviewSchema.optional(),
   coverageProof: accountingCoverageProofSchema.optional(),
 }).strict();
 const ledgerSchema = z.object({
   version: z.literal(1), sourceId: z.string(), batchId: z.string(),
   attempts: z.array(attemptSchema),
 }).strict();
+const sourcePatternCorrectionInputSchema = z.object({
+  proposal_id: idSchema,
+  payload: z.object({
+    id: idSchema,
+    induction: z.object({
+      kind: z.literal("source-pattern"),
+      supportingEventIds: z.array(idSchema).min(1).max(64),
+    }).strict(),
+  }).passthrough(),
+  evidence_segment_ids: z.array(idSchema).min(1).max(16),
+}).passthrough();
 export type ProposalAttempt = z.infer<typeof attemptSchema>;
 
 export class CompilerHostReviewRequiredError extends Error {
@@ -29,9 +147,9 @@ export class CompilerHostReviewRequiredError extends Error {
 }
 
 // Host-only, in-process authorization. Never persisted as a retry permit or exposed as a model tool.
-const hostSelectorCorrection = new AsyncLocalStorage<{
+const hostProposalCorrection = new AsyncLocalStorage<{
   root: string; sourceId: string; batchId: string; tool: string; proposalId: string;
-  inputHash: string; priorHash: string; used: boolean; reason: string; auditRef: string;
+  inputHash: string; priorHash: string; used: boolean; hostReview: z.infer<typeof hostReviewSchema>;
 }>();
 
 /** Compiler-lock-owned journal. Synchronous writes also cover synchronous Pi argument preflight. */
@@ -97,18 +215,117 @@ export class CompilerProposalObligations {
     const inputHash = crypto.createHash("sha256").update(JSON.stringify(input) ?? "undefined").digest("hex");
     return { tool, proposalId: typeof args.proposal_id === "string" ? args.proposal_id : tool === "propose_role_roster_review" ? "role-roster-review" : `unidentified-${inputHash}`, inputHash };
   }
+  private histories(): ProposalAttempt[][] {
+    const histories = new Map<string, ProposalAttempt[]>();
+    for (const attempt of this.read().attempts) {
+      const key = JSON.stringify([attempt.tool, attempt.proposalId]);
+      const history = histories.get(key) ?? [];
+      history.push(attempt);
+      histories.set(key, history);
+    }
+    return [...histories.values()];
+  }
   unresolved(): ProposalAttempt[] {
-    const latest = new Map<string, ProposalAttempt>();
-    for (const attempt of this.read().attempts) latest.set(JSON.stringify([attempt.tool, attempt.proposalId]), attempt);
-    return [...latest.values()].flatMap((item) => {
-      if (item.status === "superseded-by-coverage") {
-        const failure = item.coverageProof ? accountingCoverageProofFailure(this.root, item.coverageProof) : "missing coverage proof";
-        return failure ? [{ ...item, status: "failed" as const, diagnostic: `Coverage proof invalidated: ${failure}; host review is required.` }] : [];
+    return this.histories().flatMap((history) => {
+      const latest = history.at(-1)!;
+      if (latest.status === "superseded-by-coverage") {
+        const failure = latest.coverageProof ? accountingCoverageProofFailure(this.root, latest.coverageProof) : "missing coverage proof";
+        return failure ? [{ ...latest, status: "failed" as const, diagnostic: `Coverage proof invalidated: ${failure}; host review is required.` }] : [];
       }
-      return item.status === "failed" || item.status === "running" ? [item] : [];
+      const lastResolution = history.findLastIndex((attempt) => attempt.status === "succeeded" || attempt.status === "unsupported");
+      const unresolved = history.slice(lastResolution + 1).filter((attempt) => attempt.status === "failed" || attempt.status === "running");
+      const item = unresolved.at(-1);
+      if (!item) return [];
+      return [item];
     });
   }
   history(tool: string, proposalId: string): ProposalAttempt[] { return this.read({ tool, proposalId }).attempts; }
+  inspectSourcePatternUpstreamAuthority(toolInput: string, proposalIdInput: string) {
+    const tool = sourcePatternProposalToolSchema.parse(toolInput);
+    const proposalId = idSchema.parse(proposalIdInput);
+    const history = this.history(tool, proposalId);
+    const authority = this.sourcePatternAuthorityFromHistory(tool, proposalId, history);
+    return {
+      proposalObligation: authority,
+      requirementSetHash: sourcePatternObligationRequirementSetHash(authority),
+      requirementIds: [sourcePatternObligationRequirementId(authority)],
+    };
+  }
+  verifySourcePatternUpstreamAuthority(
+    authorityInput: SourcePatternUpstreamAuthority,
+    expected?: { upstreamPlanHash: string; addedCanonicalEventIds: readonly string[] },
+  ) {
+    const authority = sourcePatternUpstreamAuthoritySchema.parse(authorityInput);
+    if (authority.sourceId !== this.sourceId || authority.batchId !== this.batchId) {
+      throw new Error("Source-pattern upstream authority differs from its exact durable source or batch.");
+    }
+    const history = this.history(authority.tool, authority.proposalId);
+    if (history.length < authority.attemptCount) throw new Error("Source-pattern upstream authority history was truncated.");
+    const prefix = history.slice(0, authority.attemptCount);
+    const actual = this.sourcePatternAuthorityFromHistory(authority.tool, authority.proposalId, prefix);
+    if (contentHash(actual) !== contentHash(authority)) throw new Error("Source-pattern upstream authority history or failed inputs changed.");
+    const suffix = history.slice(authority.attemptCount);
+    if (!suffix.length) return { authority, correction: null };
+    const [running, succeeded] = suffix;
+    if (suffix.length !== 2 || running?.status !== "running" || succeeded?.status !== "succeeded"
+      || running.tool !== authority.tool || succeeded.tool !== authority.tool
+      || running.proposalId !== authority.proposalId || succeeded.proposalId !== authority.proposalId
+      || running.inputHash !== succeeded.inputHash || authority.failedInputHashes.includes(running.inputHash)
+      || !running.hostReview?.sourcePatternDependencyCorrection || !succeeded.hostReview?.sourcePatternDependencyCorrection
+      || contentHash(running.hostReview) !== contentHash(succeeded.hostReview)) {
+      throw new Error("Source-pattern upstream authority has a changed, failed, or incomplete host correction; preserve it for host review.");
+    }
+    const correction = sourcePatternDependencyCorrectionSchema.parse(succeeded.hostReview.sourcePatternDependencyCorrection);
+    if (correction.sourceId !== authority.sourceId || correction.batchId !== authority.batchId
+      || correction.tool !== authority.tool || correction.proposalId !== authority.proposalId
+      || correction.inputHash !== succeeded.inputHash
+      || contentHash([...correction.failedInputHashes].sort()) !== contentHash([...authority.failedInputHashes].sort())
+      || contentHash([...correction.originalSupportingEventIds].sort()) !== contentHash([...authority.originalSupportingEventIds].sort())) {
+      throw new Error("Source-pattern host correction does not match its frozen upstream authority.");
+    }
+    if (expected && (correction.upstreamPlanHash !== expected.upstreamPlanHash
+      || contentHash(correction.addedDependencies.map(item => item.id).sort()) !== contentHash([...expected.addedCanonicalEventIds].sort()))) {
+      throw new Error("Source-pattern host correction does not match the selected upstream plan outputs.");
+    }
+    return { authority, correction };
+  }
+  private sourcePatternAuthorityFromHistory(
+    tool: z.infer<typeof sourcePatternProposalToolSchema>,
+    proposalId: string,
+    history: ProposalAttempt[],
+  ): SourcePatternUpstreamAuthority {
+    if (!history.length || history.at(-1)?.status !== "failed"
+      || history.some(attempt => attempt.tool !== tool || attempt.proposalId !== proposalId
+        || attempt.hostReview || attempt.coverageProof
+        || ["succeeded", "unsupported", "superseded-by-coverage"].includes(attempt.status))) {
+      throw new Error("Source-pattern upstream planning requires one exact unreviewed failed proposal identity.");
+    }
+    const failed = [...new Map(history.filter(attempt => attempt.status === "failed").map(attempt => [attempt.inputHash, attempt])).values()];
+    if (failed.length < 2) throw new Error("Source-pattern upstream planning requires the exhausted original and corrected inputs.");
+    const attempt = failed[0]!;
+    const parsed = sourcePatternCorrectionInputSchema.safeParse(attempt.input);
+    if (!parsed.success) throw new Error("Source-pattern upstream planning requires a valid original source-pattern input.");
+    const original = { attempt, parsed };
+    const originalSupportingEventIds = [...new Set(original.parsed.data.payload.induction.supportingEventIds)].sort();
+    const originalEvidenceSegmentIds = [...new Set(original.parsed.data.evidence_segment_ids)].sort();
+    if (originalSupportingEventIds.length !== original.parsed.data.payload.induction.supportingEventIds.length
+      || originalEvidenceSegmentIds.length !== original.parsed.data.evidence_segment_ids.length) {
+      throw new Error("Source-pattern upstream planning cannot bind duplicate original support or citation scope.");
+    }
+    return sourcePatternUpstreamAuthoritySchema.parse({
+      version: 1,
+      sourceId: this.sourceId,
+      batchId: this.batchId,
+      tool,
+      proposalId,
+      attemptCount: history.length,
+      historyHash: contentHash(history),
+      failedInputHashes: failed.map(attempt => attempt.inputHash).sort(),
+      originalInputHash: original.attempt.inputHash,
+      originalSupportingEventIds,
+      originalEvidenceSegmentIds,
+    });
+  }
   requiringHostReview(): ProposalAttempt[] {
     return this.unresolved().filter((item) => {
       if (item.status === "running" || item.coverageProof) return true;
@@ -127,7 +344,7 @@ export class CompilerProposalObligations {
    * Failures remain unresolved until the tool actually succeeds; no restart receives this authority.
    */
   async withHostSelectorCorrection<T>(tool: string, input: unknown, failedInputHashes: string[], reason: string, auditRef: string, action: () => Promise<T>): Promise<T> {
-    if (!reason.trim() || !auditRef.trim() || hostSelectorCorrection.getStore()) throw new Error("A separate host review and audit reference are required.");
+    if (!reason.trim() || !auditRef.trim() || hostProposalCorrection.getStore()) throw new Error("A separate host review and audit reference are required.");
     const identity = CompilerProposalObligations.identity(tool, input);
     const history = this.history(tool, identity.proposalId), last = history.at(-1);
     if (last?.status !== "failed" || history.some(a => a.hostReview)) throw new Error("Host correction requires an unreviewed failed identity; a reviewed failure must stop.");
@@ -139,7 +356,211 @@ export class CompilerProposalObligations {
     if (contentHash(oldRest) !== contentHash(newRest) || !Array.isArray(oldSelectors) || !Array.isArray(newSelectors) || oldSelectors.length !== newSelectors.length) throw new Error("Host selector correction cannot change payload, scope, proposal ID, or assertion count.");
     const binding = (s: Record<string, unknown>) => { const { exact, prefix, suffix, occurrence, ...rest } = s; return rest; };
     if (oldSelectors.some((s, i) => contentHash(binding(s)) !== contentHash(binding(newSelectors[i])))) throw new Error("Host selector correction must preserve assertion targets and strengths.");
-    return hostSelectorCorrection.run({ root: this.root, sourceId: this.sourceId, batchId: this.batchId, ...identity, priorHash: contentHash(last), used: false, reason, auditRef }, action);
+    return hostProposalCorrection.run({ root: this.root, sourceId: this.sourceId, batchId: this.batchId, ...identity,
+      priorHash: contentHash(last), used: false, hostReview: { reason, auditRef } }, action);
+  }
+  /** Exact host-only recovery of a failed upstream slot; the upstream ledger owns its bounded grant. */
+  async withHostUpstreamCorrection<T>(tool: string, input: unknown, planHash: string, attemptRef: string, action: () => Promise<T>): Promise<T> {
+    if (hostProposalCorrection.getStore()) throw new Error("Nested host correction is forbidden.");
+    const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
+    const state = await new UpstreamRepairLedger(this.root, this.sourceId).inspect();
+    const plan = state.plans.find(item => item.plan.planHash === planHash);
+    const attempt = state.attempts.find(item => item.attemptRef === attemptRef);
+    const identity = CompilerProposalObligations.identity(tool, input);
+    const grant = plan?.hostCorrections?.find(item => item.inputHash === contentHash(input));
+    const failed = state.attempts.find(item => item.attemptRef === grant?.failedAttemptRef);
+    if (!plan || plan.plan.batchId !== this.batchId || plan.state !== "staging" || !grant || !failed?.failed
+      || !attempt || attempt.failed || attempt.staged || attempt.started.modelSessionRef || attempt.started.planHash !== planHash
+      || attempt.started.inputHash !== contentHash(input) || attempt.started.proposalId !== identity.proposalId
+      || tool !== `propose_${attempt.started.artifactKind.replaceAll("-", "_")}`) throw new Error("No exact active upstream host correction authority.");
+    const history = this.history(tool, identity.proposalId), last = history.at(-1);
+    if (!last) return action(); // A transport/schema rejection may have occurred before the domain journal.
+    if (last.status !== "failed" || history.some(item => item.hostReview || item.inputHash === identity.inputHash)) throw new Error("Upstream host correction is consumed or unchanged.");
+    return hostProposalCorrection.run({ root: this.root, sourceId: this.sourceId, batchId: this.batchId, ...identity,
+      priorHash: contentHash(last), used: false, hostReview: { reason: grant.reason, auditRef: grant.auditRef } }, action);
+  }
+  /** Resume one durable pre-receipt finish-revision input after a post-validation interruption. */
+  async withHostUpstreamFinishRevision<T>(tool: string, input: unknown, planHash: string, attemptRef: string, action: () => Promise<T>): Promise<T> {
+    if (hostProposalCorrection.getStore()) throw new Error("Nested host correction is forbidden.");
+    const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
+    const state = await new UpstreamRepairLedger(this.root, this.sourceId).inspect();
+    const plan = state.plans.find(item => item.plan.planHash === planHash), attempt = state.attempts.find(item => item.attemptRef === attemptRef);
+    const identity = CompilerProposalObligations.identity(tool, input);
+    const revision = plan?.finishRevision;
+    const correction = revision?.intent.corrections.find(item => item.replacementProposalId === identity.proposalId);
+    const authorityIssues = [
+      !plan && "plan-missing",
+      plan?.plan.batchId !== this.batchId && "batch-mismatch",
+      plan?.state !== "finish-revising" && `state-${plan?.state ?? "missing"}`,
+      !correction && "correction-missing",
+      !attempt && "attempt-missing",
+      attempt?.failed && "attempt-failed",
+      attempt?.staged && "attempt-staged",
+      attempt?.started.modelSessionRef && "model-owned",
+      attempt?.started.planHash !== planHash && "attempt-plan-mismatch",
+      attempt && correction && attempt.started.inputHash !== correction.inputHash && "grant-input-mismatch",
+      attempt && attempt.started.inputHash !== contentHash(input) && "retained-input-mismatch",
+      attempt && correction && attempt.started.artifactKind !== correction.artifactKind && "kind-mismatch",
+      attempt && correction && attempt.started.artifactId !== correction.artifactId && "slot-mismatch",
+      attempt && tool !== `propose_${attempt.started.artifactKind.replaceAll("-", "_")}` && "tool-mismatch",
+    ].filter((item): item is string => Boolean(item));
+    if (authorityIssues.length || !plan || !revision || !correction || !attempt) throw new Error(`No exact active upstream finish-revision authority: ${authorityIssues.join(", ")}.`);
+    const history = this.history(tool, identity.proposalId), last = history.at(-1);
+    if (!last) return action();
+    if (last.status !== "running" || last.inputHash !== identity.inputHash || !attempt.validatedHash || history.some(item => item.hostReview)) {
+      throw new Error("Upstream finish-revision input is consumed, failed, unchanged without a durable write intent, or already reviewed.");
+    }
+    return hostProposalCorrection.run({ root: this.root, sourceId: this.sourceId, batchId: this.batchId, ...identity,
+      priorHash: contentHash(last), used: false, hostReview: { reason: revision.intent.reason, auditRef: revision.intent.auditRef } }, action);
+  }
+  async withHostSourcePatternDependencyCorrection<T>(
+    tool: string,
+    input: unknown,
+    bindingInput: SourcePatternDependencyCorrection,
+    reason: string,
+    auditRef: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    if (!reason.trim() || !auditRef.trim() || hostProposalCorrection.getStore()) throw new Error("A separate host review and audit reference are required.");
+    const binding = sourcePatternDependencyCorrectionSchema.parse(bindingInput);
+    const identity = CompilerProposalObligations.identity(tool, input);
+    if (binding.sourceId !== this.sourceId || binding.batchId !== this.batchId || binding.tool !== tool
+      || binding.proposalId !== identity.proposalId || binding.inputHash !== identity.inputHash) {
+      throw new Error("Host dependency correction differs from its exact source, batch, tool, proposal, or input hash.");
+    }
+    const history = this.history(tool, identity.proposalId), last = history.at(-1);
+    if (last?.status !== "failed" || history.some(attempt => attempt.hostReview)) throw new Error("Host correction requires an unreviewed failed identity; a reviewed failure must stop.");
+    const failed = [...new Map(history.filter(attempt => attempt.status === "failed").map(attempt => [attempt.inputHash, attempt])).values()];
+    const failedHashes = failed.map(attempt => attempt.inputHash).sort();
+    if (new Set(binding.failedInputHashes).size !== binding.failedInputHashes.length
+      || contentHash(failedHashes) !== contentHash([...binding.failedInputHashes].sort())
+      || failedHashes.includes(identity.inputHash)) {
+      throw new Error("Host dependency review must bind every distinct failed input and one changed correction.");
+    }
+    const original = failed.map(attempt => sourcePatternCorrectionInputSchema.safeParse(attempt.input))
+      .find(result => result.success);
+    const corrected = sourcePatternCorrectionInputSchema.parse(input);
+    if (!original?.success || original.data.proposal_id !== corrected.proposal_id
+      || original.data.payload.id !== corrected.payload.id || corrected.payload.id !== identity.proposalId) {
+      throw new Error("Host dependency correction requires the original source-pattern identity and cannot change its logical ID.");
+    }
+    const uniqueSorted = (values: readonly string[]) => [...new Set(values)].sort();
+    const originalEvents = uniqueSorted(original.data.payload.induction.supportingEventIds);
+    const correctedEvents = uniqueSorted(corrected.payload.induction.supportingEventIds);
+    const addedEvents = correctedEvents.filter(id => !originalEvents.includes(id));
+    if (originalEvents.length !== original.data.payload.induction.supportingEventIds.length
+      || correctedEvents.length !== corrected.payload.induction.supportingEventIds.length
+      || originalEvents.some(id => !correctedEvents.includes(id)) || !addedEvents.length
+      || contentHash(originalEvents) !== contentHash(uniqueSorted(binding.originalSupportingEventIds))
+      || contentHash(correctedEvents) !== contentHash(uniqueSorted(binding.correctedSupportingEventIds))
+      || contentHash(addedEvents) !== contentHash(uniqueSorted(binding.addedDependencies.map(item => item.id)))
+      || contentHash(uniqueSorted(original.data.evidence_segment_ids)) !== contentHash(uniqueSorted(corrected.evidence_segment_ids))) {
+      throw new Error("Host dependency correction must retain the original supporting events and citation scope while adding only reviewed canonical-event dependencies.");
+    }
+    const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
+    const { verifyUpstreamRepairConvergence } = await import("./upstream-repair-convergence.js");
+    const { CanonicalModelStore } = await import("../world/canonical-model.js");
+    const state = await new UpstreamRepairLedger(this.root, this.sourceId).inspect();
+    const current = state.plans.find(item => item.plan.planHash === binding.upstreamPlanHash);
+    const convergence = state.records.find(record => record.hash === binding.convergenceRef);
+    if (!current || !["converged", "evaluated"].includes(current.state)
+      || current.plan.authorizationRef !== binding.upstreamAuthorizationRef
+      || current.finishedReceipt !== binding.receiptFingerprint
+      || convergence?.payload.kind !== "converged" || convergence.payload.planHash !== binding.upstreamPlanHash
+      || convergence.payload.receiptFingerprint !== binding.receiptFingerprint) {
+      throw new Error("Host dependency correction requires the exact completed and converged upstream plan, authorization, and finish receipt.");
+    }
+    const verified = await verifyUpstreamRepairConvergence(this.root, this.sourceId, binding.upstreamPlanHash);
+    if (verified.receiptFingerprint !== binding.receiptFingerprint
+      || contentHash(verified.activeRevisions) !== contentHash(convergence.payload.activeRevisions)) {
+      throw new Error("Host dependency correction upstream convergence is no longer current.");
+    }
+    const canonical = new CanonicalModelStore(this.root);
+    for (const dependency of binding.addedDependencies) {
+      const semantic = current.plan.semanticEventCreations?.find(item => item.canonicalEventId === dependency.id);
+      const active = convergence.payload.activeRevisions.find(item => item.kind === "canonical-event" && item.id === dependency.id);
+      const event = await canonical.getEvent(dependency.id);
+      if (!semantic || active?.revisionHash !== dependency.revisionHash || !event || contentHash(event) !== dependency.revisionHash) {
+        throw new Error(`Host dependency correction cannot prove the active reviewed canonical event ${dependency.id}.`);
+      }
+    }
+    return hostProposalCorrection.run({
+      root: this.root,
+      sourceId: this.sourceId,
+      batchId: this.batchId,
+      ...identity,
+      priorHash: contentHash(last),
+      used: false,
+      hostReview: { reason, auditRef, sourcePatternDependencyCorrection: binding },
+    }, action);
+  }
+  async withHostAccountingRefinement<T>(
+    input: unknown,
+    bindingInput: AccountingRefinementCorrection,
+    reason: string,
+    auditRef: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    if (!reason.trim() || !auditRef.trim() || hostProposalCorrection.getStore()) {
+      throw new Error("A separate host accounting-refinement review and audit reference are required.");
+    }
+    const binding = accountingRefinementCorrectionSchema.parse(bindingInput);
+    const identity = CompilerProposalObligations.identity("account_source_units", input);
+    if (binding.sourceId !== this.sourceId || binding.batchId !== this.batchId
+      || binding.proposalId !== identity.proposalId || binding.inputHash !== identity.inputHash) {
+      throw new Error("Host accounting refinement differs from its exact source, batch, proposal, or failed input hash.");
+    }
+    const history = this.history("account_source_units", identity.proposalId);
+    const last = history.at(-1);
+    if (last?.status !== "failed" || history.some(attempt => attempt.hostReview || attempt.coverageProof)) {
+      throw new Error("Host accounting refinement requires one unreviewed exhausted identity; a reviewed or settled attempt must stop.");
+    }
+    const failedHashes = [...new Set(history.filter(attempt => attempt.status === "failed").map(attempt => attempt.inputHash))].sort();
+    if (failedHashes.length < 2 || contentHash(failedHashes) !== contentHash([...binding.failedInputHashes].sort())
+      || contentHash(history) !== binding.historyHash) {
+      throw new Error("Host accounting refinement must bind the complete unchanged failure history and one exact-scope reviewed input.");
+    }
+    return hostProposalCorrection.run({
+      root: this.root,
+      sourceId: this.sourceId,
+      batchId: this.batchId,
+      tool: "account_source_units",
+      proposalId: identity.proposalId,
+      inputHash: identity.inputHash,
+      priorHash: contentHash(last),
+      used: false,
+      hostReview: { reason, auditRef, accountingRefinementCorrection: binding },
+    }, action);
+  }
+  completeInterruptedHostAccountingRefinement(
+    input: unknown,
+    bindingInput: AccountingRefinementCorrection,
+    reason: string,
+    auditRef: string,
+  ): void {
+    if (hostProposalCorrection.getStore()) throw new Error("Nested host correction is forbidden.");
+    const binding = accountingRefinementCorrectionSchema.parse(bindingInput);
+    const identity = CompilerProposalObligations.identity("account_source_units", input);
+    const history = this.history("account_source_units", identity.proposalId);
+    const last = history.at(-1);
+    const expectedReview = { reason, auditRef, accountingRefinementCorrection: binding };
+    if (binding.sourceId !== this.sourceId || binding.batchId !== this.batchId
+      || binding.proposalId !== identity.proposalId || binding.inputHash !== identity.inputHash
+      || last?.status !== "running" || last.inputHash !== identity.inputHash
+      || contentHash(last.hostReview) !== contentHash(expectedReview)) {
+      throw new Error("Interrupted host accounting refinement does not match the exact retained running intent.");
+    }
+    hostProposalCorrection.run({
+      root: this.root,
+      sourceId: this.sourceId,
+      batchId: this.batchId,
+      tool: "account_source_units",
+      proposalId: identity.proposalId,
+      inputHash: identity.inputHash,
+      priorHash: contentHash(last),
+      used: true,
+      hostReview: expectedReview,
+    }, () => this.record("account_source_units", input, "succeeded"));
   }
   assertRetryAllowed(tool: string, input: unknown) {
     const identity = CompilerProposalObligations.identity(tool, input);
@@ -152,7 +573,7 @@ export class CompilerProposalObligations {
     }
     const lastResolution = history.findLastIndex((item) => item.status === "succeeded" || item.status === "unsupported");
     const failedInputs = new Set(history.slice(lastResolution + 1).filter((item) => item.status === "failed").map((item) => item.inputHash));
-    const host = hostSelectorCorrection.getStore();
+    const host = hostProposalCorrection.getStore();
     if (host && !host.used && host.root === this.root && host.sourceId === this.sourceId && host.batchId === this.batchId
       && host.tool === tool && host.proposalId === identity.proposalId && host.inputHash === identity.inputHash
       && contentHash(history.at(-1)) === host.priorHash) return;
@@ -169,12 +590,12 @@ export class CompilerProposalObligations {
     const started = ledger.attempts.at(-2);
     if (status === "running" && prior?.status === "succeeded" && started?.status === "running"
       && prior.inputHash === identity.inputHash && started.inputHash === identity.inputHash) ledger.attempts.splice(-2);
-    const host = hostSelectorCorrection.getStore();
+    const host = hostProposalCorrection.getStore();
     const reviewed = host && host.root === this.root && host.sourceId === this.sourceId && host.batchId === this.batchId
       && host.tool === tool && host.proposalId === identity.proposalId && host.inputHash === identity.inputHash;
     if (reviewed && status === "running") host.used = true;
     ledger.attempts.push({ ...identity, input, status, diagnostic, updatedAt: new Date().toISOString(),
-      ...(reviewed ? { hostReview: { reason: host.reason, auditRef: host.auditRef } } : {}) });
+      ...(reviewed ? { hostReview: host.hostReview } : {}) });
     this.write(ledger);
   }
   assertFinishable() {

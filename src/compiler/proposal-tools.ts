@@ -1,3 +1,4 @@
+import { ToolDiagnosticError } from "../agent/tool-diagnostic.js";
 import { acquisitionInputSchema } from "../world/acquisition.js";
 import { hydrateAcquisitionInput } from "./acquisition-input.js";
 import { perceptionObservationInputSchema, hydratePerceptionObservationInput, loadPerceptionTraceCatalog, validatePerceptionObservationProposalTrace } from "./perception-observation-trace.js";
@@ -34,6 +35,7 @@ import {
   idSchema,
   type EvidenceAssertion,
   type EvidenceRef,
+  type TextAnchor,
 } from "../world/model.js";
 import {
   compilerProposalLogicalIdentity,
@@ -756,9 +758,9 @@ type ChapterSplitDetails =
 const modelTextSelectorParameters = Type.Object({
   segment_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
   exact: Type.String({ minLength: 1, maxLength: 4_000 }),
-  prefix: Type.Optional(Type.String({ maxLength: 500 })),
-  suffix: Type.Optional(Type.String({ maxLength: 500 })),
-  occurrence: Type.Optional(Type.Integer({ minimum: 1 })),
+  prefix: Type.Optional(Type.String({ maxLength: 500, description: "Optional immediate verbatim text directly before exact; omit when exact is unique." })),
+  suffix: Type.Optional(Type.String({ maxLength: 500, description: "Optional immediate verbatim text directly after exact; omit when exact is unique." })),
+  occurrence: Type.Optional(Type.Integer({ minimum: 1, description: "Optional one-based occurrence in the complete segment; omit when exact is unique." })),
 }, { additionalProperties: false });
 
 const annotationIdentityParameters = {
@@ -1217,6 +1219,26 @@ export function createCompilerProposalToolset(
       );
     }
     return resolveTextSelectorAnchor(workspaceRoot, segment, selector);
+  };
+  const resolveObservationSelectors = async (
+    entries: Array<{ path: string; selector: ModelTextSelector }>,
+  ): Promise<TextAnchor[]> => {
+    const outcomes = await Promise.allSettled(entries.map(entry => resolveObservationSelector(entry.selector)));
+    const issues = outcomes.flatMap((outcome, index) => outcome.status === "rejected"
+      ? [`${entries[index]!.path}: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`]
+      : []);
+    if (issues.length) throw new ToolDiagnosticError(`Source annotation selector validation failed:\n${issues.join("\n")}`, {
+      code: "ANNOTATION_SELECTORS_INVALID",
+      issues: outcomes.flatMap((outcome, index) => outcome.status === "rejected"
+        ? [{ path: entries[index]!.path, ...(outcome.reason instanceof ToolDiagnosticError ? { diagnostic: outcome.reason.diagnostic } : {}) }]
+        : []),
+      steps: [
+        "Inspect every failed selector path and its same-segment candidate context before making the single corrected retry. Keep valid exact quotes; remove optional context when unique, otherwise copy immediate verbatim context.",
+        "Check event-mention extent_selectors as well: at least one extent must contain trigger_selector, including the reporting verb rather than only the quoted speech.",
+        "Preserve the failed proposal_id, logical annotation ID, participants and scope. If source support or intended occurrence is unclear, stop for host review; never guess or rotate IDs.",
+      ],
+    });
+    return outcomes.map(outcome => (outcome as PromiseFulfilledResult<TextAnchor>).value);
   };
   const annotationDerivation = (worker: string, proposalId: string) => ({
     runId: compilerBatchId ?? proposalId,
@@ -2314,6 +2336,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Record a source mention before making any identity-resolution claim",
     promptGuidelines: [
       "Copy non-zero surface text exactly from selector.exact.",
+      "Omit prefix/suffix when exact is unique. If disambiguation is needed, copy only immediate verbatim adjacent text or use the one-based occurrence in the complete segment.",
       "Use zero-anaphora only when the actor/object is grammatically omitted; anchor the exact predicate or cue and explain the inference.",
       "Do not put a canonical entity ID in this observation. Identity resolution is a separate validated stage.",
     ],
@@ -2328,7 +2351,7 @@ export function createCompilerProposalToolset(
       if (input.form !== "zero-anaphora" && input.surface !== input.selector.exact) {
         throw new Error("A non-zero entity mention surface must exactly equal selector.exact.");
       }
-      const anchor = await resolveObservationSelector(input.selector);
+      const [anchor] = await resolveObservationSelectors([{ path: "selector", selector: input.selector }]);
       const annotation = entityMentionSchema.parse({
         version: 1,
         annotationType: "entity-mention",
@@ -2354,6 +2377,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Record a source event mention before proposing event identity or world effects",
     promptGuidelines: [
       "Copy trigger exactly from trigger_selector.exact and make sure one extent selector contains it.",
+      "Omit prefix/suffix when exact is unique. If disambiguation is needed, copy only immediate verbatim adjacent text or use the one-based occurrence in the complete segment.",
       "Reference participant mention IDs, never canonical entity IDs.",
       "Salience describes compilation importance, not factuality. Hypothetical, remembered, dreamed, denied, or narrated events remain observations until later adjudication.",
       "Use scene_id for an enclosing scene and discourse_segment_id for the most relevant flashback, dream, document, summary, or other discourse layer.",
@@ -2369,10 +2393,20 @@ export function createCompilerProposalToolset(
       if (input.trigger !== input.trigger_selector.exact) {
         throw new Error("An event mention trigger must exactly equal trigger_selector.exact.");
       }
-      const [triggerAnchor, extentAnchors] = await Promise.all([
-        resolveObservationSelector(input.trigger_selector),
-        Promise.all(input.extent_selectors.map(resolveObservationSelector)),
+      const [triggerAnchor, ...extentAnchors] = await resolveObservationSelectors([
+        { path: "trigger_selector", selector: input.trigger_selector },
+        ...input.extent_selectors.map((selector, index) => ({ path: `extent_selectors[${index}]`, selector })),
       ]);
+      if (!extentAnchors.some(anchor => anchor.sourceId === triggerAnchor!.sourceId
+        && anchor.startByte <= triggerAnchor!.startByte && anchor.endByte >= triggerAnchor!.endByte)) {
+        throw new ToolDiagnosticError("Event-mention trigger must be contained in at least one extent: check trigger_selector and extent_selectors.", {
+          code: "EVENT_MENTION_TRIGGER_OUTSIDE_EXTENT",
+          issues: [{ path: "trigger_selector", range: triggerAnchor },
+            ...extentAnchors.map((anchor, index) => ({ path: `extent_selectors[${index}]`, range: anchor }))],
+          steps: ["Re-read the named source segment. Copy a verbatim extent that includes the intended trigger; quoted speech alone may omit the reporting verb. Host-computed ranges are diagnostic only, never model input.",
+            "Keep the same proposal and annotation IDs and participants. Make one corrected retry only if the source supports the extent; otherwise stop for host review."],
+        });
+      }
       const annotation = eventMentionSchema.parse({
         version: 1,
         annotationType: "event-mention",
@@ -2402,6 +2436,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Record quoted or represented speech without collapsing speaker mentions into canonical identity",
     promptGuidelines: [
       "Reference speaker/addressee mention IDs, not canonical character IDs.",
+      "Omit prefix/suffix when exact is unique. If disambiguation is needed, copy only immediate verbatim adjacent text or use the one-based occurrence in the complete segment.",
       "Use a cue selector when an attribution phrase sits outside the quoted span.",
       "Explain indirect and free-indirect readings; the source span alone may not determine their discourse mode.",
     ],
@@ -2413,9 +2448,9 @@ export function createCompilerProposalToolset(
       if (blocked) return blocked;
       assertBatchWritable();
       if (isStructureDiscoveryBatch()) throw new Error("Source annotations are unavailable during chapter structure discovery.");
-      const [anchor, cueAnchor] = await Promise.all([
-        resolveObservationSelector(input.selector),
-        input.cue_selector ? resolveObservationSelector(input.cue_selector) : Promise.resolve(undefined),
+      const [anchor, cueAnchor] = await resolveObservationSelectors([
+        { path: "selector", selector: input.selector },
+        ...(input.cue_selector ? [{ path: "cue_selector", selector: input.cue_selector }] : []),
       ]);
       const annotation = quotationSchema.parse({
         version: 1,
@@ -2443,6 +2478,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Record discourse organization independently from chronological world events",
     promptGuidelines: [
       "Overlapping observations are allowed; use multiple exact selectors for a discontinuous span.",
+      "Omit prefix/suffix when exact is unique. If disambiguation is needed, copy only immediate verbatim adjacent text or use the one-based occurrence in the complete segment.",
       "A viewpoint reference is a mention ID. Do not infer a canonical actor identity here.",
       "Flashback/flashforward describes discourse presentation only and never commits chronological world truth.",
     ],
@@ -2454,7 +2490,10 @@ export function createCompilerProposalToolset(
       if (blocked) return blocked;
       assertBatchWritable();
       if (isStructureDiscoveryBatch()) throw new Error("Source annotations are unavailable during chapter structure discovery.");
-      const anchors = (await Promise.all(input.selectors.map(resolveObservationSelector)))
+      const anchors = (await resolveObservationSelectors(input.selectors.map((selector, index) => ({
+        path: `selectors[${index}]`,
+        selector,
+      }))))
         .sort((left, right) => left.startByte - right.startByte || left.endByte - right.endByte);
       const annotation = discourseObservationSchema.parse({
         version: 1,
@@ -2593,7 +2632,7 @@ export function createCompilerProposalToolset(
         && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
         throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse. Do not withdraw semantically valid work to make room; stop this turn and preserve the exact drafts for diagnosis.`);
       }
-      const resolution = eventResolutionSchema.parse({
+      const parsedResolution = eventResolutionSchema.safeParse({
         version: 1,
         id: input.resolution_id,
         sourceId: activeSourceId,
@@ -2619,6 +2658,24 @@ export function createCompilerProposalToolset(
           ontologyVersion: EVENT_RESOLUTION_ONTOLOGY_VERSION,
         },
       });
+      if (!parsedResolution.success) {
+        const fieldNames: Record<string, string> = { canonicalEventId: "canonical_event_id", eventMentionIds: "event_mention_ids", basisEventMentionIds: "basis_event_mention_ids", evidenceAssertionIds: "evidence_assertion_ids", supersedesResolutionIds: "supersedes_resolution_ids" };
+        throw new ToolDiagnosticError("Event resolution validation failed before staging: " + parsedResolution.error.message, {
+          code: "EVENT_RESOLUTION_INVALID",
+          issues: parsedResolution.error.issues.map(issue => ({
+            path: issue.path.map(part => fieldNames[String(part)] ?? String(part)).join("."), message: issue.message,
+          })),
+          steps: [
+            "For each event_mention_id call find_event_resolution_candidates within the active source; inspect the actual candidate and its lifecycle before choosing resolved versus new-event. If lookup is unavailable or support is absent, stop.",
+            "For same-finish drafts use find_compiler_artifacts kind=canonical-event, copy results[].readArguments.ref to read_compiler_artifact.ref, then copy the verified payload.id into canonical_event_id and candidates[].canonical_event_id. A draft is not yet a canonical event; never invent an ID.",
+            "new-event requires canonical_event_id, relation=coreference, and exactly one candidates entry selecting that same event/relation. Include every event_mention_id in basis_event_mention_ids and supply confidence, evidence_assertion_ids and rationale required by the tool schema.",
+            "resolved also requires a selected canonical_event_id/relation present in candidates, backed by existing canonical or previously checkpointed authority. unresolved and ambiguous must omit selected fields; ambiguous needs at least two candidates. non-referential requires source proof and no candidates, never use it to evade uncertainty.",
+            "Inspect the active mention and participant dependencies, not just the failed payload. Repair missing supported mentions first; retain valid drafts and exact supersedes_resolution_ids. A failed mention call creates no replacement.",
+            "Correct all reported fields together under the same failed proposal_id. Retry once only; stop on exhausted allowance, unsupported semantics or another failure, and never rotate IDs.",
+          ],
+        }, parsedResolution.error);
+      }
+      const resolution = parsedResolution.data;
       await hostOptions.upstreamRepair?.beforeStage("event-resolution", resolution.id, resolution);
       await eventResolutionStore.stage(activeSourceId, {
         version: 1,
@@ -2889,6 +2946,19 @@ export function createCompilerProposalToolset(
     ? new CompilerProposalObligations(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
   const finishReceipts = () => activeSourceId && compilerBatchId
     ? new CompilerFinishReceipts(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+  const proposalFailure = (tool: string, input: unknown, error: unknown): unknown => {
+    const journal = obligations();
+    if (!journal) return error;
+    let correctedRetryAvailable = true;
+    try { journal.assertRetryAllowed(tool, input); } catch { correctedRetryAvailable = false; }
+    const diagnostic = error instanceof ToolDiagnosticError ? error.diagnostic
+      : { code: "COMPILER_PROPOSAL_FAILED", issues: [], steps: [] };
+    return new ToolDiagnosticError(error instanceof Error ? error.message : String(error), {
+      ...diagnostic,
+      retry: { sourceId: activeSourceId!, batchId: compilerBatchId!,
+        proposalId: CompilerProposalObligations.identity(tool, input).proposalId, correctedRetryAvailable },
+    }, error);
+  };
   const trackProposal = (tool: ToolDefinition): ToolDefinition => {
     if (!tool.name.startsWith("propose_") && tool.name !== "account_source_units") return tool;
     return {
@@ -2901,8 +2971,8 @@ export function createCompilerProposalToolset(
           const prepared = tool.prepareArguments ? tool.prepareArguments(raw) : raw;
           return validateToolArguments(tool, { type: "toolCall", id: "compiler-preflight", name: tool.name, arguments: prepared as Record<string, unknown> }) as never;
         } catch (error) {
-          obligations()?.record(tool.name, raw, "failed", error instanceof Error ? error.message : String(error));
-          throw error;
+          obligations()?.record(tool.name, raw, "failed", error instanceof Error ? error.message : String(error), error instanceof ToolDiagnosticError ? error.diagnostic : undefined);
+          throw proposalFailure(tool.name, raw, error);
         }
       },
       async execute(id, input, signal, onUpdate, context) {
@@ -2916,8 +2986,8 @@ export function createCompilerProposalToolset(
           else journal?.record(tool.name, input, "succeeded");
           return result;
         } catch (error) {
-          journal?.record(tool.name, input, "failed", error instanceof Error ? error.message : String(error));
-          throw error;
+          journal?.record(tool.name, input, "failed", error instanceof Error ? error.message : String(error), error instanceof ToolDiagnosticError ? error.diagnostic : undefined);
+          throw proposalFailure(tool.name, input, error);
         }
       },
     };

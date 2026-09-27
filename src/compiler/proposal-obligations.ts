@@ -1,3 +1,4 @@
+import { toolDiagnosticContextSchema, type ToolDiagnosticContext } from "../agent/tool-diagnostic.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import path from "node:path";
@@ -8,6 +9,7 @@ import { accountingCoverageProofSchema, accountingCoverageProofFailure, type Acc
 import { CompilerAccountingPages } from "./accounting-pages.js";
 import { contentHash } from "../world/canonical.js";
 import { idSchema } from "../world/model.js";
+import { modelTextSelectorSchema, type ModelTextSelector } from "./text-anchors.js";
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 export const sourcePatternProposalToolSchema = z.enum([
@@ -109,16 +111,45 @@ export const accountingRefinementCorrectionSchema = z.object({
     "Duplicate semantic support proposal ID"),
 }).strict();
 export type AccountingRefinementCorrection = z.infer<typeof accountingRefinementCorrectionSchema>;
+export const sourceAnnotationProposalToolSchema = z.enum([
+  "propose_entity_mention",
+  "propose_event_mention",
+  "propose_quotation",
+  "propose_discourse_segment",
+]);
+const annotationSelectorBindingSchema = z.object({
+  path: z.string().regex(/^\/(?:[^~/]|~[01])+(?:\/(?:[^~/]|~[01])*)*$/),
+  segmentId: idSchema,
+  exactHash: sha256Schema,
+  selectorHash: sha256Schema,
+}).strict();
+export const annotationSelectorCorrectionSchema = z.object({
+  version: z.literal(1),
+  sourceId: idSchema,
+  batchId: idSchema,
+  tool: sourceAnnotationProposalToolSchema,
+  proposalId: idSchema,
+  inputHash: sha256Schema,
+  failedInputHashes: z.array(sha256Schema).min(2)
+    .refine(values => new Set(values).size === values.length, "Duplicate failed annotation input hash"),
+  historyHash: sha256Schema,
+  selectorBindings: z.array(annotationSelectorBindingSchema).min(1)
+    .refine(values => new Set(values.map(value => value.path)).size === values.length,
+      "Duplicate annotation selector path"),
+}).strict();
+export type AnnotationSelectorCorrection = z.infer<typeof annotationSelectorCorrectionSchema>;
 const hostReviewSchema = z.object({
   reason: z.string().min(1),
   auditRef: z.string().min(1),
   sourcePatternDependencyCorrection: sourcePatternDependencyCorrectionSchema.optional(),
   accountingRefinementCorrection: accountingRefinementCorrectionSchema.optional(),
+  annotationSelectorCorrection: annotationSelectorCorrectionSchema.optional(),
 }).strict();
 const attemptSchema = z.object({
   tool: z.string(), proposalId: z.string(), inputHash: z.string(), input: z.unknown(),
   status: z.enum(["running", "failed", "succeeded", "unsupported", "superseded-by-coverage"]),
   diagnostic: z.string(), updatedAt: z.string(),
+  diagnosticContext: toolDiagnosticContextSchema.optional(),
   hostReview: hostReviewSchema.optional(),
   coverageProof: accountingCoverageProofSchema.optional(),
 }).strict();
@@ -138,6 +169,56 @@ const sourcePatternCorrectionInputSchema = z.object({
   evidence_segment_ids: z.array(idSchema).min(1).max(16),
 }).passthrough();
 export type ProposalAttempt = z.infer<typeof attemptSchema>;
+
+export type SourceAnnotationSelectorEntry = {
+  path: string;
+  selector: ModelTextSelector;
+};
+
+export function sourceAnnotationInputSelectors(
+  toolInput: string,
+  input: unknown,
+): SourceAnnotationSelectorEntry[] {
+  const tool = sourceAnnotationProposalToolSchema.parse(toolInput);
+  const record = z.record(z.string(), z.unknown()).parse(input);
+  const selector = (value: unknown, path: string): SourceAnnotationSelectorEntry => ({
+    path,
+    selector: modelTextSelectorSchema.parse(value),
+  });
+  const selectors = (value: unknown, path: string): SourceAnnotationSelectorEntry[] => {
+    if (!Array.isArray(value) || !value.length) throw new Error(`${path} must contain at least one source selector.`);
+    return value.map((item, index) => selector(item, `${path}/${index}`));
+  };
+  if (tool === "propose_entity_mention") return [selector(record.selector, "/selector")];
+  if (tool === "propose_event_mention") {
+    return [
+      selector(record.trigger_selector, "/trigger_selector"),
+      ...selectors(record.extent_selectors, "/extent_selectors"),
+    ];
+  }
+  if (tool === "propose_quotation") {
+    return [
+      selector(record.selector, "/selector"),
+      ...(record.cue_selector === undefined ? [] : [selector(record.cue_selector, "/cue_selector")]),
+    ];
+  }
+  return selectors(record.selectors, "/selectors");
+}
+
+function annotationSelectorProjection(tool: z.infer<typeof sourceAnnotationProposalToolSchema>, input: unknown) {
+  const record = structuredClone(z.record(z.string(), z.unknown()).parse(input));
+  const placeholder = (selector: ModelTextSelector) => ({ segment_id: selector.segment_id });
+  const entries = sourceAnnotationInputSelectors(tool, record);
+  if (tool === "propose_entity_mention") record.selector = placeholder(entries[0]!.selector);
+  else if (tool === "propose_event_mention") {
+    record.trigger_selector = placeholder(entries[0]!.selector);
+    record.extent_selectors = entries.slice(1).map(entry => placeholder(entry.selector));
+  } else if (tool === "propose_quotation") {
+    record.selector = placeholder(entries[0]!.selector);
+    if (entries[1]) record.cue_selector = placeholder(entries[1].selector);
+  } else record.selectors = entries.map(entry => placeholder(entry.selector));
+  return { record, entries };
+}
 
 export class CompilerHostReviewRequiredError extends Error {
   constructor(detail: string) {
@@ -358,6 +439,99 @@ export class CompilerProposalObligations {
     if (oldSelectors.some((s, i) => contentHash(binding(s)) !== contentHash(binding(newSelectors[i])))) throw new Error("Host selector correction must preserve assertion targets and strengths.");
     return hostProposalCorrection.run({ root: this.root, sourceId: this.sourceId, batchId: this.batchId, ...identity,
       priorHash: contentHash(last), used: false, hostReview: { reason, auditRef } }, action);
+  }
+  /** Derive one immutable, source-annotation selector correction from exhausted model inputs.
+   * The host may only reuse exact spans already attempted at the same selector paths; all
+   * non-selector semantics and segment bindings must remain identical.
+   */
+  inspectAnnotationSelectorCorrection(toolInput: string, input: unknown): AnnotationSelectorCorrection {
+    const tool = sourceAnnotationProposalToolSchema.parse(toolInput);
+    const identity = CompilerProposalObligations.identity(tool, input);
+    const history = this.history(tool, identity.proposalId);
+    const last = history.at(-1);
+    if (last?.status !== "failed" || history.some(attempt => attempt.hostReview)
+      || history.some(attempt => !["running", "failed"].includes(attempt.status))) {
+      throw new Error("Annotation selector correction requires one unresolved, unreviewed failed identity.");
+    }
+    const failed = [...new Map(history.filter(attempt => attempt.status === "failed")
+      .map(attempt => [attempt.inputHash, attempt])).values()];
+    if (failed.length < 2) throw new Error("Annotation selector correction requires the exhausted original and corrected inputs.");
+    if (failed.some(attempt => attempt.tool !== tool || attempt.proposalId !== identity.proposalId)) {
+      throw new Error("Annotation selector correction history changed tool or proposal identity.");
+    }
+    const failedProjections = failed.map(attempt => annotationSelectorProjection(tool, attempt.input));
+    const correctedProjection = annotationSelectorProjection(tool, input);
+    const semanticHash = contentHash(failedProjections[0]!.record);
+    if (failedProjections.some(projection => contentHash(projection.record) !== semanticHash)
+      || contentHash(correctedProjection.record) !== semanticHash) {
+      throw new Error("Annotation selector correction cannot change non-selector semantics, selector slots, or segment scope.");
+    }
+    const paths = correctedProjection.entries.map(entry => entry.path);
+    for (const projection of failedProjections) {
+      if (contentHash(projection.entries.map(entry => entry.path)) !== contentHash(paths)) {
+        throw new Error("Annotation selector correction cannot add, remove, or reorder selector slots.");
+      }
+    }
+    for (const [index, corrected] of correctedProjection.entries.entries()) {
+      const prior = failedProjections.map(projection => projection.entries[index]!);
+      if (prior.some(entry => entry.selector.segment_id !== corrected.selector.segment_id)) {
+        throw new Error(`Annotation selector correction cannot change segment scope at ${corrected.path}.`);
+      }
+      if (!prior.some(entry => entry.selector.exact === corrected.selector.exact)) {
+        throw new Error(`Annotation selector correction at ${corrected.path} must reuse an exact span from the failed history.`);
+      }
+    }
+    const failedInputHashes = failed.map(attempt => attempt.inputHash).sort();
+    if (failedInputHashes.includes(identity.inputHash)) {
+      throw new Error("Annotation selector correction must differ from every failed input.");
+    }
+    return annotationSelectorCorrectionSchema.parse({
+      version: 1,
+      sourceId: this.sourceId,
+      batchId: this.batchId,
+      tool,
+      proposalId: identity.proposalId,
+      inputHash: identity.inputHash,
+      failedInputHashes,
+      historyHash: contentHash(history),
+      selectorBindings: correctedProjection.entries.map(entry => ({
+        path: entry.path,
+        segmentId: entry.selector.segment_id,
+        exactHash: contentHash(entry.selector.exact),
+        selectorHash: contentHash(entry.selector),
+      })),
+    });
+  }
+  /** Under the compiler lock, execute one reviewed annotation selector correction through
+   * the normal proposal schema, immutable-source anchor resolver, and proposal lifecycle.
+   */
+  async withHostAnnotationSelectorCorrection<T>(
+    tool: string,
+    input: unknown,
+    bindingInput: AnnotationSelectorCorrection,
+    reason: string,
+    auditRef: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    if (!reason.trim() || !auditRef.trim() || hostProposalCorrection.getStore()) {
+      throw new Error("A separate host review and audit reference are required.");
+    }
+    const binding = annotationSelectorCorrectionSchema.parse(bindingInput);
+    const expected = this.inspectAnnotationSelectorCorrection(tool, input);
+    if (contentHash(binding) !== contentHash(expected)) {
+      throw new Error("Annotation selector correction differs from its exact failed history or reviewed input.");
+    }
+    const identity = CompilerProposalObligations.identity(tool, input);
+    const last = this.history(tool, identity.proposalId).at(-1)!;
+    return hostProposalCorrection.run({
+      root: this.root,
+      sourceId: this.sourceId,
+      batchId: this.batchId,
+      ...identity,
+      priorHash: contentHash(last),
+      used: false,
+      hostReview: { reason, auditRef, annotationSelectorCorrection: binding },
+    }, action);
   }
   /** Exact host-only recovery of a failed upstream slot; the upstream ledger owns its bounded grant. */
   async withHostUpstreamCorrection<T>(tool: string, input: unknown, planHash: string, attemptRef: string, action: () => Promise<T>): Promise<T> {
@@ -581,7 +755,7 @@ export class CompilerProposalObligations {
       throw new CompilerHostReviewRequiredError("the original and corrected inputs both failed");
     }
   }
-  record(tool: string, input: unknown, status: ProposalAttempt["status"], diagnostic = "") {
+  record(tool: string, input: unknown, status: ProposalAttempt["status"], diagnostic = "", diagnosticContext?: ToolDiagnosticContext) {
     const identity = CompilerProposalObligations.identity(tool, input);
     const ledger = this.read(identity);
     // Idempotent successful replays need only the latest receipt. Keep every
@@ -594,8 +768,17 @@ export class CompilerProposalObligations {
     const reviewed = host && host.root === this.root && host.sourceId === this.sourceId && host.batchId === this.batchId
       && host.tool === tool && host.proposalId === identity.proposalId && host.inputHash === identity.inputHash;
     if (reviewed && status === "running") host.used = true;
-    ledger.attempts.push({ ...identity, input, status, diagnostic, updatedAt: new Date().toISOString(),
+    ledger.attempts.push({ ...identity, input, status, diagnostic, ...(diagnosticContext ? { diagnosticContext } : {}), updatedAt: new Date().toISOString(),
       ...(reviewed ? { hostReview: host.hostReview } : {}) });
+    const latest = ledger.attempts.at(-1)!;
+    if (status === "failed" && latest.diagnosticContext) {
+      const lastResolution = ledger.attempts.findLastIndex(item => item.status === "succeeded" || item.status === "unsupported");
+      const failures = new Set(ledger.attempts.slice(lastResolution + 1).filter(item => item.status === "failed").map(item => item.inputHash));
+      latest.diagnosticContext = { ...latest.diagnosticContext, retry: {
+        sourceId: this.sourceId, batchId: this.batchId, proposalId: identity.proposalId,
+        correctedRetryAvailable: failures.size < 2,
+      } };
+    }
     this.write(ledger);
   }
   assertFinishable() {

@@ -113,6 +113,27 @@ describe("agent tool recovery", () => {
     expect(formatNwhToolError("propose_entity_mention", new Error(diagnostic))).toContain(diagnostic);
   });
 
+  it("keeps a valid exact quote and repairs only invented optional context", () => {
+    const segmentId = "source-1-00019-acde1234";
+    const diagnostic = `trigger_selector: Exact evidence quote occurs 1 time(s) in segment ${segmentId}, but none match the supplied prefix/suffix context. Keep exact unchanged; optional context must be the immediate verbatim text adjacent to that occurrence.`;
+    const advice = buildNwhToolRecoveryAdvice("propose_event_mention", diagnostic, {
+      activeToolNames: ["propose_event_mention", "read_source_evidence"],
+    });
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "read_source_evidence",
+        arguments: { ref: `source-segment:${segmentId}`, offset: 0, max_chars: 120_000 },
+      },
+    });
+    const steps = advice.steps.join(" ");
+    expect(steps).toContain("Keep exact unchanged");
+    expect(steps).toContain("Remove prefix, suffix, and occurrence");
+    expect(steps).toContain("same tool, proposal_id, logical annotation ID");
+    expect(steps).toContain("never rotate IDs or make a third attempt");
+  });
+
   it.each([
     "Exact evidence quote is ambiguous in segment source-1-00009: 2 occurrences match.",
     "Exact evidence quote was not found in segment source-1-00009.",

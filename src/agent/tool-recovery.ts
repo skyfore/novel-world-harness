@@ -1,3 +1,4 @@
+import { ToolDiagnosticError, type ToolDiagnosticContext } from "./tool-diagnostic.js";
 import { validateToolArguments, type ToolCall } from "@earendil-works/pi-ai";
 import type {
   ExtensionFactory,
@@ -27,6 +28,7 @@ export type NwhToolRecoveryAdvice = {
   retryable: boolean;
   retryCondition: string;
   steps: string[];
+  context?: ToolDiagnosticContext;
   suggestedCall?: {
     tool: string;
     arguments: Record<string, unknown>;
@@ -926,6 +928,30 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const contextMismatch = /exact evidence quote occurs (\d+) time\(s\) in segment ([a-z0-9][a-z0-9._-]*), but none match the supplied prefix\/suffix context\./iu.exec(errorText);
+  if (COMPILER_PROPOSAL_TOOLS.has(toolName) && contextMismatch) {
+    const occurrenceCount = Number.parseInt(contextMismatch[1]!, 10);
+    const segmentId = contextMismatch[2]!;
+    const sourceRead = exactSourceRecovery(segmentId, scope);
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry once only after repairing the named selector's optional disambiguation context from the complete active-source segment.",
+      steps: [
+        ...sourceRead.steps,
+        "The selector's exact field already exists in the named segment. Keep exact unchanged; do not replace a valid quote to compensate for invented or distant context.",
+        occurrenceCount === 1
+          ? "This exact wording is unique in the complete segment. Remove prefix, suffix, and occurrence from the named selector; no disambiguation is needed."
+          : `This exact wording occurs ${occurrenceCount} times. Copy only the immediate verbatim prefix/suffix around the intended occurrence, or use its one-based occurrence in the complete segment.`,
+        "Correct every selector path listed by the diagnostic while retaining the same tool, proposal_id, logical annotation ID, participants, and source scope.",
+        `Retry ${toolName} once after that concrete context correction. If the corrected input fails, stop for host review; never rotate IDs or make a third attempt.`,
+      ],
+      ...(sourceRead.suggestedCall ? { suggestedCall: sourceRead.suggestedCall } : {}),
+    };
+  }
+
   const exactQuoteSegment = /exact evidence quote was not found in segment ([a-z0-9][a-z0-9._-]*?)(?: with the supplied context)?\./iu.exec(errorText)?.[1];
   if (COMPILER_PROPOSAL_TOOLS.has(toolName) && exactQuoteSegment) {
     const sourceRead = exactSourceRecovery(exactQuoteSegment, scope);
@@ -1044,7 +1070,17 @@ export function formatNwhToolError(toolName: string, error: unknown, scope?: Nwh
   const message = errorMessage(error);
   if (hasNwhToolRecovery(message)) return message;
   const advice = buildNwhToolRecoveryAdvice(toolName, message, scope);
-  return `${message}\n\n${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2)}\n${NWH_TOOL_RECOVERY_END_MARKER}`;
+  if (error instanceof ToolDiagnosticError) {
+    advice.context = error.diagnostic;
+    if (advice.retryable) advice.steps = [...error.diagnostic.steps, ...advice.steps];
+    if (error.diagnostic.retry?.correctedRetryAvailable === false) {
+      advice.retryable = false;
+      advice.category = "host-repair-required";
+      advice.retryCondition = "The durable proposal retry allowance is exhausted or blocked; host review is required.";
+      advice.steps = ["Stop model submissions for this obligation. Preserve all drafts, source scope, identities and failure history; do not change IDs or restart to reset the allowance.", "Give the host the complete diagnostic and scoped proposal history for source repair and verification."];
+    }
+  }
+  return `${message}\n\n${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2).replace(/</g, "\\u003c")}\n${NWH_TOOL_RECOVERY_END_MARKER}`;
 }
 
 export function actionableToolError(toolName: string, error: unknown, scope?: NwhToolRecoveryScope): Error {
@@ -1073,14 +1109,14 @@ export function recoverNwhToolResult(event: ToolResultEvent, scope?: NwhToolReco
   const blocked = toolResultWasBlocked(event.details);
   if (!event.isError && !blocked) return undefined;
   const message = toolResultErrorText(event);
-  const advice = buildNwhToolRecoveryAdvice(event.toolName, message, scope);
+  const advice = readNwhToolRecovery(event, event.toolName) ?? buildNwhToolRecoveryAdvice(event.toolName, message, scope);
   const content = hasNwhToolRecovery(message)
     ? event.content
     : [
         ...event.content,
         {
           type: "text" as const,
-          text: `${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2)}\n${NWH_TOOL_RECOVERY_END_MARKER}`,
+          text: `${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2).replace(/</g, "\\u003c")}\n${NWH_TOOL_RECOVERY_END_MARKER}`,
         },
       ];
   const existingDetails = event.details && typeof event.details === "object" && !Array.isArray(event.details)

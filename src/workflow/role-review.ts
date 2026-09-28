@@ -4,8 +4,13 @@ import { COMPILER_TOOL_NAMES } from "../compiler/proposal-tools.js";
 import { loadCurrentRoleRoster, ROLE_ROSTER_TOOL_NAMES } from "../compiler/role-roster-tools.js";
 import { validateRoleRoster } from "../compiler/role-roster.js";
 import { registerReviewedCoreRoles } from "../compiler/core-role-requirement-service.js";
+import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
 export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "prompt" | "compilerBatchId"> & { sourceId: string }, compile = compileCommand): Promise<void> {
+  if (options.acquireLock !== false) {
+    return withWorkspaceOperationLock(options.root, "compiler", () =>
+      reviewNovelRoles({ ...options, acquireLock: false }, compile));
+  }
   const { CompilerFinishReceipts } = await import("../compiler/finish-receipts.js");
   const { recoverCompilerFinish } = await import("../compiler/finish-recovery.js");
   for (const receipt of await CompilerFinishReceipts.list(options.root, options.sourceId)) {

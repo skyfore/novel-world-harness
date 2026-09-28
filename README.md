@@ -64,6 +64,12 @@ and resumable candidate rebuild. See the
 for completed changes and remaining acceptance work. Complete-novel live Pi
 certification has not yet been demonstrated by this branch.
 
+The [novel compilation protocol](docs/novel-compilation-protocol.zh-CN.md)
+defines reusable stage handoffs, missing-work tracking, bounded incremental
+repair, and completion evidence for every novel. Batch progress, candidate
+archival, global closure, certification, and activation are separate results;
+the protocol distinguishes required behavior from automation still to implement.
+
 The browser MVP's requirement-to-code-to-test release gate is recorded in the
 [Web UI MVP acceptance matrix](docs/web-ui-mvp-acceptance.zh-CN.md).
 

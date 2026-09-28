@@ -247,6 +247,51 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("do not re-propose a checkpointed pending identity");
   });
 
+  it("routes event-resolution graph repair through its dedicated store", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "finish_compiler_batch",
+      "Event-resolution graph is incomplete:\n"
+        + "- resolution-gate-opening-001-v2: supersedes unknown current resolution 'resolution-gate-opening-001'\n"
+        + "- resolution-gate-opening-001-v2: supersedesResolutionIds must exactly match current resolution(s): (none)",
+    );
+
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_event_resolutions",
+        arguments: { query: "resolution-gate-opening-001-v2", status: "pending", max_results: 20 },
+      },
+    });
+    const steps = advice.steps.join(" ");
+    expect(steps).toContain("results[].ref into read_event_resolution.ref");
+    expect(steps).toContain("find_compiler_artifacts does not index event-resolution records");
+    expect(steps).toContain("proposalId envelope distinct from resolutionId and eventMentionIds");
+    expect(steps).toContain("reports current resolutions as (none), use an empty array");
+    expect(steps).toContain("Preserve resolution_id");
+  });
+
+  it("uses the failed event-mention ID as a distinctive same-scope discovery query", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "find_event_resolution_candidates",
+      "Event mention not found: event-mention-gate-opening-001",
+    );
+
+    expect(advice).toMatchObject({
+      category: "lookup-miss",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_source_annotations",
+        arguments: {
+          query: "gate-opening-001",
+          annotation_type: "event-mention",
+          max_results: 20,
+        },
+      },
+    });
+    expect(advice.steps.join(" ")).toContain("exact annotationId into event_mention_id");
+  });
+
   it("repairs only named dangling annotation references with exact logical annotation IDs", () => {
     const advice = buildNwhToolRecoveryAdvice(
       "finish_compiler_batch",

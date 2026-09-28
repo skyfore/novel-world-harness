@@ -28,6 +28,8 @@ import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { EntityResolutionStore } from "../src/compiler/entity-resolution.js";
+import { SourceAnnotationStore } from "../src/compiler/annotations.js";
+import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
 import { buildNwhToolRecoveryAdvice, NWH_TOOL_RECOVERY_MARKER } from "../src/agent/tool-recovery.js";
 
 const roots: string[] = [];
@@ -539,6 +541,53 @@ describe("compiler batches", () => {
     expect(hydrated.prompt).toContain('"logicalId":"person-recovered"');
     expect(hydrated.prompt).toContain("this is a recovery attempt");
     expect(hydrated.prompt).toContain("start recovery by calling finish_compiler_batch once");
+  });
+
+  it("hydrates exact pending source-annotation identities and store-specific recovery tools", async () => {
+    const { root, source } = await fixture();
+    const batch = (await prepareCompilerBatches(root, source))
+      .find((candidate) => candidate.semanticStage === "observation")!;
+    const sourceBytes = await fs.readFile(path.join(root, source.sourcePath));
+    const triggerBytes = Buffer.from("行动");
+    const startByte = sourceBytes.indexOf(triggerBytes);
+    expect(startByte).toBeGreaterThanOrEqual(0);
+    const anchor = textAnchorForByteRange(source.id, sourceBytes, startByte, startByte + triggerBytes.byteLength);
+    await new SourceAnnotationStore(root).stage(source.id, {
+      version: 1,
+      id: "mention-action-v2",
+      annotationType: "event-mention",
+      payload: {
+        version: 1,
+        id: "mention-action",
+        sourceId: source.id,
+        annotationType: "event-mention",
+        triggerAnchor: anchor,
+        trigger: "行动",
+        extentAnchors: [anchor],
+        eventTypeCandidates: ["other"],
+        participantMentionIds: [],
+        salience: "supporting",
+        confidence: 0.8,
+        derivation: {
+          runId: batch.id,
+          worker: "test",
+          compilerBatchId: batch.id,
+          ontologyVersion: "observation-v1",
+        },
+      },
+      generatedBy: { worker: "test", compilerBatchId: batch.id },
+      createdAt: new Date(0).toISOString(),
+    });
+
+    const hydrated = await hydrateCompilerBatch(root, batch);
+
+    expect(hydrated.prompt).toContain('"proposalId":"mention-action-v2"');
+    expect(hydrated.prompt).toContain('"kind":"event-mention"');
+    expect(hydrated.prompt).toContain('"logicalId":"mention-action"');
+    expect(hydrated.prompt).toContain('"proposalStatus":"pending"');
+    expect(hydrated.prompt).toContain("find_source_annotations/read_source_annotation");
+    expect(hydrated.prompt).toContain("find_event_resolutions/read_event_resolution");
+    expect(hydrated.prompt).toContain("Keep envelope proposalId, payload logical IDs");
   });
 
   it("hydrates schema preflight failures as unresolved without interpreting diagnostic prose", async () => {

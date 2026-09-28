@@ -197,7 +197,16 @@ function lookupMiss(lower: string): boolean {
     || /\bnot (?:available|discoverable|registered)\b/u.test(lower);
 }
 
-function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | undefined {
+function failedMentionQuery(errorText: string, kind: "entity" | "event"): string | undefined {
+  const label = kind === "entity" ? "entity" : "event";
+  const failedId = new RegExp(`${label} mention (?:was )?not found:?\\s*['\"]?([A-Za-z0-9][A-Za-z0-9._-]*)`, "iu")
+    .exec(errorText)?.[1];
+  if (!failedId) return undefined;
+  const distinctive = failedId.replace(new RegExp(`^${label}-mention-`, "iu"), "");
+  return distinctive || failedId;
+}
+
+function lookupAdvice(toolName: string, lower: string, errorText: string): NwhToolRecoveryAdvice | undefined {
   const direct = LOOKUP_RECOVERY[toolName];
   if (toolName === "read_source_annotation") {
     const ref = /source annotation ref '([^']+)'/u.exec(lower)?.[1];
@@ -231,6 +240,7 @@ function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | 
   }
 
   if (toolName === "find_entity_resolution_candidates") {
+    const query = failedMentionQuery(errorText, "entity") ?? "*";
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
@@ -244,12 +254,13 @@ function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | 
       ],
       suggestedCall: {
         tool: "find_source_annotations",
-        arguments: { query: "*", annotation_type: "entity-mention", max_results: 20 },
+        arguments: { query, annotation_type: "entity-mention", max_results: 20 },
       },
     };
   }
 
   if (toolName === "find_event_resolution_candidates") {
+    const query = failedMentionQuery(errorText, "event") ?? "*";
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
@@ -263,7 +274,7 @@ function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | 
       ],
       suggestedCall: {
         tool: "find_source_annotations",
-        arguments: { query: "*", annotation_type: "event-mention", max_results: 20 },
+        arguments: { query, annotation_type: "event-mention", max_results: 20 },
       },
     };
   }
@@ -891,6 +902,33 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const eventResolutionGraphProposalId = toolName === "finish_compiler_batch"
+    && /event-resolution graph is incomplete:/iu.test(errorText)
+    ? /^-\s+([A-Za-z0-9][A-Za-z0-9._-]*):/mu.exec(errorText)?.[1]
+    : undefined;
+  if (toolName === "finish_compiler_batch" && /event-resolution graph is incomplete:/iu.test(errorText)) {
+    const query = eventResolutionGraphProposalId ?? "*";
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry finish once only after the named event-resolution draft and its exact source-annotation dependencies have been read and concretely corrected.",
+      steps: [
+        `Call find_event_resolutions with query=${JSON.stringify(query)} and status=pending in this active source. Copy results[].ref into read_event_resolution.ref; find_compiler_artifacts does not index event-resolution records.`,
+        "Keep the returned proposalId envelope distinct from resolutionId and eventMentionIds in the payload. Read the pending resolution before editing. Preserve resolution_id when correcting the same logical decision; use a new envelope proposal_id for a staged successor, or retain the exact failed proposal_id when a durable obligation permits its one corrected input.",
+        "For a missing or uncertain event mention, call find_source_annotations with a distinctive fragment of the named eventMentionId and annotation_type=event-mention. Copy results[].annotationId into find_event_resolution_candidates.event_mention_id; never copy the annotation proposalId or ref.",
+        "Set supersedes_resolution_ids only to exact current resolutionId values returned by find_event_resolutions with status=current. If the diagnostic reports current resolutions as (none), use an empty array; rejected history and pending envelope IDs are not current resolutions.",
+        "Include the selected canonical event and relation in candidates exactly as authorized by find_event_resolution_candidates. After the corrected successor stages successfully, withdraw only the defective pending predecessor envelope and preserve every unrelated draft.",
+        `Retry ${toolName} once after concrete proposal progress. If discovery is ambiguous, the corrected proposal fails, or the same full diagnostic repeats, stop for host review instead of guessing or looping.`,
+      ],
+      suggestedCall: {
+        tool: "find_event_resolutions",
+        arguments: { query, status: "pending", max_results: 20 },
+      },
+    };
+  }
+
   if (toolName === "finish_compiler_batch" && /(?:graph|trace) is incomplete|deterministic canonical commit preview(?: is incomplete)?:/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -900,7 +938,7 @@ export function buildNwhToolRecoveryAdvice(
       retryCondition: "Retry once only after correcting every reported graph/trace section through successful propose, withdraw, or replace calls.",
       steps: [
         "Treat the complete finish diagnostic as one validation report; preserve valid drafts and correct each listed logical dependency or trace.",
-        "These finish diagnostics refer to already-staged drafts. Discover their current pending refs with find_compiler_artifacts, copy the returned ref into read_compiler_artifact, and inspect the exact draft before editing. A successful draft is immutable: stage a specifically corrected replacement under a fresh envelope ID, preserve the stable artifact ID, then withdraw only its superseded successful predecessor. Never overwrite a successful ID or revive a withdrawn ID; use the latest active successor on subsequent repairs.",
+        "These finish diagnostics refer to already-staged drafts. Use the draft's owning store: find_source_annotations/read_source_annotation for observations, find_identity_resolutions/read_identity_resolution for entity resolutions, find_event_resolutions/read_event_resolution for event resolutions, and find_compiler_artifacts/read_compiler_artifact only for world proposals. Copy the exact finder ref into its paired reader and inspect the draft before editing. A successful draft is immutable: stage a specifically corrected replacement under a fresh envelope ID, preserve the stable logical ID, then withdraw only its superseded successful predecessor. Never overwrite a successful ID or revive a withdrawn ID; use the latest active successor on subsequent repairs.",
         "Repair only named defects. Restore SCENE_EVENT_BACKLINK_REQUIRED scene IDs without dropping any existing fields. For INACTIONABLE_CHARACTER_ENTRY, establish the named actor's source-backed pre-event location, plan or momentum; do not invent state or remove an entry just to pass. Leave unrelated active drafts unchanged.",
         "For entity identity, call find_entity_resolution_candidates and follow its resolutionMode: resolved reuses canonical/checkpointed identity, while new-entity requires a same-finish entity proposal.",
         "Use source-scoped finder results only when an exact existing ID is genuinely missing; do not re-propose a checkpointed pending identity or guess a replacement ID.",
@@ -1011,7 +1049,7 @@ export function buildNwhToolRecoveryAdvice(
   }
 
   if (lookupMiss(lower)) {
-    const advice = lookupAdvice(toolName, lower);
+    const advice = lookupAdvice(toolName, lower, errorText);
     if (advice) return advice;
   }
 

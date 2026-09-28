@@ -20,6 +20,7 @@ import { InitialWorldStore } from "../src/world/initial.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { preparedSubjectHash } from "../src/compiler/certification.js";
+import { WorkspaceOperationLock } from "../src/util/workspace-lock.js";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -74,6 +75,8 @@ it("preserves legacy reviews, recovers the revision pointer and completes two in
   let calls = 0;
   await reviewNovelRoles({ root: f.root, sourceId: f.source.source.id, configPath: path.join(f.root, "absent.yaml") }, async options => {
     calls++;
+    expect(options.acquireLock).toBe(false);
+    expect((await WorkspaceOperationLock.inspect(f.root)).owner?.pid).toBe(process.pid);
     await (await prepareReview(f.root, f.source.source.id, options.compilerBatchId!))();
     if (calls === 1) {
       await beginCoreRoleReviewRevision(f.root, f.input);

@@ -17,7 +17,7 @@ export async function rebuildCommand(options: RepairExistingCommandOptions): Pro
   if (!source) throw new Error(`REBUILD_SOURCE_REQUIRED: select --source from registered sources: ${sources.map((item) => item.id).join(", ") || "(none; ingest the original novel first)"}`);
   const cache = new PreparedNovelCache(options.root, options.cacheRoot), journal = await new RepairRunStore(options.root).read(source.id);
   const active = await cache.lookup(source);
-  let parent = journal?.baselineBundleHash ?? options.fromRevision ?? active.bundleHash;
+  const parent = journal?.baselineBundleHash ?? options.fromRevision ?? active.bundleHash;
   if (!parent) {
     const initial = await new InitialWorldStore(options.root).get();
     const batches = await prepareCompilerBatches(options.root, source), progress = await new CompilerBatchStore(options.root).read(source.id);
@@ -28,7 +28,9 @@ export async function rebuildCommand(options: RepairExistingCommandOptions): Pro
       stdout.write(`${JSON.stringify({ sourceId: source.id, candidateBundleHash: candidate.bundleHash, activeBundleHash: (await cache.lookup(source)).bundleHash ?? null }, null, 2)}\n`);
       return;
     }
-    parent = (await cache.archiveCandidate(source)).bundleHash;
+    const candidate = await cache.archiveCandidate(source);
+    stdout.write(`${JSON.stringify({ sourceId: source.id, candidateBundleHash: candidate.bundleHash, activeBundleHash: (await cache.lookup(source)).bundleHash ?? null }, null, 2)}\n`);
+    return;
   }
   const result = await repairExistingCommand({ ...options, sourceId: source.id, fromRevision: parent, candidateOnly: true, acquireLock: false });
   stdout.write(`${JSON.stringify(result, null, 2)}\n`);

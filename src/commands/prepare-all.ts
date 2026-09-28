@@ -427,6 +427,7 @@ export async function prepareAllCommand(
     report("Reviewing the independent major-character roster before planning semantic repairs.");
     try { await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
       ...(options.model ? { model: options.model } : {}), signal: options.signal,
+      acquireLock: false,
       onStatus: options.onStatus, onModelText: options.onModelText, onModelThinking: options.onModelThinking,
       onModelToolCall: options.onModelToolCall, onModelToolResult: options.onModelToolResult, onModelEvent: options.onModelEvent,
     }, dependencies.compileInitialWorld); } catch (error) {

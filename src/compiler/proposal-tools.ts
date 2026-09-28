@@ -2953,7 +2953,10 @@ export function createCompilerProposalToolset(
     try { journal.assertRetryAllowed(tool, input); } catch { correctedRetryAvailable = false; }
     const diagnostic = error instanceof ToolDiagnosticError ? error.diagnostic
       : { code: "COMPILER_PROPOSAL_FAILED", issues: [], steps: [] };
-    return new ToolDiagnosticError(error instanceof Error ? error.message : String(error), {
+    const message = error instanceof Error ? error.message : String(error);
+    const recoveryMessage = !correctedRetryAvailable && tool.startsWith("propose_role_roster_")
+      ? `${message.split("\nRecovery SOP:")[0]}\nStop model submissions: the durable retry allowance is exhausted. Preserve this source, batch, candidate and failed inputs for host review; do not retry, rotate IDs or finish with no-artifacts.` : message;
+    return new ToolDiagnosticError(recoveryMessage, {
       ...diagnostic,
       retry: { sourceId: activeSourceId!, batchId: compilerBatchId!,
         proposalId: CompilerProposalObligations.identity(tool, input).proposalId, correctedRetryAvailable },

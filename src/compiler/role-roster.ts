@@ -91,26 +91,39 @@ export function buildRoleRoster(input: {
   }), reviews: [] });
 }
 
-export function validateRosterReview(roster: RoleRoster, review: RoleRosterReview): ValidationIssue[] {
+export function validateRosterReview(roster: RoleRoster, review: RoleRosterReview, options: { partial?: boolean } = {}): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const fail = (code: string, message: string) => issues.push({ code, message });
+  const fail = (code: string, message: string, path?: string) => issues.push({ code, message, ...(path ? { path } : {}) });
   if (review.reviewRevisionId !== roster.reviewRevisionId) fail("ROSTER_REVIEW_REVISION_STALE", "Review belongs to another host review revision. Preserve its receipt and stop model retries; do not replay it into the new review.");
   if (review.subjectHash !== roster.subjectHash) fail("ROSTER_STALE_REVIEW", "Roster review refers to stale source or identity inputs");
   if (roster.extractionRunIds.includes(review.runId) || roster.reviews.some((x) => x.runId === review.runId)) fail("ROSTER_INDEPENDENT_REVIEW_REQUIRED", "Review must use a separate run from extraction and the other review");
   const expected = new Set(roster.candidates.map((x) => x.id));
   const actual = new Set(review.entries.map((x) => x.candidateId));
-  if (actual.size !== review.entries.length || actual.size !== expected.size || [...expected].some((id) => !actual.has(id))) fail("ROSTER_DENOMINATOR_MISMATCH", "Review must classify every candidate exactly once, including unresolved people");
+  const missing = roster.candidates.filter(candidate => !actual.has(candidate.id)).map(candidate => candidate.id);
+  const unknown = [...actual].filter(id => !expected.has(id));
+  const seen = new Set<string>(), duplicates = new Set<string>();
+  for (const entry of review.entries) { if (seen.has(entry.candidateId)) duplicates.add(entry.candidateId); seen.add(entry.candidateId); }
+  if ((!options.partial && missing.length) || unknown.length || duplicates.size) {
+    fail("ROSTER_DENOMINATOR_MISMATCH", `Review must classify every candidate exactly once, including unresolved people. ${JSON.stringify({ missingCandidateIds: missing, unknownCandidateIds: unknown, duplicateCandidateIds: [...duplicates] })}`, "entries");
+  }
   const units = new Set(roster.unitIds);
   if (new Set(review.reviewedUnitIds).size !== units.size || review.reviewedUnitIds.some((id) => !units.has(id))) fail("ROSTER_FULL_SOURCE_REVIEW_REQUIRED", "Review must account for the complete source unit inventory");
-  for (const entry of review.entries) {
-    if (entry.basisUnitIds.some((id) => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Role ${entry.candidateId} uses an unknown source unit`);
+  const checkUnits = (ids: string[], path: string) => ids.forEach((id, index) => {
+    if (!units.has(id)) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Unknown source unit ${id}`, `${path}/${index}`);
+  });
+  review.entries.forEach((entry, index) => {
+    const path = `/entries/${index}`;
+    checkUnits(entry.basisUnitIds, `${path}/basisUnitIds`);
     const development = entry.developmentExpectation;
-    if (review.version === 2 && !development) fail("ROSTER_DEVELOPMENT_EXPECTATION_REQUIRED", `Role ${entry.candidateId} needs an independent source development expectation, including unknown when evidence is insufficient`);
-    if (!development) continue;
-    const references = development.kind === "changes" ? development.changes.flatMap(change => [...change.beforeUnitIds, ...change.afterUnitIds]) : development.basisUnitIds;
-    if (references.some(id => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Role ${entry.candidateId} development expectation uses an unknown source unit`);
-  }
-  for (const omitted of review.missingMajorCharacters ?? []) if (omitted.basisUnitIds.some((id) => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Omitted major ${omitted.name} uses an unknown source unit`);
+    if (review.version === 2 && !development) fail("ROSTER_DEVELOPMENT_EXPECTATION_REQUIRED", `Role ${entry.candidateId} needs an independent source development expectation, including unknown when evidence is insufficient`, path);
+    if (!development) return;
+    if (development.kind === "changes") development.changes.forEach((change, changeIndex) => {
+      checkUnits(change.beforeUnitIds, `${path}/developmentExpectation/changes/${changeIndex}/beforeUnitIds`);
+      checkUnits(change.afterUnitIds, `${path}/developmentExpectation/changes/${changeIndex}/afterUnitIds`);
+    });
+    else checkUnits(development.basisUnitIds, `${path}/developmentExpectation/basisUnitIds`);
+  });
+  (review.missingMajorCharacters ?? []).forEach((omitted, index) => checkUnits(omitted.basisUnitIds, `/missingMajorCharacters/${index}/basisUnitIds`));
   return issues;
 }
 

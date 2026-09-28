@@ -33,7 +33,7 @@ it("requires full source reading and the real finish handshake before persisting
   const premature = call("propose_role_roster_review", { subjectHash: data.subjectHash, entries: [{ candidateId: data.candidates[0]!.id, importance: "major", rationale: "Central action", basisUnitIds: ["guessed"], developmentExpectation: { kind: "unknown", rationale: "Insufficient evidence", basisUnitIds: ["guessed"] } }] });
   await expect(premature).rejects.toThrow("read_roster_source_page");
   const page = await call("read_roster_source_page", { page: 0 });
-  const units = JSON.parse((page.content[0] as { text: string }).text).unitIds as string[];
+  const units = JSON.parse((page.content[0] as { text: string }).text).units.flatMap((unit: { unitId: string | null }) => unit.unitId ? [unit.unitId] : []) as string[];
   await call("propose_role_roster_review", { subjectHash: data.subjectHash, entries: [{ candidateId: data.candidates[0]!.id, importance: "major", rationale: "Central action", basisUnitIds: [units[0]!], developmentExpectation: { kind: "unknown", rationale: "A single act cannot establish development", basisUnitIds: [units[0]!] } }] });
   expect(await new RoleRosterStore(root).read(fixture.source.id)).toBeNull();
   const finished = await call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent whole-source character review complete" });
@@ -86,8 +86,8 @@ it("recovers role requirement registration after finish persisted the second rev
     const roster = JSON.parse(((await call("read_role_roster", { offset: 0 })).content[0] as { text: string }).text);
     const page = JSON.parse(((await call("read_roster_source_page", { page: 0 })).content[0] as { text: string }).text);
     await call("propose_role_roster_review", { subjectHash: roster.subjectHash, entries: [{ candidateId: roster.candidates[0].id,
-      importance: "major", rationale: "Central actor", basisUnitIds: page.unitIds,
-      developmentExpectation: { kind: "unknown", rationale: "Insufficient development evidence", basisUnitIds: page.unitIds },
+      importance: "major", rationale: "Central actor", basisUnitIds: page.units.flatMap((unit: { unitId: string | null }) => unit.unitId ? [unit.unitId] : []),
+      developmentExpectation: { kind: "unknown", rationale: "Insufficient development evidence", basisUnitIds: page.units.flatMap((unit: { unitId: string | null }) => unit.unitId ? [unit.unitId] : []) },
     }] });
     if (index === 2) vi.spyOn(RequirementLedger.prototype, "registerCoreRoles").mockRejectedValueOnce(new Error("simulated ledger publication interruption"));
     const finish = call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent full source review" });

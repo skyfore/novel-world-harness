@@ -36,7 +36,7 @@ it("finishes two real independent reviews before the first semantic repair plan 
         const call = (name: string, input: unknown) => tools.tools.find(tool => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
         const roster = JSON.parse(((await call("read_role_roster", { offset: 0 })).content[0] as { text: string }).text);
         const page = JSON.parse(((await call("read_roster_source_page", { page: 0 })).content[0] as { text: string }).text);
-        await call("propose_role_roster_review", { subjectHash: roster.subjectHash, entries: [{ candidateId: roster.candidates[0].id, importance: "major", rationale: "Central source actor", basisUnitIds: page.unitIds, developmentExpectation: { kind: "unknown", rationale: "Short source does not establish development", basisUnitIds: page.unitIds } }] });
+        await call("propose_role_roster_review", { subjectHash: roster.subjectHash, entries: [{ candidateId: roster.candidates[0].id, importance: "major", rationale: "Central source actor", basisUnitIds: page.units.flatMap((unit: { unitId: string | null }) => unit.unitId ? [unit.unitId] : []), developmentExpectation: { kind: "unknown", rationale: "Short source does not establish development", basisUnitIds: page.units.flatMap((unit: { unitId: string | null }) => unit.unitId ? [unit.unitId] : []) } }] });
         await call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent original-source review" });
         return;
       }

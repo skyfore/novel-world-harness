@@ -616,6 +616,24 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  if (["read_role_roster", "read_roster_source_page", "read_roster_evidence", "preview_role_roster_review", "propose_role_roster_entry", "propose_role_roster_review"].includes(toolName)) {
+    const diagnostic = lower.split("\nrecovery sop:")[0]!;
+    if (/^(?:staged role entry belongs|role entry review revision is stale|role source identity|roster source structure|roster review source|role-roster tools require)|roster_stale_review|roster_review_revision_stale/u.test(diagnostic)) {
+      return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+        retryCondition: "The host must restore or review the original source, review revision and batch before any retry.",
+        steps: ["Stop. Preserve the exact scope, successful drafts and failure history; do not guess IDs, change review revisions or start a fresh batch."] };
+    }
+    if (/roster_denominator_mismatch|roster_unknown_evidence_unit|unknown roster evidence|invalid evidence offset|unknown roster source page|invalid roster offset|unread source pages/u.test(diagnostic)) {
+      return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
+        retryCondition: "At most one corrected proposal under the same candidate/batch identity, only while the durable allowance remains available.",
+        steps: [
+          "Call read_role_roster in this scope with offset=0; follow exact nextOffset values and copy candidates[].id, subjectHash and reviewRevisionId when present. Keep every candidate in the denominator.",
+          "For source references, call read_roster_source_page starting at page=0 and follow exact nextPage values, or search with read_roster_evidence query. Copy units[].unitId and reread its paired text; never guess IDs or cite null gap IDs.",
+          "Call preview_role_roster_review to check all reported paths before the one corrected submission. Search and preview do not mark full-source pages read. Do not repeat unchanged arguments; stop after a corrected failure.",
+        ], suggestedCall: { tool: "read_role_roster", arguments: { offset: 0 } } };
+    }
+  }
+
   if (toolName === "finish_compiler_batch" && lower.startsWith("unresolved compiler proposal obligations")) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle",

@@ -65,8 +65,8 @@ async function prepareReview(root: string, sourceId: string, batchId: string, sh
   const page = JSON.parse(((await call("read_roster_source_page", { page: 0 })).content[0] as { text: string }).text);
   expect(roster.reviews).toBeUndefined();
   await call("propose_role_roster_review", { subjectHash: roster.subjectHash, entries: roster.candidates.map((candidate: { id: string; name: string }) => ({ candidateId: candidate.id,
-    importance: shrink && candidate.name === "Friend" ? "supporting" : "major", rationale: "Independent current source review", basisUnitIds: page.unitIds,
-    developmentExpectation: { kind: "stable", rationale: "No lasting change is supported by this short source", basisUnitIds: page.unitIds },
+    importance: shrink && candidate.name === "Friend" ? "supporting" : "major", rationale: "Independent current source review", basisUnitIds: page.units.flatMap((unit: { unitId: string | null }) => unit.unitId ? [unit.unitId] : []),
+    developmentExpectation: { kind: "stable", rationale: "No lasting change is supported by this short source", basisUnitIds: page.units.flatMap((unit: { unitId: string | null }) => unit.unitId ? [unit.unitId] : []) },
   })) });
   return () => call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent full source review" });
 }

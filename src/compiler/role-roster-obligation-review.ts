@@ -198,8 +198,7 @@ async function readCompleteRoleScope(toolset: CompilerProposalToolset, roster: R
   const sourcePageSchema = z.object({
     page: z.number().int().nonnegative(),
     totalPages: z.number().int().positive(),
-    text: z.string(),
-    unitIds: z.array(idSchema),
+    units: z.array(z.object({ unitId: idSchema.nullable(), text: z.string(), continued: z.boolean() }).strict()),
     nextPage: z.number().int().nonnegative().optional(),
   }).strict();
 
@@ -234,8 +233,8 @@ async function readCompleteRoleScope(toolset: CompilerProposalToolset, roster: R
     sourcePageReceipts.push({
       page: page.page,
       totalPages: page.totalPages,
-      textHash: contentHash(page.text),
-      unitIdsHash: contentHash(page.unitIds),
+      textHash: contentHash(page.units.map(unit => unit.text).join("")),
+      unitIdsHash: contentHash(page.units.flatMap(unit => unit.unitId ? [unit.unitId] : [])),
     });
   }
   return { rosterPageReceipts, sourcePageReceipts };

@@ -10,6 +10,14 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it("keeps role-review ID recovery inside its dedicated tools and stops stale scopes", () => {
+    const advice = buildNwhToolRecoveryAdvice("propose_role_roster_entry", "ROSTER_UNKNOWN_EVIDENCE_UNIT /entries/0/basisUnitIds/0: Unknown source unit guessed.\nRecovery SOP: some offset guidance");
+    expect(advice).toMatchObject({ retryable: true, suggestedCall: { tool: "read_role_roster", arguments: { offset: 0 } } });
+    expect(advice.steps.join(" ")).toContain("units[].unitId");
+    expect(advice.steps.join(" ")).toContain("preview_role_roster_review");
+    expect(advice.steps.join(" ")).not.toContain("find_compiler_artifacts");
+    expect(buildNwhToolRecoveryAdvice("preview_role_roster_review", "Staged role entry belongs to stale source or review revision. Stop; preserve the original batch for host review, never reset IDs.")).toMatchObject({ retryable: false, category: "host-repair-required" });
+  });
   it("requires durable obligation repair before finish and stops exhausted retries", () => {
     const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Unresolved compiler proposal obligations (persisted across sessions): propose_action_schema proposal_id=schema-1: failed: Exact evidence quote was not found in segment source-1.");
     expect(advice.steps.join(" ")).toContain("same identity");

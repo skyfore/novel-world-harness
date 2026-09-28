@@ -181,6 +181,11 @@ function proposalIdentity(toolName: string, argsValue: unknown): string | undefi
   // value acknowledged by finish_compiler_batch. Prefer it even when a failed
   // provider call supplied an unreadable/stringified payload so a corrected
   // retry of that same proposal can resolve the earlier tool error.
+  if (toolName === "propose_role_roster_entry") {
+    const entry = args.entry && typeof args.entry === "object" ? args.entry as Record<string, unknown> : {};
+    return `role-entry:${typeof entry.candidateId === "string" ? entry.candidateId : "invalid"}`;
+  }
+  if (toolName === "propose_role_roster_review") return "role-roster-review";
   if (typeof args.proposal_id === "string") return `envelope:${args.proposal_id}`;
   let payload = args.payload;
   if (typeof payload === "string") {

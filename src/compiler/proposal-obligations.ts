@@ -318,7 +318,11 @@ export class CompilerProposalObligations {
   static identity(tool: string, input: unknown) {
     const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
     const inputHash = crypto.createHash("sha256").update(JSON.stringify(input) ?? "undefined").digest("hex");
-    return { tool, proposalId: typeof args.proposal_id === "string" ? args.proposal_id : tool === "propose_role_roster_review" ? "role-roster-review" : `unidentified-${inputHash}`, inputHash };
+    const entry = args.entry && typeof args.entry === "object" ? args.entry as Record<string, unknown> : {};
+    // Host-derived identity: changing evidence or user-supplied IDs cannot reset a candidate's allowance.
+    const roleEntryId = tool === "propose_role_roster_entry"
+      ? `role-entry-${typeof entry.candidateId === "string" ? entry.candidateId : "invalid"}` : undefined;
+    return { tool, proposalId: roleEntryId ?? (typeof args.proposal_id === "string" ? args.proposal_id : tool === "propose_role_roster_review" ? "role-roster-review" : `unidentified-${inputHash}`), inputHash };
   }
   private histories(): ProposalAttempt[][] {
     const histories = new Map<string, ProposalAttempt[]>();
@@ -345,6 +349,7 @@ export class CompilerProposalObligations {
     });
   }
   history(tool: string, proposalId: string): ProposalAttempt[] { return this.read({ tool, proposalId }).attempts; }
+  latestAttempts(tool: string): ProposalAttempt[] { return this.histories().map(history => history.at(-1)!).filter(attempt => attempt.tool === tool); }
   inspectSourcePatternUpstreamAuthority(toolInput: string, proposalIdInput: string) {
     const tool = sourcePatternProposalToolSchema.parse(toolInput);
     const proposalId = idSchema.parse(proposalIdInput);

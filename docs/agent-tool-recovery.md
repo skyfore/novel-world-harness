@@ -1,5 +1,37 @@
 # Agent tool failure recovery
 
+Role-review source pages now return `units[]` records pairing `unitId` with its
+exact source `text`. A null ID marks an uncitable gap; `continued=true` identifies
+a unit crossing a page boundary. `read_roster_evidence` performs same-source
+lexical discovery (`query`, then exact `nextOffset`) or exact reads (`unitIds`,
+up to ten). Copy `units[].unitId`; never reconstruct or shorten IDs. A truncated
+exact read lists every `sourcePages` page needed for the remaining text. Search
+and preview do not satisfy full-source page visits.
+
+After full-source reading, use `preview_role_roster_review` with one entry and
+`partial=true` to check its structure, then `propose_role_roster_entry` to stage
+that candidate. The existing proposal-obligation journal retains the input under
+a host-derived candidate identity, bound to `subjectHash` and any
+`reviewRevisionId`; evidence changes do not reset its correction allowance.
+Preview with entries omitted reports staged and missing candidate IDs, unread
+pages and retained failures. It performs no proposal or world writes and consumes
+no submission attempt. A successful preview verifies structure only:
+`semanticSupport=not-verified` requires independent assessment of whether the
+actual text supports this character and claim. Never replace an invalid reference
+with an arbitrary valid ID.
+
+When the complete preview passes, `propose_role_roster_review` with `staged=true`
+assembles the durable entries; ordinary finish still validates the complete
+candidate denominator and commits the review. Complete-input host/legacy calls
+remain available but cannot replace or omit staged entries or escape their failed
+obligations. Successful drafts without a final capture resume under their original
+batch; they do not mix with the other independent review. Source/revision changes,
+ambiguous scopes, interrupted calls, exhausted failures and captured reviews
+without finish remain host-review stops. No new session or UUID clears them.
+The structured host-recovery stop overrides correction advice; do not attempt a
+`no-artifacts` finish to escape it.
+
+
 Independent role review checks retained source-scoped `role-roster-*` obligations before creating another model batch. A failed, exhausted, or interrupted review blocks fresh UUID creation. On `ROLE_REVIEW_REQUIRES_HOST_REVIEW`, use `compiler-obligations inspect` with the exact reported source and batch IDs, preserve the inputs and attempt history, and recover the original scope through a supported host protocol. Do not retry `prepare-all` unchanged, rotate review IDs, or classify a missing review as unsupported to clear this barrier. This guard does not itself authorize an additional model attempt or certify a roster.
 
 Quotation-content trace validation compares exact proposition object assertions

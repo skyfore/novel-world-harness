@@ -89,12 +89,12 @@ import { SourceAnnotationStore, annotationAnchors, sourceAnnotationSchema } from
 import { EntityResolutionStore, identityResolutionSchema } from "./entity-resolution.js";
 import { EventResolutionStore, eventResolutionSchema } from "./event-resolution.js";
 import { SourceStructureStore, sourceStructureManifestSchema } from "./structure.js";
-import { SourceAccountingStore, sourceAccountingManifestSchema } from "./source-accounting.js";
+import { SourceAccountingStore, projectSourceAccountingCurrentCoverage, sourceAccountingManifestSchema } from "./source-accounting.js";
 import { sceneOccurrenceSchema } from "../world/scene-occurrence.js";
 import { eventFrameSchema } from "../world/event-frame.js";
 import { actionSchemaSchema } from "../world/action-ontology.js";
 import { RoleRosterStore, roleRosterSchema } from "./role-roster.js";
-import { assessNovelClosure, assertPreparedReadiness, novelClosureAssessmentSchema, validateAssessmentRevision } from "./certification.js";
+import { assessNovelClosure, assertPreparedReadiness, novelClosureAssessmentSchema, validateAssessmentRevision, validateFrozenAccounting } from "./certification.js";
 import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 
 export { COMPILER_PIPELINE_VERSION };
@@ -905,6 +905,14 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(source.id),
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
+    const currentAccounting = await projectAccountingForSnapshot(
+      this.workspaceRoot,
+      source,
+      structure,
+      accounting,
+      evidenceBindings,
+      annotations,
+    );
     const upstreamRepairJournal = await new UpstreamRepairLedger(this.workspaceRoot, source.id).history();
     const requirementJournal = await new RequirementLedger(this.workspaceRoot, source.id).history();
     const coreRoleReviewRevision = (await new RequirementLedger(this.workspaceRoot, source.id).roleReviewRevisions()).at(-1);
@@ -945,7 +953,7 @@ export class PreparedNovelCache {
         annotations,
         entityResolutions,
         eventResolutions,
-        accounting,
+        accounting: currentAccounting,
         roleRoster: await new RoleRosterStore(this.workspaceRoot).read(source.id),
       },
     });
@@ -1152,6 +1160,20 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(sourceId),
       new SourceAccountingStore(this.workspaceRoot).read(sourceId),
     ]);
+    const source = await WorkspaceStore.openReadOnly(this.workspaceRoot).getSource(sourceId);
+    if (accounting && !source) {
+      throw new Error(`Cannot project source accounting for missing workspace source ${sourceId}.`);
+    }
+    const currentAccounting = source
+      ? await projectAccountingForSnapshot(
+          this.workspaceRoot,
+          source,
+          structure,
+          accounting,
+          evidenceBindings,
+          annotations,
+        )
+      : accounting;
     const upstreamRepairJournal = await new UpstreamRepairLedger(this.workspaceRoot, sourceId).history();
     const requirementJournal = await new RequirementLedger(this.workspaceRoot, sourceId).history();
     const coreRoleReviewRevision = (await new RequirementLedger(this.workspaceRoot, sourceId).roleReviewRevisions()).at(-1);
@@ -1173,7 +1195,7 @@ export class PreparedNovelCache {
       annotations,
       entityResolutions,
       eventResolutions,
-      accounting,
+      accounting: currentAccounting,
       roleRoster: await new RoleRosterStore(this.workspaceRoot).read(sourceId),
     };
   }
@@ -1421,6 +1443,26 @@ export class PreparedNovelCache {
   }
 }
 
+async function projectAccountingForSnapshot(
+  workspaceRoot: string,
+  source: SourceDocument,
+  structure: Awaited<ReturnType<SourceStructureStore["read"]>>,
+  accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>,
+  evidenceBindings: readonly EvidenceAssertionBindingSnapshot[],
+  annotations: Awaited<ReturnType<SourceAnnotationStore["list"]>>,
+) {
+  if (!accounting) return null;
+  if (!structure) throw new Error(`Cannot project source accounting for ${source.id}: source structure is missing.`);
+  const sourceBytes = await readSourceMaterial(workspaceRoot, source);
+  return projectSourceAccountingCurrentCoverage(
+    accounting,
+    structure,
+    sourceBytes,
+    evidenceBindings.flatMap(binding => binding.assertions),
+    annotations.map(annotation => ({ id: annotation.id, anchors: annotationAnchors(annotation) })),
+  );
+}
+
 export function currentCompilerFingerprint(): NonNullable<PreparedNovelBundle["compilerFingerprint"]> {
   return {
     pipelineVersion: COMPILER_PIPELINE_VERSION,
@@ -1626,6 +1668,14 @@ async function assertPreparedCompilerSnapshotEvidence(
   workspaceRoot: string,
   bundle: PreparedNovelBundle,
 ): Promise<void> {
+  const accountingReferenceIssues = validateFrozenAccounting(bundle).filter(issue =>
+    issue.code === "SOURCE_REPRESENTATION_REFERENCE_INVALID"
+    || issue.code === "SOURCE_REPRESENTATION_UNSUPPORTED");
+  if (accountingReferenceIssues.length) {
+    throw new Error(`Prepared source-accounting representation is not bound to current snapshot evidence: ${accountingReferenceIssues
+      .map(issue => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)
+      .join("; ")}`);
+  }
   const artifacts = new Map(preparedArtifactDescriptors(bundle.canonical)
     .map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const));
   const verifier = new EvidenceVerifier(workspaceRoot);

@@ -138,12 +138,36 @@ export const annotationSelectorCorrectionSchema = z.object({
       "Duplicate annotation selector path"),
 }).strict();
 export type AnnotationSelectorCorrection = z.infer<typeof annotationSelectorCorrectionSchema>;
+export const roleRosterCorrectionSchema = z.object({
+  version: z.literal(1),
+  sourceId: idSchema,
+  batchId: idSchema,
+  tool: z.literal("propose_role_roster_review"),
+  proposalId: z.literal("role-roster-review"),
+  inputHash: sha256Schema,
+  failedInputHashes: z.array(sha256Schema).min(2)
+    .refine(values => new Set(values).size === values.length, "Duplicate failed role-review input hash"),
+  historyHash: sha256Schema,
+  sourceSha256: sha256Schema,
+  rosterHash: sha256Schema,
+  subjectHash: sha256Schema,
+  reviewRevisionId: idSchema.nullable(),
+  sourcePageCount: z.number().int().positive(),
+  sourcePagesHash: sha256Schema,
+  rosterPageCount: z.number().int().positive(),
+  rosterPagesHash: sha256Schema,
+  candidateCount: z.number().int().positive(),
+  reviewHash: sha256Schema,
+  finishInputHash: sha256Schema,
+}).strict();
+export type RoleRosterCorrection = z.infer<typeof roleRosterCorrectionSchema>;
 const hostReviewSchema = z.object({
   reason: z.string().min(1),
   auditRef: z.string().min(1),
   sourcePatternDependencyCorrection: sourcePatternDependencyCorrectionSchema.optional(),
   accountingRefinementCorrection: accountingRefinementCorrectionSchema.optional(),
   annotationSelectorCorrection: annotationSelectorCorrectionSchema.optional(),
+  roleRosterCorrection: roleRosterCorrectionSchema.optional(),
 }).strict();
 const attemptSchema = z.object({
   tool: z.string(), proposalId: z.string(), inputHash: z.string(), input: z.unknown(),
@@ -502,6 +526,122 @@ export class CompilerProposalObligations {
       })),
     });
   }
+  /** Freeze one complete replacement role review against its exact exhausted history
+   * and the host-observed immutable source/roster page inventory.
+   */
+  inspectRoleRosterCorrection(
+    input: unknown,
+    context: Omit<RoleRosterCorrection,
+      "version" | "sourceId" | "batchId" | "tool" | "proposalId" | "inputHash" | "failedInputHashes" | "historyHash">,
+  ): RoleRosterCorrection {
+    if (!this.batchId.startsWith(`role-roster-${this.sourceId}-`)) {
+      throw new Error("Role-review correction requires the original dedicated role-roster batch.");
+    }
+    const tool = "propose_role_roster_review";
+    const identity = CompilerProposalObligations.identity(tool, input);
+    const history = this.history(tool, identity.proposalId);
+    const last = history.at(-1);
+    if (identity.proposalId !== "role-roster-review"
+      || history.some(attempt => attempt.tool !== tool || attempt.proposalId !== identity.proposalId || attempt.coverageProof)) {
+      throw new Error("Role-review correction requires one unresolved, unreviewed exhausted identity whose latest attempt failed.");
+    }
+    const firstReviewed = history.findIndex(attempt => attempt.hostReview?.roleRosterCorrection !== undefined);
+    if (firstReviewed >= 0) {
+      const prefix = history.slice(0, firstReviewed);
+      const suffix = history.slice(firstReviewed);
+      const retained = roleRosterCorrectionSchema.parse(suffix[0]!.hostReview!.roleRosterCorrection);
+      const expectedReview = suffix[0]!.hostReview;
+      const failedInputHashes = [...new Set(prefix.filter(attempt => attempt.status === "failed")
+        .map(attempt => attempt.inputHash))].sort();
+      if (suffix.length !== 2 || suffix[0]?.status !== "running" || suffix[1]?.status !== "succeeded"
+        || suffix.some(attempt => attempt.inputHash !== identity.inputHash
+          || contentHash(attempt.hostReview) !== contentHash(expectedReview))
+        || retained.sourceId !== this.sourceId || retained.batchId !== this.batchId
+        || retained.tool !== tool || retained.proposalId !== identity.proposalId
+        || retained.inputHash !== identity.inputHash
+        || retained.historyHash !== contentHash(prefix)
+        || contentHash(retained.failedInputHashes) !== contentHash(failedInputHashes)) {
+        throw new Error("Role-review host correction was interrupted, failed, changed, or already replayed; stop instead of granting another attempt.");
+      }
+      const {
+        version: _version, sourceId: _sourceId, batchId: _batchId, tool: _tool,
+        proposalId: _proposalId, inputHash: _inputHash, failedInputHashes: _failedInputHashes,
+        historyHash: _historyHash, ...retainedContext
+      } = retained;
+      if (contentHash(retainedContext) !== contentHash(context)) {
+        throw new Error("Role-review correction no longer matches its source pages, roster subject, or reviewed input.");
+      }
+      return retained;
+    }
+    if (last?.status !== "failed"
+      || history.some(attempt => attempt.hostReview
+        || ["succeeded", "unsupported", "superseded-by-coverage"].includes(attempt.status))) {
+      throw new Error("Role-review correction requires one unresolved, unreviewed exhausted identity whose latest attempt failed.");
+    }
+    const failedInputHashes = [...new Set(history.filter(attempt => attempt.status === "failed")
+      .map(attempt => attempt.inputHash))].sort();
+    if (failedInputHashes.length < 2) {
+      throw new Error("Role-review correction requires the exhausted original and corrected inputs.");
+    }
+    if (failedInputHashes.includes(identity.inputHash)) {
+      throw new Error("Role-review correction must be complete and materially different from every failed input.");
+    }
+    return roleRosterCorrectionSchema.parse({
+      version: 1,
+      sourceId: this.sourceId,
+      batchId: this.batchId,
+      tool,
+      proposalId: identity.proposalId,
+      inputHash: identity.inputHash,
+      failedInputHashes,
+      historyHash: contentHash(history),
+      ...context,
+    });
+  }
+  /** Under the compiler lock, grant exactly one reviewed role proposal invocation.
+   * The caller must use the normal role proposal and finish tools in this same scope.
+   */
+  async withHostRoleRosterCorrection<T>(
+    input: unknown,
+    bindingInput: RoleRosterCorrection,
+    reason: string,
+    auditRef: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    if (!reason.trim() || !auditRef.trim() || hostProposalCorrection.getStore()) {
+      throw new Error("A separate host role-review decision and audit reference are required.");
+    }
+    const binding = roleRosterCorrectionSchema.parse(bindingInput);
+    const {
+      version: _version, sourceId: _sourceId, batchId: _batchId, tool: _tool,
+      proposalId: _proposalId, inputHash: _inputHash, failedInputHashes: _failedInputHashes,
+      historyHash: _historyHash, ...context
+    } = binding;
+    const expected = this.inspectRoleRosterCorrection(input, context);
+    if (contentHash(binding) !== contentHash(expected)) {
+      throw new Error("Role-review correction differs from its exact failed history, source pages, roster subject, or reviewed input.");
+    }
+    const identity = CompilerProposalObligations.identity("propose_role_roster_review", input);
+    const history = this.history("propose_role_roster_review", identity.proposalId);
+    const last = history.at(-1)!;
+    const reviewed = history.filter(attempt => attempt.hostReview?.roleRosterCorrection);
+    if (reviewed.length) {
+      const expectedReview = { reason, auditRef, roleRosterCorrection: binding };
+      if (reviewed.length !== 2 || last.status !== "succeeded"
+        || reviewed.some(attempt => contentHash(attempt.hostReview) !== contentHash(expectedReview))) {
+        throw new Error("Role-review host correction is consumed, failed, or differs from its retained reviewed intent.");
+      }
+    }
+    return hostProposalCorrection.run({
+      root: this.root,
+      sourceId: this.sourceId,
+      batchId: this.batchId,
+      ...identity,
+      priorHash: contentHash(last),
+      used: false,
+      hostReview: { reason, auditRef, roleRosterCorrection: binding },
+    }, action);
+  }
   /** Under the compiler lock, execute one reviewed annotation selector correction through
    * the normal proposal schema, immutable-source anchor resolver, and proposal lifecycle.
    */
@@ -763,6 +903,7 @@ export class CompilerProposalObligations {
     const prior = ledger.attempts.at(-1);
     const started = ledger.attempts.at(-2);
     if (status === "running" && prior?.status === "succeeded" && started?.status === "running"
+      && !prior.hostReview?.roleRosterCorrection && !started.hostReview?.roleRosterCorrection
       && prior.inputHash === identity.inputHash && started.inputHash === identity.inputHash) ledger.attempts.splice(-2);
     const host = hostProposalCorrection.getStore();
     const reviewed = host && host.root === this.root && host.sourceId === this.sourceId && host.batchId === this.batchId

@@ -196,6 +196,7 @@ const semanticSpanSchema = z.object({
   startByte: z.number().int().nonnegative(),
   endByte: z.number().int().positive(),
 }).strict().refine((value) => value.endByte > value.startByte, "semantic span must be non-empty");
+type SemanticSpan = z.infer<typeof semanticSpanSchema>;
 
 const batchReviewSchema = z.object({
   batchId: idSchema,
@@ -702,15 +703,54 @@ export class SourceAccountingStore {
   }
 }
 
+/**
+ * Reproject the materialized records against the current active semantic
+ * bindings without rewriting the historical batch reviews that justified
+ * prior decisions. Removed/replaced evidence cannot keep a unit represented;
+ * absent an explicit retained disposition, that unit becomes unresolved.
+ */
+export function projectSourceAccountingCurrentCoverage(
+  manifestInput: SourceAccountingManifest,
+  structure: SourceStructureManifest,
+  sourceBytes: Buffer,
+  evidenceAssertions: readonly EvidenceAssertion[],
+  annotations: ReadonlyArray<{ id: string; anchors: readonly TextAnchor[] }>,
+): SourceAccountingManifest {
+  const manifest = sourceAccountingManifestSchema.parse(manifestInput);
+  if (manifest.sourceId !== structure.sourceId
+    || manifest.sourceSha256 !== structure.sourceSha256
+    || manifest.structureVersion !== structure.structureVersion) {
+    throw new Error("Source-accounting projection requires the exact current source and structure.");
+  }
+  if (sourceBytes.byteLength !== structure.sourceBytes
+    || crypto.createHash("sha256").update(sourceBytes).digest("hex") !== structure.sourceSha256) {
+    throw new Error("Source-accounting projection bytes do not match the frozen source structure.");
+  }
+  const evidenceSpans = uniqueSemanticSpans(evidenceAssertions.flatMap(assertion => assertion.anchors
+    .filter(anchor => anchor.sourceId === structure.sourceId)
+    .map(anchor => ({ id: assertion.id, startByte: anchor.startByte, endByte: anchor.endByte }))));
+  const annotationSpans = uniqueSemanticSpans(annotations.flatMap(annotation => annotation.anchors
+    .filter(anchor => anchor.sourceId === structure.sourceId)
+    .map(anchor => ({ id: annotation.id, startByte: anchor.startByte, endByte: anchor.endByte }))));
+  return sourceAccountingManifestSchema.parse({
+    ...manifest,
+    records: deriveAccountingRecords(structure, sourceBytes, manifest.batchReviews, {
+      evidenceSpans,
+      annotationSpans,
+    }),
+  });
+}
+
 function deriveAccountingRecords(
   structure: SourceStructureManifest,
   sourceBytes: Buffer,
   reviews: readonly BatchReview[],
+  activeCoverage?: { evidenceSpans: readonly SemanticSpan[]; annotationSpans: readonly SemanticSpan[] },
 ): SourceAccountingRecord[] {
   const records: SourceAccountingRecord[] = [];
   const allSegments = reviews.flatMap((review) => review.segments.map((segment) => ({ ...segment, review })));
-  const evidenceSpans = reviews.flatMap((review) => review.evidenceSpans);
-  const annotationSpans = reviews.flatMap((review) => review.annotationSpans);
+  const evidenceSpans = activeCoverage?.evidenceSpans ?? reviews.flatMap((review) => review.evidenceSpans);
+  const annotationSpans = activeCoverage?.annotationSpans ?? reviews.flatMap((review) => review.annotationSpans);
   for (const unit of baseStructuralUnits(structure)) {
     if (unit.kind === "non-scene") {
       records.push(sourceAccountingRecordSchema.parse({

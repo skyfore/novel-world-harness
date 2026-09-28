@@ -1,5 +1,7 @@
 # Agent tool failure recovery
 
+Independent role review checks retained source-scoped `role-roster-*` obligations before creating another model batch. A failed, exhausted, or interrupted review blocks fresh UUID creation. On `ROLE_REVIEW_REQUIRES_HOST_REVIEW`, use `compiler-obligations inspect` with the exact reported source and batch IDs, preserve the inputs and attempt history, and recover the original scope through a supported host protocol. Do not retry `prepare-all` unchanged, rotate review IDs, or classify a missing review as unsupported to clear this barrier. This guard does not itself authorize an additional model attempt or certify a roster.
+
 Quotation-content trace validation compares exact proposition object assertions
 with the cited quotation anchors at finish and committed-artifact validation.
 Sharing a segment or speaker does not establish content support. If a source
@@ -273,6 +275,21 @@ host-only SourceAccountingStore.reproposeRejected API can stage an exact copy
 under a fresh ID with restoredFrom provenance after an audited same-source/batch
 check. It preserves rejected history and still requires the normal finish gate.
 
+Source-accounting batch reviews retain the exact assertion and annotation spans
+seen when each finish was accepted; those spans are audit history, not permanent
+coverage authority. Prepared candidate capture reprojects only the materialized
+accounting `records` against the current active exact-evidence bindings and
+committed source annotations while preserving every historical review, decision,
+timestamp and receipt. When artifact replacement removes an assertion, its old
+immutable revision cannot keep a unit `represented`. A still-current overlapping
+assertion/annotation supplies its current ID; otherwise the unit keeps an explicit
+reviewed disposition when one exists, or returns to `unresolved`. It is never
+silently relabeled as background. Frozen prepared snapshots that claim
+`represented` through a missing or non-overlapping current binding are rejected
+before materialization. Reprojection writes no workspace state and certifies no
+semantic or executable completeness; newly uncovered units must pass the normal
+accounting review/repair flow.
+
 ## Development pattern
 
 ### Persistent independent scene requirements (host CLI)
@@ -476,6 +493,33 @@ reviews or recast unknown as stable to bypass the gate. Completing the semantic
 requirement or migrating historical reviews needs a host-controlled review
 revision with preserved history; the current role-review tool does not grant
 that mutation capability.
+
+An exhausted `propose_role_roster_review` identity can be recovered only through
+the host API `reviewRoleRosterObligation`. Its input names the exact original
+source, role batch, tool and fixed `role-roster-review` proposal identity, every
+distinct failed-input hash, a complete replacement review, and a separate reason
+and audit reference. Call it read-only first. The preview validates every
+candidate and evidence-unit ID, reconstructs the versioned review against the
+unchanged roster subject/review revision, and visits every `read_role_roster` and
+`read_roster_source_page` page through the ordinary tools. It returns page-content
+hashes, the normalized complete review and an `authorityHash`; this is material
+for host review, not a generated judgment or certification.
+
+Apply requires that exact `authorityHash`. Under the compiler lock it repeats all
+page reads, rechecks source bytes, roster/revision, full failure history, absence
+of a saved review or finish receipt, then invokes the ordinary
+`propose_role_roster_review` and `finish_compiler_batch` tools in the original
+batch. The journal preserves failed attempts and records the reviewed binding on
+the normal running/succeeded proposal attempts. An unchanged input, omitted
+failure, incomplete denominator, unknown candidate/unit, stale page/roster hash,
+running attempt, prior failed host correction, saved output or finish receipt
+stops without another grant. If proposal capture succeeded but finish preparation
+was interrupted before any durable receipt or roster write, the same retained
+authority may recapture that in-memory-only proposal once and finish it; a second
+interruption stops. A prepared receipt uses ordinary finish recovery. Fresh role
+UUIDs remain blocked while a captured original batch lacks its completed receipt.
+This API grants no blanket model retry, invents no role judgment, and does not
+certify the executable world.
 
 
 ### Core-role requirement registration and finish recovery

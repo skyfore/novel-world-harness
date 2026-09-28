@@ -86,7 +86,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       },
     }),
   ];
-  const schema = z.object({ subjectHash: z.string(), entries: z.array(roleRosterEntrySchema.extend({ developmentExpectation: roleDevelopmentExpectationSchema })).min(1), missingMajorCharacters: roleRosterReviewSchema.shape.missingMajorCharacters }).strict();
+  const schema = roleRosterReviewInputSchema;
   const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(schema);
   tools.push(defineTool({ name: "propose_role_roster_review", label: "Propose role roster review", description: "Capture independent full-source importance and development expectations for every candidate. Record stable, source-supported dimensional changes, or unknown; use source page unitIds, never compiled models as evidence. This is not a playability certificate; persistence requires the compiler finish handshake.",
     executionMode: "sequential", parameters: Type.Unsafe<z.infer<typeof schema>>(jsonSchema as TSchema),
@@ -124,3 +124,11 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
     reset() { snapshot = undefined; pages = []; visited.clear(); pending = undefined; },
   };
 }
+
+/** Exact model/host input accepted by the independent role-review proposal tool. */
+export const roleRosterReviewInputSchema = z.object({
+  subjectHash: z.string(),
+  entries: z.array(roleRosterEntrySchema.extend({ developmentExpectation: roleDevelopmentExpectationSchema })).min(1),
+  missingMajorCharacters: roleRosterReviewSchema.shape.missingMajorCharacters,
+}).strict();
+export type RoleRosterReviewInput = z.infer<typeof roleRosterReviewInputSchema>;

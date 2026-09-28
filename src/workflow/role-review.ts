@@ -5,6 +5,7 @@ import { loadCurrentRoleRoster, ROLE_ROSTER_TOOL_NAMES } from "../compiler/role-
 import { validateRoleRoster } from "../compiler/role-roster.js";
 import { registerReviewedCoreRoles } from "../compiler/core-role-requirement-service.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
 
 export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "prompt" | "compilerBatchId"> & { sourceId: string }, compile = compileCommand): Promise<void> {
   if (options.acquireLock !== false) {
@@ -17,6 +18,16 @@ export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "pro
     if (receipt.state === "prepared" && receipt.identity.batchId.startsWith(`role-roster-${options.sourceId}-`)) {
       options.signal?.throwIfAborted();
       await recoverCompilerFinish(options.root, options.sourceId, receipt.identity.batchId);
+    }
+  }
+  for (const batchId of CompilerProposalObligations.listBatchIds(options.root, options.sourceId)) {
+    if (!batchId.startsWith(`role-roster-${options.sourceId}-`)) continue;
+    const journal = new CompilerProposalObligations(options.root, options.sourceId, batchId);
+    const roleHistory = journal.history("propose_role_roster_review", "role-roster-review");
+    const receipt = await new CompilerFinishReceipts(options.root, options.sourceId, batchId).read();
+    const capturedWithoutFinish = roleHistory.at(-1)?.status === "succeeded" && receipt?.state !== "completed";
+    if (journal.unresolved().length || capturedWithoutFinish) {
+      throw new Error(`ROLE_REVIEW_REQUIRES_HOST_REVIEW: retained obligations in ${batchId}. Inspect compiler-obligations inspect --source ${options.sourceId} --batch ${batchId} and preserve the exact failed inputs. Recover this original scope through a supported host protocol before starting another review; do not retry in a fresh batch or reset attempt history.`);
     }
   }
   let { roster } = await loadCurrentRoleRoster(options.root, options.sourceId);

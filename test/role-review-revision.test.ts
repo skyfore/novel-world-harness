@@ -21,9 +21,26 @@ import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batc
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { preparedSubjectHash } from "../src/compiler/certification.js";
 import { WorkspaceOperationLock } from "../src/util/workspace-lock.js";
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
+
+it.each(["failed", "exhausted", "running"] as const)("does not rotate a %s role-review obligation into a fresh compiler batch", async status => {
+  const f = await fixture(0);
+  const batchId = `role-roster-${f.source.source.id}-original`;
+  const journal = new CompilerProposalObligations(f.root, f.source.source.id, batchId);
+  journal.record("propose_role_roster_review", { subjectHash: f.saved.subjectHash, entries: [] }, status === "running" ? "running" : "failed", "retained review failure");
+  if (status === "exhausted") journal.record("propose_role_roster_review", { subjectHash: f.saved.subjectHash, entries: [{}] }, "failed", "corrected input failed");
+  const history = journal.history("propose_role_roster_review", "role-roster-review");
+  const compile = vi.fn();
+  await expect(reviewNovelRoles({ root: f.root, sourceId: f.source.source.id, configPath: path.join(f.root, "absent.yaml") }, compile))
+    .rejects.toThrow(`retained obligations in ${batchId}`);
+  expect(compile).not.toHaveBeenCalled();
+  expect(journal.history("propose_role_roster_review", "role-roster-review")).toEqual(history);
+  expect(await f.store.read(f.source.source.id)).toEqual(f.saved);
+  expect((await WorkspaceOperationLock.inspect(f.root)).owner).toBeUndefined();
+});
 async function fixture(count = 2) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-role-review-revision-")); roots.push(root);
   const source = await createEvidenceFixture(root, "Hero waits. Friend watches.");

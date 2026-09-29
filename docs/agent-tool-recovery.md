@@ -1975,3 +1975,30 @@ source-specific hints do not authorize a third attempt, fresh identity or sessio
 reset. The structured diagnostic survives Pi's text-only error transport and
 batch hydration. Original errors, failure status, staged drafts and all prior
 attempts remain intact. Host/scope/receipt/budget failures retain precedence.
+
+### Bounded role-review work
+
+Role source work and global audit now use host-assigned work identities inside
+one original role-review batch. `propose_role_source_review` and
+`propose_role_review_audit` store validated proposals in the existing obligation
+journal. Their local completion never authorizes `finish_compiler_batch`.
+
+For an evidence miss, use same-source `read_role_work_evidence` with a literal
+`query`, copy `units[].unitId` to `unitId`, and follow `nextOffset` until the
+complete decisive passage has been read. Search snippets and review notes are
+not a replacement for original text. Source-work citations must be copied from
+the assigned packet's `fragments[].unitId`; null gap IDs are uncitable. Neighbor
+context uses `read_role_work_neighbor` direction `previous` or `next`; a boundary
+result is normal and must not be retried. For a notes/inventory offset miss,
+call the same reader with `offset=0` and copy `nextOffset` once. Correct all
+reported proposal fields under the original work identity; never guess IDs,
+repeat unchanged inputs or change work IDs to clear a failed attempt.
+
+`ROLE_REVIEW_WORK_HOST_REQUIRED` stops model calls: retain the plan, source and
+review hashes, local receipts, successful drafts and complete failure history.
+Stale scope, single-use receipt, changed post-audit entries, invocation allowance
+exhaustion and unresolved global audit findings are host stops. Budget/circuit
+errors and exhausted proposal allowances take precedence over lookup advice.
+The workflow does not automatically retry provider quota failures or reset
+allowances in a fresh session. A partial work result never certifies an
+independent review, complete world or active candidate.

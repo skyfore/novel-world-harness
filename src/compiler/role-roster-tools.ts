@@ -1,4 +1,6 @@
 import { CompilerHostReviewRequiredError, CompilerProposalObligations } from "./proposal-obligations.js";
+import { contentHash } from "../world/canonical.js";
+import { RoleReviewWorkStore, roleWorkStop } from "./role-review-work.js";
 import { RequirementLedger } from "./requirement-ledger.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
@@ -44,6 +46,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
   let evidenceUnits: Array<{ unitId: string; text: string }> = [];
   const visited = new Set<number>();
   let pending: RoleRosterReview | undefined;
+  let workStore: RoleReviewWorkStore | undefined;
   const active = () => {
     const current = scope();
     if (current.finished || !current.sourceId || !current.batchId?.startsWith(`role-roster-${current.sourceId}-`)) {
@@ -55,6 +58,8 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
     const current = active();
     if (!snapshot) {
       snapshot = await loadCurrentRoleRoster(root, current.sourceId);
+      const plan = (await RoleReviewWorkStore.plans(root, current.sourceId)).find(plan => plan.batchId === current.batchId);
+      if (plan) { workStore = new RoleReviewWorkStore(root, plan); workStore.assertScope(snapshot.roster, contentHash(snapshot.structure), snapshot.structure.sourceBytes); }
       const bytes = await readSourceMaterial(root, snapshot.source);
       const units = baseStructuralUnits(snapshot.structure).sort((a, b) => a.anchor.startByte - b.anchor.startByte);
       evidenceUnits = units.map(unit => ({ unitId: unit.id, text: bytes.subarray(unit.anchor.startByte, unit.anchor.endByte).toString("utf8") }));
@@ -103,7 +108,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
   });
   const resolveInput = (roster: RoleRoster, input: z.infer<typeof roleRosterSubmissionSchema>): RoleRosterReviewInput =>
     ({ subjectHash: input.subjectHash, entries: input.staged ? stagedEntries(roster) : input.entries!, missingMajorCharacters: input.missingMajorCharacters });
-  const unreadPages = () => pages.flatMap((_, index) => visited.has(index) ? [] : [index]);
+  const unreadPages = () => workStore ? (workStore.sourceComplete() ? [] : workStore.plan.spans.flatMap((_, index) => workStore!.read("source", index) ? [] : [index])) : pages.flatMap((_, index) => visited.has(index) ? [] : [index]);
   const recovery = "Use read_role_roster with offset=0 and its exact nextOffset to copy candidates[].id and subjectHash. Use read_roster_evidence with query to discover units[].unitId, then unitIds to read exact cited text. Correct all reported paths and preview again before at most one corrected proposal retry. Never guess IDs or repeat unchanged inputs. If the durable recovery block says host review is required, stop; it overrides this correction procedure.";
   const assertMutable = () => {
     if (pending) throw new Error("Role review is single-use. Finish the batch; do not resubmit or change entries.");
@@ -174,7 +179,12 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       const included = new Set(entries.map(entry => entry.candidateId));
       const unresolved = journal().unresolved().map(attempt => ({ tool: attempt.tool, proposalId: attempt.proposalId, status: attempt.status, diagnostic: attempt.diagnostic }));
       const requiresHostReview = journal().requiringHostReview().length > 0;
-      const result = { structuralValid: issues.length === 0, complete: !input.partial && issues.length === 0 && unreadPages().length === 0 && unresolved.length === 0,
+      const missing = roster.candidates.filter(candidate => !included.has(candidate.id)).map(candidate => candidate.id);
+      const nextAction = requiresHostReview ? "host_review_required" : unresolved.length ? "needs_correction" : unreadPages().length ? "needs_source_work"
+        : missing.length ? "needs_candidate_work" : workStore && !workStore.auditComplete() ? "needs_global_audit" : issues.length ? "needs_correction" : "ready_to_assemble";
+      const result = { nextAction, guidance: nextAction === "needs_candidate_work"
+        ? "Missing candidates are pending work, not a terminal error. Read the next candidate's exact evidence, preview entries=[one entry] with partial=true, then propose_role_roster_entry. Preserve existing drafts."
+        : nextAction === "host_review_required" ? "Stop; do not retry or rotate IDs." : "Complete the indicated work in the original review scope.", structuralValid: issues.length === 0, complete: !input.partial && issues.length === 0 && unreadPages().length === 0 && unresolved.length === 0 && (!workStore || workStore.auditComplete()),
         unresolvedObligations: unresolved, requiresHostReview,
         semanticSupport: "not-verified", issues, totalCandidates: roster.candidates.length,
         missingCandidateIds: roster.candidates.filter(candidate => !included.has(candidate.id)).map(candidate => candidate.id),
@@ -208,6 +218,10 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
         throw new Error(`Unresolved candidate drafts: ${unresolvedEntries.map(attempt => attempt.proposalId).join(", ")}.\nRecovery SOP: Read preview_role_roster_review.unresolvedObligations and correct each original propose_role_roster_entry once before assembling the full review; never bypass with complete entries.`);
       }
       const input = resolveInput(roster, schema.parse(raw));
+      if (workStore) {
+        if (!workStore.sourceComplete() || !workStore.auditComplete()) throw roleWorkStop("bounded source review or global audit incomplete; page visits cannot substitute for work receipts");
+        if (!isDeepStrictEqual(input.missingMajorCharacters, workStore.missingMajorCharacters())) throw roleWorkStop("assembly must preserve every audited missing-character discovery");
+      }
       if (unreadPages().length) throw new Error(`Role review has unread source pages: ${unreadPages().join(", ")}. Read them with read_roster_source_page, then retry once with the completed review.`);
       const review = makeReview(roster, input);
       const issues = validateRosterReview(roster, review);
@@ -216,6 +230,13 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
         issues.push({ code: "ROSTER_STAGED_ENTRY_MISMATCH", message: `Preserve staged candidate ${entry.candidateId}; correct it through propose_role_roster_entry before final assembly.` });
       }
       if (issues.length) throw new Error(`${issues.map(x => `${x.code} ${x.path ?? ""}: ${x.message}`).join("; ")}.\nRecovery SOP: ${recovery}`);
+      if (workStore) {
+        review.version = 3;
+        review.workEvidence = { version: 1, plan: workStore.plan,
+          sourceWork: workStore.plan.spans.map((_, page) => workStore!.read("source", page)!),
+          auditWork: workStore.plan.spans.map((_, page) => workStore!.read("audit", page)!),
+          entriesHash: contentHash([...review.entries].sort((a,b) => a.candidateId.localeCompare(b.candidateId))) };
+      }
       pending = review;
       return { content: [{ type: "text" as const, text: "Independent role review captured. Call finish_compiler_batch with outcome=complete and reviewed_segments=[]." }], details: { captured: true } };
     },
@@ -237,10 +258,11 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
         await registerReviewedCoreRoles(root, current);
         return;
       }
+      if (workStore && (!workStore.sourceComplete() || !workStore.auditComplete())) throw roleWorkStop("bounded review receipts incomplete at commitment");
       const roster = await new RoleRosterStore(root).review(current.roster, pending);
       await registerReviewedCoreRoles(root, { ...current, roster });
     },
-    reset() { snapshot = undefined; pages = []; evidenceUnits = []; visited.clear(); pending = undefined; },
+    reset() { snapshot = undefined; pages = []; evidenceUnits = []; visited.clear(); pending = undefined; workStore = undefined; },
   };
 }
 

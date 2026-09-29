@@ -100,7 +100,7 @@ import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 3;
-export const COMPILER_PROMPT_VERSION = 37;
+export const COMPILER_PROMPT_VERSION = 38;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -220,6 +220,10 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
   const attemptIssues = coreRoleAttemptHistoryIssues((snapshot.reconciliationObligations ?? []).map(item => item.receipt), snapshot.coreRoleRequirementDefinitions ?? [], sourceId);
   if (attemptIssues.length) throw new Error(attemptIssues.join("; "));
   if (snapshot.roleRoster && (snapshot.roleRoster.sourceId !== sourceId || snapshot.roleRoster.sourceSha256 !== bundle.source.contentSha256)) throw new Error("Prepared role roster escapes its source identity");
+  for (const review of snapshot.roleRoster?.reviews ?? []) {
+    const proof = review.workEvidence;
+    if (proof && (proof.plan.structureHash !== contentHash(snapshot.structure) || proof.plan.spans.at(-1)?.end !== snapshot.structure.sourceBytes)) throw new Error("Prepared bounded role review does not cover its frozen source structure");
+  }
   if (snapshot.structure.sourceId !== sourceId
     || snapshot.structure.sourceSha256 !== bundle.source.contentSha256) {
     throw new Error("Prepared compiler structure snapshot does not match its source identity.");

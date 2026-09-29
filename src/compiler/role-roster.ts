@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { boundedRoleReviewEvidenceSchema } from "./role-review-work.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -37,7 +38,8 @@ export const roleRosterEntrySchema = z.object({
   developmentExpectation: roleDevelopmentExpectationSchema.optional(),
 }).strict();
 export const roleRosterReviewSchema = z.object({
-  version: z.literal(2).optional(),
+  version: z.union([z.literal(2), z.literal(3)]).optional(),
+  workEvidence: boundedRoleReviewEvidenceSchema.optional(),
   runId: idSchema,
   reviewRevisionId: idSchema.optional(),
   subjectHash: hashSchema,
@@ -97,6 +99,16 @@ export function validateRosterReview(roster: RoleRoster, review: RoleRosterRevie
   if (review.reviewRevisionId !== roster.reviewRevisionId) fail("ROSTER_REVIEW_REVISION_STALE", "Review belongs to another host review revision. Preserve its receipt and stop model retries; do not replay it into the new review.");
   if (review.subjectHash !== roster.subjectHash) fail("ROSTER_STALE_REVIEW", "Roster review refers to stale source or identity inputs");
   if (roster.extractionRunIds.includes(review.runId) || roster.reviews.some((x) => x.runId === review.runId)) fail("ROSTER_INDEPENDENT_REVIEW_REQUIRED", "Review must use a separate run from extraction and the other review");
+  if ((review.version === 3) !== Boolean(review.workEvidence)) fail("ROSTER_WORK_EVIDENCE_REQUIRED", "Bounded version 3 review requires its source/audit evidence; legacy versions cannot claim it");
+  if (review.workEvidence) {
+    const proof = review.workEvidence, plan = proof.plan;
+    if (plan.sourceId !== roster.sourceId || plan.sourceHash !== roster.sourceSha256 || plan.subjectHash !== roster.subjectHash
+      || plan.reviewRevisionId !== roster.reviewRevisionId || plan.batchId !== review.runId
+      || proof.entriesHash !== contentHash([...review.entries].sort((a,b) => a.candidateId.localeCompare(b.candidateId)))
+      || contentHash(proof.auditWork.flatMap(work => work.missingMajorCharacters)) !== contentHash(review.missingMajorCharacters)) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Bounded work proof differs from this source/review/entry set");
+    const allowed = new Set(roster.unitIds);
+    if (proof.sourceWork.some(work => work.findings.some(f => f.unitIds.some(id => !allowed.has(id))))) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Bounded source finding has foreign evidence");
+  }
   const expected = new Set(roster.candidates.map((x) => x.id));
   const actual = new Set(review.entries.map((x) => x.candidateId));
   const missing = roster.candidates.filter(candidate => !actual.has(candidate.id)).map(candidate => candidate.id);
@@ -115,7 +127,7 @@ export function validateRosterReview(roster: RoleRoster, review: RoleRosterRevie
     const path = `/entries/${index}`;
     checkUnits(entry.basisUnitIds, `${path}/basisUnitIds`);
     const development = entry.developmentExpectation;
-    if (review.version === 2 && !development) fail("ROSTER_DEVELOPMENT_EXPECTATION_REQUIRED", `Role ${entry.candidateId} needs an independent source development expectation, including unknown when evidence is insufficient`, path);
+    if ((review.version === 2 || review.version === 3) && !development) fail("ROSTER_DEVELOPMENT_EXPECTATION_REQUIRED", `Role ${entry.candidateId} needs an independent source development expectation, including unknown when evidence is insufficient`, path);
     if (!development) return;
     if (development.kind === "changes") development.changes.forEach((change, changeIndex) => {
       checkUnits(change.beforeUnitIds, `${path}/developmentExpectation/changes/${changeIndex}/beforeUnitIds`);
@@ -151,7 +163,7 @@ export function reviewedRoleDevelopmentRequirements(roster: RoleRoster) {
   return majorRoleCandidates(roster).map(candidate => {
     const reviews = roster.reviews.map(review => ({
       runId: review.runId,
-      expectation: review.version === 2 ? review.entries.find(entry => entry.candidateId === candidate.id)?.developmentExpectation ?? null : null,
+      expectation: (review.version === 2 || review.version === 3) ? review.entries.find(entry => entry.candidateId === candidate.id)?.developmentExpectation ?? null : null,
     }));
     const kinds = reviews.map(review => review.expectation?.kind ?? "unknown");
     const status = !reviewsValid || kinds.includes("unknown") || new Set(kinds).size !== 1

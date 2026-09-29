@@ -24,3 +24,23 @@ export function boundedRoleReviewSpans(bytes: Buffer, units: readonly Unit[]) {
   };
   return roleReviewSpans(bytes).flatMap(split);
 }
+
+/** Admission reserves space for instructions/tools. Missing decisive evidence stays
+ * explicit and must be read before any judgment can pass the work's read gate. */
+export function roleEvidencePacket(bytes: Buffer, units: readonly Unit[], requiredRefs: readonly string[], backgroundRefs: readonly string[] = [], maxBytes = 12_000) {
+  const required = [...new Set(requiredRefs)], background = [...new Set(backgroundRefs)].filter(id => !required.includes(id));
+  const evidence: Array<{unitId: string; category: "required" | "background"; text: string}> = [];
+  const omittedRefs: Array<{unitId: string; category: "required" | "background"; omitReason: "requires-paginated-read"}> = [];
+  for (const [category, refs] of [["required", required], ["background", background]] as const) {
+    for (const unitId of refs) {
+      const unit = units.find(u => u.id === unitId);
+      if (!unit) throw new Error("ROLE_REVIEW_WORK_HOST_REQUIRED: evidence packet contains a foreign unit. Stop; inspect the original work references, never guess or retry unchanged.");
+      const item = {unitId, category, text: bytes.subarray(unit.anchor.startByte, unit.anchor.endByte).toString("utf8")};
+      if (Buffer.byteLength(JSON.stringify([...evidence, item])) <= maxBytes) evidence.push(item);
+      else omittedRefs.push({unitId, category, omitReason: "requires-paginated-read"});
+    }
+  }
+  return { evidence, manifest: {includedRefs: evidence.map(e => e.unitId), omittedRefs,
+    requiredButMissing: omittedRefs.filter(e => e.category === "required").map(e => e.unitId),
+    guidance: "Omission is a context boundary, never proof of irrelevance. Read requiredButMissing using read_role_work_evidence and every nextOffset before submission. Browse the independent atlas for known counterevidence outside this packet."} };
+}

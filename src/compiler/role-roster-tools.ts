@@ -178,6 +178,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       const issues = validateRosterReview(roster, review, { partial: input.partial });
       const included = new Set(entries.map(entry => entry.candidateId));
       const unresolved = journal().unresolved().map(attempt => ({ tool: attempt.tool, proposalId: attempt.proposalId, status: attempt.status, diagnostic: attempt.diagnostic }));
+      if (workStore?.auditComplete()) await workStore.assertQuestionLedger();
       const requiresHostReview = journal().requiringHostReview().length > 0;
       const missing = roster.candidates.filter(candidate => !included.has(candidate.id)).map(candidate => candidate.id);
       const nextAction = requiresHostReview ? "host_review_required" : unresolved.length ? "needs_correction" : unreadPages().length ? "needs_source_work"
@@ -220,6 +221,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       const input = resolveInput(roster, schema.parse(raw));
       if (workStore) {
         if (!workStore.sourceComplete() || !workStore.auditComplete()) throw roleWorkStop("bounded source review or global audit incomplete; page visits cannot substitute for work receipts");
+        await workStore.assertQuestionLedger();
         if (!isDeepStrictEqual(input.missingMajorCharacters, workStore.missingMajorCharacters())) throw roleWorkStop("assembly must preserve every audited missing-character discovery");
       }
       if (unreadPages().length) throw new Error(`Role review has unread source pages: ${unreadPages().join(", ")}. Read them with read_roster_source_page, then retry once with the completed review.`);
@@ -231,12 +233,15 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       }
       if (issues.length) throw new Error(`${issues.map(x => `${x.code} ${x.path ?? ""}: ${x.message}`).join("; ")}.\nRecovery SOP: ${recovery}`);
       if (workStore) {
-        review.version = 3;
-        review.workEvidence = { version: 1, plan: workStore.plan,
+        review.version = 4;
+        review.workEvidence = { version: 2, plan: workStore.plan, claimAudits: workStore.claimAudits(),
           sourceWork: workStore.plan.spans.map((_, page) => workStore!.read("source", page)!),
           auditWork: workStore.plan.spans.map((_, page) => workStore!.read("audit", page)!),
           entriesHash: contentHash([...review.entries].sort((a,b) => a.candidateId.localeCompare(b.candidateId))) };
       }
+      roleRosterReviewSchema.parse(review);
+      const proofIssues = validateRosterReview(roster, review);
+      if (proofIssues.length) throw roleWorkStop(proofIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
       pending = review;
       return { content: [{ type: "text" as const, text: "Independent role review captured. Call finish_compiler_batch with outcome=complete and reviewed_segments=[]." }], details: { captured: true } };
     },
@@ -259,6 +264,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
         return;
       }
       if (workStore && (!workStore.sourceComplete() || !workStore.auditComplete())) throw roleWorkStop("bounded review receipts incomplete at commitment");
+      if (workStore) await workStore.assertQuestionLedger();
       const roster = await new RoleRosterStore(root).review(current.roster, pending);
       await registerReviewedCoreRoles(root, { ...current, roster });
     },

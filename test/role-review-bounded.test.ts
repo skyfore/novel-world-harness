@@ -37,7 +37,23 @@ async function completeFixtureWork(work: RoleWorkInvocation, unit: string) {
     const p = packet(work);
     await invoke(work, "read_role_work_evidence", { unitId: unit });
     await invoke(work, "propose_role_roster_entry", { subjectHash: p.subjectHash, entry: entry(p.candidate.id, unit) });
-  } else await invoke(work, "propose_role_review_audit", { rationale: "All people in this core are accounted for", missingMajorCharacters: [], unresolved: [] });
+  } else if (work.workId.startsWith("role-claim")) {
+    const p = packet(work);
+    for (const unitId of p.requiredEvidenceUnitIds) await invoke(work, "read_role_work_evidence", { unitId });
+    await invoke(work, "propose_role_claim_audit", { candidateId: p.candidateId, claimRevision: p.claimRevision, atlasRevision: p.atlasRevision, packetHash:p.packetHash,
+      verdict: "supported", rationale: "Matches exchange; development remains unknown", basisUnitIds: [unit], counterevidence: {searchedUnitIds: [unit], rationale: "No contrary passage in this fixture"}, checks: fixtureChecks(unit) });
+  } else {
+    await invoke(work, "read_role_work_evidence", { unitId: unit });
+    await invoke(work, "read_role_audit_inventory", {});
+    await invoke(work, "propose_role_review_audit", fixtureAudit(work, unit));
+  }
+}
+function fixtureChecks(unit: string) { return ["importance", "identity", "development"].map(kind => ({kind, verdict:"supported", rationale:"Fixture evidence supports this dimension", basisUnitIds:[unit]})); }
+function fixtureAudit(work: RoleWorkInvocation, unit: string) {
+  const p = packet(work);
+  return { rationale: "All people in this core are accounted for", missingMajorCharacters: [], unresolved: [], atlasRevision: p.atlasRevision,
+    questionDispositions: p.expectedQuestions.map((q: {questionId: string}) => ({questionId: q.questionId, status: "resolved", rationale: "Fixture evidence answers it", basisUnitIds: [unit]})),
+    discoveryDispositions: p.discoveries.map((d: {findingId: string}) => ({findingId: d.findingId, candidateIds: [p.candidates[0].id], disposition: "mapped", rationale: "Discovered name represented in supplied claim", basisUnitIds: [unit]})) };
 }
 it("partitions UTF-8 continuously, including oversized paragraphs", () => {
   const b = Buffer.from("龙".repeat(12000) + "\n\nlast"); const spans = roleReviewSpans(b);
@@ -69,9 +85,11 @@ it("persists source work before candidates; resumes without rereading and retain
   await call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Bounded fixture review" });
   const saved = (await new RoleRosterStore(f.root).read(f.f.source.id))!;
   expect(saved.reviews).toHaveLength(1);
-  expect(saved.reviews[0]).toMatchObject({ version: 3, workEvidence: { version: 1 } });
+  expect(saved.reviews[0]).toMatchObject({ version: 4, workEvidence: { version: 2 } });
   const downgraded = structuredClone(saved.reviews[0]!); delete downgraded.workEvidence;
   expect(validateRosterReview({ ...saved, reviews: [] }, downgraded).map(x=>x.code)).toContain("ROSTER_WORK_EVIDENCE_REQUIRED");
+  const legacyProof = structuredClone(saved.reviews[0]!); legacyProof.workEvidence!.version = 1;
+  expect(validateRosterReview({ ...saved, reviews: [] }, legacyProof).map(x=>x.code)).toContain("ROSTER_WORK_EVIDENCE_REQUIRED");
   const changed = structuredClone(saved.reviews[0]!); changed.entries[0]!.rationale = "Tampered";
   expect(validateRosterReview({ ...saved, reviews: [] }, changed).map(x=>x.code)).toContain("ROSTER_WORK_EVIDENCE_MISMATCH");
 });
@@ -149,15 +167,183 @@ it("invalidates audit receipts when a staged entry changes", async () => {
   const modified = structuredClone(candidate.input) as {entry:{rationale:string}};
   modified.entry.rationale = "New independent finding";
   store.journal.record(candidate.tool, modified, "succeeded");
-  expect(() => store.auditComplete()).toThrow("entries changed after audit");
+  expect(() => store.auditComplete()).toThrow(/changed after audit/);
 });
 it("keeps unresolved audit findings durable and stops global assembly", async () => {
   const f = await setup(); const { roster } = await loadCurrentRoleRoster(f.root, f.f.source.id);
   await expect(runBoundedRoleReview(f.options, async w => {
-    if (w.workId.startsWith("role-audit")) await invoke(w,"propose_role_review_audit", { rationale:"Unresolved identity", missingMajorCharacters:[], unresolved:["Possible omitted person"] });
+    if (w.workId.startsWith("role-audit")) {
+      await invoke(w, "read_role_work_evidence", {unitId: roster.unitIds[0]!});
+      await invoke(w, "read_role_audit_inventory", {});
+      await invoke(w,"propose_role_review_audit", { ...fixtureAudit(w, roster.unitIds[0]!), rationale:"Unresolved identity", unresolved:["Possible omitted person"] });
+    }
     else await completeFixtureWork(w,roster.unitIds[0]!);
   })).rejects.toThrow("unresolved semantic work");
   const store = new RoleReviewWorkStore(f.root, (await RoleReviewWorkStore.plans(f.root, f.f.source.id))[0]!);
   expect(store.read("audit",0)?.unresolved).toEqual(["Possible omitted person"]);
   expect(store.auditComplete()).toBe(false);
+});
+
+it("cannot erase a source question with empty audit dispositions", async () => {
+  const f = await setup(); const { roster } = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
+  await expect(runBoundedRoleReview(f.options, async work => {
+    if (work.workId.startsWith("role-source")) {
+      await invoke(work, "propose_role_source_review", {summary: "Ambiguous reference", findings: [], openQuestions: ["Does Friend refer to Hero?"]});
+    } else if (work.workId.startsWith("role-audit")) {
+      expect(packet(work).expectedQuestions).toHaveLength(1);
+      await invoke(work, "propose_role_review_audit", {...fixtureAudit(work, unit), questionDispositions: []});
+    } else await completeFixtureWork(work, unit);
+  })).rejects.toThrow("Incomplete audit responsibilities");
+  const {RequirementLedger} = await import("../src/compiler/requirement-ledger.js");
+  const history = await new RequirementLedger(f.root, f.f.source.id).history();
+  expect(history.filter(r => r.payload.kind === "role-review-question")).toHaveLength(1);
+  expect(history.filter(r => r.payload.kind === "role-review-question-disposition")).toHaveLength(0);
+});
+it("requires original evidence AND mapped judgments during source audit", async () => {
+  for (const readEvidence of [false, true]) {
+    const f = await setup(); const { roster } = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
+    await expect(runBoundedRoleReview(f.options, async work => {
+      if (!work.workId.startsWith("role-audit")) return completeFixtureWork(work, unit);
+      if (readEvidence) await invoke(work, "read_role_work_evidence", {unitId: unit});
+      else await invoke(work, "read_role_audit_inventory", {});
+      await invoke(work, "propose_role_review_audit", fixtureAudit(work, unit));
+    })).rejects.toThrow(readEvidence ? "Unread mapped claim" : "Unread role work evidence");
+  }
+});
+it("does not adopt retained drafts without exact-revision verification", async () => {
+  const f = await setup(); const {roster} = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
+  const tools = createCompilerProposalToolset(f.root); await tools.beginBatch([], f.batchId, f.f.source.id);
+  await tools.tools.find(t => t.name === "read_roster_source_page")!.execute("page", {page:0} as never, undefined, undefined, {} as ExtensionContext);
+  for (const c of roster.candidates) await tools.tools.find(t => t.name === "propose_role_roster_entry")!.execute("old", {subjectHash: roster.subjectHash, entry: entry(c.id, unit)} as never, undefined, undefined, {} as ExtensionContext);
+  let audits = 0;
+  await runBoundedRoleReview(f.options, async work => {
+    expect(work.workId.startsWith("candidate")).toBe(false);
+    if (work.workId.startsWith("role-claim")) { audits++; expect(packet(work).entry.rationale).toBe("Central exchange"); }
+    await completeFixtureWork(work, unit);
+  });
+  const store = new RoleReviewWorkStore(f.root, (await RoleReviewWorkStore.plans(f.root, f.f.source.id))[0]!);
+  expect(store.plan.legacyDraftHashes).toHaveLength(roster.candidates.length);
+  expect(audits).toBe(roster.candidates.length);
+  expect(store.journal.latestAttempts("propose_role_roster_entry").every(a => store.journal.history(a.tool, a.proposalId).filter(x => x.status === "succeeded").length === 1)).toBe(true);
+});
+it("retains a contradicted claim and prevents finish on every resume", async () => {
+  const f = await setup(); const {roster} = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
+  let finalized = false;
+  await expect(runReview(f.options, async work => {
+    if (!work.workId.startsWith("role-claim")) return completeFixtureWork(work, unit);
+    const p = packet(work);
+    await invoke(work, "propose_role_claim_audit", {candidateId: p.candidateId, claimRevision: p.claimRevision, atlasRevision: p.atlasRevision, packetHash:p.packetHash,
+      verdict: "contradicted", rationale: "Counterevidence contradicts importance", basisUnitIds: [unit], counterevidence: {searchedUnitIds: [unit], rationale: "Counterexample"}, checks: fixtureChecks(unit)});
+  }, async () => {finalized = true;})).rejects.toThrow("requires evidence or semantic repair");
+  let resumedCalls = 0;
+  await expect(runBoundedRoleReview(f.options, async () => {resumedCalls++;})).rejects.toThrow("requires evidence or semantic repair");
+  expect(finalized).toBe(false); expect(resumedCalls).toBe(0);
+});
+it("preserves question provenance and audit dispositions in the existing requirement ledger", async () => {
+  const f = await setup(); const {roster} = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
+  await runBoundedRoleReview(f.options, async work => {
+    if (work.workId.startsWith("role-source")) await invoke(work, "propose_role_source_review", {summary: "Identity question", findings: [], openQuestions: ["Who is Friend?"]});
+    else await completeFixtureWork(work, unit);
+  });
+  const {RequirementLedger, requirementJournalSchema} = await import("../src/compiler/requirement-ledger.js");
+  const ledger = new RequirementLedger(f.root, f.f.source.id), history = await ledger.history();
+  expect(requirementJournalSchema.safeParse(history).success).toBe(true);
+  expect(history.filter(r => r.payload.kind === "role-review-question")).toHaveLength(1);
+  expect(history.filter(r => r.payload.kind === "role-review-question-disposition")).toHaveLength(1);
+  const store = new RoleReviewWorkStore(f.root, (await RoleReviewWorkStore.plans(f.root, f.f.source.id))[0]!);
+  await expect(store.assertQuestionLedger()).resolves.toBeUndefined();
+  await runBoundedRoleReview(f.options, async () => {throw new Error("completed work must not replay");});
+  expect(await ledger.history()).toEqual(history);
+});
+it("does not silently drop decisive text when an evidence packet is too small", async () => {
+  const {roleEvidencePacket} = await import("../src/compiler/role-review-context.js");
+  const bytes = Buffer.from("small\n" + "龙".repeat(5000));
+  const packet = roleEvidencePacket(bytes, [{id:"short",anchor:{startByte:0,endByte:6}},{id:"long",anchor:{startByte:6,endByte:bytes.length}}], ["long", "short"], ["short"], 1000);
+  expect(packet.manifest.requiredButMissing).toEqual(["long"]);
+  expect(packet.manifest.omittedRefs).toEqual([{unitId:"long",category:"required",omitReason:"requires-paginated-read"}]);
+  expect(packet.evidence).toEqual([{unitId:"short",category:"required",text:"small\n"}]);
+});
+it("exposes a paginated unfiltered atlas without leaking another review", async () => {
+  const f = await setup(); const {roster} = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
+  let inspected = false;
+  await runBoundedRoleReview(f.options, async work => {
+    if (work.workId.startsWith("candidate")) {
+      const response = await invoke(work, "read_role_review_atlas", {});
+      const atlas = JSON.parse((response.content[0] as {text:string}).text);
+      expect(atlas.pages[0].summary).toBe("Reviewed the supplied core");
+      const detail = await invoke(work, "read_role_review_atlas", {page: atlas.pages[0].page});
+      expect(JSON.parse((detail.content[0] as {text:string}).text).notes.findings[0].name).toBe("Hero");
+      inspected = true;
+    }
+    await completeFixtureWork(work, unit);
+  });
+  expect(inspected).toBe(true);
+});
+
+it("supplements evidence once in a fresh context without changing work identity", async () => {
+  const f = await setup(); const {roster} = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
+  let requestedWork: string | undefined; let supplemented = 0;
+  await runBoundedRoleReview(f.options, async work => {
+    if (!requestedWork && work.workId.startsWith("candidate")) {
+      requestedWork = work.workId;
+      await invoke(work, "request_role_work_evidence", {question:"What happened?", missing:"Original exchange", decisionImpact:"Changes importance", searchedUnitIds:[], requestedUnitIds:[unit]});
+      expect(work.complete()).toBe(true); // Handoff receipt, not candidate completion.
+      return;
+    }
+    if (work.workId === requestedWork) {
+      supplemented++;
+      expect(packet(work).supplement.manifest.includedRefs).toContain(unit);
+      expect(work.tools.some(t => t.name === "request_role_work_evidence")).toBe(false);
+    }
+    await completeFixtureWork(work, unit);
+  });
+  expect(supplemented).toBe(1);
+  const {RequirementLedger, requirementJournalSchema} = await import("../src/compiler/requirement-ledger.js");
+  const ledger = new RequirementLedger(f.root, f.f.source.id), history = await ledger.history();
+  expect(requirementJournalSchema.safeParse(history).success).toBe(true);
+  expect(history.filter(r => r.payload.kind === "role-review-evidence-need")).toHaveLength(1);
+  expect(history.filter(r => r.payload.kind === "role-review-evidence-resolution")).toHaveLength(1);
+});
+it("rejects a supplement that supplies no new original evidence", async () => {
+  const f = await setup(); const {roster} = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
+  await expect(runBoundedRoleReview(f.options, async work => {
+    if (!work.workId.startsWith("candidate")) return completeFixtureWork(work, unit);
+    await invoke(work, "read_role_work_evidence", {unitId:unit});
+    await invoke(work, "request_role_work_evidence", {question:"Again?", missing:"Nothing", decisionImpact:"None", searchedUnitIds:[unit], requestedUnitIds:[unit]});
+  })).rejects.toThrow("adds no new original text");
+});
+it("retains cumulative model usage and hard stops across replacement sessions", async () => {
+  const f = await setup(); const {roleReviewBudget} = await import("../src/compiler/role-review-budget.js");
+  const limits = {maxModelCalls:2,maxRequestBytes:1000,maxTotalPayloadBytes:1500}, plan = contentHash("plan"), work = "same-work";
+  const first = roleReviewBudget(f.root,plan,work,limits);
+  first.beginCall({}); first.admitPayload({text:"first"}); first.close();
+  const second = roleReviewBudget(f.root,plan,work,limits);
+  expect(second.snapshot().modelCalls).toBe(1);
+  second.beginCall({}); second.admitPayload({text:"second"});
+  expect(() => second.beginCall({})).toThrow("model-call limit");
+  const third = roleReviewBudget(f.root,plan,work,limits);
+  expect(third.snapshot().modelCalls).toBe(2);
+  expect(() => third.beginCall({})).toThrow("retained hard stop");
+});
+it("does not assume zero usage when legacy recovery has no retained budget record", async () => {
+  const f = await setup(); const {roleReviewBudget} = await import("../src/compiler/role-review-budget.js");
+  const limits = {maxModelCalls:2,maxRequestBytes:1000,maxTotalPayloadBytes:1500};
+  expect(() => roleReviewBudget(f.root,contentHash("legacy"),"old-work",limits,true)).toThrow("no retained usage record");
+});
+it("rejects an audit of the wrong packet and permits only a corrected same-work submission", async () => {
+  const f = await setup(); const {roster} = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
+  let checked = false;
+  await runBoundedRoleReview(f.options, async work => {
+    if (work.workId.startsWith("role-claim") && !checked) {
+      const p = packet(work); checked = true;
+      await expect(invoke(work, "propose_role_claim_audit", {candidateId:p.candidateId,claimRevision:p.claimRevision,atlasRevision:p.atlasRevision,packetHash:contentHash("different packet"),verdict:"supported",rationale:"Incorrect packet",basisUnitIds:[unit],counterevidence:{searchedUnitIds:[unit],rationale:"Fixture"},checks:fixtureChecks(unit)})).rejects.toThrow("Stale claim audit");
+    }
+    await completeFixtureWork(work, unit);
+  });
+  expect(checked).toBe(true);
+});
+it("cannot support the aggregate claim while a development check is insufficient", async () => {
+  const {roleClaimAuditSchema} = await import("../src/compiler/role-review-verification.js");
+  const checks = fixtureChecks("unit"); checks.find(c => c.kind === "development")!.verdict = "insufficient";
+  expect(roleClaimAuditSchema.safeParse({candidateId:"candidate",claimRevision:contentHash("entry"),atlasRevision:contentHash("atlas"),packetHash:contentHash("packet"),verdict:"supported",rationale:"Everything passed",basisUnitIds:["unit"],counterevidence:{searchedUnitIds:["unit"],rationale:"Checked"},checks}).success).toBe(false);
 });

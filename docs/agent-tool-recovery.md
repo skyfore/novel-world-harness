@@ -2002,3 +2002,38 @@ errors and exhausted proposal allowances take precedence over lookup advice.
 The workflow does not automatically retry provider quota failures or reset
 allowances in a fresh session. A partial work result never certifies an
 independent review, complete world or active candidate.
+
+### Role review verification v2
+
+New reviews are version 4 with version 2 work evidence. Version 3 remains a
+readable legacy artifact; it must not be relabeled as verified. Existing draft
+entries retain their identities and receive `propose_role_claim_audit` work.
+Copy `candidateId`, `claimRevision`, `packetHash` and `atlasRevision` from its assigned packet.
+Assess importance, identity and development separately. Required original units
+must be fully delivered in the packet or read with `read_role_work_evidence`
+and every `nextOffset`. Counterevidence citations also require original text.
+A contradicted/insufficient verdict is a durable finding, not a schema error;
+stop for semantic repair, never retry it unchanged or turn it into supported.
+
+`read_role_review_atlas` exposes only the current independent review. Start at
+`offset=0`; copy `pages[].page` to expand notes and questions, or copy
+`nextOffset`. For a bad page/cursor, make at most one corrected lookup. It is
+an unfiltered navigation index, not authoritative source evidence.
+
+Source audits must dispose of every supplied `expectedQuestions[].questionId`
+and `discoveries[].findingId` exactly once, with the packet `atlasRevision`.
+Read mapped judgments using `read_role_audit_inventory` and copy
+`candidates[].id`; names alone do not satisfy the judgment read gate. Read all
+cited original units. Empty dispositions, foreign IDs and stale revisions are
+errors; correct the original work once. Blocked dispositions/unresolved issues
+stop assembly and remain visible in the existing requirement ledger.
+
+`request_role_work_evidence` accepts a concrete question, missing evidence,
+decision impact, searched units and requested units. Discover exact IDs through
+`read_role_work_evidence`, copying `units[].unitId`. One fresh-context supplement
+is allowed per original work, with the same cumulative request budget. It does
+not grant new model calls. A repeated need, wholly already-read request, missing
+terminal receipt, exhausted budget or uncertain publication is a host stop;
+never rotate work IDs, discard the question, silently truncate decisive evidence,
+or retry in a new batch. Supplemental units are required before the terminal
+proposal. An unsuccessful supplement does not authorize another child work.

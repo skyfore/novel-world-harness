@@ -2,23 +2,27 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 import { PiAgentSession } from "../agent/pi-session.js";
-import { ModelRequestBudget } from "../agent/model-request-budget.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { COMPILER_SYSTEM_PROMPT } from "../compiler/pi-compiler.js";
 import { createCompilerProposalToolset } from "../compiler/proposal-tools.js";
 import { loadCurrentRoleRoster } from "../compiler/role-roster-tools.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { baseStructuralUnits } from "../compiler/structure.js";
-import { boundedRoleReviewSpans, roleReviewSourcePacket } from "../compiler/role-review-context.js";
+import { boundedRoleReviewSpans, roleReviewSourcePacket, roleEvidencePacket } from "../compiler/role-review-context.js";
 import { contentHash } from "../world/canonical.js";
 import { RoleReviewWorkStore, roleSourceWorkSchema, roleAuditWorkSchema,
   ROLE_SOURCE_WORK_TOOL, ROLE_AUDIT_WORK_TOOL, roleWorkStop, type RoleSourceWork, type RoleAuditWork } from "../compiler/role-review-work.js";
 import { type CompileCommandOptions, compileCommand } from "../commands/compile.js";
 import { TraceStore } from "../trace/store.js";
 import { TraceRecorder } from "../trace/recorder.js";
+import { roleReviewBudget } from "../compiler/role-review-budget.js";
+import { RequirementLedger } from "../compiler/requirement-ledger.js";
+import { roleClaimAuditSchema, roleEntryEvidence, roleFindingId, sameIds, roleEvidenceNeedSchema } from "../compiler/role-review-verification.js";
+import { roleRosterEntrySchema } from "../compiler/role-roster.js";
+import { ROLE_CLAIM_AUDIT_TOOL } from "../compiler/role-review-work.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 
-export type RoleWorkInvocation = { workId: string; prompt: string; tools: ToolDefinition[]; complete: () => boolean };
+export type RoleWorkInvocation = { workId: string; prompt: string; deliveredUnitIds?: string[]; retainedBudgetRequired?: boolean; tools: ToolDefinition[]; complete: () => boolean };
 export type RoleWorkRunner = (work: RoleWorkInvocation) => Promise<void>;
 export const ROLE_WORK_LIMITS = { maxModelCalls: 12, maxRequestBytes: 48_000, maxTotalPayloadBytes: 1_572_864 } as const;
 const textResult = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
@@ -45,12 +49,14 @@ export async function runBoundedRoleReview(options: CompileCommandOptions & { so
   store.assertScope(roster, contentHash(structure), bytes.length);
   const config = await loadOptionalConfig(options.configPath);
   const profile = config ? profileForRole(config, "controller").profile : undefined;
+  const ledger = new RequirementLedger(root, sourceId);
+  const readClaims = new Set<string>();
   const fullyRead = new Set<string>();
   const readOffsets = new Map<string, number>();
   const runner: RoleWorkRunner = runOverride ?? (async work => {
     const traceStore = new TraceStore(root);
     const recorder = await TraceRecorder.start(traceStore, { kind: "prepare", operationId: batchId, sourceId });
-    const budget = new ModelRequestBudget(ROLE_WORK_LIMITS);
+    const budget = roleReviewBudget(root, store.planHash, work.workId, ROLE_WORK_LIMITS, work.retainedBudgetRequired);
     let session: PiAgentSession | undefined;
     const abort = () => { void session?.abort(); };
     try {
@@ -61,7 +67,7 @@ export async function runBoundedRoleReview(options: CompileCommandOptions & { so
         saveSession: false, includeProjectInstructions: false, includeLocalTools: false, includeNwhExtension: false,
         interactionMode: "compiler", additionalTools: work.tools,
         systemPromptOverride: COMPILER_SYSTEM_PROMPT, systemPromptAppendix: protocol,
-        requestBudget: budget, onTool: options.onModelToolCall, onToolResult: options.onModelToolResult,
+        requestBudget: [budget, ...(options.requestBudget ? (Array.isArray(options.requestBudget) ? options.requestBudget : [options.requestBudget]) : [])], onTool: options.onModelToolCall, onToolResult: options.onModelToolResult,
         onText: options.onModelText, onThinking: options.onModelThinking, onEvent: options.onModelEvent,
         trace: { parent: recorder.rootContext, invocationName: work.workId, attempt: 0,
           metadata: { sourceId, compilerBatchId: batchId },
@@ -71,19 +77,77 @@ export async function runBoundedRoleReview(options: CompileCommandOptions & { so
       options.signal?.throwIfAborted();
       await session.promptWithReport(work.prompt, { timeoutMs: options.promptTimeoutMs ?? 600_000 });
       if (!work.complete()) throw roleWorkStop("model ended without the assigned work receipt");
+      await recorder.record("validation.completed", {phase: "role-review-work-usage", workId: work.workId, budget: budget.report()});
       await recorder.finish("succeeded");
     } catch (error) {
       await recorder.finish("failed", {}, { code: "ROLE_REVIEW_WORK_FAILED", message: String(error), retryable: false }); throw error;
     } finally { options.signal?.removeEventListener("abort", abort); budget.close(); await session?.dispose(); }
   });
   async function dispatch(work: RoleWorkInvocation) {
-    if (work.complete()) return;
+    const needToolName = "request_role_work_evidence";
+    const needId = `need-${contentHash({planHash: store.planHash, workId: work.workId})}`;
+    const retainedNeed = () => {
+      const record = journal.history(needToolName, needId).at(-1);
+      if (record?.status !== "succeeded") return undefined;
+      const input = record.input as {planHash: string; payload: unknown};
+      if (input.planHash !== store.planHash || record.inputHash !== CompilerProposalObligations.identity(needToolName, record.input).inputHash) throw roleWorkStop("evidence need scope mismatch");
+      return roleEvidenceNeedSchema.parse(input.payload);
+    };
+    const resolveNeed = async () => {
+      const records = work.tools.flatMap(t => journal.latestAttempts(t.name)).filter(a => a.status === "succeeded"
+        && (a.proposalId === work.workId || (work.workId.startsWith("candidate-") && a.tool === "propose_role_roster_entry" && (a.input as {entry: {candidateId: string}}).entry.candidateId === work.workId.slice(10))));
+      if (!records.length) throw roleWorkStop("evidence need has no matching terminal receipt");
+      await ledger.resolveRoleEvidenceNeed(store.planHash, work.workId, contentHash(records.map(r => r.inputHash).sort()));
+    };
+    let need = retainedNeed();
+    if (need) await ledger.recordRoleEvidenceNeed(store.planHash, work.workId, need);
+    if (work.complete()) { if (need) await resolveNeed(); return; }
     options.signal?.throwIfAborted(); journal.assertModelRecoveryAllowed();
-    await store.beginAttempt(work.workId);
-    fullyRead.clear(); readOffsets.clear();
-    options.onProgress?.(`Role review work ${work.workId}; resuming only this bounded scope.`);
-    await runner(work);
-    if (!work.complete()) throw roleWorkStop("work has no validated durable result");
+    const attempt = await store.beginAttempt(work.workId);
+    for (let pass = 0; pass < 2; pass++) {
+      const supplement = need ? roleEvidencePacket(bytes, units, need.requestedUnitIds, [], 6000) : undefined;
+      fullyRead.clear(); readOffsets.clear(); readClaims.clear();
+      for (const unitId of [...(work.deliveredUnitIds ?? []), ...(supplement?.manifest.includedRefs ?? [])]) fullyRead.add(unitId);
+      const { $schema: _, ...json } = z.toJSONSchema(roleEvidenceNeedSchema);
+      const needTool = defineTool({ name: needToolName, label: "Request bounded evidence supplement",
+        description: "If context is insufficient, name the question, missing evidence, decision impact, searched units and exact requested units. Copy unit IDs from same-source discovery tools. Ends this session and permits one fresh-context supplement under the SAME work and cumulative budget; never use to reset limits. A second supplement is a host stop.",
+        executionMode: "sequential", parameters: Type.Unsafe<Record<string, unknown>>(json as TSchema),
+        prepareArguments(raw) {
+          const input = {proposal_id: needId, planHash: store.planHash, payload: raw};
+          journal.assertRetryAllowed(needToolName, input);
+          try { return roleEvidenceNeedSchema.parse(raw) as Record<string, unknown>; }
+          catch (error) { recordValidationFailure(needToolName, input, error); }
+        },
+        async execute(_id, raw) {
+          if (retainedNeed() || work.complete()) throw roleWorkStop("evidence supplement already requested or work already settled");
+          const input = {proposal_id: needId, planHash: store.planHash, payload: raw};
+          journal.assertRetryAllowed(needToolName, input);
+          const prior = journal.history(needToolName, needId).at(-1);
+          if (prior?.status === "failed" && prior.inputHash === CompilerProposalObligations.identity(needToolName, input).inputHash) throw roleWorkStop("unchanged failed evidence need");
+          journal.record(needToolName, input, "running");
+          try {
+            const value = roleEvidenceNeedSchema.parse(raw);
+            if ([...value.searchedUnitIds, ...value.requestedUnitIds].some(id => !units.some(u => u.id === id))) throw new Error("Unknown evidence need unit. Use read_role_work_evidence query, copy units[].unitId, correct once; never guess or retry unchanged.");
+            if (value.requestedUnitIds.every(id => fullyRead.has(id))) throw roleWorkStop("evidence supplement adds no new original text; preserve the question instead of restarting context");
+            journal.record(needToolName, input, "succeeded");
+            await ledger.recordRoleEvidenceNeed(store.planHash, work.workId, value);
+          } catch (error) { recordValidationFailure(needToolName, input, error); }
+          return {...textResult({evidenceNeeded: true, globalBatchFinished: false}), terminate: true};
+        } });
+      const tools = work.tools.map(tool => ({...tool, async execute(...args: Parameters<typeof tool.execute>) {
+        if (need && tool.name.startsWith("propose_")) requireRead(need.requestedUnitIds);
+        return tool.execute(...args);
+      }}));
+      const prompt = supplement ? `${work.prompt.slice(0, work.prompt.lastIndexOf("\n"))}\n${JSON.stringify({...JSON.parse(work.prompt.split("\n").at(-1)!), evidenceNeed: need, supplement})}` : work.prompt;
+      options.onProgress?.(`Role review work ${work.workId}${need ? " evidence supplement" : ""}; original scope and cumulative budget retained.`);
+      const hadNeed = Boolean(need);
+      await runner({...work, prompt, retainedBudgetRequired: attempt > 1 || hadNeed, tools: [...tools, ...(!hadNeed ? [needTool] : [])], complete: () => work.complete() || (!hadNeed && Boolean(retainedNeed()))});
+      if (work.complete()) { if (retainedNeed()) await resolveNeed(); return; }
+      if (hadNeed) throw roleWorkStop("evidence supplement produced no validated result");
+      need = retainedNeed();
+      if (!need) throw roleWorkStop("work has no validated durable result");
+    }
+    throw roleWorkStop("bounded evidence supplement exhausted");
   }
   function sourcePacket(page: number) {
     const span = store.plan.spans[page]!;
@@ -131,8 +195,32 @@ export async function runBoundedRoleReview(options: CompileCommandOptions & { so
       if (offset >= matches.length && offset !== 0) throw new Error("Invalid notes offset. Call read_role_review_notes with the same query and offset=0, copy nextOffset and retry once.");
       return textResult({ records: matches.slice(offset, offset + 5), total: matches.length, ...(offset + 5 < matches.length ? { nextOffset: offset + 5 } : {}) });
     } });
+  const atlasTool: ToolDefinition = defineTool({ name: "read_role_review_atlas", label: "Read independent review atlas",
+    description: "Browse every reviewed core, without name filtering. Copy pages[].page to expand its complete notes and question IDs. Atlas notes are hypotheses; read original evidence before judging. Pagination never implies no other evidence exists.", executionMode: "sequential",
+    parameters: Type.Object({ page: Type.Optional(Type.Integer({ minimum: 0 })), offset: Type.Optional(Type.Integer({ minimum: 0 })) }, { additionalProperties: false }),
+    async execute(_id, args) {
+      if (args.page !== undefined) {
+        if (!store.plan.spans[args.page]) throw new Error("Unknown atlas page. Call read_role_review_atlas offset=0, copy pages[].page, correct once; never guess or retry unchanged.");
+        return textResult({ revision: store.atlasRevision(), page: args.page, span: store.plan.spans[args.page], notes: store.read("source", args.page), questions: store.questions(args.page) });
+      }
+      const offset = args.offset ?? 0;
+      if (offset >= store.plan.spans.length && offset !== 0) throw new Error("Unknown atlas offset. Call read_role_review_atlas offset=0 and copy nextOffset for one corrected retry.");
+      return textResult({ revision: store.atlasRevision(), total: store.plan.spans.length,
+        pages: store.plan.spans.slice(offset, offset + 5).map((span, i) => ({page: offset + i, span, summary: store.read("source", offset + i)?.summary})),
+        ...(offset + 5 < store.plan.spans.length ? {nextOffset: offset + 5} : {}) });
+    } });
+  function recordValidationFailure(tool: string, input: unknown, error: unknown): never {
+    const identity = CompilerProposalObligations.identity(tool, input);
+    const prior = journal.history(tool, identity.proposalId).at(-1);
+    if (prior?.status === "failed" && prior.inputHash === identity.inputHash) throw roleWorkStop("unchanged invalid work arguments");
+    journal.record(tool, input, "failed", String(error));
+    throw error;
+  }
+  function requireRead(ids: string[]) {
+    if (ids.some(id => !fullyRead.has(id))) throw new Error("Unread role work evidence. Call read_role_work_evidence with each cited unitId and every nextOffset before one corrected submission; notes and search snippets cannot substitute for the original text.");
+  }
   function receiptTool(kind: "source" | "audit", page: number): ToolDefinition {
-    const schema = kind === "source" ? roleSourceWorkSchema : roleAuditWorkSchema;
+    const schema = kind === "source" ? roleSourceWorkSchema : roleAuditWorkSchema.required({questionDispositions:true, discoveryDispositions:true, atlasRevision:true});
     const { $schema: _, ...json } = z.toJSONSchema(schema);
     return defineTool({ name: kind === "source" ? ROLE_SOURCE_WORK_TOOL : ROLE_AUDIT_WORK_TOOL,
       label: "Submit assigned role review work", description: "Submit this one source work or audit. This is single-use, source-bound review metadata, not world truth or global finish. Correct an invalid proposal once under the same work identity.",
@@ -142,15 +230,30 @@ export async function runBoundedRoleReview(options: CompileCommandOptions & { so
         const envelope = { proposal_id: store.workId(kind, page), planHash: store.planHash, payload: raw, ...(kind === "audit" ? { entriesHash: store.entriesHash() } : {}) };
         journal.assertRetryAllowed(tool, envelope);
         try { return schema.parse(raw) as Record<string, unknown>; }
-        catch (error) { journal.record(tool, envelope, "failed", String(error)); throw error; }
+        catch (error) { recordValidationFailure(tool, envelope, error); }
       },
       async execute(_id, raw, signal) {
         signal?.throwIfAborted();
         await store.submit(kind, page, raw, payload => {
           const ids = kind === "source" ? (payload as RoleSourceWork).findings.flatMap(f => f.unitIds) : (payload as RoleAuditWork).missingMajorCharacters.flatMap(f => f.basisUnitIds);
           const allowed = kind === "source" ? new Set(sourcePacket(page).fragments.map(u => u.unitId)) : new Set(units.map(u => u.id));
+          if (kind === "audit") {
+            const audit = payload as RoleAuditWork;
+            const note = store.read("source", page)!;
+            if (audit.atlasRevision !== store.atlasRevision() || !audit.questionDispositions || !sameIds(audit.questionDispositions.map(q => q.questionId), store.questions(page).map(q => q.questionId))
+              || !audit.discoveryDispositions || !sameIds(audit.discoveryDispositions.map(d => d.findingId), note.findings.map((_, i) => roleFindingId(store.planHash, page, i)))) throw new Error("Incomplete audit responsibilities. Copy atlasRevision, expectedQuestions[].questionId and discoveries[].findingId from the assigned packet; dispose of each exactly once and correct the same work once.");
+            for (const d of audit.discoveryDispositions) {
+              if (d.candidateIds.some(id => !roster.candidates.some(c => c.id === id) || !readClaims.has(id))) throw new Error("Unread mapped claim. Call read_role_audit_inventory and follow nextOffset, copy candidates[].id and read its entry before one corrected submission.");
+              if ((d.disposition === "mapped") !== (d.candidateIds.length > 0)) throw new Error("Mapped discovery must name candidates; other dispositions must not. Correct once using the assigned discoveries and inventory.");
+              const index = note.findings.findIndex((_, i) => roleFindingId(store.planHash, page, i) === d.findingId);
+              if (d.disposition === "missing-major" && !audit.missingMajorCharacters.some(m => m.name === note.findings[index]?.name)) throw new Error("Missing-major discovery must be retained in missingMajorCharacters under its discovered name. Correct once; never drop the finding.");
+            }
+            requireRead([...ids, ...audit.questionDispositions.flatMap(q => q.basisUnitIds), ...audit.discoveryDispositions.flatMap(d => d.basisUnitIds)]);
+          }
           if (ids.some(id => !allowed.has(id))) throw new Error("Unknown or out-of-scope evidence. Copy fragments[].unitId from this work packet (audit: use read_role_work_evidence units[].unitId). Correct the original work once; never guess IDs or repeat unchanged inputs.");
         });
+        if (kind === "source") await ledger.registerRoleQuestions(store.questions(page));
+        else for (const disposition of store.read("audit", page)!.questionDispositions ?? []) await ledger.recordRoleQuestionDisposition(store.planHash, contentHash(store.read("audit", page)), disposition);
         return { ...textResult({ workCompleted: true, globalBatchFinished: false }), terminate: true };
       } });
   }
@@ -159,6 +262,8 @@ export async function runBoundedRoleReview(options: CompileCommandOptions & { so
       prompt: `${protocol}\nIndependently inspect this entire core for people, causal decisions, relationships, viewpoints, development and counterevidence. Discover people even when absent from an extractor inventory. Preserve ambiguity, unresolved pronouns and cross-chapter questions. Use the evidence tool for complete continued units. Submit propose_role_source_review, including findings=[] with an evidenced explanation if none.\n${JSON.stringify(sourcePacket(page))}`,
       complete: () => Boolean(store.read("source", page)) });
   }
+  // Idempotently repair a crash between the durable work receipt and ledger append.
+  for (let page = 0; page < store.plan.spans.length; page++) await ledger.registerRoleQuestions(store.questions(page));
   const toolset = createCompilerProposalToolset(root);
   await toolset.beginBatch([], batchId, sourceId);
   const entries = () => journal.latestAttempts("propose_role_roster_entry").filter(a => a.status === "succeeded");
@@ -175,36 +280,70 @@ export async function runBoundedRoleReview(options: CompileCommandOptions & { so
         if (tool.name === "propose_role_roster_entry") {
           const input = raw as { entry: { basisUnitIds: string[]; developmentExpectation: { basisUnitIds?: string[]; changes?: Array<{ beforeUnitIds: string[]; afterUnitIds: string[] }> } } };
           const evidence = [...input.entry.basisUnitIds, ...(input.entry.developmentExpectation.basisUnitIds ?? []), ...(input.entry.developmentExpectation.changes ?? []).flatMap(c => [...c.beforeUnitIds, ...c.afterUnitIds])];
-          if (evidence.some(id => !fullyRead.has(id))) throw new Error("Unread role work evidence. Call read_role_work_evidence with each cited unitId and every nextOffset before one corrected submission; notes and search snippets cannot substitute for the original text.");
+          journal.assertRetryAllowed(tool.name, raw);
+          try { requireRead(evidence); } catch (error) { recordValidationFailure(tool.name, raw, error); }
         }
         const result = await tool.execute(id, raw as never, signal, onUpdate, ctx);
         return tool.name === "propose_role_roster_entry" && complete() ? { ...result, terminate: true } : result;
       } }));
-    await dispatch({ workId: `candidate-${candidate.id}`, tools: [evidenceTool, notesTool, ...tools], complete,
-      prompt: `${protocol}\nReview this candidate only. Read this review's source notes and exact supporting AND contradicting passages. All source shards already have durable review receipts; never reread the whole book. Classify importance by causal/relationship/viewpoint role, not frequency. For development, stable requires supported continuity, changes requires before/after evidence in the ontology, unknown requires an honest evidence boundary. Temporary emotion is not lasting development. Preview entries=[one entry], partial=true, then propose_role_roster_entry.\n${JSON.stringify({ subjectHash: roster.subjectHash, reviewRevisionId: roster.reviewRevisionId, candidate })}` });
+    await dispatch({ workId: `candidate-${candidate.id}`, tools: [evidenceTool, notesTool, atlasTool, ...tools], complete,
+      prompt: `${protocol}\nReview this candidate only. Read this review's source notes and exact supporting AND contradicting passages. All source shards already have durable review receipts; never reread the whole book. Classify importance by causal/relationship/viewpoint role, not frequency. For development, stable requires supported continuity, changes requires before/after evidence in the ontology, unknown requires an honest evidence boundary. Temporary emotion is not lasting development. Preview entries=[one entry], partial=true, then propose_role_roster_entry.\n${JSON.stringify({ subjectHash: roster.subjectHash, reviewRevisionId: roster.reviewRevisionId, candidate, navigation: { atlasRevision: store.atlasRevision(), sourceCores: store.plan.spans.length, tool: "read_role_review_atlas", guidance: "Browse unfiltered chapter/core summaries and questions before narrowing. Expand relevant notes and original passages; name matching is not a completeness test." } })}` });
+  }
+  // Every staged claim, including retained pre-v2 drafts, gets its own exact-revision audit.
+  for (const candidate of roster.candidates) {
+    const entry = roleRosterEntrySchema.parse((entries().find(a => (a.input as {entry: {candidateId: string}}).entry.candidateId === candidate.id)?.input as {entry: unknown}).entry);
+    const claimRevision = contentHash(entry), atlasRevision = store.atlasRevision();
+    const evidencePacket = roleEvidencePacket(bytes, units, roleEntryEvidence(entry));
+    const packetHash = contentHash({claimRevision, atlasRevision, evidencePacket});
+    const { $schema: _, ...json } = z.toJSONSchema(roleClaimAuditSchema);
+    const claimTool: ToolDefinition = defineTool({ name: ROLE_CLAIM_AUDIT_TOOL, label: "Audit exact role claim",
+      description: "Audit this supplied claim revision against complete original evidence and counterevidence. Supported permits continuation; contradicted or insufficient preserves the finding and blocks finish. Correct invalid arguments once under this same work identity.", executionMode: "sequential",
+      parameters: Type.Unsafe<Record<string, unknown>>(json as TSchema),
+      prepareArguments(raw) {
+        const envelope = {proposal_id: store.claimWorkId(candidate.id), planHash: store.planHash, payload: raw};
+        journal.assertRetryAllowed(ROLE_CLAIM_AUDIT_TOOL, envelope);
+        try { return roleClaimAuditSchema.parse(raw) as Record<string, unknown>; }
+        catch (error) { recordValidationFailure(ROLE_CLAIM_AUDIT_TOOL, envelope, error); }
+      },
+      async execute(_id, raw) {
+        await store.submitClaim(raw, candidate.id, audit => {
+          if (audit.candidateId !== candidate.id || audit.claimRevision !== claimRevision || audit.atlasRevision !== atlasRevision || audit.packetHash !== packetHash) throw new Error("Stale claim audit. Copy candidateId, claimRevision, packetHash and atlasRevision from this work packet for one corrected submission; never guess or change work scope.");
+          requireRead([...roleEntryEvidence(entry), ...audit.basisUnitIds, ...audit.counterevidence.searchedUnitIds, ...audit.checks.flatMap(c => c.basisUnitIds)]);
+        });
+        return { ...textResult({workCompleted: true, globalBatchFinished: false}), terminate: true };
+      } });
+    await dispatch({ workId: store.claimWorkId(candidate.id), deliveredUnitIds: evidencePacket.manifest.includedRefs, complete: () => Boolean(store.claimAudit(candidate.id)), tools: [evidenceTool, notesTool, atlasTool, claimTool],
+      prompt: `${protocol}\nIndependently verify the supplied full claim. Provide a separate check for each of importance, identity and development; inspect original support and seek counterevidence using the unfiltered atlas. Read every requiredEvidenceUnitId in full. Stability needs continuity; changes need before/trigger/after; unknown needs an honest boundary. Retained drafts require the same verification. Unsupported claims must be contradicted or insufficient, never silently adopted. Submit propose_role_claim_audit.\n${JSON.stringify({ candidateId: candidate.id, claimRevision, atlasRevision, packetHash, entry, requiredEvidenceUnitIds: roleEntryEvidence(entry), evidencePacket, navigation: {tool: "read_role_review_atlas", sourceCores: store.plan.spans.length} })}` });
+    if (store.claimAudit(candidate.id)?.verdict !== "supported") throw roleWorkStop(`claim ${candidate.id} requires evidence or semantic repair`);
   }
   const inventoryTool: ToolDefinition = defineTool({ name: "read_role_audit_inventory", label: "Read audit inventory",
-    description: "Read the frozen candidate inventory and this review's own staged judgements. Follow nextOffset. Prior reviewers are hidden.", executionMode: "sequential",
-    parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }, { additionalProperties: false }),
+    description: "Read one complete own-review judgment at a time. Optionally filter candidate names with literal query, then follow nextOffset for all matches. Copy candidates[].id. Empty search is not proof of absence; browse unfiltered inventory when necessary. Prior reviewers are hidden.", executionMode: "sequential",
+    parameters: Type.Object({ query: Type.Optional(Type.String({minLength:1})), offset: Type.Optional(Type.Integer({ minimum: 0 })) }, { additionalProperties: false }),
     async execute(_id, args) {
       const offset = args.offset ?? 0;
-      if (offset >= roster.candidates.length && offset !== 0) throw new Error("Invalid inventory offset. Call read_role_audit_inventory offset=0 and copy nextOffset for one corrected retry.");
-      return textResult({ candidates: roster.candidates.slice(offset, offset + 10).map(c => ({ id: c.id, name: c.name,
-        entry: (entries().find(a => (a.input as { entry: { candidateId: string } }).entry.candidateId === c.id)?.input as { entry: unknown } | undefined)?.entry })),
-        ...(offset + 10 < roster.candidates.length ? { nextOffset: offset + 10 } : {}) });
+      const matches = roster.candidates.filter(c => !args.query || JSON.stringify(c).includes(args.query));
+      if (offset >= matches.length && offset !== 0) throw new Error("Invalid inventory offset. Call read_role_audit_inventory offset=0 and copy nextOffset for one corrected retry.");
+      const candidates = matches.slice(offset, offset + 1).map(c => ({ id: c.id, name: c.name,
+        entry: (entries().find(a => (a.input as { entry: { candidateId: string } }).entry.candidateId === c.id)?.input as { entry: unknown } | undefined)?.entry }));
+      if (Buffer.byteLength(JSON.stringify(candidates)) > 16000) throw roleWorkStop("one audit judgment exceeds the bounded inventory packet; host must reorganize it without truncation");
+      for (const candidate of candidates) readClaims.add(candidate.id);
+      return textResult({candidates, total: matches.length, ...(offset + 1 < matches.length ? {nextOffset: offset + 1} : {})});
     } });
   for (let page = 0; page < store.plan.spans.length; page++) {
     const existingAudit = store.read("audit", page);
     if (existingAudit?.unresolved.length) throw roleWorkStop(`audit ${page} retains unresolved semantic work`);
-    await dispatch({ workId: store.workId("audit", page), tools: [evidenceTool, notesTool, neighborTool(page), inventoryTool, receiptTool("audit", page)],
+    await dispatch({ workId: store.workId("audit", page), tools: [evidenceTool, notesTool, neighborTool(page), inventoryTool, atlasTool, receiptTool("audit", page)],
       complete: () => Boolean(store.read("audit", page)),
-      prompt: `${protocol}\nAudit this source core against the supplied compact full denominator and this review's findings. Detect missing major people, consequential late arrivals, contradictory importance/development and unresolved source questions. Read exact evidence and detailed inventory as needed. Do not silently accept extractor completeness. Record missingMajorCharacters with evidence; record every remaining issue in unresolved rather than claim success. Submit propose_role_review_audit.\n${JSON.stringify({ source: sourcePacket(page), notes: store.read("source", page), candidates: roster.candidates.map(c => ({ id: c.id, name: c.name })) })}` });
+      prompt: `${protocol}\nAudit this source core against this review's findings and the frozen inventory. Only the first ten inventory names are supplied; use read_role_audit_inventory with query or pagination for the complete denominator. Detect missing major people, consequential late arrivals, contradictory importance/development and unresolved source questions. Read exact evidence and detailed inventory for every mapped claim. Dispose of ALL expectedQuestions and discoveries exactly once; empty lists cannot erase responsibilities. Use resolved only with evidence, otherwise blocked. Copy atlasRevision. Do not silently accept extractor completeness. Record missingMajorCharacters with evidence; record every remaining issue in unresolved rather than claim success. Submit propose_role_review_audit.\n${JSON.stringify({ source: sourcePacket(page), summary: store.read("source", page)!.summary, atlasRevision: store.atlasRevision(), expectedQuestions: store.questions(page), discoveries: store.read("source", page)!.findings.map((finding, index) => ({ findingId: roleFindingId(store.planHash, page, index), ...finding })), candidates: roster.candidates.slice(0,10).map(c => ({ id: c.id, name: c.name })), inventory: {total: roster.candidates.length, suppliedNames: Math.min(10,roster.candidates.length), tool:"read_role_audit_inventory"} })}` });
+    const settled = store.read("audit", page)!;
+    for (const disposition of settled.questionDispositions ?? []) await ledger.recordRoleQuestionDisposition(store.planHash, contentHash(settled), disposition);
+    if (settled.questionDispositions?.some(q => q.status === "blocked") || settled.discoveryDispositions?.some(d => d.disposition === "blocked")) throw roleWorkStop(`audit ${page} retains blocked responsibilities`);
     if (store.read("audit", page)?.unresolved.length) throw roleWorkStop(`audit ${page} retains unresolved semantic work`);
   }
   if (!store.sourceComplete() || !store.auditComplete()) throw roleWorkStop("source or audit coverage incomplete");
   // The only global completion remains the ordinary compiler finish handshake.
   await finalize({ ...options, saveSession: false, includeLocalTools: false,
-    requestBudget: new ModelRequestBudget(ROLE_WORK_LIMITS),
+    requestBudget: [roleReviewBudget(root, store.planHash, "global-assembly", ROLE_WORK_LIMITS), ...(options.requestBudget ? (Array.isArray(options.requestBudget) ? options.requestBudget : [options.requestBudget]) : [])],
     disabledProposalTools: toolset.tools.filter(t => !["preview_role_roster_review", "propose_role_roster_review", "finish_compiler_batch"].includes(t.name)).map(t => t.name),
     prompt: `${protocol}\nAll source and audit work receipts are complete and all candidates are staged. Preview with entries omitted, then propose_role_roster_review staged=true preserving EXACT missingMajorCharacters, then finish_compiler_batch outcome=complete reviewed_segments=[]. Do not repeat role judgements.\n${JSON.stringify({ subjectHash: roster.subjectHash, missingMajorCharacters: store.missingMajorCharacters() })}` });
 }

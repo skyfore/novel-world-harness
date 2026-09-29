@@ -55,12 +55,22 @@ export class ModelRequestBudget {
     if (typeof cost === "number" && Number.isFinite(cost) && cost >= 0) this.tokenUsage.cost += cost;
   }
 
-  constructor(limits: ModelRequestLimits = ACTOR_MODEL_REQUEST_LIMITS) {
+  constructor(limits: ModelRequestLimits = ACTOR_MODEL_REQUEST_LIMITS, private readonly persistence?: {
+    initial?: { usage: ModelRequestUsage; blocked: boolean };
+    save: (state: {usage: ModelRequestUsage; blocked: boolean}) => void;
+  }) {
     for (const key of ["maxModelCalls", "maxRequestBytes", "maxTotalPayloadBytes"] as const) {
       const value = limits[key];
       if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`Invalid model request limit '${key}'.`);
     }
     this.limits = Object.freeze({ ...limits });
+    if (persistence?.initial) {
+      const { usage, blocked } = persistence.initial;
+      if (Object.values(usage).some(v => !Number.isSafeInteger(v) || v < 0)
+        || usage.modelCalls > limits.maxModelCalls || usage.totalPayloadBytes > limits.maxTotalPayloadBytes || usage.largestRequestBytes > limits.maxRequestBytes) throw new Error("Invalid persisted model budget; stop for host review");
+      this.usage = {...usage};
+      if (blocked) this.failure = new ModelRequestBudgetError(this.snapshot(), this.limits, "retained hard stop");
+    }
   }
 
   snapshot(): ModelRequestUsage { return { ...this.usage }; }
@@ -73,6 +83,7 @@ export class ModelRequestBudget {
     this.checkSize(bytes);
     this.usage.modelCalls += 1;
     this.usage.largestRequestBytes = Math.max(this.usage.largestRequestBytes, bytes);
+    this.persist();
   }
 
   /** Check the final provider JSON AFTER Pi's payload extensions have transformed it. */
@@ -86,6 +97,7 @@ export class ModelRequestBudget {
     this.usage.payloads += 1;
     this.usage.totalPayloadBytes += bytes;
     this.usage.largestRequestBytes = Math.max(this.usage.largestRequestBytes, bytes);
+    this.persist();
   }
 
   private measure(value: unknown): number {
@@ -103,9 +115,14 @@ export class ModelRequestBudget {
     if (bytes > this.limits.maxRequestBytes) this.fail(`request requires ${bytes} UTF-8 bytes`);
   }
 
+  private persist(): void {
+    try { this.persistence?.save({usage: this.snapshot(), blocked: this.isBlocked()}); }
+    catch (error) { this.failure ??= new ModelRequestBudgetError(this.snapshot(), this.limits, `usage publication failed: ${String(error)}`); throw this.failure; }
+  }
   private assertAvailable(): void { if (this.failure) throw this.failure; }
   private fail(reason: string): never {
     this.failure ??= new ModelRequestBudgetError(this.snapshot(), this.limits, reason);
+    this.persist();
     throw this.failure;
   }
 }

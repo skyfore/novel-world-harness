@@ -623,11 +623,12 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
-  if (["read_role_work_evidence", "read_role_work_neighbor", "read_role_review_notes", "read_role_audit_inventory", "propose_role_source_review", "propose_role_review_audit"].includes(toolName)) {
+  if (["request_role_work_evidence", "read_role_work_evidence", "read_role_work_neighbor", "read_role_review_notes", "read_role_review_atlas", "read_role_audit_inventory", "propose_role_claim_audit", "propose_role_source_review", "propose_role_review_audit"].includes(toolName)) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
       retryCondition: "Only one materially corrected retry in this assigned work, if the durable allowance remains available; host and budget stops take precedence.",
       steps: ["For evidence, call read_role_work_evidence with query in this source, copy units[].unitId to unitId, and follow nextOffset for complete text. Source-work citations must come from the supplied packet fragments[].unitId.",
         "For neighbor context, choose direction=previous or next in the assigned work; a boundary result is not an error and must not be retried. For a notes/inventory cursor miss, call the same tool with offset=0 and copy nextOffset. For proposal fields, correct all reported schema paths under the same host-assigned work identity.",
+        "For atlas navigation, call read_role_review_atlas offset=0 and copy pages[].page or nextOffset. Audit fields must copy the assigned packet claimRevision, packetHash, atlasRevision, expectedQuestions[].questionId and discoveries[].findingId; do not omit responsibilities. Read mapped claims through read_role_audit_inventory before disposition.",
         "Never guess IDs, repeat unchanged arguments, change work identity or treat missing search results as proof of absence. Stop after a corrected failure."] };
   }
   if (["read_role_roster", "read_roster_source_page", "read_roster_evidence", "preview_role_roster_review", "propose_role_roster_entry", "propose_role_roster_review"].includes(toolName)) {

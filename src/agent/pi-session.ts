@@ -79,7 +79,7 @@ export type PiAgentSessionOptions = {
   /** Observation-only trace for one isolated Pi invocation. */
   trace?: PiTraceInvocationInput;
   /** One caller-owned budget shared by all model steps and protocol retries. */
-  requestBudget?: ModelRequestBudget;
+  requestBudget?: ModelRequestBudget | readonly ModelRequestBudget[];
 };
 
 export type PiInteractiveOptions = {
@@ -624,7 +624,8 @@ export class PiAgentSession {
       throw new Error("An explicit session ID cannot be resumed with session persistence disabled.");
     }
     const inheritedBudget = currentPlayModelBudget()?.budget;
-    const requestBudgets = [...new Set([inheritedBudget, options.requestBudget].filter((value): value is ModelRequestBudget => value !== undefined))];
+    const suppliedBudgets = options.requestBudget ? (Array.isArray(options.requestBudget) ? options.requestBudget : [options.requestBudget as ModelRequestBudget]) : [];
+    const requestBudgets = [...new Set([inheritedBudget, ...suppliedBudgets].filter((value): value is ModelRequestBudget => value !== undefined))];
     for (const budget of requestBudgets) budget.assertUsable();
     const profile = options.profile ? { ...options.profile } : undefined;
     const stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());

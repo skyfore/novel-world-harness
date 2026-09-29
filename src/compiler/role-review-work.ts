@@ -6,7 +6,9 @@ import { worldStorageRoot } from "../world/paths.js";
 import type { RoleRoster } from "./role-roster.js";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
 
-export const ROLE_REVIEW_WORK_VERSION = 1;
+import { roleClaimAuditSchema, roleQuestionDispositionSchema, roleDiscoveryDispositionSchema, roleQuestions, roleFindingId, sameIds, type RoleClaimAudit } from "./role-review-verification.js";
+export const ROLE_CLAIM_AUDIT_TOOL = "propose_role_claim_audit";
+export const ROLE_REVIEW_WORK_VERSION = 1; // Immutable plan storage format; verification evidence is v2.
 export const ROLE_SOURCE_WORK_TOOL = "propose_role_source_review";
 export const ROLE_AUDIT_WORK_TOOL = "propose_role_review_audit";
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -27,15 +29,32 @@ export const roleAuditWorkSchema = z.object({
   rationale: z.string().trim().min(1).max(2000),
   missingMajorCharacters: z.array(z.object({ name: z.string().trim().min(1).max(200),
     rationale: z.string().trim().min(1).max(1200), basisUnitIds: z.array(z.string()).min(1).max(24) }).strict()).max(64),
+  questionDispositions: z.array(roleQuestionDispositionSchema).max(24).optional(),
+  discoveryDispositions: z.array(roleDiscoveryDispositionSchema).max(64).optional(),
+  atlasRevision: hash.optional(),
   unresolved: z.array(z.string().trim().min(1).max(600)).max(24),
 }).strict();
 export const boundedRoleReviewEvidenceSchema = z.object({
-  version: z.literal(1), plan: roleReviewPlanSchema,
+  version: z.union([z.literal(1), z.literal(2)]), plan: roleReviewPlanSchema,
+  claimAudits: z.array(roleClaimAuditSchema).optional(),
   sourceWork: z.array(roleSourceWorkSchema), auditWork: z.array(roleAuditWorkSchema),
   entriesHash: hash,
 }).strict().superRefine((value, ctx) => {
   if (value.sourceWork.length !== value.plan.spans.length || value.auditWork.length !== value.plan.spans.length
     || value.auditWork.some(work => work.unresolved.length)) ctx.addIssue({ code: "custom", message: "Incomplete bounded source/audit work" });
+  if (value.version === 2) {
+    if (!value.claimAudits?.length || value.claimAudits.some(a => a.verdict !== "supported")) ctx.addIssue({ code: "custom", message: "Missing or blocked claim audits" });
+    const planHash = contentHash(value.plan), atlasRevision = contentHash(value.sourceWork);
+    for (const [page, work] of value.auditWork.entries()) {
+      const note = value.sourceWork[page];
+      if (!note || work.atlasRevision !== atlasRevision || !work.questionDispositions || !work.discoveryDispositions
+        || !sameIds(work.questionDispositions.map(q => q.questionId), roleQuestions(planHash, page, note).map(q => q.questionId))
+        || work.questionDispositions.some(q => q.status !== "resolved")
+        || !sameIds(work.discoveryDispositions.map(d => d.findingId), note.findings.map((_, i) => roleFindingId(planHash, page, i)))
+        || work.discoveryDispositions.some(d => d.disposition === "blocked")) ctx.addIssue({ code: "custom", message: "Unclosed source questions/discoveries or stale atlas" });
+    }
+    if (value.claimAudits?.some(a => a.atlasRevision !== atlasRevision)) ctx.addIssue({ code: "custom", message: "Stale claim audit atlas" });
+  }
   for (const [index, span] of value.plan.spans.entries()) if (span.start !== (index ? value.plan.spans[index - 1]!.end : 0) || span.end <= span.start) ctx.addIssue({ code: "custom", message: "Non-contiguous source work" });
 });
 export type RoleSourceWork = z.infer<typeof roleSourceWorkSchema>;
@@ -92,7 +111,7 @@ export class RoleReviewWorkStore {
   }
   workId(kind: "source" | "audit", page: number) {
     if (!Number.isInteger(page) || !this.plan.spans[page]) throw roleWorkStop("unknown host work index");
-    return `role-${kind}-${this.planHash.slice(0, 20)}-${page}`;
+    return `role-${kind}-${kind === "audit" ? "v2-" : ""}${this.planHash.slice(0, 20)}-${page}`;
   }
   read(kind: "source", page: number): RoleSourceWork | undefined;
   read(kind: "audit", page: number): RoleAuditWork | undefined;
@@ -107,7 +126,55 @@ export class RoleReviewWorkStore {
   }
   entriesHash() { return contentHash(this.journal.latestAttempts("propose_role_roster_entry").map(a => ({ id: a.proposalId, hash: a.inputHash, status: a.status })).sort((a, b) => a.id.localeCompare(b.id))); }
   sourceComplete() { return this.plan.spans.every((_, page) => Boolean(this.read("source", page))); }
-  auditComplete() { return this.plan.spans.every((_, page) => this.read("audit", page)?.unresolved.length === 0); }
+  atlasRevision() { return contentHash(this.plan.spans.map((_, page) => this.read("source", page))); }
+  questions(page: number) { const note = this.read("source", page); return note ? roleQuestions(this.planHash, page, note) : []; }
+  claimWorkId(candidateId: string) { return `role-claim-v2-${contentHash({ plan: this.planHash, candidateId })}`; }
+  claimAudit(candidateId: string): RoleClaimAudit | undefined {
+    const record = this.journal.history(ROLE_CLAIM_AUDIT_TOOL, this.claimWorkId(candidateId)).at(-1);
+    if (!record || record.status !== "succeeded") return undefined;
+    const input = record.input as {planHash: string; payload: unknown};
+    if (input.planHash !== this.planHash || record.inputHash !== CompilerProposalObligations.identity(ROLE_CLAIM_AUDIT_TOOL, record.input).inputHash) throw roleWorkStop("claim audit integrity mismatch");
+    const audit = roleClaimAuditSchema.parse(input.payload);
+    const entry = this.stagedEntries().find(e => e.candidateId === candidateId);
+    if (audit.candidateId !== candidateId || audit.claimRevision !== contentHash(entry ?? null) || audit.atlasRevision !== this.atlasRevision()) throw roleWorkStop("claim or atlas changed after audit");
+    return audit;
+  }
+  stagedEntries() { return this.journal.latestAttempts("propose_role_roster_entry").filter(a => a.status === "succeeded").map(a => (a.input as {entry: {candidateId: string}}).entry); }
+  claimAudits() { return this.stagedEntries().flatMap(e => { const audit = this.claimAudit(e.candidateId); return audit ? [audit] : []; }); }
+  auditComplete() {
+    return this.sourceComplete() && this.stagedEntries().length > 0 && this.stagedEntries().every(e => this.claimAudit(e.candidateId)?.verdict === "supported")
+      && this.plan.spans.every((_, page) => {
+        const work = this.read("audit", page), note = this.read("source", page)!;
+        return work?.unresolved.length === 0 && work.atlasRevision === this.atlasRevision()
+          && Boolean(work.questionDispositions && sameIds(work.questionDispositions.map(q => q.questionId), this.questions(page).map(q => q.questionId)) && work.questionDispositions.every(q => q.status === "resolved"))
+          && Boolean(work.discoveryDispositions && sameIds(work.discoveryDispositions.map(d => d.findingId), note.findings.map((_, i) => roleFindingId(this.planHash, page, i))) && work.discoveryDispositions.every(d => d.disposition !== "blocked"));
+      });
+  }
+  async assertQuestionLedger() {
+    const { RequirementLedger } = await import("./requirement-ledger.js");
+    const ledger = new RequirementLedger(this.root, this.plan.sourceId);
+    await ledger.assertRoleEvidenceNeedsResolved(this.planHash);
+    const history = await ledger.history();
+    for (let page = 0; page < this.plan.spans.length; page++) {
+      const audit = this.read("audit", page);
+      for (const question of this.questions(page)) {
+        if (!history.some(r => r.payload.kind === "role-review-question" && contentHash(r.payload.question) === contentHash(question))
+          || !history.some(r => r.payload.kind === "role-review-question-disposition" && r.payload.planHash === this.planHash && r.payload.auditRef === contentHash(audit)
+            && contentHash(r.payload.disposition) === contentHash(audit?.questionDispositions?.find(q => q.questionId === question.questionId) ?? null))) throw roleWorkStop("question ledger publication incomplete; recover the original bounded workflow before assembly");
+      }
+    }
+  }
+  async submitClaim(raw: unknown, candidateId: string, validate: (value: RoleClaimAudit) => void) {
+    this.journal.assertModelRecoveryAllowed();
+    if (this.claimAudit(candidateId)) throw roleWorkStop("claim audit already settled");
+    const input = { proposal_id: this.claimWorkId(candidateId), planHash: this.planHash, payload: raw };
+    this.journal.assertRetryAllowed(ROLE_CLAIM_AUDIT_TOOL, input);
+    const prior = this.journal.history(ROLE_CLAIM_AUDIT_TOOL, input.proposal_id).at(-1);
+    if (prior?.status === "failed" && prior.inputHash === CompilerProposalObligations.identity(ROLE_CLAIM_AUDIT_TOOL, input).inputHash) throw roleWorkStop("unchanged failed claim audit");
+    this.journal.record(ROLE_CLAIM_AUDIT_TOOL, input, "running");
+    try { const value = roleClaimAuditSchema.parse(raw); validate(value); this.journal.record(ROLE_CLAIM_AUDIT_TOOL, input, "succeeded"); }
+    catch (error) { this.journal.record(ROLE_CLAIM_AUDIT_TOOL, input, "failed", String(error)); throw error; }
+  }
   missingMajorCharacters() { return this.plan.spans.flatMap((_, page) => this.read("audit", page)?.missingMajorCharacters ?? []); }
   /** A receipt IS a validated journal success, avoiding a second mutable done flag. */
   async submit(kind: "source" | "audit", page: number, raw: unknown, validate: (payload: RoleSourceWork | RoleAuditWork) => void) {
@@ -132,7 +199,7 @@ export class RoleReviewWorkStore {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         await fs.writeFile(path.join(dir, `${attempt}.json`), JSON.stringify({ planHash: this.planHash, workId, at: new Date().toISOString() }), { flag: "wx", mode: 0o600 });
-        return;
+        return attempt;
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
     }
     throw roleWorkStop("work invocation allowance exhausted");

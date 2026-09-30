@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { ensureSourceStructure } from "../src/compiler/structure.js";
@@ -32,7 +32,7 @@ function entry(candidateId: string, unit: string) { return { candidateId, import
 async function completeFixtureWork(work: RoleWorkInvocation, unit: string) {
   if (work.workId.startsWith("role-source")) {
     const p = packet(work);
-    await invoke(work, "propose_role_source_review", { summary: "Reviewed the supplied core", findings: [{ name: "Hero", observation: "Interaction", unitIds: [p.fragments[0].unitId] }], openQuestions: [] });
+    await invoke(work, "propose_role_source_review", { summary: "Reviewed the supplied core", findings: [{ name: "Hero", observation: "Interaction", unitIds: [p.assignedCoreUnitIds?.[0] ?? p.fragments[0].unitId] }], openQuestions: [] });
   } else if (work.workId.startsWith("candidate")) {
     const p = packet(work);
     await invoke(work, "read_role_work_evidence", { unitId: unit });
@@ -346,4 +346,152 @@ it("cannot support the aggregate claim while a development check is insufficient
   const {roleClaimAuditSchema} = await import("../src/compiler/role-review-verification.js");
   const checks = fixtureChecks("unit"); checks.find(c => c.kind === "development")!.verdict = "insufficient";
   expect(roleClaimAuditSchema.safeParse({candidateId:"candidate",claimRevision:contentHash("entry"),atlasRevision:contentHash("atlas"),packetHash:contentHash("packet"),verdict:"supported",rationale:"Everything passed",basisUnitIds:["unit"],counterevidence:{searchedUnitIds:["unit"],rationale:"Checked"},checks}).success).toBe(false);
+});
+
+it("returns compact note directories and expands a copied stable note ID", async()=>{
+ const f=await setup();const {roster}=await loadCurrentRoleRoster(f.root,f.f.source.id);const unit=roster.unitIds[0]!;
+ let checked=false;
+ await runBoundedRoleReview(f.options,async work=>{
+  if(work.workId.startsWith('role-source'))return invoke(work,'propose_role_source_review',{summary:'Navigation only',findings:[{name:'Hero',observation:'Background. '.repeat(90)+'Important counterevidence at the end.',unitIds:[unit]}],openQuestions:['Is the identity certain?']}).then(()=>{});
+  if(work.workId.startsWith('candidate')&&!checked){
+   const directory=await invoke(work,'read_role_review_notes',{}),body=JSON.parse((directory.content[0] as {text:string}).text);
+   expect(body.mode).toBe('directory');expect(JSON.stringify(body)).not.toContain('Important counterevidence at the end.');
+   const detail=await invoke(work,'read_role_review_notes',{noteId:body.records[0].noteId});
+   expect((detail.content[0] as {text:string}).text).toContain('Important counterevidence at the end.');checked=true;
+  }
+  await completeFixtureWork(work,unit);
+ });expect(checked).toBe(true);
+});
+it("repackages the same work with actual originals and avoids duplicating already delivered evidence",async()=>{
+ const f=await setup();const {roster}=await loadCurrentRoleRoster(f.root,f.f.source.id);const unit=roster.unitIds[0]!;
+ let target:string|undefined,checked=false;
+ await runBoundedRoleReview(f.options,async work=>{
+  if(work.workId.startsWith('candidate')&&!target){target=work.workId;await invoke(work,'read_role_work_evidence',{unitId:unit});work.contextWindow!.beginCall({content:'x'.repeat(37000)});return;}
+  if(work.workId===target&&!checked){
+   expect(packet(work).contextHandoff.generation).toBe(1);
+   const p=packet(work);
+   expect(p.contextEvidence.fragments.some((f:{unitId:string;continued:boolean})=>f.unitId===unit&&!f.continued)).toBe(true);
+   expect(p.contextEvidence.fragments.some((f:{unitId:string;text:string})=>f.unitId===unit&&f.text.includes('Hero'))).toBe(true);
+   const reply=await invoke(work,'read_role_work_evidence',{unitId:unit});
+   expect(JSON.parse((reply.content[0] as {text:string}).text).units[0]).toEqual({unitId:unit,alreadyDeliveredInCurrentContext:true});
+   checked=true;
+  }
+  await completeFixtureWork(work,unit);
+ });expect(checked).toBe(true);
+});
+it("stops repeated repacks that only revisit already recorded evidence",async()=>{
+ const f=await setup();const {roster}=await loadCurrentRoleRoster(f.root,f.f.source.id);const unit=roster.unitIds[0]!;
+ await expect(runBoundedRoleReview(f.options,async work=>{
+  await invoke(work,'read_role_work_evidence',{unitId:unit});work.contextWindow!.beginCall({content:'x'.repeat(37000)});
+ })).rejects.toThrow('no new access');
+});
+
+it("recovers a trace-proven size stop once, preserving the original blocked record and all charges",async()=>{
+ const f=await setup();await expect(runBoundedRoleReview(f.options,async()=>{throw Error('stop before model');})).rejects.toThrow('stop before model');
+ const plan=(await RoleReviewWorkStore.plans(f.root,f.f.source.id))[0]!,store=new RoleReviewWorkStore(f.root,plan),workId=store.workId('source',0);
+ const {roleReviewBudget,recoverRoleContextBudget}=await import('../src/compiler/role-review-budget.js');
+ const {ROLE_WORK_LIMITS}=await import('../src/workflow/role-review-bounded.js');
+ const {worldStorageRoot}=await import('../src/world/paths.js');
+ const {TraceStore}=await import('../src/trace/store.js');const {TraceRecorder}=await import('../src/trace/recorder.js');
+ const budget=roleReviewBudget(f.root,store.planHash,workId,ROLE_WORK_LIMITS);
+ for(let i=0;i<6;i++){budget.beginCall({});budget.admitPayload({content:'existing usage'});}
+ let failure:unknown;try{budget.beginCall({content:'x'.repeat(49000)});}catch(error){failure=error;}
+ const trace=await TraceRecorder.start(new TraceStore(f.root),{kind:'prepare',sourceId:f.f.source.id,operationId:f.batchId});
+ await trace.record('validation.completed',{phase:'role-review-work',workId,planHash:store.planHash,limits:ROLE_WORK_LIMITS});
+ await trace.finish('failed',{}, {code:'ROLE_REVIEW_WORK_FAILED',message:String(failure),retryable:false});
+ const file=path.join(worldStorageRoot(f.root),'compiler','role-review-work','budgets',store.planHash,`${contentHash(workId)}.json`);
+ const before=await fs.readFile(file,'utf8'),prior=JSON.parse(before);
+ const input={sourceId:f.f.source.id,batchId:f.batchId,workId,expectedBudgetHash:prior.hash,failedRunId:trace.manifest.id,implementationRef:'tested context-window fix'};
+ await expect(recoverRoleContextBudget(f.root,{...input,expectedBudgetHash:contentHash('wrong')})).rejects.toThrow('stale or resource-exhausted');
+ const grant=await recoverRoleContextBudget(f.root,input);expect(grant.remainingCalls).toBe(6);
+ const {roleContextRecoveryTrace}=await import('../src/compiler/role-review-budget.js');
+ await expect(roleContextRecoveryTrace(f.root,store.planHash,workId)).resolves.toBe(trace.manifest.id);
+ const changedTrace=vi.spyOn(TraceStore.prototype,'peekEvents').mockResolvedValue([]);
+ try { await expect(roleContextRecoveryTrace(f.root,store.planHash,workId)).rejects.toThrow('trace changed after authorization'); }
+ finally { changedTrace.mockRestore(); }
+ expect(await fs.readFile(file,'utf8')).toBe(before);
+ const resumed=roleReviewBudget(f.root,store.planHash,workId,ROLE_WORK_LIMITS,true);
+ expect(resumed.snapshot()).toEqual(budget.snapshot());expect(resumed.isBlocked()).toBe(false);
+ for(let i=0;i<6;i++)resumed.beginCall({});
+ expect(()=>resumed.beginCall({})).toThrow('model-call limit');
+ expect(roleReviewBudget(f.root,store.planHash,workId,ROLE_WORK_LIMITS,true).isBlocked()).toBe(true);
+ await expect(recoverRoleContextBudget(f.root,input)).rejects.toThrow('already granted');
+});
+it("does not grant context recovery for exhausted call budgets",async()=>{
+ const f=await setup();await expect(runBoundedRoleReview(f.options,async()=>{throw Error('stop');})).rejects.toThrow();
+ const plan=(await RoleReviewWorkStore.plans(f.root,f.f.source.id))[0]!,store=new RoleReviewWorkStore(f.root,plan),workId=store.workId('source',0);
+ const {roleReviewBudget,recoverRoleContextBudget}=await import('../src/compiler/role-review-budget.js');const {worldStorageRoot}=await import('../src/world/paths.js');
+ const budget=roleReviewBudget(f.root,store.planHash,workId,{maxModelCalls:1,maxRequestBytes:48000,maxTotalPayloadBytes:48000});budget.beginCall({});expect(()=>budget.beginCall({})).toThrow();
+ const prior=JSON.parse(await fs.readFile(path.join(worldStorageRoot(f.root),'compiler','role-review-work','budgets',store.planHash,`${contentHash(workId)}.json`),'utf8'));
+ await expect(recoverRoleContextBudget(f.root,{sourceId:f.f.source.id,batchId:f.batchId,workId,expectedBudgetHash:prior.hash,failedRunId:'unrelated-run',implementationRef:'test'})).rejects.toThrow('stale or resource-exhausted');
+});
+
+it('continues independent source work while exhausted work still blocks downstream completion', async()=>{
+ const f=await setup('Hero helps Friend.\n'+'Other person acts.\n'.repeat(700));
+ for(let i=0;i<2;i++)await expect(runBoundedRoleReview(f.options,async()=>{throw Error('fixture outage');})).rejects.toThrow('fixture outage');
+ const plan=(await RoleReviewWorkStore.plans(f.root,f.f.source.id))[0]!,store=new RoleReviewWorkStore(f.root,plan);
+ expect(plan.spans.length).toBeGreaterThan(1);
+ const target=store.workId('source',1),seen:string[]=[];
+ await expect(runBoundedRoleReview({...f.options,sourceWorkScope:{planHash:store.planHash,workIds:[target]}},async work=>{
+  seen.push(work.workId);
+  await invoke(work,'propose_role_source_review',{summary:'Fixture source review',findings:[],openQuestions:['Unresolved fixture question']});
+ })).resolves.toBeUndefined();
+ expect(seen).toEqual([target]);expect(store.read('source',0)).toBeUndefined();
+ expect(store.read('source',1)?.openQuestions).toEqual(['Unresolved fixture question']);
+ expect(store.sourceComplete()).toBe(false);expect(store.stagedEntries()).toHaveLength(0);
+ await expect(runBoundedRoleReview(f.options,async()=>{throw Error('must not reach model');})).rejects.toThrow('work invocation allowance exhausted');
+});
+it('rejects stale or foreign host source scopes before model execution',async()=>{
+ const f=await setup();await expect(runBoundedRoleReview(f.options,async()=>{throw Error('fixture stop');})).rejects.toThrow('fixture stop');
+ const plan=(await RoleReviewWorkStore.plans(f.root,f.f.source.id))[0]!,store=new RoleReviewWorkStore(f.root,plan);
+ for(const scope of [{planHash:contentHash('stale'),workIds:[store.workId('source',0)]},{planHash:store.planHash,workIds:['foreign']},{planHash:store.planHash,workIds:[]}]){
+  await expect(runBoundedRoleReview({...f.options,sourceWorkScope:scope},async()=>{throw Error('must not reach model');})).rejects.toThrow('invalid source work scope');
+ }
+});
+
+it('exposes the total UTF-8 output limit and preserves proposal failure when context pressure blocks correction',async()=>{
+ const f=await setup();
+ await expect(runBoundedRoleReview(f.options,async work=>{
+  expect(packet(work).outputConstraints.maxJsonUtf8Bytes).toBe(8000);
+  const tool=work.tools.find(t=>t.name==='propose_role_source_review')!;
+  expect(JSON.stringify(tool.parameters)).toContain('8000 UTF-8 bytes');
+  const raw={summary:'Fixture',findings:[],openQuestions:Array.from({length:6},()=> '龙'.repeat(500))};
+  expect(()=>tool.prepareArguments!(raw)).toThrow('8000 UTF-8 bytes');
+  work.contextWindow!.beginCall({content:'x'.repeat(37000)});
+ })).rejects.toThrow('unresolved proposal plus context pressure');
+ const advice=buildNwhToolRecoveryAdvice('propose_role_source_review','Source work notes must fit 8000 UTF-8 bytes');
+ expect(advice?.category).toBe('invalid-arguments');
+ expect(advice?.steps.join(' ')).toContain('Do not re-read source');
+});
+
+it('repairs the exact oversized source proposal with the remaining attempt and retains every question',async()=>{
+ const f=await setup();
+ const original={summary:'Fixture review',findings:[],openQuestions:Array.from({length:6},(_,i)=>`${i}:`+'龙'.repeat(500))};
+ await expect(runBoundedRoleReview(f.options,async work=>{work.tools.find(t=>t.name==='propose_role_source_review')!.prepareArguments!(original);})).rejects.toThrow('8000 UTF-8 bytes');
+ const plan=(await RoleReviewWorkStore.plans(f.root,f.f.source.id))[0]!,store=new RoleReviewWorkStore(f.root,plan);
+ const failure=store.journal.unresolved()[0]!,workId=store.workId('source',0);
+ const recovery={workId,failedInputHash:failure.inputHash};
+ const corrected={...original,openQuestions:original.openQuestions.map((_,i)=>`${i}: retained fixture question`)};
+ await expect(runBoundedRoleReview({...f.options,sourceWorkScope:{planHash:store.planHash,workIds:[workId]},sourceNotesRecovery:recovery},async work=>{
+  expect(work.workId).toBe(workId);expect(work.retainedBudgetRequired).toBe(true);
+  expect(packet(work).failedProposal).toEqual(original);
+  expect(packet(work).evidence.fragments.length).toBeGreaterThan(0);
+  expect(work.tools.map(t=>t.name)).toEqual(['propose_role_source_review']);
+  await invoke(work,'propose_role_source_review',corrected);
+ })).resolves.toBeUndefined();
+ expect(store.journal.unresolved()).toEqual([]);
+ expect(store.journal.history(failure.tool,workId)[0]).toEqual(failure);
+ expect(store.read('source',0)?.openQuestions).toHaveLength(6);
+ await expect(store.beginAttempt(workId)).rejects.toThrow('invocation allowance exhausted');
+});
+it('rejects stale recovery bindings and deletion of responsibilities',async()=>{
+ const {sourceNotesCorrection,assertSourceNotesCorrection}=await import('../src/compiler/role-source-correction.js');
+ const f=await setup(),original={summary:'Fixture',findings:[],openQuestions:Array.from({length:6},()=> '龙'.repeat(500))};
+ await expect(runBoundedRoleReview(f.options,async work=>{work.tools.find(t=>t.name==='propose_role_source_review')!.prepareArguments!(original);})).rejects.toThrow('8000 UTF-8 bytes');
+ const plan=(await RoleReviewWorkStore.plans(f.root,f.f.source.id))[0]!,store=new RoleReviewWorkStore(f.root,plan),failure=store.journal.unresolved()[0]!;
+ expect(()=>sourceNotesCorrection([failure],{workId:failure.proposalId,failedInputHash:contentHash('stale')},store.planHash)).toThrow('exact sole unresolved');
+ expect(()=>sourceNotesCorrection([failure],{workId:failure.proposalId,failedInputHash:failure.inputHash},contentHash('stale plan'))).toThrow('only handles total output size');
+ expect(()=>assertSourceNotesCorrection(original,{...original,openQuestions:[]})).toThrow('every open-question slot');
+ const finding={summary:'Fixture',findings:[{name:'Hero',observation:'Acts',unitIds:['unit']}],openQuestions:[]};
+ expect(()=>assertSourceNotesCorrection(finding,{...finding,findings:[{...finding.findings[0]!,unitIds:['other']}]})).toThrow('exact name and unitIds');
 });

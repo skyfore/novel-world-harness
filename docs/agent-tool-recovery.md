@@ -2037,3 +2037,74 @@ terminal receipt, exhausted budget or uncertain publication is a host stop;
 never rotate work IDs, discard the question, silently truncate decisive evidence,
 or retry in a new batch. Supplemental units are required before the terminal
 proposal. An unsuccessful supplement does not authorize another child work.
+
+### Context pressure and same-work repacking
+
+Role notes now default to a compact directory. `nextOffset` means more entries
+are discoverable, not that every entry must enter this work's context. Copy
+`records[].noteId` into `read_role_review_notes.noteId` to expand a relevant
+record. On a lookup miss, discover in the same review, copy the exact returned
+ID and correct once. Directory previews are incomplete navigation, never evidence.
+
+A host context window checks serialized context and transformed provider payload
+before the persistent work/parent gates. Its initial soft watermark is 36,000
+UTF-8 bytes, with a conservative tool-result forecast and protocol reserve;
+48,000 bytes remains the hard admission boundary. A forecast is not a tokenizer
+estimate or permission to truncate original evidence. If required material cannot
+fit even after repacking, stop for a narrower semantic task.
+
+The host can hand off an unfinished work at most twice, preserving the work ID,
+source/revisions, all question obligations, and cumulative usage. Access metadata
+retains exact lookup arguments, returned references and cursors; it does not retain
+an authoritative model summary. `read_role_context_history` paginates this same-work
+directory. Copy `accesses[].args` to its named discovery/read tool and follow its
+returned refs. Historical reads do not satisfy new-context evidence gates: decisive
+original evidence and mapped claims must be delivered again. Repeat lookups with
+no new access records do not earn another handoff. Pending publication, changed
+scope, exhausted allowance and non-context failures are host stops, not retries.
+
+An already blocked legacy work is not automatically reset. Host-only
+`recoverRoleContextBudget`, under the compiler lock, accepts only an unfinished
+source work with a verified original budget hash and a matching failed trace
+proving a request-size stop. It records the implementation reference and a single
+immutable grant. The original blocked budget remains intact; a separate continuation
+inherits every charged call and byte under unchanged limits. Call/total-byte
+exhaustion, quota/unknown errors, unresolved proposals, stale evidence and repeated
+grants are rejected. Recovery restores navigation from that exact trace, never a
+semantic verdict, and does not reset invocation attempts.
+
+On handoff, the host rebuilds original evidence from immutable source ranges and
+merges overlaps before delivery. The assigned source core remains explicit;
+neighbor text does not enlarge review coverage. Only complete originals actually
+delivered in the new packet satisfy read gates. An exact read already fully
+present in this context returns `alreadyDeliveredInCurrentContext`; use that
+original text, do not retry the read. This pointer does not earn handoff progress.
+Partial ranges and discovery excerpts never become complete-read proofs. If the
+merged packet exceeds its byte allowance, stop for host task decomposition;
+never silently drop evidence, reset attempts or replace originals with a summary.
+
+Source-review notes have a total 8000 UTF-8 byte JSON limit, exposed in the tool
+schema description and source packet. Output-size rejection is an argument error,
+not a lookup miss: shorten wording while preserving responsibilities and exact
+references, at most once within the original allowance. Do not re-read evidence
+solely to repair length. If a proposal failure remains when context pressure stops
+the session, retain that failure for host recovery before any repack or scheduling.
+
+A host may select `sourceNotesRecovery` only for the exact sole unresolved source
+proposal whose only schema defect is total JSON byte size. Bind the original work
+ID and failed input hash within an existing sourceWorkScope; this work must run
+first. Deliver the failed proposal and immutable core/cited originals to Pi in a
+bounded correction packet. Preserve each finding's order, name and evidence IDs,
+and every open-question slot. The ordinary proposal validator and journal commit
+remain authoritative. Recovery consumes an existing work invocation and retained
+model budget, does not alter the old context checkpoint, and grants no additional
+handoff or correction attempts. Foreign scope, a second failed correction, missing
+budget, oversized required packet or exhausted invocation allowance stops. A
+successful correction resolves the original journal identity; other blocked works
+remain in the denominator. Only Pi rewrites the semantic prose.
+
+A completed host-selected sourceWorkScope returns normally at the source-stage
+boundary, with progress explicitly stating that global review remains unfinished.
+It never calls global finish. Reassembled packets carry each evidence ID on its
+fragment; the complete-read ID set stays host-side to avoid duplicate metadata.
+Recovery rechecks the authorized trace hash before restoring access navigation.

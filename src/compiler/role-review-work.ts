@@ -21,10 +21,13 @@ export const roleReviewPlanSchema = z.object({
 export type RoleReviewPlan = z.infer<typeof roleReviewPlanSchema>;
 const findingSchema = z.object({ name: z.string().trim().min(1).max(200),
   observation: z.string().trim().min(1).max(1200), unitIds: z.array(z.string()).min(1).max(24) }).strict();
-export const roleSourceWorkSchema = z.object({
+export const ROLE_SOURCE_NOTES_MAX_BYTES = 8000;
+export const roleSourceNotesSchema = z.object({
   summary: z.string().trim().min(1).max(1600), findings: z.array(findingSchema).max(64),
   openQuestions: z.array(z.string().trim().min(1).max(600)).max(24),
-}).strict().refine(value => Buffer.byteLength(JSON.stringify(value)) <= 8000, "Source work notes must fit 8000 UTF-8 bytes; keep precise evidence refs and open questions, not copied source passages");
+}).strict();
+export const roleSourceWorkSchema = roleSourceNotesSchema.refine(value => Buffer.byteLength(JSON.stringify(value)) <= ROLE_SOURCE_NOTES_MAX_BYTES, "Source work notes must fit 8000 UTF-8 bytes; keep precise evidence refs and open questions, not copied source passages")
+  .describe("The complete JSON proposal must fit 8000 UTF-8 bytes, including IDs, keys and punctuation. Keep concise observations and all unresolved questions; do not copy source passages or drop responsibilities to fit. If it cannot fit, stop for host task decomposition.");
 export const roleAuditWorkSchema = z.object({
   rationale: z.string().trim().min(1).max(2000),
   missingMajorCharacters: z.array(z.object({ name: z.string().trim().min(1).max(200),

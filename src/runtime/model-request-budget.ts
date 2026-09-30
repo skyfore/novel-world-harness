@@ -19,7 +19,7 @@ export type ModelRequestUsage = {
 };
 
 export class ModelRequestBudgetError extends Error {
-  constructor(readonly usage: ModelRequestUsage, readonly limits: ModelRequestLimits, reason: string) {
+  constructor(readonly usage: ModelRequestUsage, readonly limits: ModelRequestLimits, reason: string, readonly reasonCode = "unknown") {
     super(`Model request budget exhausted: ${reason}. Stop this invocation and preserve its diagnostics; `
       + "do not retry in a fresh model session, trim required evidence, or commit a partial proposal. "
       + "Only the host may start a narrower task or explicitly revise the budget.");
@@ -56,8 +56,8 @@ export class ModelRequestBudget {
   }
 
   constructor(limits: ModelRequestLimits = ACTOR_MODEL_REQUEST_LIMITS, private readonly persistence?: {
-    initial?: { usage: ModelRequestUsage; blocked: boolean };
-    save: (state: {usage: ModelRequestUsage; blocked: boolean}) => void;
+    initial?: { usage: ModelRequestUsage; blocked: boolean; failure?: {code:string;message:string} };
+    save: (state: {usage: ModelRequestUsage; blocked: boolean; failure?: {code:string;message:string}}) => void;
   }) {
     for (const key of ["maxModelCalls", "maxRequestBytes", "maxTotalPayloadBytes"] as const) {
       const value = limits[key];
@@ -69,7 +69,7 @@ export class ModelRequestBudget {
       if (Object.values(usage).some(v => !Number.isSafeInteger(v) || v < 0)
         || usage.modelCalls > limits.maxModelCalls || usage.totalPayloadBytes > limits.maxTotalPayloadBytes || usage.largestRequestBytes > limits.maxRequestBytes) throw new Error("Invalid persisted model budget; stop for host review");
       this.usage = {...usage};
-      if (blocked) this.failure = new ModelRequestBudgetError(this.snapshot(), this.limits, "retained hard stop");
+      if (blocked) this.failure = new ModelRequestBudgetError(this.snapshot(), this.limits, "retained hard stop", persistence.initial.failure?.code ?? "unknown");
     }
   }
 
@@ -78,7 +78,7 @@ export class ModelRequestBudget {
   /** Count actual agent model steps, including retries routed through streamFunction. */
   beginCall(context: unknown): void {
     this.assertUsable();
-    if (this.usage.modelCalls >= this.limits.maxModelCalls) this.fail("model-call limit reached");
+    if (this.usage.modelCalls >= this.limits.maxModelCalls) this.fail("model-call limit reached", "call-limit");
     const bytes = this.measure(context);
     this.checkSize(bytes);
     this.usage.modelCalls += 1;
@@ -92,7 +92,7 @@ export class ModelRequestBudget {
     const bytes = this.measure(payload);
     this.checkSize(bytes);
     if (this.usage.totalPayloadBytes + bytes > this.limits.maxTotalPayloadBytes) {
-      this.fail("cumulative provider-payload byte limit reached");
+      this.fail("cumulative provider-payload byte limit reached", "total-payload");
     }
     this.usage.payloads += 1;
     this.usage.totalPayloadBytes += bytes;
@@ -112,16 +112,16 @@ export class ModelRequestBudget {
   }
 
   private checkSize(bytes: number): void {
-    if (bytes > this.limits.maxRequestBytes) this.fail(`request requires ${bytes} UTF-8 bytes`);
+    if (bytes > this.limits.maxRequestBytes) this.fail(`request requires ${bytes} UTF-8 bytes`, "request-size");
   }
 
   private persist(): void {
-    try { this.persistence?.save({usage: this.snapshot(), blocked: this.isBlocked()}); }
+    try { this.persistence?.save({usage: this.snapshot(), blocked: this.isBlocked(), ...(this.failure?{failure:{code:this.failure.reasonCode,message:this.failure.message}}:{})}); }
     catch (error) { this.failure ??= new ModelRequestBudgetError(this.snapshot(), this.limits, `usage publication failed: ${String(error)}`); throw this.failure; }
   }
   private assertAvailable(): void { if (this.failure) throw this.failure; }
-  private fail(reason: string): never {
-    this.failure ??= new ModelRequestBudgetError(this.snapshot(), this.limits, reason);
+  private fail(reason: string, code = "unknown"): never {
+    this.failure ??= new ModelRequestBudgetError(this.snapshot(), this.limits, reason, code);
     this.persist();
     throw this.failure;
   }

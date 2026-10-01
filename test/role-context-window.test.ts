@@ -29,7 +29,9 @@ it('checks provider transformations before payload admission',async()=>{
 it('forecasts a large tool response without truncating it',()=>{
  const window=new RoleContextWindow();window.beginCall({content:'x'.repeat(20000)});
  const reply={content:'y'.repeat(13000)};window.observeResult({offset:5},reply);
- expect(window.pressure?.phase).toBe('tool-result-reserve');expect(reply.content.length).toBe(13000);
+ expect(window.pressure).toBeUndefined();expect(reply.content.length).toBe(13000);
+ expect(window.metrics().forecastBytes).toBeGreaterThan(33000);
+ expect(()=>window.beginCall({content:'x'.repeat(37000)})).toThrow(RoleContextPressure);
 });
 it('persists cursors but never original text or a false semantic summary',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'role-context-'));roots.push(root);
@@ -90,4 +92,15 @@ it('keeps read-gate bookkeeping outside the serialized evidence packet',async()=
  const limit=Buffer.byteLength(serialized);
  expect(()=>reassembleRoleContext(bytes,units,[{start:0,end:12}],[],undefined,limit)).not.toThrow();
  expect(()=>reassembleRoleContext(bytes,units,[{start:0,end:12}],[],undefined,limit-1)).toThrow('narrower semantic task');
+});
+
+it('reassembles actual returned ranges when a repeated offset skips already delivered text',async()=>{
+ const {reassembleRoleContext}=await import('../src/compiler/role-review-context.js');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'role-range-'));roots.push(root);
+ const checkpoint=await RoleContextCheckpoint.open(root,contentHash('plan'),'work',contentHash('packet'));
+ await checkpoint.record('read_role_work_evidence',{unitId:'u',offset:0},{content:[{type:'text',text:JSON.stringify({units:[{unitId:'u',text:'龙'.repeat(4000),startOffset:2000,endOffset:6000}]})}]});
+ const bytes=Buffer.from('龙'.repeat(6000)),unit={id:'u',anchor:{startByte:0,endByte:bytes.length}};
+ const result=reassembleRoleContext(bytes,[unit],[{start:0,end:6000}],checkpoint.originalAccesses(),undefined,24000);
+ expect(result.deliveredUnitIds).toEqual(['u']);
+ expect(result.packet.fragments.map(f=>f.text).join('')).toBe(bytes.toString());
 });

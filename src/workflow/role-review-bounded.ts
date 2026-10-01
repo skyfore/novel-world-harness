@@ -1,5 +1,8 @@
 import { RoleContextWindow, RoleContextPressure, RoleContextCheckpoint } from "../compiler/role-context-window.js";
 import { sourceNotesCorrection, assertSourceNotesCorrection } from "../compiler/role-source-correction.js";
+import { RoleEvidenceDelivery } from "../compiler/role-evidence-delivery.js";
+import { roleSourceParts } from "../compiler/role-source-parts.js";
+import { reviewSourceParts } from "./role-source-part-review.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
@@ -32,6 +35,7 @@ export type BoundedRoleReviewOptions = CompileCommandOptions & {
   onRoleWorkCompleted?: (workId: string) => void;
   sourceWorkScope?: { planHash: string; workIds: string[] };
   sourceNotesRecovery?: { workId: string; failedInputHash: string };
+  partitionedSourceWorkIds?: string[];
 };
 export const ROLE_WORK_LIMITS = { maxModelCalls: 12, maxRequestBytes: 48_000, maxTotalPayloadBytes: 1_572_864 } as const;
 const textResult = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
@@ -70,12 +74,14 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
     throw roleWorkStop('source note recovery must be the first selected source work under the original plan');
   }
   const failedNotes=recovery ? sourceNotesCorrection(journal.unresolved(),recovery,store.planHash) : undefined;
+  if(options.partitionedSourceWorkIds && (recovery || !sourceScope || !options.partitionedSourceWorkIds.length
+    || options.partitionedSourceWorkIds.some(id=>!sourceScope.workIds.includes(id))))throw roleWorkStop('partitioned evidence review requires original source work IDs in a host-selected scope, without a concurrent notes correction');
   const config = await loadOptionalConfig(options.configPath);
   const profile = config ? profileForRole(config, "controller").profile : undefined;
   const ledger = new RequirementLedger(root, sourceId);
   const readClaims = new Set<string>();
   const fullyRead = new Set<string>();
-  const readOffsets = new Map<string, number>();
+  const delivery = new RoleEvidenceDelivery(bytes,units);
   const runner: RoleWorkRunner = runOverride ?? (async work => {
     const traceStore = new TraceStore(root);
     const recorder = await TraceRecorder.start(traceStore, { kind: "prepare", operationId: batchId, sourceId });
@@ -101,11 +107,11 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       await session.promptWithReport(work.prompt, { timeoutMs: options.promptTimeoutMs ?? 600_000 });
       if (work.contextWindow?.pressure && !work.complete()) throw work.contextWindow.pressure;
       if (!work.complete()) throw roleWorkStop("model ended without the assigned work receipt");
-      await recorder.record("validation.completed", {phase: "role-review-work-usage", workId: work.workId, budget: budget.report()});
+      await recorder.record("validation.completed", {phase: "role-review-work-usage", workId: work.workId, budget: budget.report(),context:work.contextWindow?.metrics()});
       await recorder.finish("succeeded");
     } catch (error) {
       if(work.contextWindow?.pressure && error instanceof Error && error.message.includes("ROLE_CONTEXT_REPACK_REQUIRED")) error=work.contextWindow.pressure;
-      await recorder.record("validation.completed", {phase:"role-review-work-stopped",workId:work.workId,budget:budget.report(),repack:error instanceof RoleContextPressure});
+      await recorder.record("validation.completed", {phase:"role-review-work-stopped",workId:work.workId,budget:budget.report(),context:work.contextWindow?.metrics(),repack:error instanceof RoleContextPressure});
       await recorder.finish("failed", {}, { code: "ROLE_REVIEW_WORK_FAILED", message: String(error), retryable: false }); throw error;
     } finally { options.signal?.removeEventListener("abort", abort); budget.close(); await session?.dispose(); }
   });
@@ -132,13 +138,25 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
     const checkpoint = await RoleContextCheckpoint.open(root,store.planHash,work.workId,contentHash(work.prompt));
     const recoveryRun=await roleContextRecoveryTrace(root,store.planHash,work.workId);
     if(recoveryRun)await checkpoint.restoreNavigation(recoveryRun);
+    if(options.partitionedSourceWorkIds?.includes(work.workId)) {
+      if(work.sourcePage===undefined||need)throw roleWorkStop('partitioned review requires source work without a pending evidence supplement');
+      // Exact original ranges from this same work; the old checkpoint remains intact.
+      const evidence=reassembleRoleContext(bytes,units,[store.plan.spans[work.sourcePage]!],checkpoint.originalAccesses(),{page:work.sourcePage,spans:store.plan.spans},Number.MAX_SAFE_INTEGER);
+      const parts=roleSourceParts(bytes,units,evidence.packet.ranges);
+      await store.beginAttempt(work.workId);
+      await reviewSourceParts({store,page:work.sourcePage,parts,parent:work,runner,ledger,signal:options.signal,onProgress:options.onProgress});
+      options.onRoleWorkCompleted?.(work.workId);
+      return;
+    }
     const attempt = await store.beginAttempt(work.workId);
     let sessions=0;
     for (let pass = 0; pass < 4; pass++) {
       const contextWindow = new RoleContextWindow();
       const supplement = need ? roleEvidencePacket(bytes, units, need.requestedUnitIds, [], 6000) : undefined;
-      fullyRead.clear(); readOffsets.clear(); readClaims.clear();
-      for (const unitId of [...(work.deliveredUnitIds ?? []), ...(supplement?.manifest.includedRefs ?? [])]) fullyRead.add(unitId);
+      fullyRead.clear(); readClaims.clear();
+      delivery.clear();
+      for (const unitId of [...(work.deliveredUnitIds ?? []), ...(supplement?.manifest.includedRefs ?? [])]) {fullyRead.add(unitId);delivery.seed(unitId,'initial evidence packet');}
+      if(work.sourcePage!==undefined)delivery.seedSpan(store.plan.spans[work.sourcePage]!,'initial source packet');
       const { $schema: _, ...json } = z.toJSONSchema(roleEvidenceNeedSchema);
       const needTool = defineTool({ name: needToolName, label: "Request bounded evidence supplement",
         description: "If context is insufficient, name the question, missing evidence, decision impact, searched units and exact requested units. Copy unit IDs from same-source discovery tools. Ends this session and permits one fresh-context supplement under the SAME work and cumulative budget; never use to reset limits. A second supplement is a host stop.",
@@ -170,10 +188,16 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
         parameters:Type.Object({offset:Type.Optional(Type.Integer({minimum:0}))},{additionalProperties:false}),
         async execute(_id,args){return textResult(checkpoint.directory(args.offset));}});
       const invocationTools: ToolDefinition[] = [...work.tools,historyTool];
+      const deliveredResponses=new Map<string,string>();
       const tools = invocationTools.map(tool => ({...tool, async execute(...args: Parameters<typeof tool.execute>) {
         if(contextWindow.pressure) return {...textResult({contextRepackRequired:true,workCompleted:false}),terminate:true};
         if (need && tool.name.startsWith("propose_")) requireRead(need.requestedUnitIds);
-        const result = await tool.execute(...args);
+        let result = await tool.execute(...args);
+        if(tool.name.startsWith('read_')) {
+          const hash=contentHash({tool:tool.name,args:args[1],result}),location=deliveredResponses.get(hash);
+          if(location) result=textResult({alreadyDeliveredInCurrentContext:true,location,guidance:'Use the full response at this current-session tool call. No new evidence was delivered; proceed with the assigned judgment or name a specific missing range.'});
+          else deliveredResponses.set(hash,`tool call ${args[0]}`);
+        }
         await checkpoint.record(tool.name,args[1],result);
         contextWindow.observeResult(args[1],result);
         return contextWindow.pressure && !work.complete() ? {...result,terminate:true} : result;
@@ -193,6 +217,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
         if(body.evidencePacket)body.evidencePacket={...body.evidencePacket,evidence:[],evidenceLocation:"contextEvidence.fragments"};
         if(body.supplement)body.supplement={...body.supplement,evidence:[],evidenceLocation:"contextEvidence.fragments"};
         for(const id of contextEvidence.deliveredUnitIds)fullyRead.add(id);
+        for(const span of contextEvidence.packet.ranges)delivery.seedSpan(span,'contextEvidence.fragments');
         prompt=`${prompt.slice(0,prompt.lastIndexOf("\n"))}\n${JSON.stringify({...body,contextHandoff:checkpoint.manifest(),contextEvidence:contextEvidence.packet})}`;
       }
       options.onProgress?.(`Role review work ${work.workId}${need ? " evidence supplement" : ""}; original scope and cumulative budget retained.`);
@@ -232,14 +257,10 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       if (args.unitId) {
         const unit = units.find(u => u.id === args.unitId);
         if (!unit) throw new Error("Unknown unit. Call read_role_work_evidence with query, copy units[].unitId to unitId and retry once; never guess or retry unchanged.");
-        if(offset===0&&fullyRead.has(unit.id))return textResult({units:[{unitId:unit.id,alreadyDeliveredInCurrentContext:true}],guidance:"The complete original is already present in this context's initial packet or earlier exact read. Use that text; this response adds no evidence or new review coverage."});
-        const text = Array.from(bytes.subarray(unit.anchor.startByte, unit.anchor.endByte).toString("utf8"));
-        if (offset >= text.length && offset !== 0) throw new Error("Invalid offset. Read this unit with offset=0 and copy nextOffset for one corrected retry.");
-        if (offset === (readOffsets.get(unit.id) ?? 0)) {
-          readOffsets.set(unit.id, offset + 4000);
-          if (offset + 4000 >= text.length) fullyRead.add(unit.id);
-        }
-        return textResult({ units: [{ unitId: unit.id, text: text.slice(offset, offset + 4000).join("") }], ...(offset + 4000 < text.length ? { nextOffset: offset + 4000 } : {}) });
+        const result=delivery.read(unit,offset,`tool call ${_id}`);
+        if(delivery.complete(unit.id))fullyRead.add(unit.id);
+        const {nextOffset,...value}=result;
+        return textResult({units:[value],...(nextOffset!==undefined?{nextOffset}:{}),guidance:'Use the indicated current-context original. Only missing ranges are returned. Follow nextOffset when present; do not replay fully delivered ranges.'});
       }
       const matches = units.filter(u => bytes.subarray(u.anchor.startByte, u.anchor.endByte).toString("utf8").includes(args.query!));
       if (offset >= matches.length && offset !== 0) throw new Error("Invalid search offset. Repeat the same query with offset=0, copy nextOffset and retry once.");
@@ -252,6 +273,10 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       parameters: Type.Object({ direction: Type.Union([Type.Literal("previous"), Type.Literal("next")]) }, { additionalProperties: false }),
       async execute(_id, args) {
         const neighbor = page + (args.direction === "previous" ? -1 : 1);
+        if(store.plan.spans[neighbor]){
+          delivery.seedSpan(store.plan.spans[neighbor]!,`tool call ${_id}`);
+          for(const unit of units)if(delivery.complete(unit.id))fullyRead.add(unit.id);
+        }
         return textResult(store.plan.spans[neighbor] ? { contextOnly: true, source: sourcePacket(neighbor) } : { contextOnly: true, boundary: true });
       } });
   }
@@ -351,7 +376,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       contextWindow.beginCall({prompt}); // Reject oversized packets before consuming an invocation.
       options.signal?.throwIfAborted();
       await store.beginAttempt(recovery.workId);
-      fullyRead.clear();readOffsets.clear();readClaims.clear();
+      fullyRead.clear();readClaims.clear();
       for(const id of evidence.deliveredUnitIds)fullyRead.add(id);
       await runner({workId:recovery.workId,prompt,contextWindow,retainedBudgetRequired:true,tools:[receiptTool('source',page)],complete:()=>Boolean(store.read('source',page))});
       if(!store.read('source',page))throw roleWorkStop('source note correction produced no validated receipt; retain the failed input and stop');

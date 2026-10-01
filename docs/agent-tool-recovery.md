@@ -2048,9 +2048,10 @@ ID and correct once. Directory previews are incomplete navigation, never evidenc
 
 A host context window checks serialized context and transformed provider payload
 before the persistent work/parent gates. Its initial soft watermark is 36,000
-UTF-8 bytes, with a conservative tool-result forecast and protocol reserve;
-48,000 bytes remains the hard admission boundary. A forecast is not a tokenizer
-estimate or permission to truncate original evidence. If required material cannot
+UTF-8 bytes measured on actual serialized contexts and provider payloads;
+48,000 bytes remains the hard admission boundary. Tool-result forecasts are
+telemetry only: they cannot terminate a session or consume a handoff. Per-tool
+fixed padding previously caused false pressure during repeated short responses. If required material cannot
 fit even after repacking, stop for a narrower semantic task.
 
 The host can hand off an unfinished work at most twice, preserving the work ID,
@@ -2108,3 +2109,35 @@ boundary, with progress explicitly stating that global review remains unfinished
 It never calls global finish. Reassembled packets carry each evidence ID on its
 fragment; the complete-read ID set stays host-side to avoid duplicate metadata.
 Recovery rechecks the authorized trace hash before restoring access navigation.
+
+### Current-session delivery and partitioned source inspection
+
+Exact evidence reads return only missing Unicode-code-point ranges, with
+startOffset/endOffset and a current-session location. If already delivered, use
+locations instead of retrying. nextOffset always identifies an outstanding gap;
+reading a suffix cannot prove the unseen prefix. New sessions clear delivery
+proofs; immutable original ranges actually redelivered in the new packet reseed
+them. Search excerpts do not count. Repeated identical read-tool responses return
+a pointer to their first current-session tool call and do not earn new progress.
+
+Host-selected partitionedSourceWorkIds must belong to the original source scope.
+The host derives up to four bounded original-evidence packets from the same core
+and retained read ranges, with UTF-8-safe boundary overlap. Each session uses the
+parent work ID and its retained budget. The single remaining parent invocation
+covers all parts and final integration: child proposal IDs do not own budgets or
+new retries. Exhausted parent invocations still stop.
+
+propose_role_source_part writes only narrow unvalidated notes into the existing
+proposal journal, bound to the plan, parent, packet and partition-bundle hashes.
+Copy IDs from part.packet.fragments[].unitId. Correct invalid arguments once;
+unchanged submissions, interrupted/stale parts and a second failure stop. Each
+part uses the existing 8000-byte source-note limit and provides a read-only
+preview_role_source_part for exact byte measurement before committing. Actual
+serialized request gates govern the combined originals and drafts; no per-part
+model budget is granted. If required responsibilities cannot fit, stop rather
+than omit them. Partial notes never satisfy source coverage. Their
+questions are registered in the existing requirement ledger even if later work
+fails. Pi must finally inspect the complete original core, integrate every
+core-related finding, and retain all part questions verbatim in order. Only the
+ordinary validated parent source proposal creates a source receipt. Integration
+failure preserves partial proposals and all question obligations.

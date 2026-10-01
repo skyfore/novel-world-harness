@@ -17,6 +17,8 @@ export class RoleContextPressure extends Error {
 export class RoleContextWindow extends ModelRequestBudget {
   pressure?: RoleContextPressure;
   private measured = 0;
+  private observations: Array<{phase:string;bytes:number;fields?:Record<string,number>;argumentBytes?:number;resultBytes?:number}> = [];
+  private forecastBytes = 0;
   constructor() { super({ maxModelCalls: 12, maxRequestBytes: 48_000, maxTotalPayloadBytes: 1_572_864 }); }
   override beginCall(context: unknown) { this.checkWindow(context, "context"); }
   override admitPayload(payload: unknown) { this.checkWindow(payload, "provider-payload"); }
@@ -24,18 +26,25 @@ export class RoleContextWindow extends ModelRequestBudget {
     this.assertUsable();
     if (this.pressure) throw this.pressure;
     this.measured = Buffer.byteLength(JSON.stringify(value));
+    const fields = value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key,item])=>[key,Buffer.byteLength(JSON.stringify(item)??'')])) : undefined;
+    this.observe({phase,bytes:this.measured,fields});
     if (this.measured > ROLE_CONTEXT_SOFT_BYTES) throw (this.pressure = new RoleContextPressure(this.measured, phase));
   }
-  /** Conservative forecast; the final serialized request is still checked above.
-   * Reserve protocol/assistant overhead rather than truncating any tool response. */
+  /** Forecast is diagnostic, never a reason to end a session. Admission above
+   * measures the actual context and provider payload before transport. */
   observeResult(args: unknown, result: unknown) {
-    this.measured += Buffer.byteLength(JSON.stringify({ args, result })) + 1024;
-    if (this.measured + 4096 > ROLE_CONTEXT_SOFT_BYTES) this.pressure ??= new RoleContextPressure(this.measured + 4096, "tool-result-reserve");
+    const argumentBytes=Buffer.byteLength(JSON.stringify(args)??''),resultBytes=Buffer.byteLength(JSON.stringify(result)??'');
+    this.measured += argumentBytes + resultBytes;
+    this.forecastBytes=this.measured;
+    this.observe({phase:'tool-result',bytes:this.measured,argumentBytes,resultBytes});
   }
+  private observe(item:typeof this.observations[number]){this.observations.push(item);if(this.observations.length>64)this.observations.shift();}
+  metrics(){return {softBytes:ROLE_CONTEXT_SOFT_BYTES,forecastBytes:this.forecastBytes,observations:this.observations};}
 }
 const accessSchema = z.object({
   id: z.string(), tool: z.string(), args: z.record(z.string(), z.unknown()), responseHash: z.string(),
-  refs: z.array(z.string()), nextOffset: z.number().optional()
+  refs: z.array(z.string()), nextOffset: z.number().optional(),
+  delivered: z.array(z.object({unitId:z.string(),startOffset:z.number().int().nonnegative(),endOffset:z.number().int().positive()})).optional()
 }).strict();
 const checkpointSchema = z.object({
   version: z.literal(1), planHash: z.string(), workId: z.string(), packetHash: z.string(),
@@ -71,7 +80,7 @@ export class RoleContextCheckpoint {
     this.state.handoffs.push({ generation: 1, accessCount: this.state.accesses.length, bytes: 0, phase: "trace-proven-legacy-recovery" });
     await this.save();
   }
-  originalAccesses() { return this.state.accesses.map(({ tool, args }) => ({ tool, args })); }
+  originalAccesses() { return this.state.accesses.map(({ tool, args, delivered }) => ({ tool, args, delivered })); }
   get generation() { return this.state.handoffs.length; }
   directory(offset = 0) {
     if (!Number.isInteger(offset) || offset < 0 || (offset !== 0 && offset >= this.state.accesses.length)) throw new Error("Unknown context history offset. Call read_role_context_history offset=0, copy nextOffset and retry once; never guess or repeat unchanged.");
@@ -92,6 +101,7 @@ export class RoleContextCheckpoint {
     if (response.isError) return;
     try { body = JSON.parse(response.content?.find(c => c.type === "text")?.text ?? "{}"); } catch { return; }
     if (!body || typeof body !== "object") return;
+    if(body.alreadyDeliveredInCurrentContext===true)return;
     if (Array.isArray(body.units) && body.units.every(unit => unit?.alreadyDeliveredInCurrentContext === true)) return;
     const refs: string[] = [];
     for (const key of ["units", "records", "candidates", "pages", "fragments"]) if (Array.isArray(body[key])) for (const item of body[key] as Record<string, unknown>[]) {
@@ -100,7 +110,8 @@ export class RoleContextCheckpoint {
     }
     const responseHash = contentHash(result), id = contentHash({ tool, args: argument, responseHash });
     if (this.state.accesses.some(a => a.id === id)) return;
-    this.state.accesses.push({ id, tool, args: argument, responseHash, refs: [...new Set(refs)], ...(typeof body.nextOffset === "number" ? { nextOffset: body.nextOffset } : {}) });
+    const delivered=tool==='read_role_work_evidence'&&Array.isArray(body.units)?body.units.filter(u=>typeof u.text==='string'&&Number.isInteger(u.startOffset)&&Number.isInteger(u.endOffset)).map(u=>({unitId:u.unitId,startOffset:u.startOffset,endOffset:u.endOffset})):[];
+    this.state.accesses.push({ id, tool, args: argument, responseHash, refs: [...new Set(refs)], ...(delivered.length?{delivered}:{}), ...(typeof body.nextOffset === "number" ? { nextOffset: body.nextOffset } : {}) });
     await this.save();
   }
   async handoff(pressure: RoleContextPressure) {

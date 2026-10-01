@@ -373,7 +373,7 @@ it("repackages the same work with actual originals and avoids duplicating alread
    expect(p.contextEvidence.fragments.some((f:{unitId:string;continued:boolean})=>f.unitId===unit&&!f.continued)).toBe(true);
    expect(p.contextEvidence.fragments.some((f:{unitId:string;text:string})=>f.unitId===unit&&f.text.includes('Hero'))).toBe(true);
    const reply=await invoke(work,'read_role_work_evidence',{unitId:unit});
-   expect(JSON.parse((reply.content[0] as {text:string}).text).units[0]).toEqual({unitId:unit,alreadyDeliveredInCurrentContext:true});
+   expect(JSON.parse((reply.content[0] as {text:string}).text).units[0]).toMatchObject({unitId:unit,alreadyDeliveredInCurrentContext:true});
    checked=true;
   }
   await completeFixtureWork(work,unit);
@@ -494,4 +494,40 @@ it('rejects stale recovery bindings and deletion of responsibilities',async()=>{
  expect(()=>assertSourceNotesCorrection(original,{...original,openQuestions:[]})).toThrow('every open-question slot');
  const finding={summary:'Fixture',findings:[{name:'Hero',observation:'Acts',unitIds:['unit']}],openQuestions:[]};
  expect(()=>assertSourceNotesCorrection(finding,{...finding,findings:[{...finding.findings[0]!,unitIds:['other']}]})).toThrow('exact name and unitIds');
+});
+
+it('uses parent identity for all evidence parts and commits coverage only after integration',async()=>{
+ const f=await setup('Hero helps Friend.\n'+'Other person acts.\n'.repeat(220));
+ await expect(runBoundedRoleReview(f.options,async()=>{throw Error('fixture outage');})).rejects.toThrow('fixture outage');
+ const plan=(await RoleReviewWorkStore.plans(f.root,f.f.source.id))[0]!,store=new RoleReviewWorkStore(f.root,plan),workId=store.workId('source',0);
+ const notes:Array<{summary:string;findings:never[];openQuestions:string[]}>=[];
+ await runBoundedRoleReview({...f.options,sourceWorkScope:{planHash:store.planHash,workIds:[workId]},partitionedSourceWorkIds:[workId]},async work=>{
+  expect(work.workId).toBe(workId);expect(work.retainedBudgetRequired).toBe(true);
+  expect(store.read('source',0)).toBeUndefined();
+  if(work.tools[0]!.name==='propose_role_source_part'){
+   const p=packet(work),note={summary:'Fixture inspection',findings:[] as never[],openQuestions:[`Part ${p.partIndex} question`]};
+   const preview=await invoke(work,'preview_role_source_part',{summary:'Fixture',findings:[],openQuestions:Array.from({length:6},()=> '龙'.repeat(500))});
+   expect(JSON.parse((preview.content[0] as {text:string}).text).valid).toBe(false);
+   expect(store.journal.unresolved()).toHaveLength(0);
+   await invoke(work,'propose_role_source_part',note);notes.push(note);
+  }else{
+   expect(packet(work).partDrafts).toEqual(notes);
+   await invoke(work,'propose_role_source_review',{summary:'Integrated all parts',findings:[],openQuestions:notes.flatMap(n=>n.openQuestions)});
+  }
+ });
+ expect(notes.length).toBeGreaterThan(0);expect(store.read('source',0)?.openQuestions).toHaveLength(notes.length);
+ expect(store.journal.latestAttempts('propose_role_source_part')).toHaveLength(notes.length);
+ await expect(store.beginAttempt(workId)).rejects.toThrow('invocation allowance exhausted');
+});
+
+it('retains part questions and refuses parent coverage when integration drops them',async()=>{
+ const f=await setup();await expect(runBoundedRoleReview(f.options,async()=>{throw Error('outage');})).rejects.toThrow('outage');
+ const plan=(await RoleReviewWorkStore.plans(f.root,f.f.source.id))[0]!,store=new RoleReviewWorkStore(f.root,plan),id=store.workId('source',0);
+ await expect(runBoundedRoleReview({...f.options,sourceWorkScope:{planHash:store.planHash,workIds:[id]},partitionedSourceWorkIds:[id]},async work=>{
+  if(work.tools[0]!.name==='propose_role_source_part')await invoke(work,'propose_role_source_part',{summary:'Part',findings:[],openQuestions:['Unresolved identity']});
+  else await invoke(work,'propose_role_source_review',{summary:'Dropped question',findings:[],openQuestions:[]});
+ })).rejects.toThrow('every part open question');
+ expect(store.read('source',0)).toBeUndefined();
+ expect(store.journal.latestAttempts('propose_role_source_part')[0]?.status).toBe('succeeded');
+ expect(store.journal.unresolved()[0]?.proposalId).toBe(id);
 });

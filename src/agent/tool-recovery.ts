@@ -623,6 +623,12 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  if (toolName === "propose_role_source_part" || toolName === 'preview_role_source_part') {
+    return {version:NWH_TOOL_RECOVERY_VERSION,failedTool:toolName,category:'invalid-arguments',retryable:true,
+      retryCondition:'One materially corrected proposal in the same assigned evidence part, only while the original parent budget and correction allowance remain available. Host stops take precedence.',
+      steps:['Copy evidence IDs from part.packet.fragments[].unitId in the assigned prompt. Retain boundary ambiguities in openQuestions. Use preview_role_source_part for exact byte counts and schema diagnostics before committing. The ordinary source-note limit is 8000 UTF-8 bytes; shorten wording without dropping responsibilities.',
+        'Do not guess references, repeat unchanged input, change part IDs or restart with a fresh budget. Stop after a corrected failure or if required notes cannot fit. A part proposal is not parent source coverage.']};
+  }
   if (toolName === "propose_role_source_review" && lower.includes("8000 utf-8 bytes")) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
       retryCondition: "At most one materially corrected proposal in the same work while its durable correction and context budgets remain available; host stops take precedence.",

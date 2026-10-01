@@ -52,17 +52,18 @@ export function roleEvidencePacket(bytes: Buffer, units: readonly Unit[], requir
 
 /** Rebuild decisive text from immutable bytes, not model summaries. Core,
  * neighboring context and exact unit reads overlap: merge byte ranges first. */
-export function reassembleRoleContext(bytes: Buffer, units: readonly Unit[], required: Span[], accesses: readonly { tool: string; args: Record<string, unknown> }[], neighbor?: { page: number; spans: readonly Span[] }, maxBytes = 18000) {
+export function reassembleRoleContext(bytes: Buffer, units: readonly Unit[], required: Span[], accesses: readonly { tool: string; args: Record<string, unknown>; delivered?:Array<{unitId:string;startOffset:number;endOffset:number}> }[], neighbor?: { page: number; spans: readonly Span[] }, maxBytes = 18000) {
   const ranges = [...required];
   for (const access of accesses) {
     if (access.tool === 'read_role_work_evidence' && typeof access.args.unitId === 'string') {
       const unit = units.find(u => u.id === access.args.unitId);
       if (!unit) throw new Error('ROLE_REVIEW_WORK_HOST_REQUIRED: retained context contains foreign evidence. Stop; preserve the original checkpoint.');
-      const offset = access.args.offset ?? 0;
+      const delivered=access.delivered?.find(d=>d.unitId===unit.id);
+      const offset = delivered?.startOffset ?? access.args.offset ?? 0;
       if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) throw new Error('ROLE_REVIEW_WORK_HOST_REQUIRED: invalid retained evidence cursor. Stop; inspect the checkpoint.');
       const chars = Array.from(bytes.subarray(unit.anchor.startByte, unit.anchor.endByte).toString('utf8'));
       const start = unit.anchor.startByte + Buffer.byteLength(chars.slice(0, offset).join(''));
-      const end = start + Buffer.byteLength(chars.slice(offset, offset + 4000).join(''));
+      const end = start + Buffer.byteLength(chars.slice(offset, delivered?.endOffset ?? offset + 4000).join(''));
       if (start < end) ranges.push({ start, end });
     } else if (access.tool === 'read_role_work_neighbor' && neighbor) {
       const step = access.args.direction === 'previous' ? -1 : access.args.direction === 'next' ? 1 : 0;

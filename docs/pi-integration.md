@@ -24,7 +24,8 @@ The previous direct Anthropic SDK implementation coupled the CLI to one provider
 The [Pi 1.0.0 upgrade plan](plans/2026-10-03-pi-1-upgrade.zh-CN.md)
 records the compatibility findings, patch migration, validation gates, and
 rollback strategy. It is a proposed upgrade; the current dependency remains
-Pi 0.84.2 with the patch described below.
+Pi 1.0.0 with the patch described below. The dependency versions are exact pins;
+see [patch maintenance notes](../patches/README.md) for its scope and removal conditions.
 
 The pinned Pi package carries a reproducible pnpm patch that adds a generic
 TUI-only transient assistant stream for extension-owned child sessions. The

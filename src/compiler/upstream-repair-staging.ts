@@ -1,5 +1,3 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { withNwhToolRecovery } from "../agent/tool-recovery.js";
 import { contentHash } from "../world/canonical.js";
 import { canonicalEventSchema, eventParticipationSchema, evidenceRefSchema, textAnchorSchema } from "../world/model.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
@@ -200,11 +198,7 @@ async function executeUpstreamRepairStage(root: string, sourceId: string, planHa
       await ledger.recordValidated(planHash, attemptRef, contentHash(payload), dependencies.refs);
     } } });
     await tools.beginBatch(current.plan.sourceScope.segmentIds, current.plan.batchId, sourceId);
-    const tool = withNwhToolRecovery(tools.tools.find(tool => tool.name === toolNames[target.kind])!);
-    const invoke = async () => {
-      const prepared = tool.prepareArguments ? tool.prepareArguments(input) : input;
-      return tool.execute(attemptRef, prepared as never, undefined, undefined, {} as ExtensionContext);
-    };
+    const invoke = () => tools.executeHostProposal(toolNames[target.kind], attemptRef, input);
     const obligations = new CompilerProposalObligations(root, sourceId, current.plan.batchId);
     const result = current.hostCorrections?.some(item => item.inputHash === contentHash(input))
       ? await obligations.withHostUpstreamCorrection(toolNames[target.kind], input, planHash, attemptRef, invoke)

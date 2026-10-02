@@ -1,3 +1,4 @@
+import { jsonArguments } from "../agent/json-arguments.js";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
@@ -159,7 +160,7 @@ export async function buildSourceAnnotationObligationPreview(
   if (!tool) throw new Error(`Source-annotation proposal tool ${review.tool} is unavailable.`);
   validateToolArguments(
     { name: tool.name, description: tool.description, parameters: tool.parameters },
-    { type: "toolCall", id: "host-source-annotation-preview", name: tool.name, arguments: review.input },
+    { type: "toolCall", id: "host-source-annotation-preview", name: tool.name, arguments: jsonArguments(review.input) },
   );
 
   const evidencePreview = [];

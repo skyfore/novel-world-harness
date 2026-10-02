@@ -1,3 +1,6 @@
+import { jsonArguments } from "../agent/json-arguments.js";
+import { defineHostProposalTool as defineTool, type CompilerToolDefinition } from "./host-proposal-tool.js";
+import { executeNwhHostTool } from "../agent/tool-recovery.js";
 import { ToolDiagnosticError } from "../agent/tool-diagnostic.js";
 import { acquisitionInputSchema } from "../world/acquisition.js";
 import { hydrateAcquisitionInput } from "./acquisition-input.js";
@@ -15,7 +18,7 @@ import { initialWorldInputIssues, INITIAL_WORLD_INPUT_GUIDANCE } from "./initial
 import { initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
 import { CompilerAccountingPages } from "./accounting-pages.js";
 import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
-import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import crypto from "node:crypto";
 import { readPriorStageAccountingCoverage, type AccountingCoverage } from "./accounting-coverage.js";
 import { isDeepStrictEqual } from "node:util";
@@ -647,6 +650,7 @@ function constrainCompilerStateFields(value: unknown): void {
 
 export type CompilerProposalToolset = {
   tools: ToolDefinition[];
+  executeHostProposal(name: string, callId: string, input: unknown): ReturnType<ToolDefinition["execute"]>;
   beginBatch(segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string): Promise<void>;
 };
 
@@ -2962,8 +2966,23 @@ export function createCompilerProposalToolset(
         proposalId: CompilerProposalObligations.identity(tool, input).proposalId, correctedRetryAvailable },
     }, error);
   };
-  const trackProposal = (tool: ToolDefinition): ToolDefinition => {
+  const trackProposal = (tool: CompilerToolDefinition): CompilerToolDefinition => {
     if (!tool.name.startsWith("propose_") && tool.name !== "account_source_units") return tool;
+    const run = async (input: Parameters<ToolDefinition["execute"]>[1], invoke: () => ReturnType<ToolDefinition["execute"]>) => {
+      const journal = obligations();
+      journal?.assertRetryAllowed(tool.name, input);
+      journal?.record(tool.name, input, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
+      try {
+        const result = await invoke();
+        const details = result.details as { compilerBatchBlocked?: boolean } | undefined;
+        if (details?.compilerBatchBlocked) journal?.record(tool.name, input, "failed", "Compiler circuit breaker opened; stop this turn.");
+        else journal?.record(tool.name, input, "succeeded");
+        return result;
+      } catch (error) {
+        journal?.record(tool.name, input, "failed", error instanceof Error ? error.message : String(error), error instanceof ToolDiagnosticError ? error.diagnostic : undefined);
+        throw proposalFailure(tool.name, input, error);
+      }
+    };
     return {
       ...tool,
       prepareArguments(raw) {
@@ -2972,27 +2991,14 @@ export function createCompilerProposalToolset(
         obligations()?.assertRetryAllowed(tool.name, raw);
         try {
           const prepared = tool.prepareArguments ? tool.prepareArguments(raw) : raw;
-          return validateToolArguments(tool, { type: "toolCall", id: "compiler-preflight", name: tool.name, arguments: prepared as Record<string, unknown> }) as never;
+          return validateToolArguments(tool, { type: "toolCall", id: "compiler-preflight", name: tool.name, arguments: jsonArguments(prepared) }) as never;
         } catch (error) {
           obligations()?.record(tool.name, raw, "failed", error instanceof Error ? error.message : String(error), error instanceof ToolDiagnosticError ? error.diagnostic : undefined);
           throw proposalFailure(tool.name, raw, error);
         }
       },
-      async execute(id, input, signal, onUpdate, context) {
-        const journal = obligations();
-        journal?.assertRetryAllowed(tool.name, input);
-        journal?.record(tool.name, input, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
-        try {
-          const result = await tool.execute(id, input, signal, onUpdate, context);
-          const details = result.details as { compilerBatchBlocked?: boolean } | undefined;
-          if (details?.compilerBatchBlocked) journal?.record(tool.name, input, "failed", "Compiler circuit breaker opened; stop this turn.");
-          else journal?.record(tool.name, input, "succeeded");
-          return result;
-        } catch (error) {
-          journal?.record(tool.name, input, "failed", error instanceof Error ? error.message : String(error), error instanceof ToolDiagnosticError ? error.diagnostic : undefined);
-          throw proposalFailure(tool.name, input, error);
-        }
-      },
+      execute: (id, input, signal, onUpdate, context) => run(input, () => tool.execute(id, input, signal, onUpdate, context)),
+      ...(tool.executeHost ? { executeHost: (id, input, signal, onUpdate) => run(input, () => tool.executeHost!(id, input, signal, onUpdate)) } : {}),
     };
   };
   const finishTool = defineTool<typeof finishParameters, CompilerFinishDetails>({
@@ -3409,7 +3415,7 @@ export function createCompilerProposalToolset(
       };
     },
   });
-  const tools: ToolDefinition[] = [
+  const tools: CompilerToolDefinition[] = [
       ...roleRosterTools.tools,
       configureChapterSplitTool,
       novelTitleTool,
@@ -3425,22 +3431,29 @@ export function createCompilerProposalToolset(
       withdrawTool,
       replaceBoundaryTool,
       finishTool,
-    ].map(trackProposal).map((tool) => ({ ...tool, async execute(id, input, signal, onUpdate, context) {
-      if (!batchReady) throw finishHostError("compiler batch initialization did not complete; stop tool calls and preserve the original scope for host review");
-      if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(tool.name))) {
-        throw finishHostError(hostOptions.upstreamFinish
-          ? "frozen upstream finish authorizes only the original host finish; preserve its receipt and drafts, and stop other tool calls"
-          : "managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
-      }
-      if (tool.name !== "finish_compiler_batch" && /^(?:propose_|account_source_units$|withdraw_|configure_|defer_|replace_)/u.test(tool.name)
-        && await finishReceipts()?.read()) throw finishHostError("a prepared finish freezes this batch's mutation set");
-      try { return await tool.execute(id, input, signal, onUpdate, context); }
-      catch (error) {
-        if (error instanceof UpstreamRepairFinishValidationError) throw error;
-        if (tool.name === "finish_compiler_batch" && await finishReceipts()?.read()) throw finishHostError(String(error));
-        throw error;
-      }
-    } }));
+    ].map(trackProposal).map((tool): CompilerToolDefinition => {
+      const run = async (invoke: () => ReturnType<ToolDefinition["execute"]>) => {
+        if (!batchReady) throw finishHostError("compiler batch initialization did not complete; stop tool calls and preserve the original scope for host review");
+        if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(tool.name))) {
+          throw finishHostError(hostOptions.upstreamFinish
+            ? "frozen upstream finish authorizes only the original host finish; preserve its receipt and drafts, and stop other tool calls"
+            : "managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
+        }
+        if (tool.name !== "finish_compiler_batch" && /^(?:propose_|account_source_units$|withdraw_|configure_|defer_|replace_)/u.test(tool.name)
+          && await finishReceipts()?.read()) throw finishHostError("a prepared finish freezes this batch's mutation set");
+        try { return await invoke(); }
+        catch (error) {
+          if (error instanceof UpstreamRepairFinishValidationError) throw error;
+          if (tool.name === "finish_compiler_batch" && await finishReceipts()?.read()) throw finishHostError(String(error));
+          throw error;
+        }
+      };
+      return {
+        ...tool,
+        execute: (id, input, signal, onUpdate, context) => run(() => tool.execute(id, input, signal, onUpdate, context)),
+        ...(tool.executeHost ? { executeHost: (id, input, signal, onUpdate) => run(() => tool.executeHost!(id, input, signal, onUpdate)) } : {}),
+      };
+    });
   const exposedFinishTool = tools.find((tool) => tool.name === "finish_compiler_batch")!;
   const exposeTargetReviews = (enabled: boolean) => {
     exposedFinishTool.parameters = enabled ? finishParameters : ordinaryFinishParameters;
@@ -3448,6 +3461,14 @@ export function createCompilerProposalToolset(
   exposeTargetReviews(false);
   return {
     tools,
+    async executeHostProposal(name, callId, input) {
+      if (!managedUpstream || !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(name)) {
+        throw finishHostError("host proposal execution requires an authorized upstream staging scope and an exact proposal tool; do not retry in a model session");
+      }
+      const tool = tools.find(candidate => candidate.name === name);
+      if (!tool?.executeHost) throw finishHostError("host proposal executor is unavailable; preserve the original attempt for host review");
+      return executeNwhHostTool(tool, tool.executeHost, callId, input);
+    },
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
       batchReady = false;
       activeReviewScope = undefined;

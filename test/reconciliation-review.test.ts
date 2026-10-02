@@ -22,6 +22,7 @@ import { createEvidenceFixture } from "./helpers/evidence.js";
 import { writeKnowledgeRepairPlan } from "../src/compiler/knowledge-repair.js";
 import { worldStorageRoot } from "../src/world/paths.js";
 import { contentHash } from "../src/world/canonical.js";
+import { Compile } from "typebox/compile";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -73,6 +74,7 @@ it("requires every planned target at real finish, freezes deferrals in the recei
   const toolset = createCompilerProposalToolset(root);
   await toolset.beginBatch([], batch, fixture.source.id);
   const finish = toolset.tools.find(tool => tool.name === "finish_compiler_batch")!;
+  expect(JSON.stringify(finish.parameters)).toContain("target_reviews");
   const call = (input: unknown) => finish.execute("finish", input as never, undefined, undefined, {} as never);
   const input = { outcome: "no-artifacts", reviewed_segments: [], summary: "Insufficient source for typed effects." };
   await expect(call(input)).rejects.toThrow("Account exactly once");
@@ -80,6 +82,7 @@ it("requires every planned target at real finish, freezes deferrals in the recei
   const reports = targets.map(target => ({ target, disposition: "capability-gap" as const, evidence_segment_ids: [fixture.segmentId], summary: "The cited arrival text does not name a location; the missing location must be reviewed by the host.",
     requirement_reviews: context.repairPlan.requirements.filter((item: { target: string }) => item.target === target).map((item: { id: string }) => ({ requirementId: item.id, disposition: "capability-gap", summary: "Requires independent source review" })),
   }));
+  expect(Compile(finish.parameters).Check({ ...input, target_reviews: reports })).toBe(true);
   const result = await call({ ...input, target_reviews: reports });
   expect(JSON.stringify(result)).toContain('"compilerBatchFinished":true');
   const receipt = await new CompilerFinishReceipts(root, fixture.source.id, batch).read();

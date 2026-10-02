@@ -1,4 +1,6 @@
+import { sameIds } from "./role-review-verification.js";
 import crypto from "node:crypto";
+import { boundedRoleReviewEvidenceSchema } from "./role-review-work.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -37,7 +39,8 @@ export const roleRosterEntrySchema = z.object({
   developmentExpectation: roleDevelopmentExpectationSchema.optional(),
 }).strict();
 export const roleRosterReviewSchema = z.object({
-  version: z.literal(2).optional(),
+  version: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
+  workEvidence: boundedRoleReviewEvidenceSchema.optional(),
   runId: idSchema,
   reviewRevisionId: idSchema.optional(),
   subjectHash: hashSchema,
@@ -91,26 +94,57 @@ export function buildRoleRoster(input: {
   }), reviews: [] });
 }
 
-export function validateRosterReview(roster: RoleRoster, review: RoleRosterReview): ValidationIssue[] {
+export function validateRosterReview(roster: RoleRoster, review: RoleRosterReview, options: { partial?: boolean } = {}): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const fail = (code: string, message: string) => issues.push({ code, message });
+  const fail = (code: string, message: string, path?: string) => issues.push({ code, message, ...(path ? { path } : {}) });
   if (review.reviewRevisionId !== roster.reviewRevisionId) fail("ROSTER_REVIEW_REVISION_STALE", "Review belongs to another host review revision. Preserve its receipt and stop model retries; do not replay it into the new review.");
   if (review.subjectHash !== roster.subjectHash) fail("ROSTER_STALE_REVIEW", "Roster review refers to stale source or identity inputs");
   if (roster.extractionRunIds.includes(review.runId) || roster.reviews.some((x) => x.runId === review.runId)) fail("ROSTER_INDEPENDENT_REVIEW_REQUIRED", "Review must use a separate run from extraction and the other review");
+  if ((review.version === 3 || review.version === 4) !== Boolean(review.workEvidence) || (review.version === 4 && review.workEvidence?.version !== 2) || (review.version === 3 && review.workEvidence?.version !== 1)) fail("ROSTER_WORK_EVIDENCE_REQUIRED", "Version 4 requires v2 verification; version 3 remains legacy v1 evidence and cannot claim the new contract");
+  if (review.workEvidence) {
+    const proof = review.workEvidence, plan = proof.plan;
+    if (plan.sourceId !== roster.sourceId || plan.sourceHash !== roster.sourceSha256 || plan.subjectHash !== roster.subjectHash
+      || plan.reviewRevisionId !== roster.reviewRevisionId || plan.batchId !== review.runId
+      || proof.entriesHash !== contentHash([...review.entries].sort((a,b) => a.candidateId.localeCompare(b.candidateId)))
+      || contentHash(proof.auditWork.flatMap(work => work.missingMajorCharacters)) !== contentHash(review.missingMajorCharacters)) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Bounded work proof differs from this source/review/entry set");
+    if (proof.version === 2) {
+      const audits = proof.claimAudits ?? [];
+      if (!boundedRoleReviewEvidenceSchema.safeParse(proof).success || !sameIds(audits.map(a => a.candidateId), review.entries.map(e => e.candidateId))
+        || audits.some(a => a.claimRevision !== contentHash(review.entries.find(e => e.candidateId === a.candidateId) ?? null))) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Missing, stale or unresolved claim verification");
+      const refs = [...audits.flatMap(a => [...a.basisUnitIds, ...a.counterevidence.searchedUnitIds, ...a.checks.flatMap(c => c.basisUnitIds)]), ...proof.auditWork.flatMap(a => [...(a.questionDispositions ?? []).flatMap(q => q.basisUnitIds), ...(a.discoveryDispositions ?? []).flatMap(d => d.basisUnitIds)])];
+      if (refs.some(id => !roster.unitIds.includes(id)) || proof.auditWork.some(a => a.discoveryDispositions?.some(d => d.candidateIds.some(id => !review.entries.some(e => e.candidateId === id))
+        || (d.disposition === "mapped") !== (d.candidateIds.length > 0)))) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Verification references escape the frozen source/denominator");
+    }
+    const allowed = new Set(roster.unitIds);
+    if (proof.sourceWork.some(work => work.findings.some(f => f.unitIds.some(id => !allowed.has(id))))) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Bounded source finding has foreign evidence");
+  }
   const expected = new Set(roster.candidates.map((x) => x.id));
   const actual = new Set(review.entries.map((x) => x.candidateId));
-  if (actual.size !== review.entries.length || actual.size !== expected.size || [...expected].some((id) => !actual.has(id))) fail("ROSTER_DENOMINATOR_MISMATCH", "Review must classify every candidate exactly once, including unresolved people");
+  const missing = roster.candidates.filter(candidate => !actual.has(candidate.id)).map(candidate => candidate.id);
+  const unknown = [...actual].filter(id => !expected.has(id));
+  const seen = new Set<string>(), duplicates = new Set<string>();
+  for (const entry of review.entries) { if (seen.has(entry.candidateId)) duplicates.add(entry.candidateId); seen.add(entry.candidateId); }
+  if ((!options.partial && missing.length) || unknown.length || duplicates.size) {
+    fail("ROSTER_DENOMINATOR_MISMATCH", `Review must classify every candidate exactly once, including unresolved people. ${JSON.stringify({ missingCandidateIds: missing, unknownCandidateIds: unknown, duplicateCandidateIds: [...duplicates] })}`, "entries");
+  }
   const units = new Set(roster.unitIds);
   if (new Set(review.reviewedUnitIds).size !== units.size || review.reviewedUnitIds.some((id) => !units.has(id))) fail("ROSTER_FULL_SOURCE_REVIEW_REQUIRED", "Review must account for the complete source unit inventory");
-  for (const entry of review.entries) {
-    if (entry.basisUnitIds.some((id) => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Role ${entry.candidateId} uses an unknown source unit`);
+  const checkUnits = (ids: string[], path: string) => ids.forEach((id, index) => {
+    if (!units.has(id)) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Unknown source unit ${id}`, `${path}/${index}`);
+  });
+  review.entries.forEach((entry, index) => {
+    const path = `/entries/${index}`;
+    checkUnits(entry.basisUnitIds, `${path}/basisUnitIds`);
     const development = entry.developmentExpectation;
-    if (review.version === 2 && !development) fail("ROSTER_DEVELOPMENT_EXPECTATION_REQUIRED", `Role ${entry.candidateId} needs an independent source development expectation, including unknown when evidence is insufficient`);
-    if (!development) continue;
-    const references = development.kind === "changes" ? development.changes.flatMap(change => [...change.beforeUnitIds, ...change.afterUnitIds]) : development.basisUnitIds;
-    if (references.some(id => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Role ${entry.candidateId} development expectation uses an unknown source unit`);
-  }
-  for (const omitted of review.missingMajorCharacters ?? []) if (omitted.basisUnitIds.some((id) => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Omitted major ${omitted.name} uses an unknown source unit`);
+    if ((review.version === 2 || review.version === 3 || review.version === 4) && !development) fail("ROSTER_DEVELOPMENT_EXPECTATION_REQUIRED", `Role ${entry.candidateId} needs an independent source development expectation, including unknown when evidence is insufficient`, path);
+    if (!development) return;
+    if (development.kind === "changes") development.changes.forEach((change, changeIndex) => {
+      checkUnits(change.beforeUnitIds, `${path}/developmentExpectation/changes/${changeIndex}/beforeUnitIds`);
+      checkUnits(change.afterUnitIds, `${path}/developmentExpectation/changes/${changeIndex}/afterUnitIds`);
+    });
+    else checkUnits(development.basisUnitIds, `${path}/developmentExpectation/basisUnitIds`);
+  });
+  (review.missingMajorCharacters ?? []).forEach((omitted, index) => checkUnits(omitted.basisUnitIds, `/missingMajorCharacters/${index}/basisUnitIds`));
   return issues;
 }
 
@@ -138,7 +172,7 @@ export function reviewedRoleDevelopmentRequirements(roster: RoleRoster) {
   return majorRoleCandidates(roster).map(candidate => {
     const reviews = roster.reviews.map(review => ({
       runId: review.runId,
-      expectation: review.version === 2 ? review.entries.find(entry => entry.candidateId === candidate.id)?.developmentExpectation ?? null : null,
+      expectation: (review.version === 2 || review.version === 3 || review.version === 4) ? review.entries.find(entry => entry.candidateId === candidate.id)?.developmentExpectation ?? null : null,
     }));
     const kinds = reviews.map(review => review.expectation?.kind ?? "unknown");
     const status = !reviewsValid || kinds.includes("unknown") || new Set(kinds).size !== 1

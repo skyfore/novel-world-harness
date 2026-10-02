@@ -10,6 +10,14 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it("keeps role-review ID recovery inside its dedicated tools and stops stale scopes", () => {
+    const advice = buildNwhToolRecoveryAdvice("propose_role_roster_entry", "ROSTER_UNKNOWN_EVIDENCE_UNIT /entries/0/basisUnitIds/0: Unknown source unit guessed.\nRecovery SOP: some offset guidance");
+    expect(advice).toMatchObject({ retryable: true, suggestedCall: { tool: "read_role_roster", arguments: { offset: 0 } } });
+    expect(advice.steps.join(" ")).toContain("units[].unitId");
+    expect(advice.steps.join(" ")).toContain("preview_role_roster_review");
+    expect(advice.steps.join(" ")).not.toContain("find_compiler_artifacts");
+    expect(buildNwhToolRecoveryAdvice("preview_role_roster_review", "Staged role entry belongs to stale source or review revision. Stop; preserve the original batch for host review, never reset IDs.")).toMatchObject({ retryable: false, category: "host-repair-required" });
+  });
   it("requires durable obligation repair before finish and stops exhausted retries", () => {
     const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Unresolved compiler proposal obligations (persisted across sessions): propose_action_schema proposal_id=schema-1: failed: Exact evidence quote was not found in segment source-1.");
     expect(advice.steps.join(" ")).toContain("same identity");
@@ -34,7 +42,20 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("read payload.id into action.schemaId");
     expect(advice.steps.join(" ")).toContain("never copy an event's ad-hoc action");
     expect(advice.steps.join(" ")).toContain("Retry once after concrete correction");
+    expect(advice.steps.join(" ")).toContain("do not call propose_event_execution again");
+    expect(advice.retryCondition).toContain("otherwise do not retry this proposal");
     expect(buildNwhToolRecoveryAdvice("propose_event_execution", "requires schema-bound", { activeToolNames: ["propose_event_execution"] })).toMatchObject({ retryable: false, category: "scope-or-lifecycle" });
+  });
+  it("treats a payload-prefixed evidence pointer as an argument error rather than an ID miss", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "propose_event_execution",
+      "Evidence selector 1 target_path '/payload/canonicalEventId' does not exist in the proposal payload.",
+    );
+    expect(advice).toMatchObject({ category: "invalid-arguments", retryable: true });
+    expect(advice.suggestedCall).toBeUndefined();
+    expect(advice.steps.join(" ")).toContain("Use '/canonicalEventId' instead of '/payload/canonicalEventId'");
+    expect(advice.steps.join(" ")).toContain("IDs alone are not a binding");
+    expect(advice.steps.join(" ")).toContain("never submit a third input");
   });
   it("turns a stale read ref into an exact paired-discovery SOP", () => {
     const advice = buildNwhToolRecoveryAdvice(
@@ -98,6 +119,27 @@ describe("agent tool recovery", () => {
     expect(steps).toContain("Retry propose_entity_mention once");
     expect(steps).toContain("same diagnostic repeats, stop");
     expect(formatNwhToolError("propose_entity_mention", new Error(diagnostic))).toContain(diagnostic);
+  });
+
+  it("keeps a valid exact quote and repairs only invented optional context", () => {
+    const segmentId = "source-1-00019-acde1234";
+    const diagnostic = `trigger_selector: Exact evidence quote occurs 1 time(s) in segment ${segmentId}, but none match the supplied prefix/suffix context. Keep exact unchanged; optional context must be the immediate verbatim text adjacent to that occurrence.`;
+    const advice = buildNwhToolRecoveryAdvice("propose_event_mention", diagnostic, {
+      activeToolNames: ["propose_event_mention", "read_source_evidence"],
+    });
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "read_source_evidence",
+        arguments: { ref: `source-segment:${segmentId}`, offset: 0, max_chars: 120_000 },
+      },
+    });
+    const steps = advice.steps.join(" ");
+    expect(steps).toContain("Keep exact unchanged");
+    expect(steps).toContain("Remove prefix, suffix, and occurrence");
+    expect(steps).toContain("same tool, proposal_id, logical annotation ID");
+    expect(steps).toContain("never rotate IDs or make a third attempt");
   });
 
   it.each([
@@ -211,6 +253,51 @@ describe("agent tool recovery", () => {
     expect(advice.retryCondition).toContain("correcting every reported graph/trace section");
     expect(advice.steps.join(" ")).toContain("resolutionMode");
     expect(advice.steps.join(" ")).toContain("do not re-propose a checkpointed pending identity");
+  });
+
+  it("routes event-resolution graph repair through its dedicated store", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "finish_compiler_batch",
+      "Event-resolution graph is incomplete:\n"
+        + "- resolution-gate-opening-001-v2: supersedes unknown current resolution 'resolution-gate-opening-001'\n"
+        + "- resolution-gate-opening-001-v2: supersedesResolutionIds must exactly match current resolution(s): (none)",
+    );
+
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_event_resolutions",
+        arguments: { query: "resolution-gate-opening-001-v2", status: "pending", max_results: 20 },
+      },
+    });
+    const steps = advice.steps.join(" ");
+    expect(steps).toContain("results[].ref into read_event_resolution.ref");
+    expect(steps).toContain("find_compiler_artifacts does not index event-resolution records");
+    expect(steps).toContain("proposalId envelope distinct from resolutionId and eventMentionIds");
+    expect(steps).toContain("reports current resolutions as (none), use an empty array");
+    expect(steps).toContain("Preserve resolution_id");
+  });
+
+  it("uses the failed event-mention ID as a distinctive same-scope discovery query", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "find_event_resolution_candidates",
+      "Event mention not found: event-mention-gate-opening-001",
+    );
+
+    expect(advice).toMatchObject({
+      category: "lookup-miss",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_source_annotations",
+        arguments: {
+          query: "gate-opening-001",
+          annotation_type: "event-mention",
+          max_results: 20,
+        },
+      },
+    });
+    expect(advice.steps.join(" ")).toContain("exact annotationId into event_mention_id");
   });
 
   it("repairs only named dangling annotation references with exact logical annotation IDs", () => {
@@ -521,6 +608,11 @@ it.each([
   expect(advice).toMatchObject({ category: "host-repair-required", retryable: false });
   expect(advice.steps.join(" ")).toContain("Retain the failed obligation");
   expect(advice.steps.join(" ")).toContain("find_compiler_artifacts");
+  expect(advice.steps.join(" ")).toContain("results[].readArguments.ref");
+  expect(advice.suggestedCall).toEqual({
+    tool: "find_compiler_artifacts",
+    arguments: { query: "p", status: message.startsWith("Pending") ? "pending" : "rejected", max_results: 20 },
+  });
 });
 
 it('directs a bare quotation-ID miss to exact-ID discovery rather than neighboring prose', () => {

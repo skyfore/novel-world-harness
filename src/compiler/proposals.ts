@@ -160,22 +160,22 @@ const compilerAttributionSchema = attributionSchema.safeExtend({ evidence: evide
 const compilerEventParticipationSchema = eventParticipationSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerEventRelationSchema = eventRelationSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerEventFrameSchema = eventFrameSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
-const compilerActionSchema = actionSchemaSchema.refine(
-  (value) => value.induction.kind === "source-pattern",
-  { path: ["induction", "kind"], message: "Novel compilation may only induce source-pattern actions; domain modules are host-managed" },
-);
-const compilerActionConstraintSchema = actionConstraintSchema.refine(
-  (value) => value.induction.kind === "source-pattern",
-  { path: ["induction", "kind"], message: "Novel compilation may only induce source-pattern action constraints; domain modules are host-managed" },
-);
-const compilerNormTemplateSchema = normTemplateSchema.refine(
-  (value) => value.induction.kind === "source-pattern",
-  { path: ["induction", "kind"], message: "Novel compilation may only induce source-pattern norm templates; domain modules are host-managed" },
-);
-const compilerProcessTemplateSchema = processTemplateSchema.refine(
-  (value) => value.induction.kind === "source-pattern",
-  { path: ["induction", "kind"], message: "Novel compilation may only induce source-pattern process templates; domain modules are host-managed" },
-);
+const compilerSourcePatternInductionSchema = (minimumSupportingEvents: number) => z.object({
+  kind: z.literal("source-pattern"),
+  supportingEventIds: z.array(idSchema).min(minimumSupportingEvents).max(64),
+}).strict();
+const compilerActionSchema = actionSchemaSchema.safeExtend({
+  induction: compilerSourcePatternInductionSchema(2),
+});
+const compilerActionConstraintSchema = actionConstraintSchema.safeExtend({
+  induction: compilerSourcePatternInductionSchema(1),
+});
+const compilerNormTemplateSchema = normTemplateSchema.safeExtend({
+  induction: compilerSourcePatternInductionSchema(1),
+});
+const compilerProcessTemplateSchema = processTemplateSchema.safeExtend({
+  induction: compilerSourcePatternInductionSchema(1),
+});
 const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
   validateParticipantPresence(possibility, ctx);
   if (possibility.kind === "player-choice" && !hasExecutablePossibilityEffect(possibility)) {
@@ -271,7 +271,7 @@ export function compilerPayloadEvidence(payload: unknown): EvidenceRef[] {
 export class CompilerProposalService {
   readonly store: ProposalStore;
   constructor(private readonly workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
-  async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; evidenceAssertions?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string } }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
+  async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; evidenceAssertions?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; beforeWrite?: (payload: unknown, evidenceAssertions: readonly EvidenceAssertion[]) => Promise<void> }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
     const schema = compilerProposalSchemas[kind];
     const payload = schema.parse(input.payload);
     if (input.generatedBy.compilerBatchId) {
@@ -347,6 +347,7 @@ export class CompilerProposalService {
       generatedBy: input.generatedBy,
       createdAt: new Date().toISOString(),
     };
+    await input.beforeWrite?.(payload, evidenceAssertions);
     await this.store.writePending(proposal, schema);
     return { proposalId: input.proposalId, kind };
   }

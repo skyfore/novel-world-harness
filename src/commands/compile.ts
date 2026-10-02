@@ -37,6 +37,7 @@ export type CompileCommandOptions = {
   onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
   onModelEvent?: (event: AgentSessionEvent) => void;
   trace?: PiCompilerOptions["trace"];
+  requestBudget?: PiCompilerOptions["requestBudget"];
 };
 
 const DEFAULT_COMPILER_PROMPT = `Inspect the novel workspace and build a small, evidence-backed compiler batch. Start by searching and reading relevant source spans. Prefer stable entity proposals first, then claims, world rules, and canonical events whose references can be validated. Use propose_state_delta or propose_possibility only when they are useful staging artifacts. Do not attempt to commit anything and do not describe pending proposals as truth.`;
@@ -95,6 +96,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
     const session = await createPiCompilerSession({
       root: options.root,
+      ...(options.requestBudget ? { requestBudget: options.requestBudget } : {}),
       ...(profile ? { profile } : {}),
       ...(options.model ? { model: options.model } : {}),
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),

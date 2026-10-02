@@ -65,6 +65,21 @@ describe("host-resolved text anchors", () => {
       .resolves.toMatchObject({ startLine: 2 });
   });
 
+  it("distinguishes a valid exact quote from non-adjacent invented context", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-text-anchor-context-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "The boy watched.\nThe boy asked, voice distant.\n");
+    const segment = (await new SegmentStore(root).list(fixture.source.id))[0]!;
+    await expect(resolveTextAnchor(root, segment, {
+      segment_id: segment.id,
+      exact: "The boy asked",
+      prefix: "The boy watched.",
+      target_path: "/title",
+      relation: "supports",
+      strength: "explicit",
+    })).rejects.toThrow(/occurs 1 time\(s\).*Keep exact unchanged.*immediate verbatim/s);
+  });
+
   it("invalidates an anchor when the immutable archived source bytes are corrupted", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-text-anchor-corrupt-"));
     roots.push(root);

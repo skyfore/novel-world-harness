@@ -45,6 +45,7 @@ export type PiCompilerOptions = {
   onEvent?: PiAgentSessionOptions["onEvent"];
   onRetry?: PiAgentSessionOptions["onRetry"];
   trace?: PiAgentSessionOptions["trace"];
+  requestBudget?: PiAgentSessionOptions["requestBudget"];
   segmentIds?: readonly string[];
   compilerBatchId?: string;
   sourceId?: string;
@@ -138,6 +139,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
   ]);
   return PiAgentSession.create({
     workspace,
+    ...(options.requestBudget ? { requestBudget: options.requestBudget } : {}),
     ...(options.profile ? { profile: options.profile } : {}),
     ...(options.model ? { model: options.model } : {}),
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),

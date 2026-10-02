@@ -9,7 +9,9 @@ import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
+import { reviewAccountingRefinementObligation } from "./compiler/accounting-refinement-review.js";
 import { reviewAccountingObligation } from "./compiler/accounting-review.js";
+import { reviewSourcePatternObligation } from "./compiler/source-pattern-obligation-review.js";
 import { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
 import { reviewScenesCommand, inspectRequirementsCommand, registerCoreRoleRequirementsCommand, beginCoreRoleReviewCommand } from "./commands/review-scenes.js";
 import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
@@ -79,7 +81,7 @@ function rootFor(options: { root?: string }): string {
   return options.root ?? program.opts().root ?? process.cwd();
 }
 
-const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and review exact accounting coverage on the host");
+const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and run bounded host-reviewed corrections");
 program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")
   .option("--register <set-id>", "register persistent mandatory requirements using the canonical catalog under the compiler lock")
   .option("--predecessor <hash>", "exact definitions[].revisionHash from requirements inspect when revising a registered set")
@@ -232,6 +234,16 @@ compilerObligations.command("inspect").requiredOption("--source <id>", "register
     const journal = new CompilerProposalObligations(rootFor({}), options.source, options.batch);
     console.log(JSON.stringify({ unresolved: journal.unresolved(), requiringHostReview: journal.requiringHostReview() }, null, 2));
   });
+compilerObligations.command("inspect-upstream-authority")
+  .requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--batch <id>", "exact compiler batch ID")
+  .requiredOption("--tool <name>", "exact failed source-pattern proposal tool")
+  .requiredOption("--proposal <id>", "exact failed proposal ID")
+  .description("Derive a read-only upstream planning authority from one exhausted durable source-pattern identity")
+  .action((options) => {
+    const journal = new CompilerProposalObligations(rootFor({}), options.source, options.batch);
+    console.log(JSON.stringify(journal.inspectSourcePatternUpstreamAuthority(options.tool, options.proposal), null, 2));
+  });
 compilerObligations.command("review-accounting")
   .requiredOption("--source <id>", "registered source ID").requiredOption("--batch <id>", "exact executable batch ID")
   .requiredOption("--proposal <id>", "failed account_source_units proposal ID")
@@ -242,6 +254,20 @@ compilerObligations.command("review-accounting")
     const proof = await reviewAccountingObligation(rootFor({}), { sourceId: options.source, batchId: options.batch, proposalId: options.proposal,
       reason: options.reason, auditRef: options.auditRef, ...(options.fromRun ? { fromRun: options.fromRun } : {}) }, options.apply === true);
     console.log(JSON.stringify({ status: options.apply ? "superseded-by-coverage" : "verified-preview", executableCertification: false, proof }, null, 2));
+  });
+compilerObligations.command("review-accounting-refinement")
+  .requiredOption("--review <path>", "typed accounting correction; apply requires expectedAuthorityHash from preview")
+  .option("--apply", "apply the exact reviewed refinement under the compiler lock; default is read-only")
+  .action(async (options) => {
+    const review = JSON.parse(await fs.readFile(options.review, "utf8"));
+    console.log(JSON.stringify(await reviewAccountingRefinementObligation(rootFor({}), review, options.apply === true), null, 2));
+  });
+compilerObligations.command("review-source-pattern")
+  .requiredOption("--review <path>", "typed correction bound to all failed inputs and one converged upstream repair")
+  .option("--apply", "stage the exact verified correction through the normal proposal tool; default is read-only")
+  .action(async (options) => {
+    const review = JSON.parse(await fs.readFile(options.review, "utf8"));
+    console.log(JSON.stringify(await reviewSourcePatternObligation(rootFor({}), review, options.apply === true), null, 2));
   });
 function configFor(options: { root?: string; config?: string }): string {
   return options.config ? resolveConfigPath(options.config) : path.resolve(rootFor(options), "novel-harness.yaml");

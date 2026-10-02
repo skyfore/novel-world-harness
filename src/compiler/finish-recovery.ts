@@ -4,11 +4,29 @@ import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { ProposalStore } from "../world/canonical-model.js";
 import { loadCompilerArtifactRecords } from "./artifact-retrieval.js";
 import { contentHash } from "../world/canonical.js";
+import { COMPILER_PIPELINE_VERSION } from "./batch-progress.js";
+
+export type RecoverCompilerFinishOptions = {
+  retireSupersededPipelineReceipt?: boolean;
+};
 
 /** Host-only, compiler-lock-owned replay; never opens a model session. */
-export async function recoverCompilerFinish(root: string, sourceId: string, batchId: string): Promise<boolean> {
+export async function recoverCompilerFinish(
+  root: string,
+  sourceId: string,
+  batchId: string,
+  options: RecoverCompilerFinishOptions = {},
+): Promise<boolean> {
   const store = new CompilerFinishReceipts(root, sourceId, batchId), receipt = await store.read();
   if (!receipt) return false;
+  if (receipt.identity.pipelineVersion !== COMPILER_PIPELINE_VERSION
+    && options.retireSupersededPipelineReceipt
+    && !receipt.identity.upstreamRepairIntent
+    && !receipt.identity.requirementScope
+    && !receipt.identity.metadata.roleReview) {
+    await store.retireSupersededPipelineReceipt();
+    return false;
+  }
   if (receipt.identity.upstreamRepairIntent) {
     const { executeUpstreamRepairFinish } = await import("./upstream-repair-finish.js");
     await executeUpstreamRepairFinish(root, sourceId, receipt.identity.upstreamRepairIntent.planHash);

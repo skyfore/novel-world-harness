@@ -4,8 +4,8 @@ import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
-import { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore } from "../src/compiler/batches.js";
-import { CompilerFinishReceipts } from "../src/compiler/finish-receipts.js";
+import { COMPILER_PIPELINE_VERSION, prepareCompilerBatches, runCompilerBatches, CompilerBatchStore } from "../src/compiler/batches.js";
+import { compilerFinishReceiptSchema, CompilerFinishReceipts } from "../src/compiler/finish-receipts.js";
 import { recoverCompilerFinish } from "../src/compiler/finish-recovery.js";
 import { SourceAnnotationStore } from "../src/compiler/annotations.js";
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
@@ -17,6 +17,8 @@ import { worldStorageRoot } from "../src/world/paths.js";
 import { inspectCompilerStatus } from "../src/compiler/status.js";
 import { prepareNextSourceLoopTurn } from "../src/compiler/source-loop.js";
 import { withWorkspaceOperationLock } from "../src/util/workspace-lock.js";
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
+import { contentHash } from "../src/world/canonical.js";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -90,6 +92,120 @@ it("recovers a completed finish after checkpoint failure, preserving its origina
   await expect(runCompilerBatches(options)).resolves.toMatchObject({ completed: 1, remaining: 0 });
   expect(runner).toHaveBeenCalledTimes(1);
   expect(await f.receipts.read()).toEqual(receipt);
+});
+
+it("retires an incompatible plan-selected finish before current-pipeline recompilation", async () => {
+  const f = await fixture();
+  await f.call("finish_compiler_batch", f.input);
+  const current = (await f.receipts.read())!;
+  const legacyIdentity = { ...current.identity, pipelineVersion: COMPILER_PIPELINE_VERSION - 1 };
+  const legacy = compilerFinishReceiptSchema.parse({
+    ...current,
+    identity: legacyIdentity,
+    fingerprint: contentHash(legacyIdentity),
+  });
+  const receiptFile = path.join(
+    worldStorageRoot(f.root),
+    "compiler",
+    "finish-receipts",
+    f.source.id,
+    `${contentHash(f.batch.id)}.json`,
+  );
+  await fs.writeFile(receiptFile, `${JSON.stringify(legacy, null, 2)}\n`);
+  await expect(recoverCompilerFinish(f.root, f.source.id, f.batch.id)).rejects.toThrow("finish compiler pipeline changed");
+  expect(await f.receipts.read()).toEqual(legacy);
+
+  const runner = vi.fn(async () => {
+    expect(await f.receipts.read()).toBeUndefined();
+    const currentToolset = createCompilerProposalToolset(f.root);
+    await currentToolset.beginBatch(f.batch.segmentIds, f.batch.id, f.source.id);
+    const finish = currentToolset.tools.find((tool) => tool.name === "finish_compiler_batch")!;
+    await finish.execute("current-pipeline-finish", f.input, undefined, undefined, {} as never);
+  });
+  await expect(runCompilerBatches({
+    workspaceRoot: f.root,
+    source: f.source,
+    batchIds: [f.batch.id],
+    maxBatches: 1,
+    requireFinishReceipt: true,
+    runner,
+  })).resolves.toMatchObject({ completed: 1, remaining: 0 });
+
+  expect(runner).toHaveBeenCalledOnce();
+  const replacement = (await f.receipts.read())!;
+  expect(replacement.identity.pipelineVersion).toBe(COMPILER_PIPELINE_VERSION);
+  expect(replacement.fingerprint).not.toBe(legacy.fingerprint);
+  const historyDirectory = path.join(
+    worldStorageRoot(f.root),
+    "compiler",
+    "finish-receipts",
+    f.source.id,
+    "history",
+    contentHash(f.batch.id),
+  );
+  const [historyFile] = await fs.readdir(historyDirectory);
+  expect(JSON.parse(await fs.readFile(path.join(historyDirectory, historyFile!), "utf8"))).toMatchObject({
+    receipt: legacy,
+    reason: `Compiler pipeline ${legacy.identity.pipelineVersion} was superseded by pipeline ${COMPILER_PIPELINE_VERSION}; current-plan compilation requires a new finish`,
+  });
+});
+
+it("recovers a finish after explicit host adjudication without rewriting the failed history", async () => {
+  const f = await fixture();
+  const proposalId = "exhausted-event-execution";
+  const ledger = new CompilerProposalObligations(f.root, f.source.id, f.batch.id);
+  ledger.record("propose_event_execution", {
+    proposal_id: proposalId,
+    payload: {
+      id: proposalId,
+      canonicalEventId: "canonical-event",
+      actorId: "actor",
+      action: {
+        lane: "ad-hoc",
+        actionKindId: "announce",
+        description: "Actor announces boarding.",
+        footprint: { reads: [], writes: [], resources: [] },
+      },
+      roleBindings: [],
+    },
+    evidence_segment_ids: f.batch.segmentIds,
+  }, "failed", 'Validation failed for tool "propose_event_execution":\n  - payload.action.lane: must be equal to constant');
+  const correction = {
+    proposal_id: proposalId,
+    payload: { id: proposalId, canonicalEventId: "canonical-event", actorId: "actor" },
+    evidence_segment_ids: f.batch.segmentIds,
+    evidence_selectors: [{
+      segment_id: f.batch.segmentIds[0]!,
+      exact: "Hero waits at the gate.",
+      target_path: "/payload/canonicalEventId",
+      relation: "supports" as const,
+      strength: "explicit" as const,
+    }],
+  };
+  ledger.record("propose_event_execution", correction, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
+  ledger.record("propose_event_execution", correction, "failed", "Evidence selector 1 target_path '/payload/canonicalEventId' does not exist in the proposal payload.");
+  await expect(f.call("finish_compiler_batch", f.input)).rejects.toThrow("requires host review");
+  ledger.reviewUnsupported("propose_event_execution", proposalId,
+    "The reviewed occurrence has no supported reusable binding.", "test:host-review");
+  const history = structuredClone(ledger.history("propose_event_execution", proposalId));
+
+  await f.call("finish_compiler_batch", f.input);
+  const receipt = await f.receipts.read();
+  expect(receipt?.state).toBe("completed");
+
+  const runner = vi.fn();
+  await expect(runCompilerBatches({
+    workspaceRoot: f.root,
+    source: f.source,
+    batchIds: [f.batch.id],
+    maxBatches: 1,
+    requireFinishReceipt: true,
+    runner,
+  })).resolves.toMatchObject({ completed: 1, remaining: 0 });
+
+  expect(runner).not.toHaveBeenCalled();
+  expect(await f.receipts.read()).toEqual(receipt);
+  expect(ledger.history("propose_event_execution", proposalId)).toEqual(history);
 });
 
 it("rejects changed finish arguments and withdrawn dependencies while retaining the prepared intent", async () => {
@@ -192,4 +308,29 @@ it("does not skip a completed world finish after an accepted dependency is remov
   await f.proposals.transition("relation-proposal", "accepted", "rejected");
   await expect(recoverCompilerFinish(f.root, f.source.id, f.batchId)).rejects.toThrow("host review");
   expect(await new CompilerFinishReceipts(f.root, f.source.id, f.batchId).read()).toEqual(f.receipt);
+});
+
+it.each(["prepared", "newer", "changed-dependency"] as const)("preserves %s receipts instead of bypassing recovery during recompilation", async (scenario) => {
+  const f = await fixture();
+  if (scenario === "prepared") {
+    vi.spyOn(CompilerFinishReceipts.prototype, "complete").mockRejectedValueOnce(new Error("interrupted after acceptance"));
+    await expect(f.call("finish_compiler_batch", f.input)).rejects.toThrow("interrupted after acceptance");
+  } else await f.call("finish_compiler_batch", f.input);
+  const original = (await f.receipts.read())!;
+  const identity = {
+    ...original.identity,
+    pipelineVersion: COMPILER_PIPELINE_VERSION + (scenario === "newer" ? 1 : -1),
+    dependencies: original.identity.dependencies.map((dependency, index) => scenario === "changed-dependency" && index === 0
+      ? { ...dependency, hash: "0".repeat(64) } : dependency),
+  };
+  const retained = compilerFinishReceiptSchema.parse({ ...original, identity, fingerprint: contentHash(identity) });
+  const directory = path.join(worldStorageRoot(f.root), "compiler", "finish-receipts", f.source.id);
+  await fs.writeFile(path.join(directory, `${contentHash(f.batch.id)}.json`), JSON.stringify(retained));
+  const runner = vi.fn();
+  await expect(runCompilerBatches({ workspaceRoot: f.root, source: f.source, batchIds: [f.batch.id],
+    maxBatches: 1, requireFinishReceipt: true, runner })).rejects.toThrow("host review");
+  expect(runner).not.toHaveBeenCalled();
+  expect(await f.receipts.read()).toEqual(retained);
+  await expect(fs.stat(path.join(directory, "history"))).rejects.toMatchObject({ code: "ENOENT" });
+  expect((await new CompilerBatchStore(f.root).read(f.source.id)).completedBatchIds).toEqual([]);
 });

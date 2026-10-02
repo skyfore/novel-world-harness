@@ -128,7 +128,7 @@ async function prepareSourceLoopForSource(
   if (!batch) return { status: "complete", source, totalBatches: batches.length };
   // The TUI caller owns the compiler lock. Recover the saved host operation
   // before offering another model turn over this source scope.
-  if (await recoverCompilerFinish(workspaceRoot, source.id, batch.id)) {
+  if (await recoverCompilerFinish(workspaceRoot, source.id, batch.id, { retireSupersededPipelineReceipt: true })) {
     await markSourceLoopBatchComplete(workspaceRoot, source.id, batch.id, { requireFinishReceipt: true });
     const refreshed = await WorkspaceStore.openReadOnly(workspaceRoot).getSource(source.id);
     return prepareSourceLoopForSource(workspaceRoot, refreshed ?? source);

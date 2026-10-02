@@ -15,20 +15,30 @@ import { checkUpstreamRepairMutation, recoverUpstreamRepairStage } from "./upstr
 import { UpstreamRepairFinishValidationError, freezeUpstreamRepairFinishIntent, type UpstreamRepairFinishIntent } from "./upstream-repair-finish-intent.js";
 import type { UpstreamRepairPlan } from "./upstream-repair-plan.js";
 
-async function assertFinishInventory(root: string, plan: UpstreamRepairPlan, proposals: UpstreamRepairFinishIntent["proposals"], intent?: UpstreamRepairFinishIntent) {
-  const sourceId = plan.sourceScope.sourceId, expected = new Set(proposals.map(item => `${item.artifactKind.endsWith("resolution") ? item.artifactKind : "annotation"}:${item.proposalId}`));
+const upstreamStore = (kind: UpstreamRepairFinishIntent["proposals"][number]["artifactKind"]) =>
+  kind === "entity-resolution" || kind === "event-resolution" ? kind
+    : kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
+function envelopeEvidenceAssertions(envelope: unknown): readonly unknown[] {
+  if (!envelope || typeof envelope !== "object") return [];
+  const assertions = (envelope as { evidenceAssertions?: unknown }).evidenceAssertions;
+  return Array.isArray(assertions) ? assertions : [];
+}
+
+export async function assertUpstreamRepairFinishInventory(root: string, plan: UpstreamRepairPlan, proposals: UpstreamRepairFinishIntent["proposals"], intent?: UpstreamRepairFinishIntent) {
+  const sourceId = plan.sourceScope.sourceId, expected = new Set(proposals.map(item => `${upstreamStore(item.artifactKind)}:${item.proposalId}`));
+  const world = new ProposalStore(root), worldBatch = [];
+  for (const status of ["pending", "accepted"] as const) for (const item of await world.list(status, sourceId)) {
+    const envelope = await world.readEnvelope(status, item.id), generatedBy = envelope.generatedBy as { compilerBatchId?: string } | undefined;
+    if (generatedBy?.compilerBatchId === plan.batchId) worldBatch.push(`world:${item.id}`);
+  }
   const actual = [
+    ...worldBatch,
     ...(await new SourceAnnotationStore(root).listBatchProposals(sourceId, plan.batchId)).map(item => `annotation:${item.id}`),
     ...(await new EntityResolutionStore(root).listRecoverableBatchProposals(sourceId, plan.batchId)).map(item => `entity-resolution:${item.id}`),
     ...(await new EventResolutionStore(root).listRecoverableBatchProposals(sourceId, plan.batchId)).map(item => `event-resolution:${item.id}`),
   ];
   if (actual.length !== expected.size || actual.some(key => !expected.has(key))) throw upstreamRepairHostError("Finish batch contains missing or unauthorized upstream proposals");
   if ((await new SourceAccountingStore(root).listBatchProposals(sourceId, plan.batchId)).length) throw upstreamRepairHostError("Upstream finish cannot include accounting side effects");
-  const world = new ProposalStore(root);
-  for (const status of ["pending", "accepted"] as const) for (const item of await world.list(status)) {
-    const envelope = await world.readEnvelope(status, item.id);
-    if ((envelope.generatedBy as { compilerBatchId?: string } | undefined)?.compilerBatchId === plan.batchId) throw upstreamRepairHostError("Upstream finish cannot include world proposals");
-  }
   const { WorkspaceStore } = await import("../storage/workspace-store.js");
   const source = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
   if (source?.pendingTitleProposal?.generatedBy.compilerBatchId === plan.batchId
@@ -48,12 +58,12 @@ export async function prepareUpstreamRepairFinish(root: string, sourceId: string
   const verified = await verifyUpstreamRepairPlan(root, current.plan);
   const proposals: UpstreamRepairFinishIntent["proposals"] = [];
   for (const slot of [...current.plan.allowedWrites, ...current.plan.allowedCreations]) {
-    const attempt = state.attempts.find(item => item.started.planHash === planHash && item.started.artifactKind === slot.kind && item.started.artifactId === slot.id && item.staged);
+    const attempt = state.attempts.findLast(item => item.started.planHash === planHash && item.started.artifactKind === slot.kind && item.started.artifactId === slot.id && item.staged);
     if (!attempt?.validatedHash) throw upstreamRepairHostError(`Finish slot ${slot.kind}:${slot.id} has no validated staged result`);
     const result = await recoverUpstreamRepairStage(root, sourceId, planHash, attempt.attemptRef);
     proposals.push({ artifactKind: slot.kind, artifactId: slot.id, proposalId: result.proposalId, proposalHash: result.proposalHash, attemptRef: attempt.attemptRef, payloadHash: attempt.validatedHash });
   }
-  await assertFinishInventory(root, current.plan, proposals);
+  await assertUpstreamRepairFinishInventory(root, current.plan, proposals);
   const original = current.finishIntent;
   const intent = freezeUpstreamRepairFinishIntent({ version: 1, planHash, sourceId, sourceSha256: current.plan.sourceScope.sourceSha256,
     requirementSetHash: current.plan.requirementSetHash, authorizationHeadHash: original?.authorizationHeadHash ?? (await ledger.history()).at(-1)!.hash, input,
@@ -71,27 +81,40 @@ export async function verifyUpstreamRepairFinish(root: string, sourceId: string,
   const { plan, finishIntent: intent } = current;
   if (expectedBatchId && plan.batchId !== expectedBatchId) throw upstreamRepairHostError("Finish receipt batch differs from retained authorization");
   if (expectedIntent && contentHash(intent) !== contentHash(expectedIntent)) throw upstreamRepairHostError("Finish receipt differs from retained authorization");
-  await assertFinishInventory(root, plan, intent.proposals, intent);
+  await assertUpstreamRepairFinishInventory(root, plan, intent.proposals, intent);
   const receipt = await new CompilerFinishReceipts(root, sourceId, plan.batchId).read() ?? restoringReceipt;
   if (receipt && (receipt.identity.batchId !== plan.batchId || contentHash(receipt.identity.upstreamRepairIntent ?? null) !== contentHash(intent))) throw upstreamRepairHostError("Restored receipt differs from frozen authorization");
-  const committedOutputs = new Map<string, string>(), outputs = new Map<string, unknown>();
+  const committedOutputs = new Map<string, string>(), outputs = new Map<string, unknown>(), assertions = new Map<string, readonly unknown[]>();
   for (const proposal of intent.proposals) {
-    const store = proposal.artifactKind === "entity-resolution" ? new EntityResolutionStore(root) : proposal.artifactKind === "event-resolution" ? new EventResolutionStore(root) : new SourceAnnotationStore(root);
+    const store = upstreamStore(proposal.artifactKind) === "world" ? new ProposalStore(root)
+      : proposal.artifactKind === "entity-resolution" ? new EntityResolutionStore(root)
+        : proposal.artifactKind === "event-resolution" ? new EventResolutionStore(root) : new SourceAnnotationStore(root);
     let envelope;
-    try { envelope = await store.readProposal(sourceId, "pending", proposal.proposalId); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; envelope = await store.readProposal(sourceId, "accepted", proposal.proposalId); }
+    if (store instanceof ProposalStore) {
+      try { envelope = await store.readEnvelope("pending", proposal.proposalId); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; envelope = await store.readEnvelope("accepted", proposal.proposalId); }
+      if (envelope.kind !== proposal.artifactKind) throw upstreamRepairHostError("Original finish world proposal kind changed");
+    } else {
+      try { envelope = await store.readProposal(sourceId, "pending", proposal.proposalId); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; envelope = await store.readProposal(sourceId, "accepted", proposal.proposalId); }
+    }
     if (contentHash(envelope) !== proposal.proposalHash || contentHash(envelope.payload) !== proposal.payloadHash) throw upstreamRepairHostError("Original finish proposal envelope changed");
     const key = `${proposal.artifactKind}:${proposal.artifactId}`;
     outputs.set(key, envelope.payload);
+    assertions.set(key, envelopeEvidenceAssertions(envelope));
     if (receipt) committedOutputs.set(key, proposal.payloadHash);
   }
   const verified = await verifyUpstreamRepairPlan(root, plan, committedOutputs, restoringReceipt);
-  if (requireCommitted) for (const proposal of intent.proposals) if (verified.activeRevisions.get(`${proposal.artifactKind}:${proposal.artifactId}`) !== proposal.payloadHash) throw upstreamRepairHostError("Completed finish output is no longer active");
+  if (requireCommitted) for (const proposal of intent.proposals) if (upstreamStore(proposal.artifactKind) !== "world"
+    && verified.activeRevisions.get(`${proposal.artifactKind}:${proposal.artifactId}`) !== proposal.payloadHash) throw upstreamRepairHostError("Completed finish output is no longer active");
   // Re-run the field and source guard against the original baselines, never
   // against a partially committed proposal masquerading as its own baseline.
   for (const baseline of intent.baselines) { const key = `${baseline.kind}:${baseline.id}`; verified.payloads.set(key, baseline.payload); verified.activeRevisions.set(key, baseline.revisionHash); }
   for (const creation of plan.allowedCreations) { const key = `${creation.kind}:${creation.id}`; verified.payloads.delete(key); verified.activeRevisions.delete(key); }
-  for (const proposal of intent.proposals) checkUpstreamRepairMutation(verified, proposal.artifactKind, proposal.artifactId, outputs.get(`${proposal.artifactKind}:${proposal.artifactId}`), outputs);
+  for (const proposal of intent.proposals) {
+    const key = `${proposal.artifactKind}:${proposal.artifactId}`;
+    checkUpstreamRepairMutation(verified, proposal.artifactKind, proposal.artifactId, outputs.get(key), outputs, assertions.get(key));
+  }
   return intent;
 }
 

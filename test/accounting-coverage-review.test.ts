@@ -5,11 +5,15 @@ import { afterEach, expect, it } from "vitest";
 import { prepareCompilerBatches, CompilerBatchStore } from "../src/compiler/batches.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
-import { reviewAccountingObligation } from "../src/compiler/accounting-review.js";
+import { CompilerAccountingPages } from "../src/compiler/accounting-pages.js";
+import { reviewAccountingObligation, reviewAccountingRefinementObligation } from "../src/compiler/accounting-review.js";
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 import { ProposalStore } from "../src/world/canonical-model.js";
+import { contentHash } from "../src/world/canonical.js";
+import { ActorModelStore, characterGoalSchema } from "../src/world/actors.js";
 import { worldStorageRoot } from "../src/world/paths.js";
 import { TraceStore } from "../src/trace/store.js";
+import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -125,4 +129,301 @@ it("reconstructs a legacy page only from a hash-verified same-session discovery 
   expect(f.journal.unresolved()).toEqual([]);
   await new SourceAccountingStore(f.root).withdrawProposal(f.fixture.source.id, "p07b");
   await expect(reviewAccountingObligation(f.root, f.options)).rejects.toThrow("incomplete"); // restored provenance survives the legacy trace reader
+});
+
+it.each(["Source accounting coverage changed: no decisions were staged.", "Localized or newer compiler diagnostic."])("refines exhausted accounting from structural evidence independently of diagnostic text: %s", async (oldDiagnostic) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-refinement-review-"));
+  roots.push(root);
+  const sourceText = "The team continues along the route.\nThe standing mission remains unchanged.\nThe retained goal already describes the standing mission.";
+  const fixture = await createEvidenceFixture(root, sourceText);
+  const batch = (await prepareCompilerBatches(root, fixture.source)).find((item) => item.semanticStage === "executable")!;
+  const initial = createCompilerProposalToolset(root);
+  await initial.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+  const call = (set: ReturnType<typeof createCompilerProposalToolset>, name: string, input: unknown) =>
+    set.tools.find((candidate) => candidate.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
+  const discover = async () => {
+    const result = await call(initial, "find_source_accounting_units", { status: "unresolved", offset: 0, max_results: 20 });
+    return JSON.parse((result.content[0] as { text: string }).text) as { pageToken: string; units: Array<{ unitId: string }> };
+  };
+  const originalPage = await discover();
+  await call(initial, "account_source_units", {
+    proposal_id: "blocking-page",
+    page_token: originalPage.pageToken,
+    page_default: { status: "unresolved", reason: "The initial review intentionally leaves executable meaning open." },
+  });
+
+  const journal = new CompilerProposalObligations(root, fixture.source.id, batch.id);
+  const collisionPage = await discover();
+  const collisionInput = {
+    proposal_id: "blocking-page",
+    page_token: collisionPage.pageToken,
+    page_default: { status: "background-only", reason: "The second review found no additional semantic artifact." },
+  };
+  journal.record("account_source_units", collisionInput, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
+  journal.record("account_source_units", collisionInput, "failed", "Pending source-accounting proposal blocking-page already exists with different content; use a new proposal id.");
+
+  const firstFailedPage = await discover();
+  const firstFailedInput = {
+    proposal_id: "refined-page",
+    page_token: firstFailedPage.pageToken,
+    page_default: { status: "background-only", reason: "Reviewed continuation with no additional semantic artifact." },
+  };
+  const secondFailedPage = await discover();
+  const secondFailedInput = {
+    proposal_id: "refined-page",
+    page_token: secondFailedPage.pageToken,
+    page_default: { status: "background-only", reason: "Reviewed mission context with no additional executable mechanism." },
+  };
+  for (const input of [firstFailedInput, secondFailedInput]) {
+    journal.record("account_source_units", input, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
+    journal.record("account_source_units", input, "failed", oldDiagnostic);
+  }
+  const originalRefinementHistory = journal.history("account_source_units", "refined-page");
+  const correctedInput = {
+    ...secondFailedInput,
+    page_default: { status: "background-only" as const, reason: "Reviewed continuation with no additional semantic artifact." },
+    page_overrides: [{
+      unit_index: 3,
+      status: "duplicate-description" as const,
+      reason: "This operational rationale is already represented by the retained semantic goal.",
+    }],
+  };
+  const supportText = "The retained goal already describes the standing mission.";
+  const sourceBytes = Buffer.from(sourceText);
+  const supportStart = sourceBytes.indexOf(Buffer.from(supportText));
+  const supportAnchor = textAnchorForByteRange(fixture.source.id, sourceBytes, supportStart, supportStart + Buffer.byteLength(supportText));
+  const retainedGoal = characterGoalSchema.parse({
+    id: "retained-goal",
+    actorId: "team",
+    description: "The team continues its standing mission.",
+    priority: 0.7,
+    requiresKnowledge: [],
+    evidence: fixture.evidence(supportText),
+  });
+  const supportProposalId = "retained-goal-proposal";
+  const proposals = new ProposalStore(root);
+  await proposals.writePending({
+    id: supportProposalId,
+    kind: "character-goal",
+    schemaVersion: 1,
+    payload: retainedGoal,
+    evidence: retainedGoal.evidence,
+    evidenceAssertions: [{
+      version: 1,
+      id: "retained-goal-description-evidence",
+      target: { artifactKind: "character-goal", artifactId: retainedGoal.id, jsonPointer: "/description" },
+      anchors: [supportAnchor],
+      relation: "supports",
+      strength: "explicit",
+      derivation: { runId: "accounting-refinement-test", worker: "fixture", compilerBatchId: batch.id, ontologyVersion: "evidence-v1" },
+    }],
+    generatedBy: { worker: "fixture", compilerBatchId: batch.id },
+    createdAt: "2026-09-26T00:00:00.000Z",
+  }, characterGoalSchema);
+  const actors = new ActorModelStore(root);
+  await actors.putGoal(retainedGoal);
+  await proposals.transition(supportProposalId, "pending", "accepted");
+  const options = {
+    sourceId: fixture.source.id,
+    batchId: batch.id,
+    proposalId: "refined-page",
+    settleProposalIds: ["blocking-page"],
+    duplicateSupportProposalIds: [supportProposalId],
+    reason: "Host reviewed the retained page and approved only a blocking-to-background accounting refinement.",
+    auditRef: "test:accounting-refinement-review",
+    correctedInput,
+  };
+  await expect(reviewAccountingRefinementObligation(root, {
+    ...options,
+    correctedInput: {
+      ...secondFailedInput,
+      page_default: { status: "background-only" as const, reason: secondFailedInput.page_default.reason },
+    },
+    duplicateSupportProposalIds: [],
+  })).rejects.toThrow("differs from every exhausted failed input");
+  await expect(reviewAccountingRefinementObligation(root, {
+    ...options,
+    duplicateSupportProposalIds: [],
+  })).rejects.toThrow("requires at least one exact accepted semantic support proposal");
+  const preview = await reviewAccountingRefinementObligation(root, options);
+  expect(preview).toMatchObject({
+    status: "verified-preview",
+    executableCertification: false,
+    input: correctedInput,
+    units: expect.arrayContaining([expect.objectContaining({ predecessorProposalId: "blocking-page", predecessorStatus: "unresolved" })]),
+  });
+  expect(preview.binding.failedInputHashes).toHaveLength(2);
+  expect(preview.binding.failedInputHashes).not.toContain(preview.binding.inputHash);
+  expect(preview.binding.duplicateSupportDependencies).toEqual([expect.objectContaining({
+    proposalId: supportProposalId,
+    artifactKind: "character-goal",
+    artifactId: retainedGoal.id,
+    unitIds: [originalPage.units[2]!.unitId],
+    evidenceAssertionIds: ["retained-goal-description-evidence"],
+  })]);
+  expect(journal.history("account_source_units", "refined-page")).toEqual(originalRefinementHistory);
+  await expect(new SourceAccountingStore(root).readProposal(fixture.source.id, "pending", "refined-page"))
+    .rejects.toMatchObject({ code: "ENOENT" });
+
+  await expect(reviewAccountingRefinementObligation(root, {
+    ...options,
+    expectedAuthorityHash: "0".repeat(64),
+  }, true)).rejects.toThrow("authority changed after preview");
+  await actors.putGoal({ ...retainedGoal, description: "A changed current goal revision." });
+  await expect(reviewAccountingRefinementObligation(root, {
+    ...options,
+    expectedAuthorityHash: preview.authorityHash,
+  }, true)).rejects.toThrow("is not the current accepted artifact revision");
+  await actors.putGoal(retainedGoal);
+  const applied = await reviewAccountingRefinementObligation(root, {
+    ...options,
+    expectedAuthorityHash: preview.authorityHash,
+  }, true);
+  expect(applied.status).toBe("staged");
+  expect(applied.settlements).toHaveLength(1);
+  const accounting = new SourceAccountingStore(root);
+  const original = await accounting.readProposal(fixture.source.id, "pending", "blocking-page");
+  const successor = await accounting.readProposal(fixture.source.id, "pending", "refined-page");
+  expect(original.decisions.every((decision) => decision.status === "unresolved")).toBe(true);
+  expect(successor.refinements).toEqual([{
+    proposalId: "blocking-page",
+    proposalHash: contentHash(original),
+    unitIds: originalPage.units.map((unit) => unit.unitId).sort(),
+  }]);
+  expect(successor.decisions[2]?.status).toBe("duplicate-description");
+  expect(new CompilerAccountingPages(root, fixture.source.id, batch.id).read(secondFailedPage.pageToken)?.consumedBy).toBe("refined-page");
+  expect(journal.history("account_source_units", "refined-page").slice(0, originalRefinementHistory.length)).toEqual(originalRefinementHistory);
+  expect(journal.history("account_source_units", "refined-page").slice(-2).map((attempt) => attempt.status)).toEqual(["running", "succeeded"]);
+  expect(journal.history("account_source_units", "blocking-page").at(-1)).toMatchObject({ status: "superseded-by-coverage" });
+  expect(journal.unresolved()).toEqual([]);
+
+  await expect(reviewAccountingRefinementObligation(root, {
+    ...options,
+    expectedAuthorityHash: preview.authorityHash,
+  }, true)).rejects.toThrow("already consumed");
+  new CompilerAccountingPages(root, fixture.source.id, batch.id).consume(firstFailedPage.pageToken, "unexpected-consumer");
+  await expect(reviewAccountingRefinementObligation(root, {
+    ...options,
+    expectedAuthorityHash: preview.authorityHash,
+  }, true)).rejects.toThrow("ambiguous consumption state");
+
+  const resumed = createCompilerProposalToolset(root);
+  await resumed.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+  await expect(call(resumed, "finish_compiler_batch", {
+    outcome: "complete",
+    reviewed_segments: batch.segmentIds.map((segment_id) => ({
+      segment_id,
+      disposition: "proposed",
+      summary: "Every source unit was reviewed through the retained accounting graph.",
+    })),
+    summary: "Host-reviewed accounting refinement is ready for the normal finish handshake.",
+  })).resolves.toMatchObject({ terminate: true });
+  await expect(reviewAccountingRefinementObligation(root, {
+    ...options,
+    expectedAuthorityHash: preview.authorityHash,
+  }, true)).rejects.toThrow("checkpoint, or finish baseline changed");
+});
+
+it("recovers only the exact durable running accounting-refinement intent", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-refinement-interruption-"));
+  roots.push(root);
+  const fixture = await createEvidenceFixture(root, "The team continues.\nThe mission remains unchanged.");
+  const batch = (await prepareCompilerBatches(root, fixture.source)).find((item) => item.semanticStage === "executable")!;
+  const toolset = createCompilerProposalToolset(root);
+  await toolset.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+  const call = (name: string, input: unknown) => toolset.tools.find((candidate) => candidate.name === name)!
+    .execute(name, input as never, undefined, undefined, {} as never);
+  const discover = async () => {
+    const result = await call("find_source_accounting_units", { status: "unresolved", offset: 0, max_results: 20 });
+    return JSON.parse((result.content[0] as { text: string }).text) as { pageToken: string; units: Array<{ unitId: string }> };
+  };
+  const blockingPage = await discover();
+  await call("account_source_units", {
+    proposal_id: "blocking-page",
+    page_token: blockingPage.pageToken,
+    page_default: { status: "unresolved", reason: "The first review leaves the executable disposition open." },
+  });
+
+  const journal = new CompilerProposalObligations(root, fixture.source.id, batch.id);
+  const failedInputs: Array<{
+    proposal_id: string;
+    page_token: string;
+    page_default: { status: "background-only"; reason: string };
+  }> = [];
+  for (const reason of ["First exhausted disposition.", "Second exhausted disposition."]) {
+    const page = await discover();
+    const input = {
+      proposal_id: "refined-page",
+      page_token: page.pageToken,
+      page_default: { status: "background-only" as const, reason },
+    };
+    failedInputs.push(input);
+    journal.record("account_source_units", input, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
+    journal.record("account_source_units", input, "failed", "Source accounting coverage changed: no decisions were staged. Represented units cannot receive a model disposition; retain existing valid accounting.");
+  }
+  const correctedInput = {
+    ...failedInputs[1]!,
+    page_default: { status: "background-only" as const, reason: "Host reviewed the retained source text as non-executable context." },
+  };
+  const options = {
+    sourceId: fixture.source.id,
+    batchId: batch.id,
+    proposalId: "refined-page",
+    settleProposalIds: [],
+    duplicateSupportProposalIds: [],
+    correctedInput,
+    reason: "Recover one exact interrupted host accounting refinement.",
+    auditRef: "test:accounting-refinement-interruption",
+  };
+  const preview = await reviewAccountingRefinementObligation(root, options);
+  const accounting = new SourceAccountingStore(root);
+  const predecessor = await accounting.readProposal(fixture.source.id, "pending", "blocking-page");
+  const priorFailure = journal.history("account_source_units", "refined-page").at(-1)!;
+  const interruptedProposal = {
+    version: 1 as const,
+    id: "refined-page",
+    sourceId: fixture.source.id,
+    compilerBatchId: batch.id,
+    decisions: blockingPage.units.map(({ unitId }) => ({
+      unitId,
+      status: "background-only" as const,
+      reason: correctedInput.page_default.reason,
+    })),
+    generatedBy: { worker: "account_source_units" as const },
+    refinements: [{
+      proposalId: predecessor.id,
+      proposalHash: contentHash(predecessor),
+      unitIds: blockingPage.units.map(({ unitId }) => unitId).sort(),
+    }],
+    createdAt: priorFailure.updatedAt,
+  };
+  await expect(journal.withHostAccountingRefinement(
+    correctedInput,
+    preview.binding,
+    options.reason,
+    options.auditRef,
+    async () => {
+      journal.record("account_source_units", correctedInput, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
+      await accounting.stageProposal(interruptedProposal);
+      throw new Error("simulated interruption after durable output");
+    },
+  )).rejects.toThrow("simulated interruption");
+  expect(journal.history("account_source_units", "refined-page").at(-1)).toMatchObject({
+    status: "running",
+    hostReview: { accountingRefinementCorrection: { authorityHash: preview.authorityHash } },
+  });
+  expect(new CompilerAccountingPages(root, fixture.source.id, batch.id).read(correctedInput.page_token)?.consumedBy).toBeUndefined();
+
+  const recovered = await reviewAccountingRefinementObligation(root, {
+    ...options,
+    expectedAuthorityHash: preview.authorityHash,
+  }, true);
+  expect(recovered.status).toBe("recovered");
+  expect(new CompilerAccountingPages(root, fixture.source.id, batch.id).read(correctedInput.page_token)?.consumedBy).toBe("refined-page");
+  expect(journal.history("account_source_units", "refined-page").at(-1)?.status).toBe("succeeded");
+  expect(journal.unresolved()).toEqual([]);
+  await expect(reviewAccountingRefinementObligation(root, {
+    ...options,
+    expectedAuthorityHash: preview.authorityHash,
+  }, true)).rejects.toThrow("already consumed");
 });

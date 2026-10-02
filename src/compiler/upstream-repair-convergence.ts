@@ -25,6 +25,7 @@ export async function verifyUpstreamRepairConvergence(root: string, sourceId: st
   if (pending.length) throw new Error("UPSTREAM_REPAIR_CONVERGENCE_PENDING: preserve pending source work; finish, repair or quarantine it through its existing host workflow before convergence observation. Do not rerun the upstream model or reset its plan.");
   const outputs = new Map(current.finishIntent.proposals.map(item => [`${item.artifactKind}:${item.artifactId}`, item.payloadHash]));
   const verified = await verifyUpstreamRepairPlan(root, current.plan, outputs);
+  for (const proposal of current.finishIntent.proposals) if (verified.activeRevisions.get(`${proposal.artifactKind}:${proposal.artifactId}`) !== proposal.payloadHash) throw upstreamRepairHostError(`Converged output is no longer active: ${proposal.artifactKind}:${proposal.artifactId}`);
   const refs = new Map(current.plan.baselineRefs.map(ref => [`${ref.kind}:${ref.id}`, { kind: ref.kind, id: ref.id }]));
   for (const proposal of current.finishIntent.proposals) refs.set(`${proposal.artifactKind}:${proposal.artifactId}`, { kind: proposal.artifactKind, id: proposal.artifactId });
   for (const revision of current.plan.resolutionRevisions ?? []) refs.delete(`${revision.kind}:${revision.predecessorId}`);

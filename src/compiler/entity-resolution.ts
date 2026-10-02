@@ -560,13 +560,15 @@ export async function validateIdentityResolutionClosure(
   const resolutionProposalIds = uniqueParsedIds(resolutionProposalIdsInput);
   if (!resolutionProposalIds.length) return [];
   const resolutionStore = new EntityResolutionStore(workspaceRoot);
-  const [current, allPending, mentionCatalog, entityCatalog] = await Promise.all([
+  const [current, allPending, allAccepted, mentionCatalog, entityCatalog] = await Promise.all([
     resolutionStore.list(sourceId),
     resolutionStore.listProposals(sourceId, "pending"),
+    resolutionStore.listProposals(sourceId, "accepted"),
     loadMentionCatalog(workspaceRoot, sourceId, annotationProposalIdsInput),
     loadResolutionEntityCatalog(workspaceRoot, sourceId, worldProposalIdsInput),
   ]);
   const currentByMention = new Map(current.map((resolution) => [resolution.mentionId, resolution]));
+  const acceptedProposalIds = new Set(allAccepted.map((proposal) => proposal.id));
   const staged: IdentityResolutionProposal[] = [];
   const issues = new Set<string>();
   for (const proposalId of resolutionProposalIds) {
@@ -638,7 +640,14 @@ export async function validateIdentityResolutionClosure(
         }
       }
     }
-    if (resolution.status === "new-entity" && resolution.entityId && !entityCatalog.selectedPending.has(resolution.entityId)) {
+    const acceptedCreationReplay = resolution.status === "new-entity"
+      && resolution.entityId !== undefined
+      && alreadyCurrent
+      && acceptedProposalIds.has(proposal.id)
+      && entityCatalog.canonical.has(resolution.entityId);
+    if (resolution.status === "new-entity" && resolution.entityId
+      && !entityCatalog.selectedPending.has(resolution.entityId)
+      && !acceptedCreationReplay) {
       issues.add(entityCatalog.checkpointedPending.has(resolution.entityId)
         ? `${proposal.id}: new-entity identity '${resolution.entityId}' was proposed by a previously checkpointed source batch; reuse it with status resolved instead of proposing it again`
         : `${proposal.id}: new-entity identity '${resolution.entityId}' requires a same-finish entity proposal`);

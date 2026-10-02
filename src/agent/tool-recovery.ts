@@ -1,3 +1,4 @@
+import { ToolDiagnosticError, type ToolDiagnosticContext } from "./tool-diagnostic.js";
 import { validateToolArguments, type ToolCall } from "@earendil-works/pi-ai";
 import type {
   ExtensionFactory,
@@ -27,6 +28,7 @@ export type NwhToolRecoveryAdvice = {
   retryable: boolean;
   retryCondition: string;
   steps: string[];
+  context?: ToolDiagnosticContext;
   suggestedCall?: {
     tool: string;
     arguments: Record<string, unknown>;
@@ -195,7 +197,16 @@ function lookupMiss(lower: string): boolean {
     || /\bnot (?:available|discoverable|registered)\b/u.test(lower);
 }
 
-function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | undefined {
+function failedMentionQuery(errorText: string, kind: "entity" | "event"): string | undefined {
+  const label = kind === "entity" ? "entity" : "event";
+  const failedId = new RegExp(`${label} mention (?:was )?not found:?\\s*['\"]?([A-Za-z0-9][A-Za-z0-9._-]*)`, "iu")
+    .exec(errorText)?.[1];
+  if (!failedId) return undefined;
+  const distinctive = failedId.replace(new RegExp(`^${label}-mention-`, "iu"), "");
+  return distinctive || failedId;
+}
+
+function lookupAdvice(toolName: string, lower: string, errorText: string): NwhToolRecoveryAdvice | undefined {
   const direct = LOOKUP_RECOVERY[toolName];
   if (toolName === "read_source_annotation") {
     const ref = /source annotation ref '([^']+)'/u.exec(lower)?.[1];
@@ -229,6 +240,7 @@ function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | 
   }
 
   if (toolName === "find_entity_resolution_candidates") {
+    const query = failedMentionQuery(errorText, "entity") ?? "*";
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
@@ -242,12 +254,13 @@ function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | 
       ],
       suggestedCall: {
         tool: "find_source_annotations",
-        arguments: { query: "*", annotation_type: "entity-mention", max_results: 20 },
+        arguments: { query, annotation_type: "entity-mention", max_results: 20 },
       },
     };
   }
 
   if (toolName === "find_event_resolution_candidates") {
+    const query = failedMentionQuery(errorText, "event") ?? "*";
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
@@ -261,7 +274,7 @@ function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | 
       ],
       suggestedCall: {
         tool: "find_source_annotations",
-        arguments: { query: "*", annotation_type: "event-mention", max_results: 20 },
+        arguments: { query, annotation_type: "event-mention", max_results: 20 },
       },
     };
   }
@@ -366,6 +379,13 @@ export function buildNwhToolRecoveryAdvice(
   // can contain arbitrary novel wording, including "unknown" or "offset".
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
+  if (lower.includes("role_review_work_host_required")) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "The owning host must inspect the unchanged role review work, plan and journal before continuation.",
+      steps: ["Stop. Preserve work receipts, batch identity, drafts and all attempts; do not rotate IDs, repeat the call or finish a partial batch."] };
+  }
+
+
 
   if (/tool-call budget|tool call budget|tool-call safety fuse|circuit breaker|circuit-breaker/u.test(lower)) {
     return {
@@ -603,6 +623,45 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  if (toolName === "propose_role_source_part" || toolName === 'preview_role_source_part') {
+    return {version:NWH_TOOL_RECOVERY_VERSION,failedTool:toolName,category:'invalid-arguments',retryable:true,
+      retryCondition:'One materially corrected proposal in the same assigned evidence part, only while the original parent budget and correction allowance remain available. Host stops take precedence.',
+      steps:['Copy evidence IDs from part.packet.fragments[].unitId in the assigned prompt. Retain boundary ambiguities in openQuestions. Use preview_role_source_part for exact byte counts and schema diagnostics before committing. The ordinary source-note limit is 8000 UTF-8 bytes; shorten wording without dropping responsibilities.',
+        'Do not guess references, repeat unchanged input, change part IDs or restart with a fresh budget. Stop after a corrected failure or if required notes cannot fit. A part proposal is not parent source coverage.']};
+  }
+  if (toolName === "propose_role_source_review" && lower.includes("8000 utf-8 bytes")) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected proposal in the same work while its durable correction and context budgets remain available; host stops take precedence.",
+      steps: ["The complete JSON proposal must fit 8000 UTF-8 bytes, including keys, IDs and punctuation. Shorten wording and avoid copied source passages while preserving findings, evidence references and unresolved questions.",
+        "Do not re-read source solely to fix output length. If required notes cannot fit, or context/attempt limits stop correction, preserve the exact failed input and stop for host task decomposition. Never clear the journal or rotate work IDs."] };
+  }
+  if (["read_role_context_history", "request_role_work_evidence", "read_role_work_evidence", "read_role_work_neighbor", "read_role_review_notes", "read_role_review_atlas", "read_role_audit_inventory", "propose_role_claim_audit", "propose_role_source_review", "propose_role_review_audit"].includes(toolName)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
+      retryCondition: "Only one materially corrected retry in this assigned work, if the durable allowance remains available; host and budget stops take precedence.",
+      steps: ["For evidence, call read_role_work_evidence with query in this source, copy units[].unitId to unitId, and follow nextOffset for complete text. Source-work citations must come from the supplied packet fragments[].unitId.",
+        "For neighbor context, choose direction=previous or next in the assigned work; a boundary result is not an error and must not be retried. For a notes/inventory cursor miss, call the same tool with offset=0 and copy nextOffset. For proposal fields, correct all reported schema paths under the same host-assigned work identity.",
+        "For note details, call read_role_review_notes with query or offset=0, then copy records[].noteId. For context history, call read_role_context_history offset=0 and copy nextOffset; past read receipts are navigation only and decisive original evidence must be delivered again. Directory pagination is optional discovery, not an instruction to ingest every detail.",
+        "For atlas navigation, call read_role_review_atlas offset=0 and copy pages[].page or nextOffset. Audit fields must copy the assigned packet claimRevision, packetHash, atlasRevision, expectedQuestions[].questionId and discoveries[].findingId; do not omit responsibilities. Read mapped claims through read_role_audit_inventory before disposition.",
+        "Never guess IDs, repeat unchanged arguments, change work identity or treat missing search results as proof of absence. Stop after a corrected failure."] };
+  }
+  if (["read_role_roster", "read_roster_source_page", "read_roster_evidence", "preview_role_roster_review", "propose_role_roster_entry", "propose_role_roster_review"].includes(toolName)) {
+    const diagnostic = lower.split("\nrecovery sop:")[0]!;
+    if (/^(?:staged role entry belongs|role entry review revision is stale|role source identity|roster source structure|roster review source|role-roster tools require)|roster_stale_review|roster_review_revision_stale/u.test(diagnostic)) {
+      return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+        retryCondition: "The host must restore or review the original source, review revision and batch before any retry.",
+        steps: ["Stop. Preserve the exact scope, successful drafts and failure history; do not guess IDs, change review revisions or start a fresh batch."] };
+    }
+    if (/roster_denominator_mismatch|roster_unknown_evidence_unit|unknown roster evidence|invalid evidence offset|unknown roster source page|invalid roster offset|unread source pages/u.test(diagnostic)) {
+      return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
+        retryCondition: "At most one corrected proposal under the same candidate/batch identity, only while the durable allowance remains available.",
+        steps: [
+          "Call read_role_roster in this scope with offset=0; follow exact nextOffset values and copy candidates[].id, subjectHash and reviewRevisionId when present. Keep every candidate in the denominator.",
+          "For source references, call read_roster_source_page starting at page=0 and follow exact nextPage values, or search with read_roster_evidence query. Copy units[].unitId and reread its paired text; never guess IDs or cite null gap IDs.",
+          "Call preview_role_roster_review to check all reported paths before the one corrected submission. Search and preview do not mark full-source pages read. Do not repeat unchanged arguments; stop after a corrected failure.",
+        ], suggestedCall: { tool: "read_role_roster", arguments: { offset: 0 } } };
+    }
+  }
+
   if (toolName === "finish_compiler_batch" && lower.startsWith("unresolved compiler proposal obligations")) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle",
@@ -633,14 +692,21 @@ export function buildNwhToolRecoveryAdvice(
   }
 
   if (COMPILER_PROPOSAL_TOOLS.has(toolName) && /(?:pending proposal .* already exists with different content|proposal .* already exists in (?:accepted|rejected) history)/u.test(lower)) {
+    const pendingCollision = /pending proposal ([A-Za-z0-9][A-Za-z0-9._-]*) already exists with different content/iu.exec(errorText);
+    const historyCollision = /proposal ([A-Za-z0-9][A-Za-z0-9._-]*) already exists in (accepted|rejected) history/iu.exec(errorText);
+    const proposalId = pendingCollision?.[1] ?? historyCollision?.[1];
+    const status = pendingCollision ? "pending" : historyCollision?.[2]?.toLowerCase();
     return {
       version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
       retryCondition: "Stop this identity's retries; the host must review the persisted failed mutation before any replacement.",
       steps: [
         "The proposal ID belongs to an existing immutable draft or history entry. This is not a never-staged validation failure; the same-ID correction rule cannot overwrite or revive it.",
-        "Retain the failed obligation and every valid draft. Use find_compiler_artifacts in this source, copy the returned pending ref into read_compiler_artifact, and inspect the current active successor for the same logical artifact. Do not guess IDs or retry a retired ID.",
+        `Retain the failed obligation and every valid draft. Use find_compiler_artifacts in this source${proposalId && status ? ` with query=${JSON.stringify(proposalId)} and status=${JSON.stringify(status)}` : ""}; copy results[].readArguments.ref into read_compiler_artifact.ref and inspect the exact envelope lifecycle. Do not guess IDs or retry a retired ID.`,
         "After host adjudication, keep an unchanged valid active draft. Only a specifically diagnosed defective successful draft may be replaced through normal proposal validation and withdrawal, preserving its stable artifact ID. Never change IDs to clear this failed obligation.",
       ],
+      ...(proposalId && status ? {
+        suggestedCall: { tool: "find_compiler_artifacts", arguments: { query: proposalId, status, max_results: 20 } },
+      } : {}),
     };
   }
 
@@ -882,6 +948,33 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const eventResolutionGraphProposalId = toolName === "finish_compiler_batch"
+    && /event-resolution graph is incomplete:/iu.test(errorText)
+    ? /^-\s+([A-Za-z0-9][A-Za-z0-9._-]*):/mu.exec(errorText)?.[1]
+    : undefined;
+  if (toolName === "finish_compiler_batch" && /event-resolution graph is incomplete:/iu.test(errorText)) {
+    const query = eventResolutionGraphProposalId ?? "*";
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry finish once only after the named event-resolution draft and its exact source-annotation dependencies have been read and concretely corrected.",
+      steps: [
+        `Call find_event_resolutions with query=${JSON.stringify(query)} and status=pending in this active source. Copy results[].ref into read_event_resolution.ref; find_compiler_artifacts does not index event-resolution records.`,
+        "Keep the returned proposalId envelope distinct from resolutionId and eventMentionIds in the payload. Read the pending resolution before editing. Preserve resolution_id when correcting the same logical decision; use a new envelope proposal_id for a staged successor, or retain the exact failed proposal_id when a durable obligation permits its one corrected input.",
+        "For a missing or uncertain event mention, call find_source_annotations with a distinctive fragment of the named eventMentionId and annotation_type=event-mention. Copy results[].annotationId into find_event_resolution_candidates.event_mention_id; never copy the annotation proposalId or ref.",
+        "Set supersedes_resolution_ids only to exact current resolutionId values returned by find_event_resolutions with status=current. If the diagnostic reports current resolutions as (none), use an empty array; rejected history and pending envelope IDs are not current resolutions.",
+        "Include the selected canonical event and relation in candidates exactly as authorized by find_event_resolution_candidates. After the corrected successor stages successfully, withdraw only the defective pending predecessor envelope and preserve every unrelated draft.",
+        `Retry ${toolName} once after concrete proposal progress. If discovery is ambiguous, the corrected proposal fails, or the same full diagnostic repeats, stop for host review instead of guessing or looping.`,
+      ],
+      suggestedCall: {
+        tool: "find_event_resolutions",
+        arguments: { query, status: "pending", max_results: 20 },
+      },
+    };
+  }
+
   if (toolName === "finish_compiler_batch" && /(?:graph|trace) is incomplete|deterministic canonical commit preview(?: is incomplete)?:/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -891,7 +984,7 @@ export function buildNwhToolRecoveryAdvice(
       retryCondition: "Retry once only after correcting every reported graph/trace section through successful propose, withdraw, or replace calls.",
       steps: [
         "Treat the complete finish diagnostic as one validation report; preserve valid drafts and correct each listed logical dependency or trace.",
-        "These finish diagnostics refer to already-staged drafts. Discover their current pending refs with find_compiler_artifacts, copy the returned ref into read_compiler_artifact, and inspect the exact draft before editing. A successful draft is immutable: stage a specifically corrected replacement under a fresh envelope ID, preserve the stable artifact ID, then withdraw only its superseded successful predecessor. Never overwrite a successful ID or revive a withdrawn ID; use the latest active successor on subsequent repairs.",
+        "These finish diagnostics refer to already-staged drafts. Use the draft's owning store: find_source_annotations/read_source_annotation for observations, find_identity_resolutions/read_identity_resolution for entity resolutions, find_event_resolutions/read_event_resolution for event resolutions, and find_compiler_artifacts/read_compiler_artifact only for world proposals. Copy the exact finder ref into its paired reader and inspect the draft before editing. A successful draft is immutable: stage a specifically corrected replacement under a fresh envelope ID, preserve the stable logical ID, then withdraw only its superseded successful predecessor. Never overwrite a successful ID or revive a withdrawn ID; use the latest active successor on subsequent repairs.",
         "Repair only named defects. Restore SCENE_EVENT_BACKLINK_REQUIRED scene IDs without dropping any existing fields. For INACTIONABLE_CHARACTER_ENTRY, establish the named actor's source-backed pre-event location, plan or momentum; do not invent state or remove an entry just to pass. Leave unrelated active drafts unchanged.",
         "For entity identity, call find_entity_resolution_candidates and follow its resolutionMode: resolved reuses canonical/checkpointed identity, while new-entity requires a same-finish entity proposal.",
         "Use source-scoped finder results only when an exact existing ID is genuinely missing; do not re-propose a checkpointed pending identity or guess a replacement ID.",
@@ -919,6 +1012,30 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const contextMismatch = /exact evidence quote occurs (\d+) time\(s\) in segment ([a-z0-9][a-z0-9._-]*), but none match the supplied prefix\/suffix context\./iu.exec(errorText);
+  if (COMPILER_PROPOSAL_TOOLS.has(toolName) && contextMismatch) {
+    const occurrenceCount = Number.parseInt(contextMismatch[1]!, 10);
+    const segmentId = contextMismatch[2]!;
+    const sourceRead = exactSourceRecovery(segmentId, scope);
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry once only after repairing the named selector's optional disambiguation context from the complete active-source segment.",
+      steps: [
+        ...sourceRead.steps,
+        "The selector's exact field already exists in the named segment. Keep exact unchanged; do not replace a valid quote to compensate for invented or distant context.",
+        occurrenceCount === 1
+          ? "This exact wording is unique in the complete segment. Remove prefix, suffix, and occurrence from the named selector; no disambiguation is needed."
+          : `This exact wording occurs ${occurrenceCount} times. Copy only the immediate verbatim prefix/suffix around the intended occurrence, or use its one-based occurrence in the complete segment.`,
+        "Correct every selector path listed by the diagnostic while retaining the same tool, proposal_id, logical annotation ID, participants, and source scope.",
+        `Retry ${toolName} once after that concrete context correction. If the corrected input fails, stop for host review; never rotate IDs or make a third attempt.`,
+      ],
+      ...(sourceRead.suggestedCall ? { suggestedCall: sourceRead.suggestedCall } : {}),
+    };
+  }
+
   const exactQuoteSegment = /exact evidence quote was not found in segment ([a-z0-9][a-z0-9._-]*?)(?: with the supplied context)?\./iu.exec(errorText)?.[1];
   if (COMPILER_PROPOSAL_TOOLS.has(toolName) && exactQuoteSegment) {
     const sourceRead = exactSourceRecovery(exactQuoteSegment, scope);
@@ -937,6 +1054,26 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const payloadPrefixedPointer = /target_path '(\/payload(?:\/[^']*)?)' does not exist in the proposal payload/u.exec(errorText)?.[1];
+  if (COMPILER_PROPOSAL_TOOLS.has(toolName) && payloadPrefixedPointer) {
+    const correctedPointer = payloadPrefixedPointer.slice("/payload".length) || "";
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "One corrected retry under the same proposal_id only when its retry budget is not already exhausted and the proposal payload is otherwise supported.",
+      steps: [
+        `target_path is relative to the payload object itself. Use '${correctedPointer}' instead of '${payloadPrefixedPointer}'; do not move evidence_selectors inside payload.`,
+        "Correct every payload-prefixed selector together. This is a JSON Pointer shape error, not a missing compiler artifact or permission to change a logical ID, so do not call artifact discovery merely to repair the pointer.",
+        toolName === "propose_event_execution"
+          ? "An event-execution still requires a schema-bound action, non-empty processRecoveries, or a complete entryCheckpoint. IDs alone are not a binding; if none is independently supported, do not retry the proposal and finish while preserving the canonical occurrence."
+          : "Preserve the payload, source scope, proposal_id, relation and strength while correcting only the pointer prefix.",
+        "If this call was already the identity's corrected attempt, stop for durable host review; never submit a third input or rotate the proposal ID.",
+      ],
+    };
+  }
+
   if (toolName === "propose_event_execution" && /validation|schema-bound|compiled mechanism|evidence_segment_ids|additional propert/u.test(lower)) {
     if (scope && (!scope.activeToolNames.includes("find_compiler_artifacts") || !scope.activeToolNames.includes("read_compiler_artifact"))) {
       return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
@@ -945,20 +1082,20 @@ export function buildNwhToolRecoveryAdvice(
     }
     return {
       version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
-      retryCondition: "One corrected retry only after fixing the envelope and using a source-supported compiled mechanism or complete entry checkpoint.",
+      retryCondition: "One corrected retry only when same-source discovery supports a schema-bound mechanism or an independently complete entry/process binding; otherwise do not retry this proposal.",
       steps: [
         "Place proposal_id, payload, evidence_segment_ids and evidence_selectors beside each other in the outer argument object; never nest evidence_segment_ids/evidence_selectors inside payload.",
         "An action binding requires action.lane=schema-bound; never copy an event's ad-hoc action or relabel it without a real mechanism.",
         "Call find_compiler_artifacts with kind=action-schema in the same active source. Copy its returned ref into read_compiler_artifact, then copy the read payload.id into action.schemaId and use its exact role IDs. A retrieval ref is not a schema ID.",
-        "If no supported schema exists, propose one only when source evidence satisfies the induction contract; otherwise preserve the occurrence without an action binding. Use entryCheckpoint only for a separately supported complete embodied entry, never to bypass a missing mechanism.",
-        "Retry once after concrete correction. If the same diagnostic repeats, stop and report it; never guess schema IDs or submit unchanged proposals.",
+        "If no supported schema exists, propose one only when source evidence satisfies the induction contract; otherwise preserve the canonical ad-hoc occurrence and do not call propose_event_execution again. Use entryCheckpoint or processRecoveries only when separately complete and supported, never to bypass a missing mechanism.",
+        "Retry once after concrete correction only when such a binding exists. Otherwise stop for an explicit host disposition of this failed proposal; a no-write diagnostic alone cannot settle its obligation or certify executable closure. If a corrected call fails, stop and report it; never guess schema IDs or submit unchanged proposals.",
       ],
       suggestedCall: { tool: "find_compiler_artifacts", arguments: { kind: "action-schema", query: "*", max_results: 20 } },
     };
   }
 
   if (lookupMiss(lower)) {
-    const advice = lookupAdvice(toolName, lower);
+    const advice = lookupAdvice(toolName, lower, errorText);
     if (advice) return advice;
   }
 
@@ -1017,7 +1154,17 @@ export function formatNwhToolError(toolName: string, error: unknown, scope?: Nwh
   const message = errorMessage(error);
   if (hasNwhToolRecovery(message)) return message;
   const advice = buildNwhToolRecoveryAdvice(toolName, message, scope);
-  return `${message}\n\n${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2)}\n${NWH_TOOL_RECOVERY_END_MARKER}`;
+  if (error instanceof ToolDiagnosticError) {
+    advice.context = error.diagnostic;
+    if (advice.retryable) advice.steps = [...error.diagnostic.steps, ...advice.steps];
+    if (error.diagnostic.retry?.correctedRetryAvailable === false) {
+      advice.retryable = false;
+      advice.category = "host-repair-required";
+      advice.retryCondition = "The durable proposal retry allowance is exhausted or blocked; host review is required.";
+      advice.steps = ["Stop model submissions for this obligation. Preserve all drafts, source scope, identities and failure history; do not change IDs or restart to reset the allowance.", "Give the host the complete diagnostic and scoped proposal history for source repair and verification."];
+    }
+  }
+  return `${message}\n\n${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2).replace(/</g, "\\u003c")}\n${NWH_TOOL_RECOVERY_END_MARKER}`;
 }
 
 export function actionableToolError(toolName: string, error: unknown, scope?: NwhToolRecoveryScope): Error {
@@ -1046,14 +1193,14 @@ export function recoverNwhToolResult(event: ToolResultEvent, scope?: NwhToolReco
   const blocked = toolResultWasBlocked(event.details);
   if (!event.isError && !blocked) return undefined;
   const message = toolResultErrorText(event);
-  const advice = buildNwhToolRecoveryAdvice(event.toolName, message, scope);
+  const advice = readNwhToolRecovery(event, event.toolName) ?? buildNwhToolRecoveryAdvice(event.toolName, message, scope);
   const content = hasNwhToolRecovery(message)
     ? event.content
     : [
         ...event.content,
         {
           type: "text" as const,
-          text: `${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2)}\n${NWH_TOOL_RECOVERY_END_MARKER}`,
+          text: `${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2).replace(/</g, "\\u003c")}\n${NWH_TOOL_RECOVERY_END_MARKER}`,
         },
       ];
   const existingDetails = event.details && typeof event.details === "object" && !Array.isArray(event.details)

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
+import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
@@ -19,6 +20,67 @@ function resultText(result: unknown): string {
 }
 
 describe("compiler artifact retrieval", () => {
+  it("discovers rejected same-source envelopes only through explicit history status", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-artifact-rejected-history-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero enters the Hall.\n");
+    const service = new CompilerProposalService(root);
+    await service.submit("entity", {
+      proposalId: "retired-hero-envelope",
+      payload: {
+        id: "hero",
+        kind: "character",
+        canonicalName: "Hero",
+        aliases: [],
+        evidence: fixture.evidence("Hero"),
+      },
+      generatedBy: { worker: "test", compilerBatchId: "batch-history" },
+    });
+    await service.withdraw("retired-hero-envelope", "The retained draft used the wrong lifecycle slot.");
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([], "batch-history", fixture.source.id);
+    const find = toolset.tools.find((tool) => tool.name === "find_compiler_artifacts")!;
+    const read = toolset.tools.find((tool) => tool.name === "read_compiler_artifact")!;
+
+    const active = JSON.parse(resultText(await find.execute(
+      "active-only",
+      { query: "retired-hero-envelope", max_results: 20 } as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    ))) as { results: unknown[] };
+    expect(active.results).toEqual([]);
+
+    const history = JSON.parse(resultText(await find.execute(
+      "rejected-history",
+      { query: "retired-hero-envelope", status: "rejected", max_results: 20 } as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    ))) as { results: Array<{ ref: string; readArguments: { ref: string }; status: string; rejection: { errors: Array<{ code: string }> } }> };
+    expect(history.results).toEqual([expect.objectContaining({
+      ref: "rejected:retired-hero-envelope",
+      readArguments: { ref: "rejected:retired-hero-envelope" },
+      status: "rejected",
+      rejection: expect.objectContaining({ errors: [expect.objectContaining({ code: "WITHDRAWN_COMPILER_PROPOSAL" })] }),
+    })]);
+
+    const retained = JSON.parse(resultText(await read.execute(
+      "read-rejected-history",
+      { ref: history.results[0]!.readArguments.ref } as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    ))) as { chunk: string };
+    expect(JSON.parse(retained.chunk)).toMatchObject({
+      ref: "rejected:retired-hero-envelope",
+      status: "rejected",
+      logicalId: "hero",
+      rejection: { errors: [{ code: "WITHDRAWN_COMPILER_PROPOSAL" }] },
+      payload: { id: "hero" },
+    });
+  });
+
   it("normalizes the event alias and rejects unsupported kinds instead of returning a silent miss", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-artifact-kind-"));
     roots.push(root);

@@ -36,7 +36,7 @@ export async function reviewAccountingObligation(root: string, options: Accounti
   return (await buildAccountingCoverageProof(root, options)).proof;
 }
 
-async function buildAccountingCoverageProof(root: string, options: AccountingReviewOptions): Promise<{ proof: AccountingCoverageProof; recoveredPages: AccountingPage[] }> {
+export async function buildAccountingCoverageProof(root: string, options: AccountingReviewOptions): Promise<{ proof: AccountingCoverageProof; recoveredPages: AccountingPage[] }> {
   const { sourceId, batchId, proposalId } = options;
   [sourceId, batchId, proposalId].forEach((id) => idSchema.parse(id));
   if (!options.reason.trim() || !options.auditRef.trim()) throw new Error("Host accounting review requires a reason and audit reference.");
@@ -173,7 +173,7 @@ export async function readAccountingBatchSegments(root: string, sourceId: string
   throw new Error("No current segment group matches the exact batch scope hash; host repair is required.");
 }
 
-function rangeCovered(range: { startByte: number; endByte: number }, segments: readonly SourceSegment[]) {
+export function rangeCovered(range: { startByte: number; endByte: number }, segments: readonly SourceSegment[]) {
   let cursor = range.startByte;
   for (const segment of [...segments].sort((a, b) => a.startByte - b.startByte)) {
     if (segment.endByte <= cursor) continue;
@@ -213,3 +213,5 @@ async function readAuditedPage(root: string, runId: string, sourceId: string, ba
   }
   throw new Error("No verified same-session discovery -> exact failed input -> failed result audit chain for this page token.");
 }
+
+export { reviewAccountingRefinementObligation } from "./accounting-refinement-review.js";

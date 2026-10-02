@@ -234,7 +234,8 @@ export class PreparationApplicationService {
       await withWorkspaceOperationLock(this.root, "compiler", async () => {
         progress.phase("reviewing-major-roles");
         await reviewNovelRoles({ root: this.root, sourceId, configPath: this.options.configPath ?? path.join(this.root, "novel-harness.yaml"), allowMissingConfig: true,
-          ...(input.model ?? this.options.model ? { model: input.model ?? this.options.model } : {}), signal: context.signal, ...progress.callbacks() }, this.dependencies.compileOpening);
+          ...(input.model ?? this.options.model ? { model: input.model ?? this.options.model } : {}), signal: context.signal, acquireLock: false,
+          ...progress.callbacks() }, this.dependencies.compileOpening);
         progress.phase("evaluating-world-closure");
         const { assessment } = await new PreparedNovelCache(this.root).inspectCandidate(source);
         progress.log(`Major entry probes: ${assessment.playability?.readyTotal ?? 0}/${assessment.playability?.majorTotal ?? 0}; full novel certified: ${assessment.fullNovelReady}`);

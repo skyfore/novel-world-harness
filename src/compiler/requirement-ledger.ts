@@ -1,3 +1,4 @@
+import { roleQuestionSchema, roleQuestionDispositionSchema, type RoleQuestion, type RoleQuestionDisposition, roleQuestions, roleEvidenceNeedSchema, type RoleEvidenceNeed } from "./role-review-verification.js";
 import { requirementResultSchema, type RequirementResult } from "./requirement-result.js";
 export { requirementResultSchema, type RequirementResult } from "./requirement-result.js";
 import { roleReviewRevisionSchema, assertRoleReviewRevisionEvidence, type RoleReviewRevision } from "./role-review-revision.js";
@@ -28,6 +29,10 @@ export const requirementSetSchema = z.object({
 });
 export type RequirementSet = z.infer<typeof requirementSetSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("role-review-evidence-need"), planHash: hash, workId: text, need: roleEvidenceNeedSchema }).strict(),
+  z.object({ kind: z.literal("role-review-evidence-resolution"), planHash: hash, workId: text, needRef: hash, resolutionRef: hash }).strict(),
+  z.object({ kind: z.literal("role-review-question"), question: roleQuestionSchema }).strict(),
+  z.object({ kind: z.literal("role-review-question-disposition"), planHash: hash, auditRef: hash, disposition: roleQuestionDispositionSchema }).strict(),
   z.object({ kind: z.literal("core-role-review-snapshot"), roster: roleRosterSchema }).strict(),
   z.object({ kind: z.literal("core-role-review-revision"), revision: roleReviewRevisionSchema }).strict(),
   z.object({ kind: z.literal("core-role-invalidation"), evaluationRef: hash, nextSubjectSnapshotHash: hash.nullable(), reason: text }).strict(),
@@ -339,6 +344,39 @@ export class RequirementLedger {
       await this.publish({ kind: "core-role-definition", definition });
     }
   }
+  async recordRoleEvidenceNeed(planHash: string, workId: string, need: RoleEvidenceNeed) {
+    const payload = {kind: "role-review-evidence-need" as const, planHash, workId, need};
+    const prior = (await this.history()).find(r => r.payload.kind === "role-review-evidence-need" && r.payload.planHash === planHash && r.payload.workId === workId);
+    if (prior && contentHash(prior.payload) !== contentHash(payload)) throw new Error("ROLE_REVIEW_WORK_HOST_REQUIRED: repeated evidence supplement request. Stop; preserve the original need and budget, do not rotate work identities.");
+    if (!prior) await this.publish(payload);
+    return contentHash(payload);
+  }
+  async resolveRoleEvidenceNeed(planHash: string, workId: string, resolutionRef: string) {
+    const history = await this.history();
+    const need = history.find(r => r.payload.kind === "role-review-evidence-need" && r.payload.planHash === planHash && r.payload.workId === workId);
+    if (!need) return;
+    const payload = {kind: "role-review-evidence-resolution" as const, planHash, workId, needRef: contentHash(need.payload), resolutionRef};
+    if (!history.some(r => contentHash(r.payload) === contentHash(payload))) await this.publish(payload);
+  }
+  async assertRoleEvidenceNeedsResolved(planHash: string) {
+    const history = await this.history();
+    for (const r of history) if (r.payload.kind === "role-review-evidence-need" && r.payload.planHash === planHash
+      && !history.some(s => s.payload.kind === "role-review-evidence-resolution" && s.payload.needRef === contentHash(r.payload))) throw new Error("ROLE_REVIEW_WORK_HOST_REQUIRED: unresolved evidence need. Resume its original work; never finish or reset the budget.");
+  }
+  async registerRoleQuestions(questions: RoleQuestion[]): Promise<void> {
+    for (const question of questions) {
+      const existing = (await this.history()).find(r => r.payload.kind === "role-review-question" && r.payload.question.questionId === question.questionId);
+      if (existing) {
+        if (existing.payload.kind !== "role-review-question" || contentHash(existing.payload.question) !== contentHash(question)) throw new Error("Role question identity collision; stop for host review");
+      } else await this.publish({ kind: "role-review-question", question });
+    }
+  }
+  async recordRoleQuestionDisposition(planHash: string, auditRef: string, disposition: RoleQuestionDisposition): Promise<void> {
+    const history = await this.history();
+    if (!history.some(r => r.payload.kind === "role-review-question" && r.payload.question.planHash === planHash && r.payload.question.questionId === disposition.questionId)) throw new Error("Unknown role question; preserve scope and stop for host review");
+    const payload = { kind: "role-review-question-disposition" as const, planHash, auditRef, disposition };
+    if (!history.some(r => contentHash(r.payload) === contentHash(payload))) await this.publish(payload);
+  }
   private async publish(payload: z.infer<typeof payloadSchema>): Promise<void> {
     const history = await this.history(), last = history.at(-1);
     if (last && contentHash(last.payload) === contentHash(payload)) return;
@@ -443,7 +481,19 @@ export const requirementJournalSchema = z.array(recordSchema).superRefine((recor
         if (retainedReviews.has(review.runId) && retainedReviews.get(review.runId) !== contentHash(review)) throw new Error("Retained role review run was rewritten");
         retainedReviews.set(review.runId, contentHash(review));
       }
-      if (record.payload.kind === "core-role-review-snapshot") {
+      if (record.payload.kind === "role-review-evidence-need") {
+        const p = record.payload;
+        if (records.slice(0, record.sequence).some(r => r.payload.kind === p.kind && r.payload.planHash === p.planHash && r.payload.workId === p.workId)) throw new Error("Repeated evidence need; do not reset work allowance");
+      } else if (record.payload.kind === "role-review-evidence-resolution") {
+        const p = record.payload;
+        if (!records.slice(0, record.sequence).some(r => r.payload.kind === "role-review-evidence-need" && r.payload.planHash === p.planHash && r.payload.workId === p.workId && contentHash(r.payload) === p.needRef)) throw new Error("Evidence resolution lacks its retained need");
+      } else if (record.payload.kind === "role-review-question") {
+        const q = record.payload.question;
+        if (records.slice(0, record.sequence).some(r => r.payload.kind === "role-review-question" && r.payload.question.questionId === q.questionId)) throw new Error("Repeated role review question");
+      } else if (record.payload.kind === "role-review-question-disposition") {
+        const p = record.payload;
+        if (!records.slice(0, record.sequence).some(r => r.payload.kind === "role-review-question" && r.payload.question.planHash === p.planHash && r.payload.question.questionId === p.disposition.questionId)) throw new Error("Role question disposition has no retained question");
+      } else if (record.payload.kind === "core-role-review-snapshot") {
         const roster = record.payload.roster, activeRevision = reviewRevisions.at(-1), key = roster.reviewRevisionId ?? "";
         const prior = reviewSnapshots.get(key);
         if (roster.sourceId !== sourceId || !roster.reviews.length || roster.reviewRevisionId !== activeRevision?.id
@@ -521,6 +571,19 @@ export function requirementJournalBindingIssues(snapshot: {
   }
   if (requireHistory && expectedRevision && (snapshot.roleRoster?.reviewRevisionId !== expectedRevision.id || snapshot.coreRoleRequirementDefinitions?.at(-1)?.roster.reviewRevisionId !== expectedRevision.id)) issues.push("CORE_ROLE_REVIEW_REVISION_PENDING");
   if (history.some(record => record.sourceId !== sourceId)) issues.push("REQUIREMENT_JOURNAL_SOURCE_MISMATCH");
+  for (const review of snapshot.roleRoster?.reviews ?? []) {
+    const proof = review.workEvidence;
+    if (proof?.version !== 2) continue;
+    const planHash = contentHash(proof.plan);
+    for (const r of history) if (r.payload.kind === "role-review-evidence-need" && r.payload.planHash === planHash
+      && !history.some(s => s.payload.kind === "role-review-evidence-resolution" && s.payload.needRef === contentHash(r.payload))) issues.push("ROLE_REVIEW_EVIDENCE_NEED_UNRESOLVED");
+    for (const [page, note] of proof.sourceWork.entries()) for (const question of roleQuestions(planHash, page, note)) {
+      const audit = proof.auditWork[page], disposition = audit?.questionDispositions?.find(d => d.questionId === question.questionId);
+      if (!history.some(r => r.payload.kind === "role-review-question" && contentHash(r.payload.question) === contentHash(question))
+        || !history.some(r => r.payload.kind === "role-review-question-disposition" && r.payload.planHash === planHash && r.payload.auditRef === contentHash(audit)
+          && contentHash(r.payload.disposition) === contentHash(disposition ?? null))) issues.push("ROLE_REVIEW_QUESTION_HISTORY_MISSING");
+    }
+  }
   const scenes = history.flatMap(record => record.payload.kind === "definition" ? [record.payload.definition] : []);
   const roles = history.flatMap(record => record.payload.kind === "core-role-definition" ? [record.payload.definition] : []);
   if (contentHash(scenes) !== contentHash(snapshot.requirementDefinitions ?? []) || contentHash(roles) !== contentHash(snapshot.coreRoleRequirementDefinitions ?? [])) issues.push("REQUIREMENT_JOURNAL_DEFINITIONS_MISMATCH");

@@ -10,14 +10,21 @@ import { worldStorageRoot } from "../world/paths.js";
 import { upstreamRepairPlanSchema, upstreamRepairKindSchema, upstreamRepairReadableRefSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import { upstreamRepairHostError, verifyUpstreamRepairPlan } from "./upstream-repair-preflight.js";
 import { upstreamRepairFinishIntentSchema, type UpstreamRepairFinishIntent } from "./upstream-repair-finish-intent.js";
+import {
+  finishRevisionSemanticInputHash,
+  upstreamRepairFinishRevisionIntentSchema,
+  type UpstreamRepairFinishRevisionIntent,
+} from "./upstream-repair-finish-revision-intent.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
+const hostCorrectionSchema = z.object({ failedAttemptRef: hash, inputHash: hash, auditRef: z.string().trim().min(1), reason: z.string().trim().min(1) }).strict();
 const stagedDependencySchema = z.object({ attemptRef: hash, proposalHash: hash }).strict();
 export type UpstreamStagedDependency = z.infer<typeof stagedDependencySchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("planned"), plan: upstreamRepairPlanSchema, predecessorPlanHash: hash.nullable() }).strict(),
   z.object({ kind: z.literal("model-session-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, promptHash: hash }).strict(),
   z.object({ kind: z.literal("model-session-ended"), planHash: hash, sessionRef: hash, attemptRef: hash.nullable(), diagnostic: z.string().trim().min(1).optional() }).strict(),
+  hostCorrectionSchema.extend({ kind: z.literal("host-correction-authorized"), planHash: hash }).strict(),
   z.object({ kind: z.literal("authorized"), planHash: hash }).strict(),
   z.object({ kind: z.literal("finish-review-recorded"), planHash: hash, input: compilerFinishInputSchema }).strict(),
   z.object({ kind: z.literal("evaluated"), planHash: hash, evaluation: upstreamRepairEvaluationSchema }).strict(),
@@ -25,6 +32,8 @@ const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("converged"), planHash: hash, receiptFingerprint: hash, activeRevisions: z.array(upstreamRepairReadableRefSchema.extend({ revisionHash: hash }).strict()) }).strict(),
   z.object({ kind: z.literal("finished"), planHash: hash, receiptFingerprint: hash }).strict(),
   z.object({ kind: z.literal("finish-frozen"), planHash: hash, intent: upstreamRepairFinishIntentSchema }).strict(),
+  z.object({ kind: z.literal("finish-revision-authorized"), planHash: hash, revision: upstreamRepairFinishRevisionIntentSchema }).strict(),
+  z.object({ kind: z.literal("finish-revision-completed"), planHash: hash, revisionHash: hash, intent: upstreamRepairFinishIntentSchema }).strict(),
   z.object({ kind: z.literal("attempt-started"), planHash: hash, artifactKind: upstreamRepairKindSchema, artifactId: idSchema, proposalId: idSchema, inputHash: hash, modelSessionRef: hash.optional(), toolInput: z.unknown().optional() }).strict(),
   z.object({ kind: z.literal("attempt-staged"), planHash: hash, attemptRef: hash, proposalHash: hash }).strict(),
   z.object({ kind: z.literal("attempt-validated"), planHash: hash, attemptRef: hash, payloadHash: hash, dependencies: z.array(stagedDependencySchema).max(256).optional() }).strict(),
@@ -35,12 +44,44 @@ const recordSchema = z.object({ version: z.literal(1), sourceId: idSchema, seque
 type Record = z.infer<typeof recordSchema>;
 export type UpstreamRepairRecord = Record;
 type Started = Extract<Record["payload"], { kind: "attempt-started" }>;
-type PlanState = { plan: UpstreamRepairPlan; state: "planned" | "authorized" | "staging" | "finish-frozen" | "finished" | "converged" | "evaluated" | "needs-host-review"; evaluation?: { ref: string; result: UpstreamRepairEvaluation }; finishReview?: z.infer<typeof compilerFinishInputSchema>; finishIntent?: UpstreamRepairFinishIntent; finishedReceipt?: string };
+type AttemptState = { started: Started; failed: boolean; staged: boolean; validatedHash?: string; dependencies?: UpstreamStagedDependency[] };
+type PlanState = {
+  hostCorrections?: Array<z.infer<typeof hostCorrectionSchema>>;
+  pendingHostCorrection?: z.infer<typeof hostCorrectionSchema>;
+  plan: UpstreamRepairPlan;
+  state: "planned" | "authorized" | "staging" | "finish-frozen" | "finish-revising" | "finished" | "converged" | "evaluated" | "needs-host-review";
+  evaluation?: { ref: string; result: UpstreamRepairEvaluation };
+  finishReview?: z.infer<typeof compilerFinishInputSchema>;
+  originalFinishIntent?: UpstreamRepairFinishIntent;
+  finishIntent?: UpstreamRepairFinishIntent;
+  finishRevision?: { ref: string; intent: UpstreamRepairFinishRevisionIntent; completed: boolean };
+  finishedReceipt?: string;
+};
 type ModelSession = { started: Extract<Record["payload"], { kind: "model-session-started" }>; closed: boolean; chargedFailure: boolean };
+
+function proposalBySlot(intent: UpstreamRepairFinishIntent) {
+  return new Map(intent.proposals.map(proposal => [`${proposal.artifactKind}:${proposal.artifactId}`, proposal]));
+}
+
+export function upstreamRepairFinishGraphHash(plan: UpstreamRepairPlan, intent: UpstreamRepairFinishIntent, attempts: ReadonlyMap<string, AttemptState>): string {
+  return contentHash({
+    planHash: plan.planHash,
+    sourceScope: plan.sourceScope,
+    requirementSetHash: plan.requirementSetHash,
+    baselineRefs: plan.baselineRefs,
+    dependencyEdges: plan.dependencyEdges,
+    intentHash: intent.intentHash,
+    baselines: intent.baselines,
+    proposals: intent.proposals.map(proposal => ({
+      ...proposal,
+      dependencies: attempts.get(proposal.attemptRef)?.dependencies ?? [],
+    })).sort((left, right) => `${left.artifactKind}:${left.artifactId}`.localeCompare(`${right.artifactKind}:${right.artifactId}`)),
+  });
+}
 function project(records: Record[]) {
   const plans = new Map<string, PlanState>();
   const sessions = new Map<string, ModelSession>();
-  const attempts = new Map<string, { started: Started; failed: boolean; staged: boolean; validatedHash?: string; dependencies?: UpstreamStagedDependency[] }>();
+  const attempts = new Map<string, AttemptState>();
   for (const [index, record] of records.entries()) {
     const { hash: ownHash, ...identity } = record;
     if (contentHash(identity) !== ownHash || record.sequence !== index || record.predecessorHash !== (records[index - 1]?.hash ?? null)
@@ -69,6 +110,17 @@ function project(records: Record[]) {
       session.closed = true;
       session.chargedFailure = !event.attemptRef && ![...attempts.values()].some(item => item.started.modelSessionRef === event.sessionRef && item.failed);
       if (!event.attemptRef) current.state = "needs-host-review";
+    } else if (event.kind === "host-correction-authorized") {
+      const failed = attempts.get(event.failedAttemptRef);
+      if (current.state !== "needs-host-review" || current.finishIntent || !failed?.failed || failed.started.planHash !== event.planHash
+        || [...sessions.values()].some(item => !item.closed)
+        || [...attempts.values()].some(item => !item.failed && !item.staged)
+        || [...attempts.values()].some(item => item.started.inputHash === event.inputHash)
+        || current.hostCorrections?.some(item => item.failedAttemptRef === event.failedAttemptRef)
+        || (current.hostCorrections?.length ?? 0) >= 5) throw upstreamRepairHostError("Host correction requires an original settled failed attempt, a new exact input, audit and unused bounded authority");
+      current.hostCorrections = [...(current.hostCorrections ?? []), event];
+      current.pendingHostCorrection = event;
+      current.state = "staging";
     } else if (event.kind === "authorized") {
       if (current.state !== "planned") throw upstreamRepairHostError("Repair authorization was consumed or stopped");
       current.state = "authorized";
@@ -91,7 +143,80 @@ function project(records: Record[]) {
         if (!attempt?.staged || attempt.started.planHash !== plan.planHash || attempt.started.artifactKind !== proposal.artifactKind || attempt.started.artifactId !== proposal.artifactId || attempt.started.proposalId !== proposal.proposalId || attempt.validatedHash !== proposal.payloadHash || staged?.kind !== "attempt-staged" || staged.proposalHash !== proposal.proposalHash) throw upstreamRepairHostError("Finish proposal differs from its validated staged result");
       }
       if ([...attempts.values()].some(attempt => attempt.started.planHash === plan.planHash && !attempt.failed && !attempt.staged)) throw upstreamRepairHostError("Finish has an unresolved reserved attempt");
-      current.state = "finish-frozen"; current.finishIntent = intent;
+      current.state = "finish-frozen"; current.originalFinishIntent = intent; current.finishIntent = intent;
+    } else if (event.kind === "finish-revision-authorized") {
+      const { revision } = event, original = current.originalFinishIntent ?? current.finishIntent;
+      const failedFinish = records.find(item => item.hash === revision.failedFinishRef)?.payload;
+      if (current.state !== "needs-host-review" || !original || current.finishRevision || current.finishedReceipt
+        || failedFinish?.kind !== "needs-host-review" || failedFinish.planHash !== event.planHash
+        || revision.failedFinishRef !== record.predecessorHash || revision.sourceId !== record.sourceId
+        || revision.planHash !== current.plan.planHash || revision.originalIntentHash !== original.intentHash
+        || revision.originalGraphHash !== upstreamRepairFinishGraphHash(current.plan, original, attempts)
+        || [...sessions.values()].some(item => !item.closed)
+        || [...attempts.values()].some(item => item.started.planHash === event.planHash && !item.failed && !item.staged)) {
+        throw upstreamRepairHostError("Finish revision requires the exact stopped pre-receipt graph, closed sessions and unused host authority");
+      }
+      const originalBySlot = proposalBySlot(original);
+      const originalProposalIds = new Set(original.proposals.map(item => item.proposalId));
+      const replacementProposalIds = new Set(revision.corrections.map(item => item.replacementProposalId));
+      const changed = new Set<string>();
+      for (const correction of revision.corrections) {
+        const key = `${correction.artifactKind}:${correction.artifactId}`;
+        const proposal = originalBySlot.get(key), attempt = attempts.get(correction.originalAttemptRef);
+        if (!proposal || proposal.attemptRef !== correction.originalAttemptRef || proposal.proposalId !== correction.originalProposalId
+          || !attempt?.staged || attempt.started.planHash !== event.planHash || attempt.started.inputHash !== correction.originalInputHash
+          || attempt.started.proposalId !== correction.originalProposalId || attempt.started.artifactKind !== correction.artifactKind
+          || attempt.started.artifactId !== correction.artifactId || attempt.started.toolInput === undefined
+          || originalProposalIds.has(correction.replacementProposalId)
+          || [...attempts.values()].some(item => item.started.proposalId === correction.replacementProposalId)) {
+          throw upstreamRepairHostError("Finish revision correction differs from the exact original staged slot or reuses a proposal identity");
+        }
+        if (finishRevisionSemanticInputHash(attempt.started.toolInput) !== finishRevisionSemanticInputHash(correction.toolInput)) changed.add(key);
+      }
+      if (!changed.size || replacementProposalIds.size !== revision.corrections.length) throw upstreamRepairHostError("Finish revision requires at least one material semantic correction and unique replacement proposal IDs");
+      const affected = new Set(changed), slots = new Set(originalBySlot.keys());
+      let expanded = true;
+      while (expanded) {
+        expanded = false;
+        for (const edge of current.plan.dependencyEdges) if (slots.has(edge.from) && affected.has(edge.to) && !affected.has(edge.from)) {
+          affected.add(edge.from); expanded = true;
+        }
+      }
+      const corrected = new Set(revision.corrections.map(item => `${item.artifactKind}:${item.artifactId}`));
+      if (affected.size !== corrected.size || [...affected].some(key => !corrected.has(key))) throw upstreamRepairHostError("Finish revision must replace exactly the materially changed slots and every changed descendant");
+      current.finishRevision = { ref: record.hash, intent: revision, completed: false };
+      current.state = "finish-revising";
+    } else if (event.kind === "finish-revision-completed") {
+      const revision = current.finishRevision, original = current.originalFinishIntent;
+      if (current.state !== "finish-revising" || !revision || revision.completed || revision.intent.revisionHash !== event.revisionHash || !original
+        || event.intent.planHash !== current.plan.planHash || event.intent.sourceId !== record.sourceId
+        || event.intent.sourceSha256 !== original.sourceSha256 || event.intent.requirementSetHash !== original.requirementSetHash
+        || event.intent.authorizationHeadHash !== revision.ref || contentHash(event.intent.input) !== contentHash(original.input)
+        || contentHash(event.intent.baselines) !== contentHash(original.baselines)
+        || [...sessions.values()].some(item => !item.closed)
+        || [...attempts.values()].some(item => item.started.planHash === event.planHash && !item.failed && !item.staged)) {
+        throw upstreamRepairHostError("Completed finish revision differs from its exact durable pre-receipt authority");
+      }
+      const corrections = new Map(revision.intent.corrections.map(item => [`${item.artifactKind}:${item.artifactId}`, item]));
+      const revisedBySlot = proposalBySlot(event.intent), originalBySlot = proposalBySlot(original);
+      if (revisedBySlot.size !== originalBySlot.size || [...originalBySlot.keys()].some(key => !revisedBySlot.has(key))) throw upstreamRepairHostError("Finish revision changed the frozen logical slot inventory");
+      for (const [key, proposal] of revisedBySlot) {
+        const correction = corrections.get(key), prior = originalBySlot.get(key)!;
+        const expectedProposalId = correction?.replacementProposalId ?? prior.proposalId;
+        const expectedAttemptRef = correction
+          ? [...attempts].findLast(([, item]) => item.started.planHash === event.planHash && item.started.proposalId === correction.replacementProposalId)?.[0]
+          : prior.attemptRef;
+        const attempt = expectedAttemptRef ? attempts.get(expectedAttemptRef) : undefined;
+        const staged = expectedAttemptRef ? records.slice(0, index).findLast(item => item.payload.kind === "attempt-staged" && item.payload.attemptRef === expectedAttemptRef)?.payload : undefined;
+        if (!attempt?.staged || proposal.proposalId !== expectedProposalId || proposal.attemptRef !== expectedAttemptRef
+          || proposal.artifactKind !== attempt.started.artifactKind || proposal.artifactId !== attempt.started.artifactId
+          || proposal.payloadHash !== attempt.validatedHash || staged?.kind !== "attempt-staged" || proposal.proposalHash !== staged.proposalHash) {
+          throw upstreamRepairHostError("Finish revision proposal inventory differs from its validated effective attempts");
+        }
+      }
+      revision.completed = true;
+      current.finishIntent = event.intent;
+      current.state = "finish-frozen";
     } else if (event.kind === "finished") {
       if (current.state !== "finish-frozen" || !current.finishIntent) throw upstreamRepairHostError("Finished repair lacks its original frozen intent");
       current.state = "finished"; current.finishedReceipt = event.receiptFingerprint;
@@ -115,11 +240,13 @@ function project(records: Record[]) {
       current.state = "converged"; current.evaluation = undefined;
     } else if (event.kind === "attempt-started") {
       if (event.toolInput !== undefined && contentHash(event.toolInput) !== event.inputHash) throw upstreamRepairHostError("Reserved tool input hash mismatch");
+      const revisingFinish = current.state === "finish-revising";
       assertStart(current, event, plans, attempts, sessions);
-      attempts.set(record.hash, { started: event, failed: false, staged: false }); current.state = "staging";
+      current.pendingHostCorrection = undefined;
+      attempts.set(record.hash, { started: event, failed: false, staged: false }); current.state = revisingFinish ? "finish-revising" : "staging";
     } else if (event.kind === "attempt-validated") {
       const attempt = attempts.get(event.attemptRef);
-      if (!attempt || attempt.failed || attempt.staged || attempt.validatedHash || attempt.started.planHash !== event.planHash || current.state !== "staging") throw upstreamRepairHostError("Validated payload does not match the reserved attempt");
+      if (!attempt || attempt.failed || attempt.staged || attempt.validatedHash || attempt.started.planHash !== event.planHash || !["staging", "finish-revising"].includes(current.state)) throw upstreamRepairHostError("Validated payload does not match the reserved attempt");
       if (new Set(event.dependencies?.map(ref => ref.attemptRef)).size !== (event.dependencies?.length ?? 0)) throw upstreamRepairHostError("Duplicate staged dependency");
       const slots = new Set([...current.plan.allowedWrites, ...current.plan.allowedCreations].map(ref => `${ref.kind}:${ref.id}`));
       const required = new Set<string>(), queue = [`${attempt.started.artifactKind}:${attempt.started.artifactId}`];
@@ -139,13 +266,14 @@ function project(records: Record[]) {
       attempt.dependencies = event.dependencies;
     } else if (event.kind === "attempt-staged") {
       const attempt = attempts.get(event.attemptRef);
-      if (!attempt || attempt.failed || attempt.staged || !attempt.validatedHash || attempt.started.planHash !== event.planHash || current.state !== "staging") throw upstreamRepairHostError("Staged result does not match the reserved attempt");
+      if (!attempt || attempt.failed || attempt.staged || !attempt.validatedHash || attempt.started.planHash !== event.planHash || !["staging", "finish-revising"].includes(current.state)) throw upstreamRepairHostError("Staged result does not match the reserved attempt");
       attempt.staged = true;
     } else if (event.kind === "attempt-failed") {
       const attempt = attempts.get(event.attemptRef);
-      if (!attempt || attempt.failed || attempt.staged || attempt.started.planHash !== event.planHash || !["staging", "needs-host-review"].includes(current.state)) throw upstreamRepairHostError("Failure does not match an active repair attempt");
+      if (!attempt || attempt.failed || attempt.staged || attempt.started.planHash !== event.planHash || !["staging", "finish-revising", "needs-host-review"].includes(current.state)) throw upstreamRepairHostError("Failure does not match an active repair attempt");
       attempt.failed = true;
-      if (current.plan.requirementIds.some(id => [...attempts.values()].filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(id)).length + [...sessions.values()].filter(item => item.chargedFailure && plans.get(item.started.planHash)!.plan.requirementIds.includes(id)).length >= 2)) current.state = "needs-host-review";
+      if (current.finishRevision?.intent.corrections.some(item => item.replacementProposalId === attempt.started.proposalId)) current.state = "needs-host-review";
+      if (current.plan.requirementIds.some(id => [...attempts.values()].filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(id)).length + [...sessions.values()].filter(item => item.chargedFailure && plans.get(item.started.planHash)!.plan.requirementIds.includes(id)).length >= 2 + (current.hostCorrections?.length ?? 0))) current.state = "needs-host-review";
     } else {
       if (current.state === "needs-host-review") throw upstreamRepairHostError("Repair stop was rewritten");
       current.state = "needs-host-review";
@@ -153,8 +281,14 @@ function project(records: Record[]) {
   }
   return { plans, attempts, sessions };
 }
-function assertStart(current: PlanState, input: Started, plans: Map<string, PlanState>, attempts: Map<string, { started: Started; failed: boolean; staged: boolean }>, sessions: Map<string, ModelSession>) {
+function assertStart(current: PlanState, input: Started, plans: Map<string, PlanState>, attempts: Map<string, AttemptState>, sessions: Map<string, ModelSession>) {
   const plan = current.plan;
+  if (current.pendingHostCorrection) {
+    const correction = current.pendingHostCorrection, failed = attempts.get(correction.failedAttemptRef)!;
+    if (input.modelSessionRef || input.toolInput === undefined || input.inputHash !== correction.inputHash
+      || input.artifactKind !== failed.started.artifactKind || input.artifactId !== failed.started.artifactId
+      || input.proposalId !== failed.started.proposalId) throw upstreamRepairHostError("Only the exact reviewed host correction may consume this authority; no model retry or changed slot");
+  }
   const activeSession = [...sessions].find(([, item]) => !item.closed && plans.get(item.started.planHash)!.plan.requirementIds.some(id => plan.requirementIds.includes(id)));
   if (activeSession && input.modelSessionRef !== activeSession[0]) throw upstreamRepairHostError("An original model session is unresolved; recover it before another invocation or host staging call");
   if (input.modelSessionRef) {
@@ -162,10 +296,20 @@ function assertStart(current: PlanState, input: Started, plans: Map<string, Plan
     if (!session || session.closed || session.started.planHash !== plan.planHash || session.started.artifactKind !== input.artifactKind || session.started.artifactId !== input.artifactId || session.started.proposalId !== input.proposalId) throw upstreamRepairHostError("Proposal escapes its original model session slot");
   }
   if (![...plan.allowedWrites, ...plan.allowedCreations].some(ref => ref.kind === input.artifactKind && ref.id === input.artifactId)) throw upstreamRepairHostError("Attempt escapes the exact allocated write slot");
+  if (current.state === "finish-revising") {
+    const correction = current.finishRevision?.intent.corrections.find(item => item.artifactKind === input.artifactKind && item.artifactId === input.artifactId);
+    if (!correction || input.modelSessionRef || input.toolInput === undefined || input.proposalId !== correction.replacementProposalId
+      || input.inputHash !== correction.inputHash || contentHash(input.toolInput) !== correction.inputHash
+      || [...attempts.values()].some(item => item.started.planHash === plan.planHash && !item.failed && !item.staged)
+      || [...attempts.values()].some(item => item.started.planHash === plan.planHash && item.started.proposalId === correction.replacementProposalId)) {
+      throw upstreamRepairHostError("Only the exact unused reviewed finish-revision slot may be staged; no model retry, changed input or rotated identity");
+    }
+    return;
+  }
   const related = [...attempts.values()].filter(item => plans.get(item.started.planHash)!.plan.requirementIds.some(id => plan.requirementIds.includes(id)));
   if (related.some(item => !item.failed && !item.staged)) throw upstreamRepairHostError("A reserved attempt is unresolved; recover that original attempt without opening a new model call");
   for (const requirementId of plan.requirementIds) {
-    if (related.filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(requirementId)).length + [...sessions.values()].filter(item => item.chargedFailure && plans.get(item.started.planHash)!.plan.requirementIds.includes(requirementId)).length >= 2) throw upstreamRepairHostError(`Persistent failure budget exhausted for ${requirementId}`);
+    if (related.filter(item => item.failed && plans.get(item.started.planHash)!.plan.requirementIds.includes(requirementId)).length + [...sessions.values()].filter(item => item.chargedFailure && plans.get(item.started.planHash)!.plan.requirementIds.includes(requirementId)).length >= 2 + (current.hostCorrections?.length ?? 0)) throw upstreamRepairHostError(`Persistent failure budget exhausted for ${requirementId}`);
   }
   if (!["authorized", "staging"].includes(current.state)) throw upstreamRepairHostError("Repair is not authorized or has stopped");
   const previous = related.findLast(item => item.started.artifactKind === input.artifactKind && item.started.artifactId === input.artifactId);
@@ -256,6 +400,26 @@ export class UpstreamRepairLedger {
     }
     await verifyUpstreamRepairPlan(this.root, plan);
     await this.append({ kind: "planned", plan, predecessorPlanHash });
+  }
+  /** Caller holds compiler lock. Exact host-authored correction, never exposed to a model. */
+  async authorizeHostCorrection(planHash: string, raw: z.infer<typeof hostCorrectionSchema>): Promise<void> {
+    const input = hostCorrectionSchema.parse(raw), state = await this.inspect();
+    const current = state.plans.find(item => item.plan.planHash === planHash);
+    if (!current) throw upstreamRepairHostError("Host correction plan is missing");
+    await verifyUpstreamRepairPlan(this.root, current.plan);
+    await this.append({ kind: "host-correction-authorized", planHash, ...input });
+  }
+  /** Caller holds the compiler lock. This freezes one pre-receipt graph revision and never stages or accepts a proposal. */
+  async authorizeFinishRevision(raw: UpstreamRepairFinishRevisionIntent): Promise<void> {
+    const revision = upstreamRepairFinishRevisionIntentSchema.parse(raw), current = (await this.inspect()).plans.find(item => item.plan.planHash === revision.planHash);
+    if (!current) throw upstreamRepairHostError("Finish revision plan is missing");
+    await verifyUpstreamRepairPlan(this.root, current.plan);
+    await this.append({ kind: "finish-revision-authorized", planHash: revision.planHash, revision });
+  }
+  /** Freeze the effective corrected graph while retaining the original failed finish intent in history. */
+  async completeFinishRevision(planHash: string, revisionHash: string, raw: UpstreamRepairFinishIntent): Promise<void> {
+    const intent = upstreamRepairFinishIntentSchema.parse(raw);
+    await this.append({ kind: "finish-revision-completed", planHash, revisionHash: hash.parse(revisionHash), intent });
   }
   async authorize(planHash: string): Promise<void> {
     const current = project(await this.history()).plans.get(planHash);

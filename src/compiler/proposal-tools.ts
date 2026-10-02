@@ -1,3 +1,4 @@
+import { ToolDiagnosticError } from "../agent/tool-diagnostic.js";
 import { acquisitionInputSchema } from "../world/acquisition.js";
 import { hydrateAcquisitionInput } from "./acquisition-input.js";
 import { perceptionObservationInputSchema, hydratePerceptionObservationInput, loadPerceptionTraceCatalog, validatePerceptionObservationProposalTrace } from "./perception-observation-trace.js";
@@ -5,6 +6,7 @@ import { utteranceExpressionInputSchema, hydrateUtteranceExpressionInput } from 
 import { validateUtteranceExpressionProposalTrace } from "./utterance-expression-trace.js";
 import { UpstreamRepairFinishValidationError } from "./upstream-repair-finish-intent.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
+import { contentHash } from "../world/canonical.js";
 import { reconciliationReviewIssues } from "./reconciliation-review.js";
 import { readKnowledgeRepairPlan, knowledgeRepairScopeIssues } from "./knowledge-repair.js";
 import { validateToolArguments } from "@earendil-works/pi-ai";
@@ -33,6 +35,7 @@ import {
   idSchema,
   type EvidenceAssertion,
   type EvidenceRef,
+  type TextAnchor,
 } from "../world/model.js";
 import {
   compilerProposalLogicalIdentity,
@@ -68,9 +71,14 @@ import {
 import { baseStructuralUnits, ensureSourceStructure } from "./structure.js";
 import {
   SourceAccountingStore,
+  isBlockingSourceAccountingStatus,
+  projectSourceAccountingProposalDecisions,
   sourceUnitReviewRange,
   sourceUnitAccountingDecisionSchema,
+  type ActiveSourceAccountingProposal,
   type SourceAccountingProposal,
+  type SourceAccountingRefinement,
+  type SourceAccountingStatus,
   type SourceUnitAccountingDecision,
 } from "./source-accounting.js";
 import {
@@ -156,8 +164,8 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "acquisition": { name: "propose_acquisition", label: "Propose acquisition", description: "Propose independently evidenced receipt, understanding and belief at an acquiring event cut. Use typed expression/perception or this actor's prior acquisition references. Remote read uses basis.textChannel with the reader’s stable channelId/processTemplateId, each with its own exact evidence selector; never put a runtime process ID in source semantics. Host freezes actor/document/template revisions, and execution requires a unique pre-event session. Host freezes exact dependency revisions; compiler knowledge is not branch experience. Never relabel reports, invent premises, merge receipt with belief, or assert world truth." },
   "utterance-expression": { name: "propose_utterance_expression", label: "Propose utterance expression", description: "Propose one source-grounded expression occurrence. Freeze exact quotation and proposition revisions, preserve ordered separate raw-byte fragments, speaker/addressees/event, and provide this expression’s own exact evidence for every semantic field. Evidence from another occurrence cannot substitute. This never asserts proposition truth." },
   "event-frame": { name: "propose_event_frame", label: "Propose event frame", description: "Submit one reusable evidence-backed event frame with typed semantic roles, kind/cardinality constraints, and temporal shape. A frame classifies occurrences; it is not itself an event or world change." },
-  "event-execution": { name: "propose_event_execution", label: "Propose event execution binding", description: "Bind an existing canonical occurrence to an action mechanism and/or a complete character entryCheckpoint. An action requires typed agency and exact effects; an entry-only binding requires bodily presence or an evidenced active remote channel and never grants action authority. Remote entry needs an autonomous profile, matching remote occurrence participation, a complete prior process seed, disclosed mechanisms and exact selectors for /actorId, /canonicalEventId, /entryCheckpoint/actorId, each remote presence mode and each historical process operation. Complete entryCheckpoint includes projectionSeed for semantic, norm, process, active rules and elapsed time; create it after its referenced templates. Never rewrite the original occurrence or copy its outcome into a pre-event entry." },
-  "action-schema": { name: "propose_action_schema", label: "Propose action schema", description: "Submit a source-induced reusable action schema only when at least two canonical events support the pattern. Declare role and parameter binding, preconditions, typed effects, and a strict effect envelope; a single occurrence must remain ad hoc, and domain modules are host-managed. Declare visibility explicitly: supportingEventIds are induction evidence, never actor experience prerequisites; knowledge visibility requires exact knownByClaimIds." },
+  "event-execution": { name: "propose_event_execution", label: "Propose event execution binding", description: "Bind an existing canonical occurrence to a schema-bound action mechanism and/or a complete character entryCheckpoint. Never submit the canonical event's ad-hoc action here; without a supported schema or an independently supported complete entry/process binding, do not call this tool for that occurrence. An action requires typed agency and exact effects; an entry-only binding requires bodily presence or an evidenced active remote channel and never grants action authority. Remote entry needs an autonomous profile, matching remote occurrence participation, a complete prior process seed, disclosed mechanisms and exact selectors for /actorId, /canonicalEventId, /entryCheckpoint/actorId, each remote presence mode and each historical process operation. Complete entryCheckpoint includes projectionSeed for semantic, norm, process, active rules and elapsed time; create it after its referenced templates. Never rewrite the original occurrence or copy its outcome into a pre-event entry." },
+  "action-schema": { name: "propose_action_schema", label: "Propose action schema", description: "Submit a source-induced reusable action schema only when at least two canonical events support the pattern. Declare role and parameter binding, preconditions, typed effects, and a strict effect envelope; a single occurrence must remain ad hoc on its canonical event and must not be passed to propose_event_execution as an action. Domain modules are host-managed. Declare visibility explicitly: supportingEventIds are induction evidence, never actor experience prerequisites; knowledge visibility requires exact knownByClaimIds." },
   "action-constraint": { name: "propose_action_constraint", label: "Propose action constraint", description: "Submit a source-induced capability or action restriction with explicit before/after clauses, exceptions, priority, visibility, and override edges. It constrains matching actions only after validation; domain constraints are host-managed." },
   "norm-template": { name: "propose_norm_template", label: "Propose norm template", description: "Submit an evidence-backed obligation, prohibition, or permission template with authority, applicability, exceptions, deadlines, reparations, visibility, and defeasible overrides. A template does not instantiate a branch norm by itself." },
   "process-template": { name: "propose_process_template", label: "Propose process template", description: "Submit an evidence-backed multi-phase process pattern with owner roles, legal transitions, cadence, outcomes, visibility, and supporting canonical events. Declare actorControls for actor progression: actionPattern, phase/outcome bounds, per-turn maximumAdvance, minimumElapsedDays, requiresBefore and requiresAfter over actor/owner-role bindings. Without controls actors can only accept a zero-progress job; onDue is host-driven. A template does not start a branch process by itself." },
@@ -386,8 +394,17 @@ function proposalToolParameters(kind: CompilerProposalKind) {
   const { $schema: _selectorDialect, ...selectorJsonSchema } = z.toJSONSchema(modelEvidenceSelectorsSchema);
   properties.evidence_selectors = {
     ...selectorJsonSchema,
-    description: "Optional field/relation-level exact quote selectors. Supply source text and a payload JSON Pointer; the host resolves trusted byte offsets and hashes. Never submit hashes or offsets.",
+    description: "Optional field/relation-level exact quote selectors. target_path is relative to the payload object itself: use /canonicalEventId, never /payload/canonicalEventId. The host resolves trusted byte offsets and hashes. Never submit hashes or offsets.",
   };
+  if (kind === "event-execution") {
+    const payload = properties.payload as Record<string, unknown>;
+    payload.anyOf = [
+      { required: ["action"] },
+      { required: ["processRecoveries"] },
+      { required: ["entryCheckpoint"] },
+    ];
+    payload.description = "An event-execution payload must contain a schema-bound action, non-empty processRecoveries, or a complete entryCheckpoint. IDs alone are not an execution binding.";
+  }
   jsonSchema.required = [...new Set([...(jsonSchema.required ?? []), "evidence_segment_ids"])];
   constrainCompilerStateFields(jsonSchema);
   if (kind === "initial-world") {
@@ -443,6 +460,31 @@ function evidencePointerTargetsEvidence(pointer: string): boolean {
   return pointer.slice(1).split("/")
     .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"))
     .some((token) => token === "evidence" || token === "counterEvidence" || token === "evidenceAssertions");
+}
+
+function proposalInputPreflightIssues(kind: CompilerProposalKind, input: ProposalToolInput): string[] {
+  const issues: string[] = [];
+  const payload = input?.payload && typeof input.payload === "object" && !Array.isArray(input.payload)
+    ? input.payload as Record<string, unknown>
+    : undefined;
+  if (kind === "event-execution" && payload
+    && !payload.action && !payload.entryCheckpoint
+    && (!Array.isArray(payload.processRecoveries) || payload.processRecoveries.length === 0)) {
+    issues.push("payload: an event-execution binding must supply a schema-bound action, non-empty processRecoveries, or a complete entryCheckpoint; IDs alone are not executable content");
+  }
+  if (kind !== "utterance-expression" && payload && Array.isArray(input?.evidence_selectors)) {
+    for (let index = 0; index < input.evidence_selectors.length; index += 1) {
+      const selector = input.evidence_selectors[index];
+      if (!selector || typeof selector !== "object" || Array.isArray(selector)) continue;
+      const targetPath = (selector as Record<string, unknown>).target_path;
+      if (typeof targetPath !== "string" || !targetPath.startsWith("/payload/")) continue;
+      const payloadRelativePath = targetPath.slice("/payload".length);
+      if (!jsonPointerExists(payload, targetPath) && jsonPointerExists(payload, payloadRelativePath)) {
+        issues.push(`evidence_selectors.${index}.target_path: pointers are relative to the payload object; use '${payloadRelativePath}' instead of '${targetPath}'`);
+      }
+    }
+  }
+  return issues;
 }
 
 function injectHostEvidence(
@@ -608,11 +650,6 @@ export type CompilerProposalToolset = {
   beginBatch(segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string): Promise<void>;
 };
 
-type ActiveSourceAccountingProposal = {
-  proposal: SourceAccountingProposal;
-  proposalStatus: "pending" | "accepted";
-};
-
 const MAX_CONSECUTIVE_FINISH_FAILURES = 3;
 const MAX_IDENTICAL_FINISH_FAILURES = 2;
 
@@ -721,9 +758,9 @@ type ChapterSplitDetails =
 const modelTextSelectorParameters = Type.Object({
   segment_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
   exact: Type.String({ minLength: 1, maxLength: 4_000 }),
-  prefix: Type.Optional(Type.String({ maxLength: 500 })),
-  suffix: Type.Optional(Type.String({ maxLength: 500 })),
-  occurrence: Type.Optional(Type.Integer({ minimum: 1 })),
+  prefix: Type.Optional(Type.String({ maxLength: 500, description: "Optional immediate verbatim text directly before exact; omit when exact is unique." })),
+  suffix: Type.Optional(Type.String({ maxLength: 500, description: "Optional immediate verbatim text directly after exact; omit when exact is unique." })),
+  occurrence: Type.Optional(Type.Integer({ minimum: 1, description: "Optional one-based occurrence in the complete segment; omit when exact is unique." })),
 }, { additionalProperties: false });
 
 const annotationIdentityParameters = {
@@ -1009,7 +1046,7 @@ function safeTextSuffix(text: string, maxChars: number): string {
 export function createCompilerProposalToolset(
   workspaceRoot: string,
   generatedBy: { provider?: string; model?: string } = {},
-  hostOptions: { recoverPreparedFinish?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown) => Promise<void> } } = {},
+  hostOptions: { recoverPreparedFinish?: boolean; hostObligationCorrection?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown, evidenceAssertions?: readonly EvidenceAssertion[]) => Promise<void> } } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
@@ -1029,6 +1066,7 @@ export function createCompilerProposalToolset(
   let validatedSourceSegments: SourceSegment[] = [];
   let compilerBatchId: string | undefined;
   let activeSourceId: string | undefined;
+  let activeReviewScope: Awaited<ReturnType<typeof reconciliationReviewScope>>;
   let managedUpstream = false;
   let batchReady = true;
   let activeBoundaryCalibration: BoundaryCalibrationRequest | undefined;
@@ -1181,6 +1219,26 @@ export function createCompilerProposalToolset(
       );
     }
     return resolveTextSelectorAnchor(workspaceRoot, segment, selector);
+  };
+  const resolveObservationSelectors = async (
+    entries: Array<{ path: string; selector: ModelTextSelector }>,
+  ): Promise<TextAnchor[]> => {
+    const outcomes = await Promise.allSettled(entries.map(entry => resolveObservationSelector(entry.selector)));
+    const issues = outcomes.flatMap((outcome, index) => outcome.status === "rejected"
+      ? [`${entries[index]!.path}: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`]
+      : []);
+    if (issues.length) throw new ToolDiagnosticError(`Source annotation selector validation failed:\n${issues.join("\n")}`, {
+      code: "ANNOTATION_SELECTORS_INVALID",
+      issues: outcomes.flatMap((outcome, index) => outcome.status === "rejected"
+        ? [{ path: entries[index]!.path, ...(outcome.reason instanceof ToolDiagnosticError ? { diagnostic: outcome.reason.diagnostic } : {}) }]
+        : []),
+      steps: [
+        "Inspect every failed selector path and its same-segment candidate context before making the single corrected retry. Keep valid exact quotes; remove optional context when unique, otherwise copy immediate verbatim context.",
+        "Check event-mention extent_selectors as well: at least one extent must contain trigger_selector, including the reporting verb rather than only the quoted speech.",
+        "Preserve the failed proposal_id, logical annotation ID, participants and scope. If source support or intended occurrence is unclear, stop for host review; never guess or rotate IDs.",
+      ],
+    });
+    return outcomes.map(outcome => (outcome as PromiseFulfilledResult<TextAnchor>).value);
   };
   const annotationDerivation = (worker: string, proposalId: string) => ({
     runId: compilerBatchId ?? proposalId,
@@ -1704,8 +1762,8 @@ export function createCompilerProposalToolset(
       ...semanticCoverage.assertions.flatMap((assertion) => assertion.anchors),
       ...semanticCoverage.annotations.flatMap((annotation) => annotation.anchors),
     ];
-    return activeProposals.flatMap(({ proposal, proposalStatus }) =>
-      proposal.decisions.flatMap((decision) => {
+    const proposalStatus = new Map(activeProposals.map((item) => [item.proposal.id, item.proposalStatus]));
+    return projectSourceAccountingProposalDecisions(activeProposals).flatMap((decision) => {
         const unit = units.get(decision.unitId);
         const nowRepresented = unit !== undefined && unit.kind !== "non-scene" && semanticSpans.some((span) =>
           span.sourceId === structure.sourceId
@@ -1719,9 +1777,9 @@ export function createCompilerProposalToolset(
         // A migrated, interrupted batch can still have pending classifications
         // from before cross-stage coverage existed. Preserve those immutable
         // drafts but project the verified prior evidence over their decisions.
-        if (nowRepresented && (proposalStatus === "accepted" || inheritedRepresentation)) return [];
-        return [{ ...decision, proposalId: proposal.id }];
-      }));
+        if (nowRepresented && (proposalStatus.get(decision.proposalId!) === "accepted" || inheritedRepresentation)) return [];
+        return [decision];
+      });
   };
 
   const readActiveAnnotationInventory = async (): Promise<Array<{
@@ -1800,7 +1858,7 @@ export function createCompilerProposalToolset(
       "Same-slice checkpointed observation/semantic evidence contributes source coverage only. You must still review executable mechanisms; represented is not proof of an action, rule, or playable world.",
       "A prior field reports the materialized parent/current manifest only as review context; it never satisfies this active batch's fresh accounting requirement.",
       "A non-empty status=unresolved result returns a pageToken and one-based unit indexes. Review every unit, then pass that token to account_source_units with one page_default plus only genuinely different page_overrides.",
-      "After a successful page accounting proposal, the unresolved result set shrinks: refetch status=unresolved at offset=0 instead of following the old nextOffset. Repeat until the returned units are empty.",
+      "After a successful page accounting proposal, refetch status=unresolved at offset=0. Blocking unresolved/intentionally-deferred decisions remain discoverable; resolve them under a fresh proposal ID when later review supports a nonblocking disposition.",
       "A page token is bound to this active batch and exact returned page. Refetch after new semantic proposals change represented coverage; never guess or reuse a stale token.",
       "Classify every remaining unit in a proposal-bearing segment; use unresolved or intentionally-deferred honestly when semantics remain open.",
     ],
@@ -1850,7 +1908,7 @@ export function createCompilerProposalToolset(
             && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
           const pending = pendingByUnit.get(unit.id);
           const current = currentByUnit.get(unit.id);
-          const status = unit.kind === "non-scene"
+          const status: SourceAccountingStatus = unit.kind === "non-scene"
             ? "background-only"
             : represented
               ? "represented"
@@ -1872,7 +1930,7 @@ export function createCompilerProposalToolset(
           };
         })
         .filter((unit) => statusFilter === "all"
-          || (statusFilter === "pending" ? Boolean(unit.pending) : unit.status === "unresolved"));
+          || (statusFilter === "pending" ? Boolean(unit.pending) : isBlockingSourceAccountingStatus(unit.status)));
       const offset = input.offset ?? 0;
       // Sentence payloads are source text, not a compact index. Bound one
       // page so a novel-scale slice cannot crowd out the model's proposal and
@@ -1895,7 +1953,7 @@ export function createCompilerProposalToolset(
           nextOffset,
           ...(pageToken ? { pageToken, indexBase: 1 } : {}),
           units: page.map((unit, index) => ({ unitIndex: index + 1, ...unit })),
-          policy: "represented is host-derived and non-scene is deterministic. prior is materialized parent/current context only and never satisfies this active batch. For a status=unresolved page, review each unit and use pageToken + page_default + page_overrides; the host expands indexes to exact unit IDs. After recording it, refetch unresolved at offset 0 because the result set shrinks.",
+          policy: "represented is host-derived and non-scene is deterministic. prior is materialized parent/current context only and never satisfies this active batch. For a status=unresolved page, review each unit and use pageToken + page_default + page_overrides; the host expands indexes to exact unit IDs. A blocking pending decision remains on this page until a fresh proposal ID supplies a reviewed nonblocking refinement. Refetch unresolved at offset 0 after each success.",
         }) }],
         details: {
           proposalId: `accounting-page-${offset}`,
@@ -1918,6 +1976,7 @@ export function createCompilerProposalToolset(
       "Alternatively use decisions with exact unit IDs returned by find_source_accounting_units; never mix the two input modes.",
       "Do not classify a represented or deterministic non-scene unit.",
       "Use background-only only for non-material narration; use duplicate-description only when semantics are already represented elsewhere; unresolved and intentionally-deferred remain preparation blockers.",
+      "A pending unresolved or intentionally-deferred decision may be refined only under a fresh proposal_id and only to a reviewed nonblocking disposition; the host preserves and hash-links the original proposal.",
     ],
     executionMode: "sequential",
     parameters: sourceAccountingParameters,
@@ -1951,8 +2010,9 @@ export function createCompilerProposalToolset(
       const byId = new Map(baseStructuralUnits(structure).map((unit) => [unit.id, unit]));
       const alreadyDecided = new Map(projectActiveAccountingDecisions(activeProposals, structure, semanticCoverage).map((decision) => [
         decision.unitId,
-        decision.proposalId!,
+        decision,
       ] as const));
+      const activeAccountingById = new Map(activeProposals.map((item) => [item.proposal.id, item.proposal]));
       const exactMode = Boolean(input.decisions?.length);
       const pageMode = Boolean(input.page_token || input.page_default || input.page_overrides?.length);
       if (exactMode === pageMode) {
@@ -2007,6 +2067,7 @@ export function createCompilerProposalToolset(
       ];
       const representedUnitIds: string[] = [];
       const accountedUnits: Array<{ unitId: string; proposalId: string }> = [];
+      const refinedUnits = new Map<string, string[]>();
       for (const decision of decisions) {
         const unit = byId.get(decision.unitId);
         if (!unit) throw new Error(`Unknown deterministic source unit ${decision.unitId}; call find_source_accounting_units and copy unitId exactly.`);
@@ -2021,9 +2082,16 @@ export function createCompilerProposalToolset(
           && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte))) {
           representedUnitIds.push(decision.unitId);
         }
-        const priorProposalId = alreadyDecided.get(decision.unitId);
-        if (priorProposalId && priorProposalId !== input.proposal_id) {
-          accountedUnits.push({ unitId: decision.unitId, proposalId: priorProposalId });
+        const priorDecision = alreadyDecided.get(decision.unitId);
+        if (priorDecision?.proposalId && priorDecision.proposalId !== input.proposal_id) {
+          if (isBlockingSourceAccountingStatus(priorDecision.status)
+            && !isBlockingSourceAccountingStatus(decision.status)) {
+            const unitIds = refinedUnits.get(priorDecision.proposalId) ?? [];
+            unitIds.push(decision.unitId);
+            refinedUnits.set(priorDecision.proposalId, unitIds);
+          } else {
+            accountedUnits.push({ unitId: decision.unitId, proposalId: priorDecision.proposalId });
+          }
         }
       }
       if (representedUnitIds.length || accountedUnits.length) {
@@ -2035,6 +2103,17 @@ export function createCompilerProposalToolset(
             remainingUnitIds: decisions.filter((item) => !covered.has(item.unitId)).map((item) => item.unitId) })
           + `\nKeep proposal_id=${input.proposal_id}. Call find_source_accounting_units with status=unresolved and offset=0; copy its exact pageToken and review the new page for one corrected retry. If none remain, stop for host coverage review; never submit empty decisions, invent a new identity, or withdraw valid coverage.`);
       }
+      const refinements: SourceAccountingRefinement[] = [...refinedUnits.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([proposalId, unitIds]) => {
+          const predecessor = activeAccountingById.get(proposalId);
+          if (!predecessor) throw new Error(`Active source-accounting predecessor ${proposalId} is unavailable; stop for host review.`);
+          return {
+            proposalId,
+            proposalHash: contentHash(predecessor),
+            unitIds: [...unitIds].sort(),
+          };
+        });
       const proposal: SourceAccountingProposal = {
         version: 1,
         id: input.proposal_id,
@@ -2042,6 +2121,7 @@ export function createCompilerProposalToolset(
         compilerBatchId: compilerBatchId!,
         decisions,
         generatedBy: { worker: "account_source_units", ...generatedBy },
+        ...(refinements.length ? { refinements } : {}),
         createdAt: new Date().toISOString(),
       };
       await accountingStore.stageProposal(proposal);
@@ -2082,15 +2162,19 @@ export function createCompilerProposalToolset(
       label: metadata.label,
       description: metadata.description,
       promptSnippet: metadata.description,
-      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "Place proposal_id, payload, evidence_segment_ids and evidence_selectors at the top level. Evidence envelope fields do not belong inside payload.", "For each material field or relation, add an evidence_selector with an exact source quote, its payload JSON Pointer, relation, and independently judged strength. Never submit offsets or hashes.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory.",
+      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "Place proposal_id, payload, evidence_segment_ids and evidence_selectors at the top level. Evidence envelope fields do not belong inside payload.", "For each material field or relation, add an evidence_selector with an exact source quote, its payload-relative JSON Pointer, relation, and independently judged strength. Use /canonicalEventId, never /payload/canonicalEventId. Never submit offsets or hashes.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory.",
         ...(kind === "utterance-expression" ? ["Supply logical quotation/proposition IDs and exact fragment selectors only. The host freezes their revisions and snapshots. Evidence selector target_path refers to the expanded expression: /canonicalEventId, /speakerId, /addresseeIds/i, /modality, /quotation/quotationId, /propositionId, and /propositions/i/snapshot/{subjectEntityId,relationId,polarity,modality,validStoryTime,object/...}. Use this occurrence’s fragment content for semantic fields; never another quotation. Read referenced propositions first to enumerate every object field including nested propositions."] : []),
-        ...(kind === "event-execution" ? ["Never copy an ad-hoc event.action into this binding. First find/read a supported action-schema, then use action.lane=schema-bound with its exact payload.id, role IDs and parameters. Without a supported mechanism, preserve the occurrence; a complete entryCheckpoint is allowed only when independently justified by bodily or active-channel entry evidence at the same source cut."] : []),
+        ...(kind === "event-execution" ? ["Never copy an ad-hoc event.action into this binding. First find/read a supported action-schema, then use action.lane=schema-bound with its exact payload.id, role IDs and parameters. Without a supported mechanism, preserve the occurrence and do not call propose_event_execution unless a complete entryCheckpoint or process recovery is independently justified at the same source cut."] : []),
         ...(kind === "initial-world" ? [INITIAL_WORLD_INPUT_GUIDANCE] : []),
         "A failed call that never staged a proposal must be corrected under the same proposal_id. Only replace a successfully staged defective draft under a new ID; a new ID never clears an old failed call."],
       executionMode: "sequential",
       parameters,
       prepareArguments: (args) => {
         const input = prepareProposalToolArguments(args, kind);
+        const preflightIssues = proposalInputPreflightIssues(kind, input);
+        if (preflightIssues.length) {
+          throw new Error(`Proposal input preflight failed:\n${preflightIssues.join("\n")}`);
+        }
         if (kind === "initial-world" && input?.evidence_segment_ids) {
           const issues = initialWorldInputIssues(input);
           if (issues.length) throw new Error(`Initial-world input validation failed:\n${issues.join("\n")}\nExact evidence and graph checks have not run. Correct all listed fields before one corrected submission with the same proposal_id.`);
@@ -2134,6 +2218,10 @@ export function createCompilerProposalToolset(
             ...generatedBy,
             ...(compilerBatchId ? { compilerBatchId } : {}),
           },
+          ...(hostOptions.upstreamRepair ? { beforeWrite: async (payload: unknown, evidenceAssertions: readonly EvidenceAssertion[]) => {
+            if (kind !== "canonical-event" && kind !== "event-participation") throw finishHostError("managed semantic upstream repair attempted an unauthorized world proposal kind");
+            await hostOptions.upstreamRepair!.beforeStage(kind, compilerProposalArtifactId(kind, payload, input.proposal_id), payload, evidenceAssertions);
+          } } : {}),
         });
         successfulProposalIds.add(accepted.proposalId);
         recordProposalProgress();
@@ -2248,6 +2336,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Record a source mention before making any identity-resolution claim",
     promptGuidelines: [
       "Copy non-zero surface text exactly from selector.exact.",
+      "Omit prefix/suffix when exact is unique. If disambiguation is needed, copy only immediate verbatim adjacent text or use the one-based occurrence in the complete segment.",
       "Use zero-anaphora only when the actor/object is grammatically omitted; anchor the exact predicate or cue and explain the inference.",
       "Do not put a canonical entity ID in this observation. Identity resolution is a separate validated stage.",
     ],
@@ -2262,7 +2351,7 @@ export function createCompilerProposalToolset(
       if (input.form !== "zero-anaphora" && input.surface !== input.selector.exact) {
         throw new Error("A non-zero entity mention surface must exactly equal selector.exact.");
       }
-      const anchor = await resolveObservationSelector(input.selector);
+      const [anchor] = await resolveObservationSelectors([{ path: "selector", selector: input.selector }]);
       const annotation = entityMentionSchema.parse({
         version: 1,
         annotationType: "entity-mention",
@@ -2288,6 +2377,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Record a source event mention before proposing event identity or world effects",
     promptGuidelines: [
       "Copy trigger exactly from trigger_selector.exact and make sure one extent selector contains it.",
+      "Omit prefix/suffix when exact is unique. If disambiguation is needed, copy only immediate verbatim adjacent text or use the one-based occurrence in the complete segment.",
       "Reference participant mention IDs, never canonical entity IDs.",
       "Salience describes compilation importance, not factuality. Hypothetical, remembered, dreamed, denied, or narrated events remain observations until later adjudication.",
       "Use scene_id for an enclosing scene and discourse_segment_id for the most relevant flashback, dream, document, summary, or other discourse layer.",
@@ -2303,10 +2393,20 @@ export function createCompilerProposalToolset(
       if (input.trigger !== input.trigger_selector.exact) {
         throw new Error("An event mention trigger must exactly equal trigger_selector.exact.");
       }
-      const [triggerAnchor, extentAnchors] = await Promise.all([
-        resolveObservationSelector(input.trigger_selector),
-        Promise.all(input.extent_selectors.map(resolveObservationSelector)),
+      const [triggerAnchor, ...extentAnchors] = await resolveObservationSelectors([
+        { path: "trigger_selector", selector: input.trigger_selector },
+        ...input.extent_selectors.map((selector, index) => ({ path: `extent_selectors[${index}]`, selector })),
       ]);
+      if (!extentAnchors.some(anchor => anchor.sourceId === triggerAnchor!.sourceId
+        && anchor.startByte <= triggerAnchor!.startByte && anchor.endByte >= triggerAnchor!.endByte)) {
+        throw new ToolDiagnosticError("Event-mention trigger must be contained in at least one extent: check trigger_selector and extent_selectors.", {
+          code: "EVENT_MENTION_TRIGGER_OUTSIDE_EXTENT",
+          issues: [{ path: "trigger_selector", range: triggerAnchor },
+            ...extentAnchors.map((anchor, index) => ({ path: `extent_selectors[${index}]`, range: anchor }))],
+          steps: ["Re-read the named source segment. Copy a verbatim extent that includes the intended trigger; quoted speech alone may omit the reporting verb. Host-computed ranges are diagnostic only, never model input.",
+            "Keep the same proposal and annotation IDs and participants. Make one corrected retry only if the source supports the extent; otherwise stop for host review."],
+        });
+      }
       const annotation = eventMentionSchema.parse({
         version: 1,
         annotationType: "event-mention",
@@ -2336,6 +2436,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Record quoted or represented speech without collapsing speaker mentions into canonical identity",
     promptGuidelines: [
       "Reference speaker/addressee mention IDs, not canonical character IDs.",
+      "Omit prefix/suffix when exact is unique. If disambiguation is needed, copy only immediate verbatim adjacent text or use the one-based occurrence in the complete segment.",
       "Use a cue selector when an attribution phrase sits outside the quoted span.",
       "Explain indirect and free-indirect readings; the source span alone may not determine their discourse mode.",
     ],
@@ -2347,9 +2448,9 @@ export function createCompilerProposalToolset(
       if (blocked) return blocked;
       assertBatchWritable();
       if (isStructureDiscoveryBatch()) throw new Error("Source annotations are unavailable during chapter structure discovery.");
-      const [anchor, cueAnchor] = await Promise.all([
-        resolveObservationSelector(input.selector),
-        input.cue_selector ? resolveObservationSelector(input.cue_selector) : Promise.resolve(undefined),
+      const [anchor, cueAnchor] = await resolveObservationSelectors([
+        { path: "selector", selector: input.selector },
+        ...(input.cue_selector ? [{ path: "cue_selector", selector: input.cue_selector }] : []),
       ]);
       const annotation = quotationSchema.parse({
         version: 1,
@@ -2377,6 +2478,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Record discourse organization independently from chronological world events",
     promptGuidelines: [
       "Overlapping observations are allowed; use multiple exact selectors for a discontinuous span.",
+      "Omit prefix/suffix when exact is unique. If disambiguation is needed, copy only immediate verbatim adjacent text or use the one-based occurrence in the complete segment.",
       "A viewpoint reference is a mention ID. Do not infer a canonical actor identity here.",
       "Flashback/flashforward describes discourse presentation only and never commits chronological world truth.",
     ],
@@ -2388,7 +2490,10 @@ export function createCompilerProposalToolset(
       if (blocked) return blocked;
       assertBatchWritable();
       if (isStructureDiscoveryBatch()) throw new Error("Source annotations are unavailable during chapter structure discovery.");
-      const anchors = (await Promise.all(input.selectors.map(resolveObservationSelector)))
+      const anchors = (await resolveObservationSelectors(input.selectors.map((selector, index) => ({
+        path: `selectors[${index}]`,
+        selector,
+      }))))
         .sort((left, right) => left.startByte - right.startByte || left.endByte - right.endByte);
       const annotation = discourseObservationSchema.parse({
         version: 1,
@@ -2527,7 +2632,7 @@ export function createCompilerProposalToolset(
         && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
         throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse. Do not withdraw semantically valid work to make room; stop this turn and preserve the exact drafts for diagnosis.`);
       }
-      const resolution = eventResolutionSchema.parse({
+      const parsedResolution = eventResolutionSchema.safeParse({
         version: 1,
         id: input.resolution_id,
         sourceId: activeSourceId,
@@ -2553,6 +2658,24 @@ export function createCompilerProposalToolset(
           ontologyVersion: EVENT_RESOLUTION_ONTOLOGY_VERSION,
         },
       });
+      if (!parsedResolution.success) {
+        const fieldNames: Record<string, string> = { canonicalEventId: "canonical_event_id", eventMentionIds: "event_mention_ids", basisEventMentionIds: "basis_event_mention_ids", evidenceAssertionIds: "evidence_assertion_ids", supersedesResolutionIds: "supersedes_resolution_ids" };
+        throw new ToolDiagnosticError("Event resolution validation failed before staging: " + parsedResolution.error.message, {
+          code: "EVENT_RESOLUTION_INVALID",
+          issues: parsedResolution.error.issues.map(issue => ({
+            path: issue.path.map(part => fieldNames[String(part)] ?? String(part)).join("."), message: issue.message,
+          })),
+          steps: [
+            "For each event_mention_id call find_event_resolution_candidates within the active source; inspect the actual candidate and its lifecycle before choosing resolved versus new-event. If lookup is unavailable or support is absent, stop.",
+            "For same-finish drafts use find_compiler_artifacts kind=canonical-event, copy results[].readArguments.ref to read_compiler_artifact.ref, then copy the verified payload.id into canonical_event_id and candidates[].canonical_event_id. A draft is not yet a canonical event; never invent an ID.",
+            "new-event requires canonical_event_id, relation=coreference, and exactly one candidates entry selecting that same event/relation. Include every event_mention_id in basis_event_mention_ids and supply confidence, evidence_assertion_ids and rationale required by the tool schema.",
+            "resolved also requires a selected canonical_event_id/relation present in candidates, backed by existing canonical or previously checkpointed authority. unresolved and ambiguous must omit selected fields; ambiguous needs at least two candidates. non-referential requires source proof and no candidates, never use it to evade uncertainty.",
+            "Inspect the active mention and participant dependencies, not just the failed payload. Repair missing supported mentions first; retain valid drafts and exact supersedes_resolution_ids. A failed mention call creates no replacement.",
+            "Correct all reported fields together under the same failed proposal_id. Retry once only; stop on exhausted allowance, unsupported semantics or another failure, and never rotate IDs.",
+          ],
+        }, parsedResolution.error);
+      }
+      const resolution = parsedResolution.data;
       await hostOptions.upstreamRepair?.beforeStage("event-resolution", resolution.id, resolution);
       await eventResolutionStore.stage(activeSourceId, {
         version: 1,
@@ -2789,8 +2912,7 @@ export function createCompilerProposalToolset(
       };
     },
   });
-  const finishParameters = Type.Object({
-    target_reviews: Type.Optional(Type.Array(Type.Object({
+  const targetReviewParameters = Type.Array(Type.Object({
       target: Type.String({ minLength: 1 }),
       disposition: Type.Union([Type.Literal("proposed"), Type.Literal("unsupported"), Type.Literal("capability-gap")]),
       evidence_segment_ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
@@ -2800,7 +2922,11 @@ export function createCompilerProposalToolset(
         disposition: Type.Union([Type.Literal("proposed"), Type.Literal("unsupported"), Type.Literal("capability-gap")]),
         summary: Type.String({ minLength: 1, maxLength: 2000 }),
       }, { additionalProperties: false }), { maxItems: 16 })),
-    }, { additionalProperties: false }), { maxItems: 128 })),
+    }, { additionalProperties: false }), {
+      maxItems: 128,
+      description: "Available only in a host-scheduled versioned reconciliation or knowledge-repair scope whose prompt enumerates the exact targets.",
+    });
+  const finishBaseParameters = {
     outcome: Type.Union([Type.Literal("complete"), Type.Literal("no-artifacts")]),
     reviewed_segments: Type.Array(Type.Object({
       segment_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
@@ -2808,11 +2934,34 @@ export function createCompilerProposalToolset(
       summary: Type.String({ minLength: 1, maxLength: 500 }),
     }, { additionalProperties: false })),
     summary: Type.String({ minLength: 1, maxLength: 2_000 }),
+  };
+  const finishParameters = Type.Object({
+    target_reviews: Type.Optional(targetReviewParameters),
+    ...finishBaseParameters,
+  }, { additionalProperties: false });
+  const ordinaryFinishParameters = Type.Object({
+    ...finishBaseParameters,
   }, { additionalProperties: false });
   const obligations = () => activeSourceId && compilerBatchId
     ? new CompilerProposalObligations(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
   const finishReceipts = () => activeSourceId && compilerBatchId
     ? new CompilerFinishReceipts(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+  const proposalFailure = (tool: string, input: unknown, error: unknown): unknown => {
+    const journal = obligations();
+    if (!journal) return error;
+    let correctedRetryAvailable = true;
+    try { journal.assertRetryAllowed(tool, input); } catch { correctedRetryAvailable = false; }
+    const diagnostic = error instanceof ToolDiagnosticError ? error.diagnostic
+      : { code: "COMPILER_PROPOSAL_FAILED", issues: [], steps: [] };
+    const message = error instanceof Error ? error.message : String(error);
+    const recoveryMessage = !correctedRetryAvailable && tool.startsWith("propose_role_roster_")
+      ? `${message.split("\nRecovery SOP:")[0]}\nStop model submissions: the durable retry allowance is exhausted. Preserve this source, batch, candidate and failed inputs for host review; do not retry, rotate IDs or finish with no-artifacts.` : message;
+    return new ToolDiagnosticError(recoveryMessage, {
+      ...diagnostic,
+      retry: { sourceId: activeSourceId!, batchId: compilerBatchId!,
+        proposalId: CompilerProposalObligations.identity(tool, input).proposalId, correctedRetryAvailable },
+    }, error);
+  };
   const trackProposal = (tool: ToolDefinition): ToolDefinition => {
     if (!tool.name.startsWith("propose_") && tool.name !== "account_source_units") return tool;
     return {
@@ -2825,8 +2974,8 @@ export function createCompilerProposalToolset(
           const prepared = tool.prepareArguments ? tool.prepareArguments(raw) : raw;
           return validateToolArguments(tool, { type: "toolCall", id: "compiler-preflight", name: tool.name, arguments: prepared as Record<string, unknown> }) as never;
         } catch (error) {
-          obligations()?.record(tool.name, raw, "failed", error instanceof Error ? error.message : String(error));
-          throw error;
+          obligations()?.record(tool.name, raw, "failed", error instanceof Error ? error.message : String(error), error instanceof ToolDiagnosticError ? error.diagnostic : undefined);
+          throw proposalFailure(tool.name, raw, error);
         }
       },
       async execute(id, input, signal, onUpdate, context) {
@@ -2840,8 +2989,8 @@ export function createCompilerProposalToolset(
           else journal?.record(tool.name, input, "succeeded");
           return result;
         } catch (error) {
-          journal?.record(tool.name, input, "failed", error instanceof Error ? error.message : String(error));
-          throw error;
+          journal?.record(tool.name, input, "failed", error instanceof Error ? error.message : String(error), error instanceof ToolDiagnosticError ? error.diagnostic : undefined);
+          throw proposalFailure(tool.name, input, error);
         }
       },
     };
@@ -2900,8 +3049,7 @@ export function createCompilerProposalToolset(
       if (input.outcome === "complete" && expected.length === 0) {
         return failFinish("complete requires at least one active successful proposal submission.");
       }
-      const reviewScope = activeSourceId && compilerBatchId
-        ? await reconciliationReviewScope(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+      const reviewScope = activeReviewScope;
       const targetScope = reviewScope?.targets;
       if (targetScope !== undefined) {
         const proposals = new Map<string, { kind: string; payload: Record<string, unknown> }>();
@@ -3261,8 +3409,7 @@ export function createCompilerProposalToolset(
       };
     },
   });
-  return {
-    tools: [
+  const tools: ToolDefinition[] = [
       ...roleRosterTools.tools,
       configureChapterSplitTool,
       novelTitleTool,
@@ -3280,7 +3427,7 @@ export function createCompilerProposalToolset(
       finishTool,
     ].map(trackProposal).map((tool) => ({ ...tool, async execute(id, input, signal, onUpdate, context) {
       if (!batchReady) throw finishHostError("compiler batch initialization did not complete; stop tool calls and preserve the original scope for host review");
-      if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution"].includes(tool.name))) {
+      if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(tool.name))) {
         throw finishHostError(hostOptions.upstreamFinish
           ? "frozen upstream finish authorizes only the original host finish; preserve its receipt and drafts, and stop other tool calls"
           : "managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
@@ -3293,9 +3440,18 @@ export function createCompilerProposalToolset(
         if (tool.name === "finish_compiler_batch" && await finishReceipts()?.read()) throw finishHostError(String(error));
         throw error;
       }
-    } })),
+    } }));
+  const exposedFinishTool = tools.find((tool) => tool.name === "finish_compiler_batch")!;
+  const exposeTargetReviews = (enabled: boolean) => {
+    exposedFinishTool.parameters = enabled ? finishParameters : ordinaryFinishParameters;
+  };
+  exposeTargetReviews(false);
+  return {
+    tools,
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
       batchReady = false;
+      activeReviewScope = undefined;
+      exposeTargetReviews(false);
       priorStageCoverage = undefined;
       roleRosterTools.reset();
       successfulProposalIds.clear();
@@ -3317,11 +3473,15 @@ export function createCompilerProposalToolset(
         const managed = (await new UpstreamRepairLedger(workspaceRoot, activeSourceId).inspect()).plans.find(item => item.plan.batchId === compilerBatchId);
         if (managed) {
           const finishPermit = hostOptions.upstreamFinish && managed.finishIntent && isDeepStrictEqual(hostOptions.upstreamFinish, managed.finishIntent) && ["finish-frozen", "finished", "converged", "evaluated"].includes(managed.state);
-          const stagePermit = hostOptions.upstreamRepair?.planHash === managed.plan.planHash && ["authorized", "staging"].includes(managed.state);
+          const stagePermit = hostOptions.upstreamRepair?.planHash === managed.plan.planHash && ["authorized", "staging", "finish-revising"].includes(managed.state);
           if ((!finishPermit && !stagePermit) || (hostOptions.upstreamFinish && hostOptions.upstreamRepair)) throw finishHostError("managed upstream batch requires its exact active host authorization; preserve its ledger and stop ordinary batch recovery");
           managedUpstream = true;
         } else if (hostOptions.upstreamRepair || hostOptions.upstreamFinish) throw finishHostError("upstream authorization has no retained source-local plan");
       } else if (hostOptions.upstreamRepair || hostOptions.upstreamFinish) throw finishHostError("upstream staging requires its exact source and batch");
+      activeReviewScope = activeSourceId && compilerBatchId
+        ? await reconciliationReviewScope(workspaceRoot, activeSourceId, compilerBatchId)
+        : undefined;
+      exposeTargetReviews(activeReviewScope !== undefined);
       const resumingFinish = await finishReceipts()?.read();
       finishFrozen = Boolean(resumingFinish);
       if (resumingFinish) await finishReceipts()!.verify(resumingFinish);
@@ -3385,7 +3545,8 @@ export function createCompilerProposalToolset(
             throw new Error(`Boundary calibration ${compilerBatchId} requires exactly: ${calibrationSegmentIds.join(", ")}.`);
           }
         }
-        if (!managedUpstream && !resumingFinish && !activeBoundaryCalibration && compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
+        if (!managedUpstream && !resumingFinish && !activeBoundaryCalibration && !hostOptions.hostObligationCorrection
+          && compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
           // A retry must not inherit a request made by an attempt that never
           // reached the finish/checkpoint handshake. The model decides again
           // from the frozen evidence slice in this fresh turn.

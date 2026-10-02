@@ -5,7 +5,7 @@ import { z } from "zod";
 import { worldStorageRoot } from "../world/paths.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
-import { canonicalJson } from "../world/canonical.js";
+import { canonicalJson, contentHash } from "../world/canonical.js";
 import { idSchema, type EvidenceAssertion, type TextAnchor } from "../world/model.js";
 import type { SourceSegment } from "./segments.js";
 import { baseStructuralUnits, type SourceStructureManifest, type StructuralUnit } from "./structure.js";
@@ -34,6 +34,12 @@ export const sourceUnitReviewStatusSchema = z.enum([
 ]);
 export type SourceUnitReviewStatus = z.infer<typeof sourceUnitReviewStatusSchema>;
 
+export function isBlockingSourceAccountingStatus(
+  status: SourceAccountingStatus | SourceUnitReviewStatus,
+): status is "unresolved" | "intentionally-deferred" {
+  return status === "unresolved" || status === "intentionally-deferred";
+}
+
 export const sourceUnitAccountingDecisionSchema = z.object({
   unitId: idSchema,
   status: sourceUnitReviewStatusSchema,
@@ -41,6 +47,14 @@ export const sourceUnitAccountingDecisionSchema = z.object({
   proposalId: idSchema.optional(),
 }).strict();
 export type SourceUnitAccountingDecision = z.infer<typeof sourceUnitAccountingDecisionSchema>;
+
+export const sourceAccountingRefinementSchema = z.object({
+  proposalId: idSchema,
+  proposalHash: z.string().regex(/^[a-f0-9]{64}$/),
+  unitIds: z.array(idSchema).min(1).max(512)
+    .refine((ids) => new Set(ids).size === ids.length, "refined unit IDs must be unique"),
+}).strict();
+export type SourceAccountingRefinement = z.infer<typeof sourceAccountingRefinementSchema>;
 
 export const sourceAccountingProposalSchema = z.object({
   version: z.literal(1),
@@ -56,11 +70,113 @@ export const sourceAccountingProposalSchema = z.object({
     provider: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
   }).strict(),
+  refinements: z.array(sourceAccountingRefinementSchema).max(512).optional(),
   createdAt: z.string().datetime(),
   restoredFrom: z.object({ proposalId: idSchema, reason: z.string().trim().min(1).max(1_000) }).strict().optional(),
-}).strict();
+}).strict().superRefine((proposal, ctx) => {
+  const decisionIds = new Set(proposal.decisions.map((decision) => decision.unitId));
+  const refinedIds = new Set<string>();
+  const predecessorIds = new Set<string>();
+  for (let index = 0; index < (proposal.refinements?.length ?? 0); index += 1) {
+    const refinement = proposal.refinements![index]!;
+    if (refinement.proposalId === proposal.id) {
+      ctx.addIssue({ code: "custom", path: ["refinements", index, "proposalId"], message: "An accounting proposal cannot refine itself" });
+    }
+    if (predecessorIds.has(refinement.proposalId)) {
+      ctx.addIssue({ code: "custom", path: ["refinements", index, "proposalId"], message: "Refinement predecessors must be unique" });
+    }
+    predecessorIds.add(refinement.proposalId);
+    for (const unitId of refinement.unitIds) {
+      if (!decisionIds.has(unitId)) {
+        ctx.addIssue({ code: "custom", path: ["refinements", index, "unitIds"], message: `Refined unit ${unitId} has no replacement decision` });
+      }
+      if (refinedIds.has(unitId)) {
+        ctx.addIssue({ code: "custom", path: ["refinements", index, "unitIds"], message: `Refined unit ${unitId} is bound to more than one predecessor` });
+      }
+      refinedIds.add(unitId);
+    }
+  }
+});
 export type SourceAccountingProposal = z.infer<typeof sourceAccountingProposalSchema>;
 export type SourceAccountingProposalStatus = "pending" | "accepted" | "rejected";
+
+export type ActiveSourceAccountingProposal = {
+  proposal: SourceAccountingProposal;
+  proposalStatus: Exclude<SourceAccountingProposalStatus, "rejected">;
+};
+
+/**
+ * Project immutable source-accounting proposals into one active disposition per
+ * unit. A successor may replace only an explicitly hash-bound blocking
+ * decision with a nonblocking review. Every proposal remains durable history.
+ */
+export function projectSourceAccountingProposalDecisions(
+  activeProposalsInput: readonly ActiveSourceAccountingProposal[],
+): SourceUnitAccountingDecision[] {
+  const activeProposals = activeProposalsInput.map(({ proposal, proposalStatus }) => ({
+    proposal: sourceAccountingProposalSchema.parse(proposal),
+    proposalStatus,
+  }));
+  const byId = new Map(activeProposals.map((item) => [item.proposal.id, item]));
+  if (byId.size !== activeProposals.length) throw new Error("Active source-accounting proposal IDs must be unique.");
+  const ordered: ActiveSourceAccountingProposal[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (item: ActiveSourceAccountingProposal) => {
+    if (visited.has(item.proposal.id)) return;
+    if (visiting.has(item.proposal.id)) throw new Error(`Source-accounting refinement cycle includes ${item.proposal.id}.`);
+    visiting.add(item.proposal.id);
+    for (const refinement of item.proposal.refinements ?? []) {
+      const predecessor = byId.get(refinement.proposalId);
+      if (!predecessor) {
+        throw new Error(`Source-accounting refinement ${item.proposal.id} is missing active predecessor ${refinement.proposalId}.`);
+      }
+      if (contentHash(predecessor.proposal) !== refinement.proposalHash) {
+        throw new Error(`Source-accounting refinement ${item.proposal.id} predecessor ${refinement.proposalId} changed.`);
+      }
+      visit(predecessor);
+    }
+    visiting.delete(item.proposal.id);
+    visited.add(item.proposal.id);
+    ordered.push(item);
+  };
+  for (const item of [...activeProposals].sort((left, right) =>
+    left.proposal.createdAt.localeCompare(right.proposal.createdAt) || left.proposal.id.localeCompare(right.proposal.id))) visit(item);
+
+  const projected = new Map<string, SourceUnitAccountingDecision>();
+  for (const { proposal } of ordered) {
+    const refinementByUnit = new Map((proposal.refinements ?? []).flatMap((refinement) =>
+      refinement.unitIds.map((unitId) => [unitId, refinement] as const)));
+    const usedRefinements = new Set<string>();
+    for (const decision of proposal.decisions) {
+      const prior = projected.get(decision.unitId);
+      const refinement = refinementByUnit.get(decision.unitId);
+      if (!prior) {
+        if (refinement) {
+          throw new Error(`Source-accounting refinement ${proposal.id} cannot find predecessor decision ${refinement.proposalId}:${decision.unitId}.`);
+        }
+        projected.set(decision.unitId, { ...decision, proposalId: proposal.id });
+        continue;
+      }
+      if (!refinement || refinement.proposalId !== prior.proposalId) {
+        throw new Error(`Source unit ${decision.unitId} has conflicting active accounting proposals ${prior.proposalId} and ${proposal.id}.`);
+      }
+      if (!isBlockingSourceAccountingStatus(prior.status) || isBlockingSourceAccountingStatus(decision.status)) {
+        throw new Error(`Source-accounting refinement ${proposal.id} may replace only blocking decisions with nonblocking review.`);
+      }
+      usedRefinements.add(decision.unitId);
+      projected.set(decision.unitId, { ...decision, proposalId: proposal.id });
+    }
+    for (const unitId of refinementByUnit.keys()) {
+      if (!usedRefinements.has(unitId)) throw new Error(`Source-accounting refinement ${proposal.id} did not replace ${unitId}.`);
+    }
+  }
+  return [...projected.values()].sort((left, right) => left.unitId.localeCompare(right.unitId));
+}
+
+export function sourceAccountingProposalIdentityHash(proposalInput: SourceAccountingProposal): string {
+  return contentHash(proposalIdentity(sourceAccountingProposalSchema.parse(proposalInput)));
+}
 
 export const sourceAccountingRecordSchema = z.object({
   version: z.literal(1),
@@ -80,6 +196,7 @@ const semanticSpanSchema = z.object({
   startByte: z.number().int().nonnegative(),
   endByte: z.number().int().positive(),
 }).strict().refine((value) => value.endByte > value.startByte, "semantic span must be non-empty");
+type SemanticSpan = z.infer<typeof semanticSpanSchema>;
 
 const batchReviewSchema = z.object({
   batchId: idSchema,
@@ -586,15 +703,54 @@ export class SourceAccountingStore {
   }
 }
 
+/**
+ * Reproject the materialized records against the current active semantic
+ * bindings without rewriting the historical batch reviews that justified
+ * prior decisions. Removed/replaced evidence cannot keep a unit represented;
+ * absent an explicit retained disposition, that unit becomes unresolved.
+ */
+export function projectSourceAccountingCurrentCoverage(
+  manifestInput: SourceAccountingManifest,
+  structure: SourceStructureManifest,
+  sourceBytes: Buffer,
+  evidenceAssertions: readonly EvidenceAssertion[],
+  annotations: ReadonlyArray<{ id: string; anchors: readonly TextAnchor[] }>,
+): SourceAccountingManifest {
+  const manifest = sourceAccountingManifestSchema.parse(manifestInput);
+  if (manifest.sourceId !== structure.sourceId
+    || manifest.sourceSha256 !== structure.sourceSha256
+    || manifest.structureVersion !== structure.structureVersion) {
+    throw new Error("Source-accounting projection requires the exact current source and structure.");
+  }
+  if (sourceBytes.byteLength !== structure.sourceBytes
+    || crypto.createHash("sha256").update(sourceBytes).digest("hex") !== structure.sourceSha256) {
+    throw new Error("Source-accounting projection bytes do not match the frozen source structure.");
+  }
+  const evidenceSpans = uniqueSemanticSpans(evidenceAssertions.flatMap(assertion => assertion.anchors
+    .filter(anchor => anchor.sourceId === structure.sourceId)
+    .map(anchor => ({ id: assertion.id, startByte: anchor.startByte, endByte: anchor.endByte }))));
+  const annotationSpans = uniqueSemanticSpans(annotations.flatMap(annotation => annotation.anchors
+    .filter(anchor => anchor.sourceId === structure.sourceId)
+    .map(anchor => ({ id: annotation.id, startByte: anchor.startByte, endByte: anchor.endByte }))));
+  return sourceAccountingManifestSchema.parse({
+    ...manifest,
+    records: deriveAccountingRecords(structure, sourceBytes, manifest.batchReviews, {
+      evidenceSpans,
+      annotationSpans,
+    }),
+  });
+}
+
 function deriveAccountingRecords(
   structure: SourceStructureManifest,
   sourceBytes: Buffer,
   reviews: readonly BatchReview[],
+  activeCoverage?: { evidenceSpans: readonly SemanticSpan[]; annotationSpans: readonly SemanticSpan[] },
 ): SourceAccountingRecord[] {
   const records: SourceAccountingRecord[] = [];
   const allSegments = reviews.flatMap((review) => review.segments.map((segment) => ({ ...segment, review })));
-  const evidenceSpans = reviews.flatMap((review) => review.evidenceSpans);
-  const annotationSpans = reviews.flatMap((review) => review.annotationSpans);
+  const evidenceSpans = activeCoverage?.evidenceSpans ?? reviews.flatMap((review) => review.evidenceSpans);
+  const annotationSpans = activeCoverage?.annotationSpans ?? reviews.flatMap((review) => review.annotationSpans);
   for (const unit of baseStructuralUnits(structure)) {
     if (unit.kind === "non-scene") {
       records.push(sourceAccountingRecordSchema.parse({
@@ -695,6 +851,7 @@ function proposalIdentity(proposal: SourceAccountingProposal): unknown {
     compilerBatchId: proposal.compilerBatchId,
     decisions: proposal.decisions,
     generatedBy: proposal.generatedBy,
+    ...(proposal.refinements?.length ? { refinements: proposal.refinements } : {}),
   };
 }
 

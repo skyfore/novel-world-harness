@@ -2,7 +2,7 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { Type } from "typebox";
 import { ActorModelStore } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
-import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
+import { CanonicalModelStore, ProposalStore, type ProposalRejectionReport } from "../world/canonical-model.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { evidenceAssertionSchema, type EvidenceAssertion, type EvidenceRef } from "../world/model.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
@@ -18,7 +18,8 @@ import {
   COMPILER_RETRIEVAL_MAX_READ_CHARS as MAX_READ_CHARS,
 } from "./limits.js";
 
-type ArtifactStatus = "canonical" | "pending";
+type ArtifactStatus = "canonical" | "pending" | "accepted" | "rejected";
+type ProposalHistoryStatus = Extract<ArtifactStatus, "accepted" | "rejected">;
 export const COMPILER_ARTIFACT_KINDS = [
   "entity",
   "proposition",
@@ -58,6 +59,7 @@ type ArtifactRecord = {
   payload: unknown;
   evidence: EvidenceRef[];
   evidenceAssertions: EvidenceAssertion[];
+  rejection?: ProposalRejectionReport;
 };
 
 const COMPILER_ARTIFACT_KIND_SET = new Set<string>(COMPILER_ARTIFACT_KINDS);
@@ -136,6 +138,7 @@ function pendingLabel(kind: string, payload: unknown, logicalId: string): string
 export async function loadCompilerArtifactRecords(
   workspaceRoot: string,
   sourceId: string,
+  proposalHistoryStatus?: ProposalHistoryStatus,
 ): Promise<ArtifactRecord[]> {
   const canon = new CanonicalModelStore(workspaceRoot);
   const actors = new ActorModelStore(workspaceRoot);
@@ -143,7 +146,7 @@ export async function loadCompilerArtifactRecords(
   const initial = new InitialWorldStore(workspaceRoot);
   const proposals = new ProposalStore(workspaceRoot);
   const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
-  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, sceneOccurrences, eventFrames, actionSchemas, eventExecutions, actionConstraints, normTemplates, processTemplates, spatialRelations, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
+  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, sceneOccurrences, eventFrames, actionSchemas, eventExecutions, actionConstraints, normTemplates, processTemplates, spatialRelations, rules, goals, models, templates, initialWorld, pending, proposalHistory] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -165,6 +168,7 @@ export async function loadCompilerArtifactRecords(
     possibilities.list(),
     initial.get(),
     proposals.list("pending", sourceId),
+    proposalHistoryStatus ? proposals.list(proposalHistoryStatus, sourceId) : Promise.resolve([]),
   ]);
   const records: ArtifactRecord[] = [];
   const addCanonical = <T extends { evidence?: readonly EvidenceRef[] }>(
@@ -252,8 +256,11 @@ export async function loadCompilerArtifactRecords(
       );
     }
   }));
-  for (const summary of pending) {
-    const envelope = await proposals.readEnvelope("pending", summary.id);
+  for (const { summary, status } of [
+    ...pending.map((summary) => ({ summary, status: "pending" as const })),
+    ...proposalHistory.map((summary) => ({ summary, status: proposalHistoryStatus! })),
+  ]) {
+    const envelope = await proposals.readEnvelope(status, summary.id);
     const payload = envelope.payload;
     const evidence = payloadEvidence(payload, envelope, sourceId);
     if (!evidence.length) continue;
@@ -264,7 +271,7 @@ export async function loadCompilerArtifactRecords(
         ? (payload as { evidence: EvidenceRef[] }).evidence
         : []),
     ];
-    assertEvidenceExclusiveToSource(allEvidence, sourceId, `Pending compiler proposal ${summary.id}`);
+    assertEvidenceExclusiveToSource(allEvidence, sourceId, `${status} compiler proposal ${summary.id}`);
     const evidenceAssertions = evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []);
     const exactSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
     if (exactSourceIds.length && (exactSourceIds.length !== 1 || exactSourceIds[0] !== sourceId)) {
@@ -272,15 +279,17 @@ export async function loadCompilerArtifactRecords(
         `Pending compiler proposal ${summary.id} has exact evidence outside active source ${sourceId}: ${exactSourceIds.join(", ")}.`,
       );
     }
+    const rejection = status === "rejected" ? await proposals.readRejection(summary.id) : null;
     records.push({
-      ref: `pending:${summary.id}`,
-      status: "pending",
+      ref: `${status}:${summary.id}`,
+      status,
       kind: summary.kind,
       logicalId,
       label: pendingLabel(summary.kind, payload, logicalId),
       payload: structuredClone(payload),
       evidence,
       evidenceAssertions,
+      ...(rejection ? { rejection } : {}),
     });
   }
   if (records.length > MAX_ARTIFACT_RECORDS) {
@@ -319,16 +328,23 @@ export function createCompilerArtifactRetrievalTools(
     ], {
       description: "Exact artifact kind. Use canonical-event for events; event is accepted as a compatibility alias.",
     })),
-    status: Type.Optional(Type.Union([Type.Literal("canonical"), Type.Literal("pending")])),
+    status: Type.Optional(Type.Union([
+      Type.Literal("canonical"),
+      Type.Literal("pending"),
+      Type.Literal("accepted"),
+      Type.Literal("rejected"),
+    ], {
+      description: "Canonical and pending are active views. Accepted/rejected explicitly inspect immutable proposal history and are never active draft authority.",
+    })),
     offset: Type.Optional(Type.Integer({ minimum: 0, maximum: MAX_ARTIFACT_RECORDS })),
     max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_FIND_RESULTS })),
   }, { additionalProperties: false });
   const find = defineTool({
     name: "find_compiler_artifacts",
     label: "Find compiler artifacts",
-    description: "Search source-scoped canonical and pending artifact semantics. Results are bounded summaries with stable refs and semantic hashes; use read_compiler_artifact for the exact payload.",
+    description: "Search source-scoped canonical and pending artifact semantics, or explicitly inspect accepted/rejected immutable proposal history. Results are bounded summaries with stable refs and semantic hashes; use read_compiler_artifact for the exact payload.",
     promptSnippet: "Find prior source-scoped compiler artifacts before creating duplicates or revisions",
-    promptGuidelines: ["Use this when the bounded prompt catalog omits an artifact or only shows its identity.", "Never treat artifacts from another source as context.", "Copy results[].ref verbatim into read_compiler_artifact; logicalId is a domain identity, never a ref construction template. Discovery outside the current citable slice provides context, not citation authority."],
+    promptGuidelines: ["Use this when the bounded prompt catalog omits an artifact or only shows its identity.", "Never treat artifacts from another source as context.", "Copy results[].readArguments.ref verbatim into read_compiler_artifact.ref; logicalId is a domain identity, never a ref construction template.", "Use status=accepted or status=rejected only to inspect an exact immutable envelope lifecycle. Retired envelopes are not active drafts and do not by themselves establish current canonical truth.", "Discovery outside the current citable slice provides context, not citation authority."],
     executionMode: "sequential" as const,
     parameters: findParameters,
     async execute(_id, input, signal) {
@@ -337,10 +353,12 @@ export function createCompilerArtifactRetrievalTools(
       const blocked = beforeCall?.();
       if (blocked) return blocked;
       const sourceId = requireSourceId(getSourceId);
+      const status = input.status as ArtifactStatus | undefined;
+      const proposalHistoryStatus = status === "accepted" || status === "rejected" ? status : undefined;
       const needle = input.query.normalize("NFKC").toLocaleLowerCase();
-      const matches = (await loadCompilerArtifactRecords(workspaceRoot, sourceId))
+      const matches = (await loadCompilerArtifactRecords(workspaceRoot, sourceId, proposalHistoryStatus))
         .filter((record) => !kind || record.kind === kind)
-        .filter((record) => !input.status || record.status === input.status)
+        .filter((record) => !status || record.status === status)
         .filter((record) => needle === "*" || `${record.ref}\n${record.logicalId}\n${record.label}\n${canonicalJson(record.payload)}`
           .normalize("NFKC").toLocaleLowerCase().includes(needle));
       const offset = input.offset ?? 0;
@@ -374,6 +392,7 @@ export function createCompilerArtifactRetrievalTools(
             })),
           })),
           omittedExactEvidence: Math.max(0, record.evidenceAssertions.length - 20),
+          ...(record.rejection ? { rejection: record.rejection } : {}),
         }));
       return textResult(promptJson({
         sourceId,
@@ -411,7 +430,9 @@ export function createCompilerArtifactRetrievalTools(
       const blocked = beforeCall?.();
       if (blocked) return blocked;
       const sourceId = requireSourceId(getSourceId);
-      const record = (await loadCompilerArtifactRecords(workspaceRoot, sourceId)).find((candidate) => candidate.ref === input.ref);
+      const proposalHistoryStatus = input.ref.startsWith("accepted:") ? "accepted"
+        : input.ref.startsWith("rejected:") ? "rejected" : undefined;
+      const record = (await loadCompilerArtifactRecords(workspaceRoot, sourceId, proposalHistoryStatus)).find((candidate) => candidate.ref === input.ref);
       if (!record) throw new Error(`Artifact ref '${input.ref}' was not found in active source '${sourceId}'.`);
       const serialized = canonicalJson({
         ref: record.ref,
@@ -421,6 +442,7 @@ export function createCompilerArtifactRetrievalTools(
         semanticHash: contentHash(record.payload),
         evidence: record.evidence,
         evidenceAssertions: record.evidenceAssertions,
+        ...(record.rejection ? { rejection: record.rejection } : {}),
         payload: record.payload,
       });
       const offset = input.offset ?? 0;

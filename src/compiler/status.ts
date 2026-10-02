@@ -1,3 +1,4 @@
+import { RoleReviewWorkStore } from "./role-review-work.js";
 import { contentHash } from "../world/canonical.js";
 import { isDeepStrictEqual } from "node:util";
 import { ProposalStore } from "../world/canonical-model.js";
@@ -65,6 +66,21 @@ async function inspectSource(root: string, source: SourceDocument) {
   });
   const proposals = new ProposalStore(root);
   const inventory = await Promise.all((["pending", "accepted", "rejected"] as const).map(async (status) => [status, (await proposals.list(status, source.id)).length] as const));
+  let roleReviewWork: Array<{ batchId: string; sourceWorks: number; reviewedSources: number; auditedSources: number; stagedCandidates: number; blockedAudits: number; openQuestions: number; verifiedClaims: number; pendingClaimVerifications: number; verificationVersion: number }> = [];
+  try {
+    roleReviewWork = (await RoleReviewWorkStore.plans(root, source.id)).map(plan => {
+      const store = new RoleReviewWorkStore(root, plan);
+      return { batchId: plan.batchId, sourceWorks: plan.spans.length,
+        reviewedSources: plan.spans.filter((_, index) => store.read("source", index)).length,
+        verificationVersion: 2,
+        verifiedClaims: store.claimAudits().filter(a => a.verdict === "supported").length,
+        pendingClaimVerifications: store.stagedEntries().filter(e => store.claimAudit(e.candidateId)?.verdict !== "supported").length,
+        openQuestions: plan.spans.flatMap((_, page) => store.questions(page).filter(q => !store.read("audit", page)?.questionDispositions?.some(d => d.questionId === q.questionId && d.status === "resolved"))).length,
+        auditedSources: plan.spans.filter((_, index) => { const a = store.read("audit", index); return a?.unresolved.length === 0 && a.questionDispositions?.every(q => q.status === "resolved") && a.discoveryDispositions?.every(d => d.disposition !== "blocked"); }).length,
+        blockedAudits: plan.spans.filter((_, index) => (() => {const a = store.read("audit", index); return Boolean(a?.unresolved.length || a?.questionDispositions?.some(q => q.status === "blocked") || a?.discoveryDispositions?.some(d => d.disposition === "blocked"));})()).length,
+        stagedCandidates: store.journal.latestAttempts("propose_role_roster_entry").filter(a => a.status === "succeeded").length };
+    });
+  } catch (error) { diagnostics.push(`Role review work inspection failed: ${String(error)}`); }
   const latestRun = runs[0];
   const events = latestRun ? await new TraceStore(root).peekEvents(latestRun.id) : [];
   const failedTool = events.findLast(event => event.type === "tool.call.failed");
@@ -96,7 +112,7 @@ async function inspectSource(root: string, source: SourceDocument) {
     }));
   } catch (error) { finishInspection = "unknown"; diagnostics.push(`Finish receipt inspection: ${String(error)}`); }
   return {
-    sourceId: source.id, sourcePath: source.sourcePath, sourceSha256: source.contentSha256, bytes: source.bytes, sourceIntegrity,
+    roleReviewWork, sourceId: source.id, sourcePath: source.sourcePath, sourceSha256: source.contentSha256, bytes: source.bytes, sourceIntegrity,
     persistedPipelineVersion: persisted?.pipelineVersion ?? null, effectivePipelineVersion: progress.pipelineVersion,
     checkpointUpdatedAt: persisted?.updatedAt ?? null,
     checkpointReadStable: contentHash(persisted) === contentHash(finalProgress),

@@ -1,7 +1,7 @@
 import { contentHash } from "../world/canonical.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { inspectUpstreamRepairJournal, UpstreamRepairLedger } from "./upstream-repair-ledger.js";
-import { activeRequirementSets, resultFromReport, type RequirementResult } from "./requirement-ledger.js";
+import { activeRequirementSets, requirementResultSchema, resultFromReport, type RequirementResult } from "./requirement-ledger.js";
 import { evaluateReviewedSceneCapabilities } from "../eval/scene-capabilities.js";
 import { frozenSceneCatalog } from "./requirement-service.js";
 import { evaluateCoreRoleCapabilities } from "./core-role-capabilities.js";
@@ -11,11 +11,13 @@ import type { UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import { upstreamRepairHostError } from "./upstream-repair-preflight.js";
 import { verifyUpstreamRepairConvergence } from "./upstream-repair-convergence.js";
 import { upstreamRepairEvaluationSchema, UPSTREAM_REPAIR_EVALUATOR_VERSION } from "./upstream-repair-evaluation-model.js";
+import { sourcePatternObligationRequirementId } from "./proposal-obligations.js";
 
 type AssessmentInputs = Pick<NovelClosureAssessment, "subjectSnapshotHash" | "roster" | "playability" | "requirementResults" | "coreRoleResult">;
 
 /** Recompute against frozen independently reviewed definitions; never trust recorded success. */
 export function upstreamRepairRequirementResult(bundle: PreparedNovelBundle, assessment: AssessmentInputs, plan: UpstreamRepairPlan): RequirementResult {
+  if (plan.proposalObligation) return proposalObligationRequirementResult(bundle, plan);
   const scene = activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []).find(item => item.revisionHash === plan.requirementSetHash);
   const core = bundle.compilerSnapshot.coreRoleRequirementDefinitions?.at(-1);
   let result: RequirementResult;
@@ -31,6 +33,61 @@ export function upstreamRepairRequirementResult(bundle: PreparedNovelBundle, ass
   const requirements = result.requirements.filter(item => plan.requirementIds.includes(item.id)).sort((a, b) => a.id.localeCompare(b.id));
   if (requirements.length !== plan.requirementIds.length || new Set(requirements.map(item => item.id)).size !== plan.requirementIds.length) throw upstreamRepairHostError("Evaluation does not cover every original independent requirement");
   return { ...result, requirements };
+}
+
+export function proposalObligationRequirementResult(
+  bundle: {
+    batchIds: readonly string[];
+    canonical: {
+      events: readonly { id: string }[];
+      actionSchemas: readonly { id: string; induction: { kind: string; supportingEventIds?: string[] } }[];
+      actionConstraints: readonly { id: string; induction: { kind: string; supportingEventIds?: string[] } }[];
+      normTemplates: readonly { id: string; induction: { kind: string; supportingEventIds?: string[] } }[];
+      processTemplates: readonly { id: string; induction: { kind: string; supportingEventIds?: string[] } }[];
+    };
+  },
+  plan: UpstreamRepairPlan,
+): RequirementResult {
+  const authority = plan.proposalObligation;
+  if (!authority) throw upstreamRepairHostError("Repair plan has no durable proposal-obligation authority");
+  const targets: Record<typeof authority.tool, readonly { id: string; induction: { kind: string; supportingEventIds?: string[] } }[]> = {
+    propose_action_schema: bundle.canonical.actionSchemas,
+    propose_action_constraint: bundle.canonical.actionConstraints,
+    propose_norm_template: bundle.canonical.normTemplates,
+    propose_process_template: bundle.canonical.processTemplates,
+  };
+  const target = targets[authority.tool].find(item => item.id === authority.proposalId);
+  const createdEventIds = (plan.semanticEventCreations ?? []).map(item => item.canonicalEventId).sort();
+  const support = target?.induction.kind === "source-pattern" ? target.induction.supportingEventIds ?? [] : [];
+  const missingOriginal = authority.originalSupportingEventIds.filter(id => !support.includes(id));
+  const missingCreatedSupport = createdEventIds.filter(id => !support.includes(id));
+  const missingCreatedEvents = createdEventIds.filter(id => !bundle.canonical.events.some(event => event.id === id));
+  const diagnostics = [
+    ...(!bundle.batchIds.includes(authority.batchId) ? ["PROPOSAL_OBLIGATION_ORIGINAL_BATCH_MISSING"] : []),
+    ...(!target ? ["PROPOSAL_OBLIGATION_TARGET_MISSING"] : []),
+    ...(target && target.induction.kind !== "source-pattern" ? ["PROPOSAL_OBLIGATION_TARGET_NOT_SOURCE_PATTERN"] : []),
+    ...(missingOriginal.length ? [`PROPOSAL_OBLIGATION_ORIGINAL_SUPPORT_MISSING: ${missingOriginal.join(", ")}`] : []),
+    ...(missingCreatedSupport.length ? [`PROPOSAL_OBLIGATION_UPSTREAM_SUPPORT_MISSING: ${missingCreatedSupport.join(", ")}`] : []),
+    ...(missingCreatedEvents.length ? [`PROPOSAL_OBLIGATION_CREATED_EVENT_MISSING: ${missingCreatedEvents.join(", ")}`] : []),
+  ];
+  const requirementId = sourcePatternObligationRequirementId(authority);
+  return requirementResultSchema.parse({
+    setId: `proposal-obligation-${contentHash({ sourceId: authority.sourceId, batchId: authority.batchId, tool: authority.tool, proposalId: authority.proposalId }).slice(0, 32)}`,
+    revisionHash: plan.requirementSetHash,
+    catalogHash: contentHash({
+      originalBatchPresent: bundle.batchIds.includes(authority.batchId),
+      target: target ?? null,
+      createdEvents: createdEventIds.map(id => bundle.canonical.events.find(event => event.id === id) ?? null),
+    }),
+    evaluatorVersion: "proposal-obligation-upstream-v1",
+    requirements: [{
+      id: requirementId,
+      definitionHash: contentHash({ authority, createdEventIds }),
+      state: diagnostics.length ? "blocked" : "satisfied",
+      diagnostics,
+      blockedBy: [...new Set([...missingOriginal, ...missingCreatedSupport, ...missingCreatedEvents])],
+    }],
+  });
 }
 
 /** Certification consumes current exact results, even when the stored evaluation claims success. */

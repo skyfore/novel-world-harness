@@ -14,6 +14,8 @@ import { RoleRosterStore } from "./role-roster.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
 import { recoverUpstreamResolutionBaselines, assertUpstreamResolutionAbsences, upstreamRepairPlanSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import type { SceneReviewCatalog } from "../eval/scene-capabilities.js";
+import { CompilerProposalObligations, sourcePatternObligationRequirementId } from "./proposal-obligations.js";
+import { readAccountingBatchSegments } from "./accounting-review.js";
 
 export function upstreamRepairHostError(reason: string): Error {
   return new Error(`UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: ${reason}. Preserve plan, receipts, budget and drafts. Stop this task and model retries; do not reset history, rotate namespaces, guess IDs or retry unchanged.`);
@@ -37,22 +39,37 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   const bytes = await readSourceMaterial(root, source);
   if (crypto.createHash("sha256").update(bytes).digest("hex") !== plan.sourceScope.sourceSha256 || source.contentSha256 !== plan.sourceScope.sourceSha256) throw upstreamRepairHostError("Immutable source changed");
   const ledger = new RequirementLedger(root, sourceId);
-  const scene = (await ledger.definitions()).find(item => item.revisionHash === plan.requirementSetHash);
-  const core = (await ledger.coreRoleDefinitionHistory()).at(-1);
   let requirementIds: string[];
-  if (scene) {
-    const catalog = Object.fromEntries(sceneCatalogKeys.map(key => [key, new Map()])) as SceneReviewCatalog;
-    requirementIds = evaluateRequirementSet(scene, bytes, catalog).requirements.map(item => item.id);
-  } else if (core?.revisionHash === plan.requirementSetHash) {
-    assertCoreRoleDefinitionEvidence(core, bytes);
-    const roster = await new RoleRosterStore(root).read(sourceId);
-    if (!roster || contentHash(roster) !== contentHash(core.roster) || roster.reviewRevisionId !== (await ledger.roleReviewRevisions()).at(-1)?.id) throw upstreamRepairHostError("Role review scope is being revised; retained definitions are historical repair inputs only");
-    requirementIds = coreRoleDefinitions({ source }, core.roster).map(item => item.id);
-  } else throw upstreamRepairHostError("Independent requirement definition is no longer active");
+  if (plan.proposalObligation) {
+    new CompilerProposalObligations(root, plan.proposalObligation.sourceId, plan.proposalObligation.batchId)
+      .verifySourcePatternUpstreamAuthority(plan.proposalObligation, {
+        upstreamPlanHash: plan.planHash,
+        addedCanonicalEventIds: (plan.semanticEventCreations ?? []).map(item => item.canonicalEventId),
+      });
+    requirementIds = [sourcePatternObligationRequirementId(plan.proposalObligation)];
+  } else {
+    const scene = (await ledger.definitions()).find(item => item.revisionHash === plan.requirementSetHash);
+    const core = (await ledger.coreRoleDefinitionHistory()).at(-1);
+    if (scene) {
+      const catalog = Object.fromEntries(sceneCatalogKeys.map(key => [key, new Map()])) as SceneReviewCatalog;
+      requirementIds = evaluateRequirementSet(scene, bytes, catalog).requirements.map(item => item.id);
+    } else if (core?.revisionHash === plan.requirementSetHash) {
+      assertCoreRoleDefinitionEvidence(core, bytes);
+      const roster = await new RoleRosterStore(root).read(sourceId);
+      if (!roster || contentHash(roster) !== contentHash(core.roster) || roster.reviewRevisionId !== (await ledger.roleReviewRevisions()).at(-1)?.id) throw upstreamRepairHostError("Role review scope is being revised; retained definitions are historical repair inputs only");
+      requirementIds = coreRoleDefinitions({ source }, core.roster).map(item => item.id);
+    } else throw upstreamRepairHostError("Independent requirement definition is no longer active");
+  }
   if (plan.requirementIds.some(id => !requirementIds.includes(id))) throw upstreamRepairHostError("Plan selects an unknown independent requirement");
   const manifest = await new SegmentStore(root).readManifest(sourceId);
   if (!manifest || contentHash(manifest) !== contentHash(await segmentSource(root, source))) throw upstreamRepairHostError("Source segment layout is missing or stale");
   if (plan.sourceScope.segmentIds.some(id => !manifest.segments.some(segment => segment.id === id))) throw upstreamRepairHostError("Plan segment is outside the immutable source layout");
+  if (plan.proposalObligation) {
+    const originalBatchSegments = await readAccountingBatchSegments(root, sourceId, plan.proposalObligation.batchId);
+    if (plan.proposalObligation.originalEvidenceSegmentIds.some(id => !originalBatchSegments.some(segment => segment.id === id))) {
+      throw upstreamRepairHostError("Proposal-obligation citation scope differs from its original executable batch");
+    }
+  }
   const payloads = new Map<string, unknown>();
   const structure = plan.readableRefs.some(ref => ref.kind === "structural-discourse")
     ? await new SourceStructureStore(root).read(sourceId) : null;
@@ -74,6 +91,13 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   for (const ref of plan.readableRefs) if (!baselineRevisions.has(`${ref.kind}:${ref.id}`)) throw upstreamRepairHostError(`Readable dependency is missing: ${ref.kind}:${ref.id}`);
   const annotationKinds = ["entity-mention", "event-mention", "quotation", "discourse-segment"];
   for (const ref of plan.allowedCreations) if ((activeRevisions.has(`${ref.kind}:${ref.id}`) && (!committedOutputs.has(`${ref.kind}:${ref.id}`) || activeRevisions.get(`${ref.kind}:${ref.id}`) !== committedOutputs.get(`${ref.kind}:${ref.id}`))) || (annotationKinds.includes(ref.kind) && annotationKinds.some(kind => kind !== ref.kind && activeRevisions.has(`${kind}:${ref.id}`)))) throw upstreamRepairHostError(`Allocated creation ID is already active: ${ref.kind}:${ref.id}`);
+  for (const semantic of plan.semanticEventCreations ?? []) for (const [candidateKey, payload] of payloads) {
+    if (!candidateKey.startsWith("event-resolution:")) continue;
+    const resolution = payload as { id?: string; eventMentionIds?: string[] };
+    if (!resolution.eventMentionIds?.includes(semantic.eventMentionId)) continue;
+    const expectedKey = `event-resolution:${semantic.eventResolutionId}`;
+    if (candidateKey !== expectedKey || committedOutputs.get(expectedKey) !== contentHash(payload)) throw upstreamRepairHostError(`Reviewed missing-event mention already has another active resolution: ${semantic.eventMentionId}`);
+  }
   assertUpstreamResolutionAbsences(plan, payloads, committedOutputs);
   const receipts = await CompilerFinishReceipts.listRetained(root, sourceId);
   for (const fingerprint of plan.predecessorReceiptRefs) {

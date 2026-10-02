@@ -10,6 +10,7 @@ import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batc
 import { RequirementLedger } from "../src/compiler/requirement-ledger.js";
 import { coreRoleAttemptScope } from "../src/compiler/requirement-attempts.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
+import { WorkspaceOperationLock } from "../src/util/workspace-lock.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -26,6 +27,8 @@ it("finishes two real independent reviews before the first semantic repair plan 
   const calls: string[] = [];
   await expect(prepareAllCommand({ root, sourceId: source.source.id, yes: true, restoreCache: false, cacheRoot: path.join(root, "cache"), createBranch: false, onProgress() {} }, {
     compileInitialWorld: async options => {
+      expect(options.acquireLock).toBe(false);
+      expect((await WorkspaceOperationLock.inspect(root)).owner?.pid).toBe(process.pid);
       if (options.compilerBatchId?.startsWith("role-roster-")) {
         calls.push("review");
         const tools = createCompilerProposalToolset(root);
@@ -33,7 +36,7 @@ it("finishes two real independent reviews before the first semantic repair plan 
         const call = (name: string, input: unknown) => tools.tools.find(tool => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
         const roster = JSON.parse(((await call("read_role_roster", { offset: 0 })).content[0] as { text: string }).text);
         const page = JSON.parse(((await call("read_roster_source_page", { page: 0 })).content[0] as { text: string }).text);
-        await call("propose_role_roster_review", { subjectHash: roster.subjectHash, entries: [{ candidateId: roster.candidates[0].id, importance: "major", rationale: "Central source actor", basisUnitIds: page.unitIds, developmentExpectation: { kind: "unknown", rationale: "Short source does not establish development", basisUnitIds: page.unitIds } }] });
+        await call("propose_role_roster_review", { subjectHash: roster.subjectHash, entries: [{ candidateId: roster.candidates[0].id, importance: "major", rationale: "Central source actor", basisUnitIds: page.units.flatMap((unit: { unitId: string | null }) => unit.unitId ? [unit.unitId] : []), developmentExpectation: { kind: "unknown", rationale: "Short source does not establish development", basisUnitIds: page.units.flatMap((unit: { unitId: string | null }) => unit.unitId ? [unit.unitId] : []) } }] });
         await call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent original-source review" });
         return;
       }

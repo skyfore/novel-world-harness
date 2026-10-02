@@ -47,6 +47,9 @@ export function projectCompletedNwhMessages<T extends NwhContextMessage>(
   let compilerSpan = initialCompilerSpan;
   const projected: T[] = [];
   for (const message of messages) {
+    // Pi 1.0 records prompt/tool changes between compiler messages. They are
+    // host control data, never a boundary that ends a private compiler span.
+    if (message.role === "system") continue;
     if (isDisplayOnlyMessage(message)) continue;
     if (dropSummaries && isSummaryMessage(message)) continue;
     if (isCompilerBoundary(message)) {
@@ -130,11 +133,22 @@ export function projectNwhSummaryEntries(
   entries: readonly SessionEntry[],
   sessionContainsPrivateContext = branchContainsNwhPrivateContext(entries),
 ): SessionEntry[] {
-  if (!sessionContainsPrivateContext) return [...entries];
   const markedSummaries = markerTargetIds(entries);
+  const edits = new Map(entries.filter(entry => entry.type === "context_edit").map(entry => [entry.targetId, entry.replacement]));
   let compilerSpan = false;
   const projected: SessionEntry[] = [];
-  for (const entry of entries) {
+  for (let entry of entries) {
+    // Prompt deltas and operational edits/usage are not novel evidence or
+    // dialogue. Pi resolves edits before the ordinary context projection.
+    if (entry.type === "context_edit" || entry.type === "usage") continue;
+    if (edits.has(entry.id)) {
+      const edit = edits.get(entry.id);
+      if (!edit) continue;
+      if (entry.type === "custom_message") entry = { ...entry, content: edit.content as typeof entry.content };
+      else if (entry.type === "message" && entry.message.role !== "system") {
+        entry = { ...entry, message: { ...entry.message, content: edit.content } as typeof entry.message };
+      }
+    }
     if (entry.type === "custom" && entry.customType === NWH_CONTEXT_POLICY_MARKER) continue;
     if (entry.type === "custom_message" || entry.type === "custom") {
       if (DISPLAY_ONLY_CONTEXT_TYPES.has(entry.customType)) continue;
@@ -159,17 +173,39 @@ export function projectNwhSummaryEntries(
       continue;
     }
     if (entry.type === "message") {
+      if (entry.message.role === "system") continue;
       if (compilerSpan && (entry.message.role === "assistant" || entry.message.role === "toolResult")) continue;
       compilerSpan = false;
       projected.push(entry);
       continue;
     }
-    if ((entry.type === "compaction" || entry.type === "branch_summary") && !markedSummaries.has(entry.id)) {
+    if (sessionContainsPrivateContext && (entry.type === "compaction" || entry.type === "branch_summary") && !markedSummaries.has(entry.id)) {
       continue;
     }
     projected.push(entry);
   }
   return projected;
+}
+
+/** A context edit may change visible dialogue, never conceal a privacy boundary. */
+export function assertNwhContextEdits(entries: readonly SessionEntry[]): void {
+  const known: Record<SessionEntry["type"], true> = {
+    message: true, custom: true, custom_message: true, context_edit: true,
+    compaction: true, branch_summary: true, usage: true, model_change: true,
+    thinking_level_change: true, label: true, session_info: true,
+  };
+  if (entries.some(entry => !Object.hasOwn(known, entry.type))) {
+    throw new Error("Unsupported Pi history entry. Preserve the transcript and stop for host review; do not rewrite or retry it.");
+  }
+  const allowed = new Set(projectNwhSummaryEntries(entries.filter(entry => entry.type !== "context_edit")).map(entry => entry.id));
+  for (const entry of entries) {
+    if (entry.type !== "context_edit") continue;
+    const target = entries.find(candidate => candidate.id === entry.targetId);
+    if (!target || !allowed.has(entry.targetId)
+      || (target.type !== "message" && target.type !== "custom_message")) {
+      throw new Error("Pi context edit targets private or host control history. Preserve the original transcript and start a separate host-reviewed session; do not retry or remove its privacy markers.");
+    }
+  }
 }
 
 export type ContextPolicyMarker = {

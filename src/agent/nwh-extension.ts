@@ -1,3 +1,4 @@
+import { registerNwhContextProjection } from "./context-projection.js";
 import { withPlayModelBudget } from "../runtime/play-model-budget.js";
 import { currentRuntimeHooks, hookError } from "../runtime/hooks.js";
 import { withCommandHooks } from "./pi-hooks.js";
@@ -119,16 +120,7 @@ import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.
 import { createNwhModelLoadingIndicator } from "./nwh-model-loading.js";
 import { NWH_DOUBLE_CTRL_C_WINDOW_MS, NwhDoubleCtrlCExit } from "./nwh-exit.js";
 import { classifyPlayerInput, renderPlayerMetaResponse } from "../world/player-input-route.js";
-import {
-  branchContainsNwhPrivateContext,
-  branchHasUntrustedSummary,
-  contextPolicyMarker,
-  projectCompletedNwhMessages,
-  projectNwhModelMessages,
-  projectNwhSummaryEntries,
-  NWH_CONTEXT_POLICY_MARKER,
-  type NwhContextMessage,
-} from "./context-policy.js";
+import { projectNwhModelMessages, type NwhContextMessage } from "./context-policy.js";
 import { promptJson } from "../util/prompt-data.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
@@ -2095,88 +2087,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       };
     });
 
-    pi.on("session_before_compact", (event, ctx) => {
-      let sessionContainsPrivateContext = branchContainsNwhPrivateContext(event.branchEntries);
-      try {
-        sessionContainsPrivateContext ||= branchContainsNwhPrivateContext(ctx.sessionManager.getEntries());
-      } catch {
-        // Synthetic embeddings may expose only the branch supplied by Pi.
-      }
-      const dropSummaries = branchHasUntrustedSummary(event.branchEntries, sessionContainsPrivateContext);
-      const history = projectCompletedNwhMessages(
-        event.preparation.messagesToSummarize,
-        false,
-        dropSummaries,
-      );
-      const prefix = projectCompletedNwhMessages(
-        event.preparation.turnPrefixMessages,
-        history.state.compilerSpan,
-        dropSummaries,
-      );
-      event.preparation.messagesToSummarize = history.messages;
-      event.preparation.turnPrefixMessages = prefix.messages;
-      if (dropSummaries) event.preparation.previousSummary = undefined;
-      if (!history.messages.length && !prefix.messages.length && !event.preparation.previousSummary) {
-        return {
-          compaction: {
-            summary: `No ordinary model-visible history was compacted. NWH private entries were excluded by context policy v2.`,
-            firstKeptEntryId: event.preparation.firstKeptEntryId,
-            tokensBefore: event.preparation.tokensBefore,
-            details: { nwhContextPolicyVersion: 2, privateEntriesExcluded: true },
-          },
-        };
-      }
-    });
-
-    pi.on("session_compact", (event) => {
-      pi.appendEntry(
-        NWH_CONTEXT_POLICY_MARKER,
-        contextPolicyMarker(event.compactionEntry.id, "compaction"),
-      );
-    });
-
-    pi.on("session_before_tree", (event, ctx) => {
-      let branch = event.preparation.entriesToSummarize;
-      let sessionContainsPrivateContext = branchContainsNwhPrivateContext(branch);
-      try {
-        branch = ctx.sessionManager.getBranch();
-        sessionContainsPrivateContext ||= branchContainsNwhPrivateContext(ctx.sessionManager.getEntries());
-      } catch {
-        // Synthetic embedding contexts may not provide a session manager.
-      }
-      const allowedIds = new Set(projectNwhSummaryEntries(branch, sessionContainsPrivateContext).map((entry) => entry.id));
-      event.preparation.entriesToSummarize = event.preparation.entriesToSummarize
-        .filter((entry) => allowedIds.has(entry.id));
-    });
-
-    pi.on("session_tree", (event) => {
-      if (!event.summaryEntry) return;
-      pi.appendEntry(
-        NWH_CONTEXT_POLICY_MARKER,
-        contextPolicyMarker(event.summaryEntry.id, "branch"),
-      );
-    });
-
-    pi.on("context", (event, ctx) => {
-      let dropSummaries = false;
-      try {
-        const branch = ctx.sessionManager.getBranch();
-        dropSummaries = branchHasUntrustedSummary(
-          branch,
-          branchContainsNwhPrivateContext(ctx.sessionManager.getEntries()),
-        );
-      } catch {
-        // A context can be synthetic in embedding tests. The real Pi runtime
-        // always supplies a read-only session manager.
-      }
-      const messages = projectNwhModelMessages(
-        event.messages,
-        Boolean(pendingTurn || prepareAllState?.initialWorldRequestRunning || prepareAllState?.reconciliationRequestRunning),
-        dropSummaries,
-      );
-      if (messages.length === event.messages.length && messages.every((message, index) => message === event.messages[index])) return;
-      return { messages };
-    });
+    registerNwhContextProjection(pi, () => Boolean(pendingTurn || prepareAllState?.initialWorldRequestRunning || prepareAllState?.reconciliationRequestRunning));
 
     pi.on("agent_end", (event) => {
       if (!pendingTurn && !prepareAllState?.initialWorldRequestRunning && !prepareAllState?.reconciliationRequestRunning) return;

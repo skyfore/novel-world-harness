@@ -1,3 +1,4 @@
+import { mockPiProvider } from "./helpers/pi-provider.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -56,34 +57,12 @@ describe("PiAgentSession", () => {
       saveSession: false,
       includeNwhExtension: false,
     });
-    const internals = session as unknown as {
-      runtimeHost: {
-        session: {
-          systemPrompt: string;
-          _baseSystemPromptOptions: unknown;
-          _extensionRunner: {
-            emitBeforeAgentStart(
-              prompt: string,
-              images: undefined,
-              systemPrompt: string,
-              options: unknown,
-            ): Promise<{ systemPrompt?: string } | undefined>;
-          };
-        };
-      };
-    };
-    const piSession = internals.runtimeHost.session;
-    // This assertion proves the test exercises Pi's post-NWH cwd append, not
-    // merely buildSystemPrompt's intermediate application string.
-    expect(piSession.systemPrompt).toContain(root);
-    const projected = await piSession._extensionRunner.emitBeforeAgentStart(
-      "hello",
-      undefined,
-      piSession.systemPrompt,
-      piSession._baseSystemPromptOptions,
-    );
-    expect(projected?.systemPrompt).not.toContain(root);
-    expect(projected?.systemPrompt).toContain("Current working directory: [host-managed workspace]");
+    const provider = await mockPiProvider(session);
+    expect(provider.host.session.systemPrompt).toContain(root);
+    await session.prompt("hello");
+    expect(provider.payloads).toHaveLength(1);
+    expect(JSON.stringify(provider.payloads[0])).not.toContain(root);
+    expect(JSON.stringify(provider.payloads[0])).toContain("[host-managed workspace]");
     await session.dispose();
   });
 

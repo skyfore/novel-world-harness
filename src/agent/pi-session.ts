@@ -1,3 +1,5 @@
+import { COMPILER_TOOL_NAMES } from "../compiler/proposal-tools.js";
+import { createNwhRequestPolicy } from "./pi-request-policy.js";
 import { currentPlayModelBudget } from "../runtime/play-model-budget.js";
 import { installModelRequestBudget, type ModelRequestBudget } from "./model-request-budget.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
@@ -802,6 +804,12 @@ export class PiAgentSession {
       const recoveryScope = { activeToolNames: toolDefinitions.map((tool) => tool.name) };
       const configuredTools = toolDefinitions.map((tool) => withNwhToolRecovery(tool, () => recoveryScope));
       const contextContract = buildNwhContextContract(this.options, configuredTools);
+      const requestPolicy = createNwhRequestPolicy({
+        redact: text => redactHostWorkspacePath(text, this.options.workspace.root),
+        includeNwhExtension: this.options.includeNwhExtension !== false,
+        allowedToolNames: new Set([...configuredTools.map(tool => tool.name),
+          ...(this.options.includeNwhExtension === false ? [] : ["rename_session", ...COMPILER_TOOL_NAMES])]),
+      });
       const services = await createAgentSessionServices({
         cwd,
         agentDir,
@@ -852,6 +860,7 @@ export class PiAgentSession {
               hidden: true,
               factory: createNwhPromptPrivacyExtension(this.options.workspace.root),
             },
+            { name: "nwh-request-policy", hidden: true, factory: requestPolicy.factory },
             ...(this.trace ? [{
               name: "nwh-trace",
               hidden: true,
@@ -872,6 +881,7 @@ export class PiAgentSession {
           noTools: "builtin",
           customTools: configuredTools,
         });
+      requestPolicy.install(created.session, this.runtime);
       if (this.requestBudgets.length) installModelRequestBudget(created.session.agent, this.requestBudgets);
       if (this.options.trackLastOpenedSession && created.session.sessionFile) {
         await writeLastOpenedSession(this.options.workspace.root, this.stateDir, created.session.sessionFile);
@@ -901,7 +911,6 @@ export class PiAgentSession {
         this.onThinking?.(event.assistantMessageEvent.delta);
       } else if (event.type === "message_end" && event.message.role === "assistant") {
         this.lastAssistantStopReason = event.message.stopReason;
-        for (const budget of this.requestBudgets) budget.observeUsage(event.message.usage);
       } else if (event.type === "message_end" && event.message.role === "custom" && event.message.display) {
         const rendered = `${event.message.content}\n`;
         this.activeText += rendered;

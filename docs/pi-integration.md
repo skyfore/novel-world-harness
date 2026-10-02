@@ -27,6 +27,12 @@ rollback strategy. The current dependency is
 Pi 1.0.0 with the patch described below. The dependency versions are exact pins;
 see [patch maintenance notes](../patches/README.md) for its scope and removal conditions.
 
+The [upgrade validation record](plans/2026-10-03-pi-1-upgrade-validation.zh-CN.md)
+contains clean-install, full-suite, provider, terminal, benchmark and rollback
+evidence. Real model checks use an isolated synthetic source and the existing Pi
+OAuth configuration; they do not certify a complete novel. Measured rendering
+and search improvements are workload-specific, not whole-application guarantees.
+
 The pinned Pi package carries a reproducible pnpm patch that adds a generic
 TUI-only transient assistant stream for extension-owned child sessions. The
 stream is mounted in Pi's transcript rather than an editor widget, uses Pi's

@@ -1,0 +1,669 @@
+{
+  "environment": {
+    "platform": "Linux x86_64",
+    "kernel": "6.1.0-32-amd64",
+    "node": "22.19.0",
+    "pnpm": "11.21.0"
+  },
+  "baseline": "0a9fd1255abd4a721687accf220cc6b75c63f8c9",
+  "implementation": "4205d83",
+  "versions": {
+    "before": "0.84.2",
+    "after": "1.0.0"
+  },
+  "checks": {
+    "unitTestFiles": 235,
+    "unitTests": 1538,
+    "semanticContracts": 2,
+    "playwrightTests": 2,
+    "sourceTypes": "passed",
+    "changedTestTypes": "passed",
+    "productionBuild": "passed",
+    "cleanFrozenInstall": "passed",
+    "piDependencyGraph": "all reachable Pi runtime packages at 1.0.0"
+  },
+  "live": {
+    "model": "openai-codex/gpt-6-luna",
+    "thinkingLevel": "medium",
+    "sourceSha256": "4d0a44426d114471904e2f00cc03223869216eed6e3c2b34afe1b670891dc240",
+    "sourceId": "4d0a44426d114471904e",
+    "compiler": {
+      "startedAt": "2026-10-02T19:08:08.446Z",
+      "finishedAt": "2026-10-02T19:08:14.033Z",
+      "status": "passed",
+      "budget": {
+        "limits": {
+          "maxModelCalls": 24,
+          "maxRequestBytes": 512000,
+          "maxTotalPayloadBytes": 4000000
+        },
+        "usage": {
+          "modelCalls": 2,
+          "payloads": 2,
+          "totalPayloadBytes": 20882,
+          "largestRequestBytes": 11335
+        },
+        "providerUsage": {
+          "reports": 2,
+          "input": 2256,
+          "output": 99,
+          "cacheRead": 1536,
+          "cacheWrite": 0,
+          "totalTokens": 3891,
+          "cost": 0.0006007200000000001
+        },
+        "blocked": false,
+        "closed": true
+      },
+      "scope": "one host-validated source annotation; no batch finish, semantic closure, bundle, certification or activation",
+      "proposalId": "pi-upgrade-mara",
+      "acceptedAnnotations": [
+        {
+          "version": 1,
+          "id": "pi-upgrade-mara-mention",
+          "sourceId": "4d0a44426d114471904e",
+          "derivation": {
+            "runId": "pi-upgrade-observation-probe",
+            "worker": "propose_entity_mention",
+            "compilerBatchId": "pi-upgrade-observation-probe",
+            "model": "openai-codex/gpt-6-luna",
+            "ontologyVersion": "observation-v1"
+          },
+          "annotationType": "entity-mention",
+          "anchor": {
+            "version": 1,
+            "sourceId": "4d0a44426d114471904e",
+            "startByte": 0,
+            "endByte": 4,
+            "startLine": 1,
+            "endLine": 1,
+            "exactHash": "d48c6c588f9a21165dd21fbccc19588d42016c92529029d66b4acb57075366d1",
+            "prefixHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "suffixHash": "735447ca0e9a7218835f50dd01ef5af27765f0b17592005e8adba97306f12a30",
+            "contextBytes": 64,
+            "normalization": "source-bytes-v1"
+          },
+          "surface": "Mara",
+          "form": "proper",
+          "kindCandidates": [
+            "character"
+          ],
+          "confidence": 1
+        }
+      ]
+    },
+    "play": {
+      "startedAt": "2026-10-02T19:09:13.708Z",
+      "finishedAt": "2026-10-02T19:09:42.073Z",
+      "status": "passed",
+      "budget": {
+        "limits": {
+          "maxModelCalls": 24,
+          "maxRequestBytes": 512000,
+          "maxTotalPayloadBytes": 4000000
+        },
+        "usage": {
+          "modelCalls": 10,
+          "payloads": 10,
+          "totalPayloadBytes": 276819,
+          "largestRequestBytes": 70119
+        },
+        "providerUsage": {
+          "reports": 10,
+          "input": 26159,
+          "output": 912,
+          "cacheRead": 27648,
+          "cacheWrite": 0,
+          "totalTokens": 54719,
+          "cost": 0.0068791600000000005
+        },
+        "blocked": false,
+        "closed": true
+      },
+      "genesis": "9c29e2b3afe43d7adcdf99f22f18f661f3fff75979855315a6eaa4304798d7c2",
+      "worldHead": "072ee18d826adb8fa8a194a148642933473912a219cc67fd70f488dc8358316f",
+      "narrationPreservedWorld": true,
+      "events": [
+        {
+          "type": "narration-attempt",
+          "attempt": 1
+        }
+      ]
+    },
+    "compaction": {
+      "startedAt": "2026-10-02T19:11:32.703Z",
+      "finishedAt": "2026-10-02T19:11:44.163Z",
+      "status": "passed",
+      "budget": {
+        "limits": {
+          "maxModelCalls": 24,
+          "maxRequestBytes": 512000,
+          "maxTotalPayloadBytes": 4000000
+        },
+        "usage": {
+          "modelCalls": 8,
+          "payloads": 7,
+          "totalPayloadBytes": 227184,
+          "largestRequestBytes": 73954
+        },
+        "providerUsage": {
+          "reports": 8,
+          "input": 34082,
+          "output": 140,
+          "cacheRead": 14848,
+          "cacheWrite": 0,
+          "totalTokens": 49070,
+          "cost": 0.007281360000000001
+        },
+        "blocked": false,
+        "closed": true
+      },
+      "compaction": {
+        "summaryLength": 445,
+        "tokensBefore": 15782
+      },
+      "cancelledWithoutCheckpoint": true,
+      "fixtureBytes": 68489,
+      "events": [
+        {
+          "type": "tool",
+          "name": "read_upgrade_fixture"
+        },
+        {
+          "type": "tool-result",
+          "name": "read_upgrade_fixture",
+          "isError": false
+        },
+        {
+          "type": "tool",
+          "name": "read_upgrade_fixture"
+        },
+        {
+          "type": "tool-result",
+          "name": "read_upgrade_fixture",
+          "isError": false
+        }
+      ]
+    },
+    "costMeaning": "Pi model-catalog estimate, not a provider invoice; cancelled calls may have no reported usage; one separate initial CLI authentication request is outside these budgets"
+  },
+  "terminal": [
+    {
+      "mode": "regular",
+      "exitCode": 0,
+      "bytes": 44578,
+      "modelShown": true,
+      "helpShown": true,
+      "loginShown": true,
+      "alternateScreen": false,
+      "resumeHint": true
+    },
+    {
+      "mode": "fullscreen",
+      "exitCode": 0,
+      "bytes": 22225,
+      "modelShown": true,
+      "helpShown": true,
+      "loginShown": true,
+      "alternateScreen": true,
+      "resumeHint": true
+    }
+  ],
+  "rollback": {
+    "old": {
+      "version": "0.84.2",
+      "head": "072ee18d826adb8fa8a194a148642933473912a219cc67fd70f488dc8358316f",
+      "stateHash": "645f25e24d563963f6887f14eb18d03164451d2c744021bec3a331c49cfb66f0",
+      "entriesBefore": 7,
+      "entriesAfter": 8
+    },
+    "new": {
+      "version": "1.0.0",
+      "head": "072ee18d826adb8fa8a194a148642933473912a219cc67fd70f488dc8358316f",
+      "stateHash": "645f25e24d563963f6887f14eb18d03164451d2c744021bec3a331c49cfb66f0",
+      "entriesBefore": 7,
+      "entriesAfter": 8
+    },
+    "preservedLiveFiles": 24,
+    "preservedRollbackFiles": 24,
+    "legacyBackupUnchanged": true,
+    "status": "passed"
+  },
+  "benchmark": {
+    "scriptSha256": "cca4bb6afca70c7a70c0878989de9ce7cbef6bfc53da50c4c7e6ad838e46092b",
+    "runs": [
+      {
+        "version": "0.84.2",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 353.99120899999997,
+        "warmImportMs": 0.053297000000043226,
+        "assemblyMs": 0.40336242000000083,
+        "firstRenderMs": 80.90917300000001,
+        "cachedRenderMs": 0.06730705999999997,
+        "changedQueryMs": 163.97025519999997,
+        "repeatedSearchMs": 163.42999264999997,
+        "streamingMs": 895.5868400000036,
+        "importedHeapBytes": 43119000,
+        "importedRssBytes": 159985664,
+        "longMessageRetainedHeapBytes": 6720392,
+        "finalHeapBytes": 51092040,
+        "finalRssBytes": 295243776,
+        "run": 1
+      },
+      {
+        "version": "1.0.0",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 272.252009,
+        "warmImportMs": 0.05506800000000567,
+        "assemblyMs": 0.4100191799999993,
+        "firstRenderMs": 64.81498699999997,
+        "cachedRenderMs": 0.09766005000000007,
+        "changedQueryMs": 32.343253000000004,
+        "repeatedSearchMs": 0.12330249999999979,
+        "streamingMs": 604.3323430000008,
+        "importedHeapBytes": 32536296,
+        "importedRssBytes": 134787072,
+        "longMessageRetainedHeapBytes": 5831264,
+        "finalHeapBytes": 46577400,
+        "finalRssBytes": 246374400,
+        "run": 1
+      },
+      {
+        "version": "1.0.0",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 266.836415,
+        "warmImportMs": 0.05887599999999793,
+        "assemblyMs": 0.4108440399999995,
+        "firstRenderMs": 62.862554999999986,
+        "cachedRenderMs": 0.09992549999999994,
+        "changedQueryMs": 35.3978786,
+        "repeatedSearchMs": 0.13450145000000474,
+        "streamingMs": 594.572340999999,
+        "importedHeapBytes": 32544408,
+        "importedRssBytes": 137080832,
+        "longMessageRetainedHeapBytes": 5828072,
+        "finalHeapBytes": 46579592,
+        "finalRssBytes": 234246144,
+        "run": 2
+      },
+      {
+        "version": "0.84.2",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 355.313896,
+        "warmImportMs": 0.048757000000023254,
+        "assemblyMs": 0.41775757999999996,
+        "firstRenderMs": 78.408277,
+        "cachedRenderMs": 0.06739937999999995,
+        "changedQueryMs": 162.7082358,
+        "repeatedSearchMs": 158.1511784,
+        "streamingMs": 870.3683650000021,
+        "importedHeapBytes": 43143320,
+        "importedRssBytes": 157929472,
+        "longMessageRetainedHeapBytes": 6721416,
+        "finalHeapBytes": 48608224,
+        "finalRssBytes": 249344000,
+        "run": 2
+      },
+      {
+        "version": "0.84.2",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 362.441405,
+        "warmImportMs": 0.047747000000015305,
+        "assemblyMs": 0.41717570000000026,
+        "firstRenderMs": 87.40718700000002,
+        "cachedRenderMs": 0.06643771000000015,
+        "changedQueryMs": 164.6777292,
+        "repeatedSearchMs": 163.66834865,
+        "streamingMs": 856.6719619999985,
+        "importedHeapBytes": 43136472,
+        "importedRssBytes": 156987392,
+        "longMessageRetainedHeapBytes": 6693264,
+        "finalHeapBytes": 48596112,
+        "finalRssBytes": 247758848,
+        "run": 3
+      },
+      {
+        "version": "1.0.0",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 263.328302,
+        "warmImportMs": 0.05811199999999417,
+        "assemblyMs": 0.40870329999999966,
+        "firstRenderMs": 64.65854200000001,
+        "cachedRenderMs": 0.09870053999999982,
+        "changedQueryMs": 32.1821468,
+        "repeatedSearchMs": 0.124209350000001,
+        "streamingMs": 595.6511760000001,
+        "importedHeapBytes": 32533504,
+        "importedRssBytes": 136462336,
+        "longMessageRetainedHeapBytes": 5827232,
+        "finalHeapBytes": 46572936,
+        "finalRssBytes": 246067200,
+        "run": 3
+      },
+      {
+        "version": "1.0.0",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 280.607268,
+        "warmImportMs": 0.05863699999997607,
+        "assemblyMs": 0.4126180999999997,
+        "firstRenderMs": 63.28596300000004,
+        "cachedRenderMs": 0.07233464999999967,
+        "changedQueryMs": 33.686376800000005,
+        "repeatedSearchMs": 0.12062285000000088,
+        "streamingMs": 604.2180229999997,
+        "importedHeapBytes": 32547496,
+        "importedRssBytes": 148619264,
+        "longMessageRetainedHeapBytes": 5831528,
+        "finalHeapBytes": 46578696,
+        "finalRssBytes": 258146304,
+        "run": 4
+      },
+      {
+        "version": "0.84.2",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 370.57062199999996,
+        "warmImportMs": 0.04626500000000533,
+        "assemblyMs": 0.4053197799999998,
+        "firstRenderMs": 81.38013299999994,
+        "cachedRenderMs": 0.06544199000000049,
+        "changedQueryMs": 162.3719098,
+        "repeatedSearchMs": 160.08747345,
+        "streamingMs": 868.8767389999975,
+        "importedHeapBytes": 43164208,
+        "importedRssBytes": 163749888,
+        "longMessageRetainedHeapBytes": 6670368,
+        "finalHeapBytes": 51189736,
+        "finalRssBytes": 294699008,
+        "run": 4
+      },
+      {
+        "version": "0.84.2",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 359.742207,
+        "warmImportMs": 0.04726800000003095,
+        "assemblyMs": 0.4132774000000006,
+        "firstRenderMs": 77.98535899999996,
+        "cachedRenderMs": 0.06587625000000003,
+        "changedQueryMs": 163.27969339999999,
+        "repeatedSearchMs": 161.34371015000002,
+        "streamingMs": 856.8135580000016,
+        "importedHeapBytes": 43134168,
+        "importedRssBytes": 157741056,
+        "longMessageRetainedHeapBytes": 6693008,
+        "finalHeapBytes": 51165008,
+        "finalRssBytes": 292999168,
+        "run": 5
+      },
+      {
+        "version": "1.0.0",
+        "node": "v22.19.0",
+        "workload": {
+          "width": 100,
+          "transcriptMessages": 200,
+          "assemblyIterations": 50,
+          "streamingUpdates": 40,
+          "markdownBytes": 169890,
+          "sha256": "a19aaa4340a216bb606ab1ac694860c1c74af1ffa6dba36ef6b455ed1a941e2b",
+          "payloadBytes": 247335,
+          "renderedLines": 7000,
+          "matches": 1000
+        },
+        "coldImportMs": 266.05407099999996,
+        "warmImportMs": 0.05544099999997343,
+        "assemblyMs": 0.4168347600000004,
+        "firstRenderMs": 62.63340099999999,
+        "cachedRenderMs": 0.08065895999999953,
+        "changedQueryMs": 33.5239222,
+        "repeatedSearchMs": 0.11842775000000075,
+        "streamingMs": 596.8795430000004,
+        "importedHeapBytes": 32527504,
+        "importedRssBytes": 146231296,
+        "longMessageRetainedHeapBytes": 5816416,
+        "finalHeapBytes": 46558408,
+        "finalRssBytes": 256303104,
+        "run": 5
+      }
+    ],
+    "summary": {
+      "0.84.2": {
+        "coldImportMs": {
+          "median": 359.742207,
+          "min": 353.99120899999997,
+          "max": 370.57062199999996
+        },
+        "warmImportMs": {
+          "median": 0.047747000000015305,
+          "min": 0.04626500000000533,
+          "max": 0.053297000000043226
+        },
+        "assemblyMs": {
+          "median": 0.4132774000000006,
+          "min": 0.40336242000000083,
+          "max": 0.41775757999999996
+        },
+        "firstRenderMs": {
+          "median": 80.90917300000001,
+          "min": 77.98535899999996,
+          "max": 87.40718700000002
+        },
+        "cachedRenderMs": {
+          "median": 0.06643771000000015,
+          "min": 0.06544199000000049,
+          "max": 0.06739937999999995
+        },
+        "changedQueryMs": {
+          "median": 163.27969339999999,
+          "min": 162.3719098,
+          "max": 164.6777292
+        },
+        "repeatedSearchMs": {
+          "median": 161.34371015000002,
+          "min": 158.1511784,
+          "max": 163.66834865
+        },
+        "streamingMs": {
+          "median": 868.8767389999975,
+          "min": 856.6719619999985,
+          "max": 895.5868400000036
+        },
+        "importedHeapBytes": {
+          "median": 43136472,
+          "min": 43119000,
+          "max": 43164208
+        },
+        "importedRssBytes": {
+          "median": 157929472,
+          "min": 156987392,
+          "max": 163749888
+        },
+        "longMessageRetainedHeapBytes": {
+          "median": 6693264,
+          "min": 6670368,
+          "max": 6721416
+        },
+        "finalHeapBytes": {
+          "median": 51092040,
+          "min": 48596112,
+          "max": 51189736
+        },
+        "finalRssBytes": {
+          "median": 292999168,
+          "min": 247758848,
+          "max": 295243776
+        }
+      },
+      "1.0.0": {
+        "coldImportMs": {
+          "median": 266.836415,
+          "min": 263.328302,
+          "max": 280.607268
+        },
+        "warmImportMs": {
+          "median": 0.05811199999999417,
+          "min": 0.05506800000000567,
+          "max": 0.05887599999999793
+        },
+        "assemblyMs": {
+          "median": 0.4108440399999995,
+          "min": 0.40870329999999966,
+          "max": 0.4168347600000004
+        },
+        "firstRenderMs": {
+          "median": 63.28596300000004,
+          "min": 62.63340099999999,
+          "max": 64.81498699999997
+        },
+        "cachedRenderMs": {
+          "median": 0.09766005000000007,
+          "min": 0.07233464999999967,
+          "max": 0.09992549999999994
+        },
+        "changedQueryMs": {
+          "median": 33.5239222,
+          "min": 32.1821468,
+          "max": 35.3978786
+        },
+        "repeatedSearchMs": {
+          "median": 0.12330249999999979,
+          "min": 0.11842775000000075,
+          "max": 0.13450145000000474
+        },
+        "streamingMs": {
+          "median": 596.8795430000004,
+          "min": 594.572340999999,
+          "max": 604.3323430000008
+        },
+        "importedHeapBytes": {
+          "median": 32536296,
+          "min": 32527504,
+          "max": 32547496
+        },
+        "importedRssBytes": {
+          "median": 137080832,
+          "min": 134787072,
+          "max": 148619264
+        },
+        "longMessageRetainedHeapBytes": {
+          "median": 5828072,
+          "min": 5816416,
+          "max": 5831528
+        },
+        "finalHeapBytes": {
+          "median": 46577400,
+          "min": 46558408,
+          "max": 46579592
+        },
+        "finalRssBytes": {
+          "median": 246374400,
+          "min": 234246144,
+          "max": 258146304
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Linux only; no macOS/Windows or human terminal visual inspection",
+    "Real provider is openai-codex only; OpenAI Chat Completions and Anthropic Messages adapters used mocked HTTP SSE",
+    "Synthetic source observation scope and host-authored runtime fixture are not a fully compiled/certified/activated novel",
+    "Microbenchmark is SDK/component work, not end-to-end model latency or whole-NWH memory savings"
+  ]
+}

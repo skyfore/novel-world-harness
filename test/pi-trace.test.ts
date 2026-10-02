@@ -238,7 +238,7 @@ describe("Pi trace conformance", () => {
     const responseBlob = await store.getBlob(response!.blobRef!);
     expect(JSON.stringify(responseBlob)).toContain("Door opened.");
     expect(JSON.stringify(responseBlob)).not.toContain("canary-hidden-reasoning");
-    expect(response?.data.errorMessage).toBe("[REDACTED]");
+    expect(response?.data?.errorMessage).toBe("[REDACTED]");
 
     const persistedTrace = await readTree(store.root);
     for (const secret of [

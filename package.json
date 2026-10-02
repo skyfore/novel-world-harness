@@ -22,6 +22,7 @@
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "check": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit && tsc -p e2e/tsconfig.json --noEmit",
+    "check:pi-tests": "tsc -p tsconfig.pi-tests.json",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "node --import tsx src/cli.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",

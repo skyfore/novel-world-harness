@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": ".", "noEmit": true },
+  "include": [
+    "test/json-arguments.test.ts",
+    "test/pi-session.test.ts",
+    "test/pi-trace.test.ts",
+    "test/pi-rendering.test.ts",
+    "test/pi-request-policy.test.ts",
+    "test/pi-provider-protocol.test.ts",
+    "test/pi-session-compatibility.test.ts",
+    "test/helpers/pi-provider.ts"
+  ]
+}

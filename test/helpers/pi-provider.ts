@@ -34,6 +34,7 @@ export async function mockPiProvider(session: PiAgentSession, options: {
           message.provider = model.provider; message.model = model.id; message.api = model.api;
           message.usage = { input: 100_000, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 100_010,
             cost: { input: 1, output: 0.001, cacheRead: 0, cacheWrite: 0, total: 1.001 } };
+          if (message.stopReason === "pending") throw new Error("Provider fixture must emit a terminal response");
           stream.push({ type: "start", partial: message });
           if (message.stopReason === "error" || message.stopReason === "aborted") {
             stream.push({ type: "error", reason: message.stopReason, error: message });

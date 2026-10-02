@@ -1,4 +1,4 @@
-import { mockPiProvider } from "./helpers/pi-provider.js";
+import { mockPiProvider, piRuntime } from "./helpers/pi-provider.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -415,47 +415,44 @@ describe("PiAgentSession", () => {
     expect(abort).toHaveBeenCalledOnce();
   });
 
-  it("restores the model selected in a previous workspace session", async () => {
+  it("restores an explicitly persisted model selection from a controlled catalog", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-persisted-model-"));
     temporaryDirectories.push(root);
-    const previousApiKey = process.env.ANTHROPIC_API_KEY;
-    process.env.ANTHROPIC_API_KEY = "test-key";
+    const piAgentDir = path.join(root, "pi-agent");
+    await fs.mkdir(piAgentDir);
+    await fs.writeFile(path.join(piAgentDir, "auth.json"), JSON.stringify({
+      "selection-fixture": { type: "api_key", key: "fixture-only" },
+    }));
+    await fs.writeFile(path.join(piAgentDir, "models.json"), JSON.stringify({ providers: {
+      "selection-fixture": { api: "openai-completions", baseUrl: "https://invalid.test/v1", models: ["first", "second"].map(id => ({
+        id, name: id, reasoning: false, input: ["text"], contextWindow: 20_000, maxTokens: 4096,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      })) },
+    } }));
+    await fs.writeFile(path.join(piAgentDir, "settings.json"), JSON.stringify({ defaultProvider: "selection-fixture", defaultModel: "first" }));
+    const options = { workspace: await LocalFileWorkspace.create(root), runtimeDir: path.join(root, "user-runtime"), piAgentDir, saveSession: false };
+    const first = await PiAgentSession.create(options);
+    expect(first.model).toBe("selection-fixture/first");
+    const runtime = piRuntime(first);
+    const selected = runtime.services.modelRuntime.getModel("selection-fixture", "second")!;
+    // Pi 1.0 distinguishes this session's model from a saved default. This is
+    // the same public operation used by the interactive persistent selection.
+    await runtime.session.setModel(selected, { persist: true });
+    await first.dispose();
+    const restarted = await PiAgentSession.create(options);
+    expect(restarted.model).toBe("selection-fixture/second");
+    await restarted.dispose();
+    const savedSettings = JSON.parse(await fs.readFile(path.join(piAgentDir, "settings.json"), "utf8"));
+    expect(savedSettings).toMatchObject({ defaultProvider: "selection-fixture", defaultModel: "second" });
 
-    try {
-      const first = await PiAgentSession.create({
-        workspace: await LocalFileWorkspace.create(root),
-        runtimeDir: path.join(root, "user-runtime"),
-        piAgentDir: path.join(root, "pi-agent"),
-        saveSession: false,
-      });
-      const internals = first as unknown as {
-        runtimeHost: {
-          session: { setModel(model: unknown): Promise<void> };
-          services: { modelRuntime: { getModel(provider: string, modelId: string): unknown } };
-        };
-      };
-      const selectedModel = internals.runtimeHost.services.modelRuntime.getModel("anthropic", "claude-haiku-4-5");
-      expect(selectedModel).toBeDefined();
-      await internals.runtimeHost.session.setModel(selectedModel);
-      await first.dispose();
-
-      const restarted = await PiAgentSession.create({
-        workspace: await LocalFileWorkspace.create(root),
-        runtimeDir: path.join(root, "user-runtime"),
-        piAgentDir: path.join(root, "pi-agent"),
-        saveSession: false,
-      });
-      expect(restarted.model).toBe("anthropic/claude-haiku-4-5");
-      await restarted.dispose();
-
-      const savedSettings = JSON.parse(await fs.readFile(path.join(root, "pi-agent", "settings.json"), "utf8")) as Record<string, unknown>;
-      expect(savedSettings).toMatchObject({
-        defaultProvider: "anthropic",
-        defaultModel: "claude-haiku-4-5",
-      });
-    } finally {
-      if (previousApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-      else process.env.ANTHROPIC_API_KEY = previousApiKey;
-    }
+    const explicitProfile = { provider: "selection-fixture", model: "first", thinkingLevel: "off" as const };
+    const profiled = await PiAgentSession.create({ ...options, profile: explicitProfile });
+    expect(profiled.model).toBe("selection-fixture/first");
+    await profiled.dispose();
+    const overridden = await PiAgentSession.create({ ...options, profile: explicitProfile, model: "selection-fixture/second" });
+    expect(overridden.model).toBe("selection-fixture/second");
+    await overridden.dispose();
+    await expect(PiAgentSession.create({ ...options, model: "selection-fixture/removed" })).rejects.toThrow("could not resolve");
+    expect(JSON.parse(await fs.readFile(path.join(piAgentDir, "settings.json"), "utf8"))).toMatchObject(savedSettings);
   });
 });

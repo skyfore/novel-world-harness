@@ -21,6 +21,11 @@ Novel World Harness owns the parts specific to executable fiction:
 
 The previous direct Anthropic SDK implementation coupled the CLI to one provider and duplicated session/tool-loop behavior already available in Pi. The current adapter resolves the configured profile through Pi and can register a custom provider endpoint when `baseUrl` and `apiProtocol` are supplied. Interactive use is hosted by Pi's public `AgentSessionRuntime` and `InteractiveMode`; an NWH inline extension supplies branding, safe local commands, and guarded file mentions.
 
+The [Pi 1.0.0 upgrade plan](plans/2026-10-03-pi-1-upgrade.zh-CN.md)
+records the compatibility findings, patch migration, validation gates, and
+rollback strategy. It is a proposed upgrade; the current dependency remains
+Pi 0.84.2 with the patch described below.
+
 The pinned Pi package carries a reproducible pnpm patch that adds a generic
 TUI-only transient assistant stream for extension-owned child sessions. The
 stream is mounted in Pi's transcript rather than an editor widget, uses Pi's

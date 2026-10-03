@@ -51,5 +51,6 @@ jobs:
           if-no-files-found: error
       - run: pnpm test:semantic-contracts
       - run: pnpm run check
+      - run: pnpm run check:pi-tests
       - run: pnpm test
       - run: pnpm run build

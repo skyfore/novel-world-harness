@@ -8,12 +8,26 @@ import {
   type TransientAssistantStreamOptions,
 } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
-import { Container } from "@earendil-works/pi-tui";
+import { Container, MouseRegion } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 beforeAll(() => initTheme("dark", false));
 
 describe("Pi-native NWH stream rendering", () => {
+  it("retains Pi 1.0 mouse expansion alongside automatic thinking collapse", () => {
+    const component = new AssistantMessageComponent(fauxAssistantMessage([fauxThinking("mouse-visible reasoning")]),
+      false, getMarkdownTheme(), "Thinking", 1, [], "auto");
+    expect(component.render(80).join("\n")).not.toContain("mouse-visible reasoning");
+    const content = component.children.find(child => child instanceof Container)!;
+    expect(content).toBeInstanceOf(Container);
+    const region = (content as Container).children.find(child => child instanceof MouseRegion) as MouseRegion;
+    expect(region).toBeInstanceOf(MouseRegion);
+    region.handleMouse({ type: "click", button: "left", x: 1, y: 0, screenX: 1, screenY: 0, width: 80, height: 1,
+      shift: false, alt: false, ctrl: false });
+    expect(component.render(80).join("\n")).toContain("mouse-visible reasoning");
+    component.setThinkingDisplayMode("auto");
+    expect(component.render(80).join("\n")).not.toContain("mouse-visible reasoning");
+  });
   it("shows active thinking, collapses it when the block ends, and lets the user expand it", () => {
     const component = new AssistantMessageComponent(
       undefined,
@@ -166,6 +180,7 @@ describe("Pi-native NWH stream rendering", () => {
       type: "thinking_end",
       contentIndex: 0,
       content: "transient child-session reasoning",
+      partial: message,
     });
 
     expect(chatContainer.children).toHaveLength(1);
@@ -197,7 +212,7 @@ describe("Pi-native NWH stream rendering", () => {
     stream.dispose();
     expect(chatContainer.children).toHaveLength(1);
 
-    chatContainer.removeChild(stream.component);
+    chatContainer.removeChild(chatContainer.children[0]!);
     mode.thinkingDisplayMode = "auto";
     mode.addCustomEntryToChat({
       type: "custom",

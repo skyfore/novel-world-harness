@@ -22,6 +22,7 @@
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "check": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit && tsc -p e2e/tsconfig.json --noEmit",
+    "check:pi-tests": "tsc -p tsconfig.pi-tests.json",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "node --import tsx src/cli.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",
@@ -35,9 +36,9 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.84.2",
-    "@earendil-works/pi-coding-agent": "^0.84.2",
-    "@earendil-works/pi-tui": "^0.84.2",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "1.0.0",
+    "@earendil-works/pi-tui": "1.0.0",
     "@fastify/static": "^10.1.3",
     "@tanstack/react-query": "^5.102.8",
     "@tanstack/react-router": "^1.170.32",

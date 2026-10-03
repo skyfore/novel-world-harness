@@ -61,6 +61,8 @@ async function setup(scene: typeof scenes[number]) {
   return { root, source, canon, anchor, mentions, quotation, proposition, event, expression, paths, operation };
 }
 
+// This compile/repair/archive/replay flow uses real filesystem I/O and can
+// exceed Vitest's 5-second unit-test default on shared CI runners.
 it.each(scenes.flatMap(scene => [false, true].map(repair => ({ ...scene, repair }))))("repair=$repair freezes recipient experience through compile, rebuild, memory, inference and replay: $speaker", async scene => {
   const { root, source, canon, event, expression, quotation, proposition, paths, operation } = await setup(scene);
   if (scene.repair) {
@@ -240,7 +242,7 @@ it.each(scenes.flatMap(scene => [false, true].map(repair => ({ ...scene, repair 
   const { evidence: _eventEvidence, ...eventPayload } = event;
   await expect(unverified.tools.find(tool => tool.name === "propose_canonical_event")!.execute("new-legacy", { proposal_id: "new-unverified", payload: { ...eventPayload, id: "new-unverified", observedKnowledge: { version: 1, operations: [operation] } }, evidence_segment_ids: [source.segmentId] } as never, undefined, undefined, {} as never)).rejects.toThrow("ACQUISITION_REQUIRED");
   await expect(canon.getEvent("new-unverified")).rejects.toMatchObject({ code: "ENOENT" });
-});
+}, 20_000);
 it.each(scenes)("separates reading, uncomprehended receipt and mistaken sources: $speaker", async original => {
   for (const mode of ["read", "remote-read", "deceived-misattributed", "ununderstood"] as const) {
     const reading = mode === "read" || mode === "remote-read";

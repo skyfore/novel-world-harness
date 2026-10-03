@@ -335,7 +335,7 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(56);
+    expect(tools).toHaveLength(59);
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "propose_proposition",
       "propose_attribution",
@@ -355,6 +355,9 @@ describe("compiler proposal tools", () => {
       "propose_spatial_relation",
       "find_source_accounting_units",
       "account_source_units",
+      "read_roster_evidence",
+      "preview_role_roster_review",
+      "propose_role_roster_entry",
     ]));
     const eventExecution = tools.find((tool) => tool.name === "propose_event_execution")!;
     expect(eventExecution.description).toContain("Never submit the canonical event's ad-hoc action");

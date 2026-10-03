@@ -1,3 +1,4 @@
+import { jsonArguments } from "./json-arguments.js";
 import { ToolDiagnosticError, type ToolDiagnosticContext } from "./tool-diagnostic.js";
 import { validateToolArguments, type ToolCall } from "@earendil-works/pi-ai";
 import type {
@@ -1242,7 +1243,7 @@ export function withNwhToolRecovery(tool: ToolDefinition, getScope?: () => NwhTo
         type: "toolCall",
         id: "nwh-tool-recovery-preflight",
         name: tool.name,
-        arguments: prepared as Record<string, unknown>,
+        arguments: jsonArguments(prepared),
       } satisfies ToolCall) as never;
     } catch (error) {
       throw actionableToolError(tool.name, error, getScope?.());
@@ -1263,4 +1264,19 @@ export function withNwhToolRecovery(tool: ToolDefinition, getScope?: () => NwhTo
   };
   Object.defineProperty(wrapped, WRAPPED_TOOL, { value: true });
   return wrapped;
+}
+
+/** Run the same argument/recovery contract for a capability-free host domain executor. */
+export async function executeNwhHostTool(
+  tool: ToolDefinition,
+  execute: (id: string, input: Parameters<ToolDefinition["execute"]>[1]) => ReturnType<ToolDefinition["execute"]>,
+  id: string,
+  raw: unknown,
+) {
+  const prepared = withNwhToolRecovery(tool).prepareArguments!(raw);
+  try { return await execute(id, prepared); }
+  catch (error) {
+    if (isAbortFailure(error, undefined)) throw error;
+    throw actionableToolError(tool.name, error);
+  }
 }

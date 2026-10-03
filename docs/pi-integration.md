@@ -21,6 +21,18 @@ Novel World Harness owns the parts specific to executable fiction:
 
 The previous direct Anthropic SDK implementation coupled the CLI to one provider and duplicated session/tool-loop behavior already available in Pi. The current adapter resolves the configured profile through Pi and can register a custom provider endpoint when `baseUrl` and `apiProtocol` are supplied. Interactive use is hosted by Pi's public `AgentSessionRuntime` and `InteractiveMode`; an NWH inline extension supplies branding, safe local commands, and guarded file mentions.
 
+The [Pi 1.0.0 upgrade plan](plans/2026-10-03-pi-1-upgrade.zh-CN.md)
+records the compatibility findings, patch migration, validation gates, and
+rollback strategy. The current dependency is
+Pi 1.0.0 with the patch described below. The dependency versions are exact pins;
+see [patch maintenance notes](../patches/README.md) for its scope and removal conditions.
+
+The [upgrade validation record](plans/2026-10-03-pi-1-upgrade-validation.zh-CN.md)
+contains clean-install, full-suite, provider, terminal, benchmark and rollback
+evidence. Real model checks use an isolated synthetic source and the existing Pi
+OAuth configuration; they do not certify a complete novel. Measured rendering
+and search improvements are workload-specific, not whole-application guarantees.
+
 The pinned Pi package carries a reproducible pnpm patch that adds a generic
 TUI-only transient assistant stream for extension-owned child sessions. The
 stream is mounted in Pi's transcript rather than an editor widget, uses Pi's
@@ -122,3 +134,26 @@ compaction inputs, and branch/tree summarization all use the same projection.
 Safe summaries carry a persistent policy marker, and an unmarked legacy
 summary or transcript with private history fails closed instead of being
 silently reused under a new role.
+
+
+## Pi 1.0 request boundary
+
+Every embedded session loads `nwh-request-policy`, including actor/narrator and
+other sessions with the interactive NWH extension disabled. The full transcript
+head is rebuilt from the current trusted prompt and active tool definitions.
+An outer stream/payload guard checks extension health, host-path privacy, tool
+scope and session history; a failed extension cannot silently permit dispatch.
+Nested tools are subject to the same active scope.
+
+Compiler/player privacy markers remain authoritative across prompt deltas,
+compaction and tree navigation. Tree summary inputs are modified in place because
+Pi retains the original array. Visible dialogue edits are honored in summaries;
+edits that hide private history or host control records stop for host review.
+Original entries and world events are never rewritten by this projection.
+
+Cache warming is disabled by an always-loaded decision handler. A single-use
+runtime dispatch permit also prevents background calls from bypassing the guard
+if a handler disappears during a stream. Global Pi warming preferences are left
+unchanged. Foreground, retry, manual/automatic compaction and branch-summary calls
+share the invocation budget, including final payloads and actual terminal usage
+reports, without counting ordinary responses twice.

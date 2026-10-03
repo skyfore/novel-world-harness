@@ -73,3 +73,11 @@ describe("model request budget", () => {
     try { budget.beginCall({}); } catch (error) { expect(String(error)).not.toContain("do-not-echo-this"); }
   });
 });
+
+it('charges compaction payloads when Pi invokes streamFunction without the agent payload hook',async()=>{
+ const budget=new ModelRequestBudget({maxModelCalls:2,maxRequestBytes:48000,maxTotalPayloadBytes:200000},undefined,{requestBytesMode:'observe'});
+ const stream=vi.fn(async(_model,_context,options)=>{await options.onPayload({summaryInput:'x'.repeat(60000)},model);return {result: async()=>({usage:{}})} as never;});
+ const target={streamFunction:stream,onPayload:undefined} as unknown as BudgetAgent;
+ installModelRequestBudget(target,budget);await target.streamFunction(model,{} as never);
+ expect(budget.snapshot().modelCalls).toBe(1);expect(budget.snapshot().payloads).toBe(1);expect(budget.snapshot().totalPayloadBytes).toBeGreaterThan(60000);
+});

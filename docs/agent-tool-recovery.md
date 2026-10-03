@@ -2046,23 +2046,65 @@ are discoverable, not that every entry must enter this work's context. Copy
 record. On a lookup miss, discover in the same review, copy the exact returned
 ID and correct once. Directory previews are incomplete navigation, never evidence.
 
-A host context window checks serialized context and transformed provider payload
-before the persistent work/parent gates. Its initial soft watermark is 36,000
-UTF-8 bytes measured on actual serialized contexts and provider payloads;
-48,000 bytes remains the hard admission boundary. Tool-result forecasts are
-telemetry only: they cannot terminate a session or consume a handoff. Per-tool
-fixed padding previously caused false pressure during repeated short responses. If required material cannot
-fit even after repacking, stop for a narrower semantic task.
+Novel role review uses Pi's native auto-compaction. Serialized context and
+provider-payload bytes are telemetry, not a tokenizer estimate or model capacity.
+The historical 36,000-byte watermark never stops a request. Persisted
+`maxRequestBytes` remains historical budget metadata and is reported with
+`requestBytesMode: observe` for role-review budgets, including retained parent
+windows. Production role review uses a persisted window of 12 model calls without a
+new host-validated milestone; cumulative call counts remain intact. Per-request
+and cumulative bytes are observations (`requestBytesMode: observe`, `totalBytesMode: observe`). Actor and
+other explicitly enforced request budgets retain their own policy. Existing
+blocked budget records do not become usable merely because policy changed.
 
-The host can hand off an unfinished work at most twice, preserving the work ID,
-source/revisions, all question obligations, and cumulative usage. Access metadata
-retains exact lookup arguments, returned references and cursors; it does not retain
-an authoritative model summary. `read_role_context_history` paginates this same-work
-directory. Copy `accesses[].args` to its named discovery/read tool and follow its
-returned refs. Historical reads do not satisfy new-context evidence gates: decisive
-original evidence and mapped claims must be delivered again. Repeat lookups with
-no new access records do not earn another handoff. Pending publication, changed
-scope, exhausted allowance and non-context failures are host stops, not retries.
+Pi owns threshold compaction and its native overflow compact-and-retry attempt.
+Compaction model calls and payloads consume the same budgets as normal calls.
+A successful compaction invalidates current-context evidence/read deduplication
+state. Before proposing, use `read_role_session_context` with offset=0 and copy
+`nextOffset` until the immutable task/evidence pages are restored; then use the
+ordinary same-source tools for additional decisive originals. A summary cannot
+satisfy evidence gates or change world truth. Unknown page offsets permit one
+corrected discovery-based read, never guessed IDs or unchanged retry loops.
+
+Role work first uses same-session self-review: call `refactor_role_work` with
+an explicit diagnosis, revision plan and unresolved questions, then inspect the
+draft using a read-only preview or original-evidence tool. A rebuild request
+before that step returns an actionable correction; it does not commit anything.
+If the work still needs a fresh session, `request_role_session_rebuild` carries
+the self-review and diagnostics forward. A real provider overflow remaining
+after Pi's native recovery may also enter this fallback. Authentication, rate
+limit, cancellation, unknown transport errors and uncertain writes do not.
+
+Every context-loop round is claimed durably before dispatch, under the same
+parent work and immutable task hash. There are at most THREE sessions, including
+the initial session. Each replacement receives recovery diagnostics plus
+paginated access to the original task. Native compaction, self-review, previews
+and replacement sessions all charge the SAME retained model-call budget. A
+spent round cannot be restarted by process restart or renamed task. Existing
+legacy single-use fallback claims remain stopped for explicit host review.
+
+Draft previews are not commits and may be revised within the loop/call limits.
+Original committed proposal identities, real validation failures, evidence
+requirements and questions persist. A failed committed proposal does not acquire
+extra retries from a fresh session; unresolved proposal/host/scope gates still
+require exact host disposition. Failed or exhausted loops preserve all records.
+
+Every actual model request, including Pi summarization, records context and
+transformed provider-payload observations in the existing run trace BEFORE
+transport. `validation.completed` events with `phase: role-request-observation`
+include work/plan/task identity, session and request ordinal, recovery reason,
+request kind (task/compaction), evidence epoch, last tool, model context-token
+capacity, exact total JSON UTF-8 bytes, per-top-level-section sizes, and per-message
+role/tool/size. Each event links a redacted full snapshot blob for later analysis.
+Byte counts are measured before redaction; token estimates are explicitly unknown
+when unavailable. Actual provider usage remains in response records. Observation
+persistence failure blocks dispatch rather than silently losing a round's data.
+
+Historical host handoff checkpoints remain readable, with their original
+allowances and navigation entries intact. `read_role_context_history` paginates
+same-work access metadata; copy `accesses[].args` to its named discovery/read
+tool. Historical reads do not prove current evidence delivery. Legacy handoff
+paths are for diagnosed recovery, never triggered by a byte observation.
 
 An already blocked legacy work is not automatically reset. Host-only
 `recoverRoleContextBudget`, under the compiler lock, accepts only an unfinished
@@ -2080,16 +2122,21 @@ neighbor text does not enlarge review coverage. Only complete originals actually
 delivered in the new packet satisfy read gates. An exact read already fully
 present in this context returns `alreadyDeliveredInCurrentContext`; use that
 original text, do not retry the read. This pointer does not earn handoff progress.
-Partial ranges and discovery excerpts never become complete-read proofs. If the
-merged packet exceeds its byte allowance, stop for host task decomposition;
+Partial ranges and discovery excerpts never become complete-read proofs. For a diagnostic evidence-packet preview with an explicit byte allowance,
+an oversized merged packet requires host task decomposition;
 never silently drop evidence, reset attempts or replace originals with a summary.
 
-Source-review notes have a total 8000 UTF-8 byte JSON limit, exposed in the tool
-schema description and source packet. Output-size rejection is an argument error,
-not a lookup miss: shorten wording while preserving responsibilities and exact
-references, at most once within the original allowance. Do not re-read evidence
-solely to repair length. If a proposal failure remains when context pressure stops
-the session, retain that failure for host recovery before any repack or scheduling.
+Source-review notes have an observational 8000-byte reference point, not a total
+JSON-size validity constraint. Preserve exact references, all findings and open
+questions even when notes exceed it. Prefer concise observations and use draft
+preview/refactor tools for schema, scope and evidence feedback. Ordinary source,
+part and integration previews share their corresponding submission validators.
+An invalid draft never commits truth or consumes a proposal correction attempt;
+its actual model call and tool feedback are retained in the trace. Citation,
+identity, responsibility, structural schema and committed proposal gates remain.
+
+The following sourceNotesRecovery path concerns retained historical size failures;
+it never implies that the old size validator remains active.
 
 A host may select `sourceNotesRecovery` only for the exact sole unresolved source
 proposal whose only schema defect is total JSON byte size. Bind the original work
@@ -2131,7 +2178,7 @@ propose_role_source_part writes only narrow unvalidated notes into the existing
 proposal journal, bound to the plan, parent, packet and partition-bundle hashes.
 Copy IDs from part.packet.fragments[].unitId. Correct invalid arguments once;
 unchanged submissions, interrupted/stale parts and a second failure stop. Each
-part uses the existing 8000-byte source-note limit and provides a read-only
+part uses the shared source-note schema and provides a read-only
 preview_role_source_part for exact byte measurement before committing. Actual
 serialized request gates govern the combined originals and drafts; no per-part
 model budget is granted. If required responsibilities cannot fit, stop rather
@@ -2141,3 +2188,188 @@ fails. Pi must finally inspect the complete original core, integrate every
 core-related finding, and retain all part questions verbatim in order. Only the
 ordinary validated parent source proposal creates a source receipt. Integration
 failure preserves partial proposals and all question obligations.
+
+### Host revalidation of legacy source-part size failures
+
+`reviewLegacySourcePart` is host-only and previews before apply. It accepts only
+an unchanged retained part whose complete failed history reports solely the
+retired 1800-byte validator. It reconstructs the original immutable packets,
+checks every cited unit, current roster/structure, both parent invocation markers,
+and retained budget. The shared structural source-note validator remains binding; note bytes
+are observational. Apply requires the exact preview `authorityHash` and appends a host
+revalidation to the original proposal journal; it never changes prose, clears
+history, grants model calls, creates source coverage, or certifies semantics.
+
+The host may resume that original partition invocation once with
+`sourcePartContinuation`, the exact single `sourceWorkScope`, and the original
+`partitionedSourceWorkIds`. A durable claim prevents a second continuation even
+if integration fails. Pi must inspect the originals and integrate all retained
+findings/questions through the ordinary parent validator. Stale packets,
+non-size failures, unknown or exhausted budgets, pending publication, changed
+parent scope and repeated claims stop without model retries. Discover exact IDs
+in the retained same-source role-work plan and obligation journal; never guess
+or rotate IDs. Revalidation is not an automatic retry of a rejected proposal.
+
+### Original parent integration correction after context pressure
+
+`inspectIntegrationCorrection` provides a read-only host preview for the sole
+original parent binding failure after all original evidence parts succeeded.
+It verifies source/roster/structure, part packets, the consumed continuation,
+original invocation markers, exact failed tool input in the stopped trace, and
+unchanged retained usage. Only a trace-proven context stop with one unused
+proposal correction and remaining model calls is eligible. This is a distinct
+parent-proposal correction, not another part continuation or a budget grant.
+
+An explicitly selected `sourceIntegrationCorrection` must match that preview's
+`authorityHash` in an exact single-work `sourceWorkScope`. Under the compiler
+lock it claims the original correction once before transport. Failure, interruption
+or zero output consumes that claim; never repeat it, rotate IDs, reset attempts,
+clear a budget, or accept a draft manually.
+
+The packet contains all assigned core bytes and complete originals for every
+cited unit, merging overlaps and indexing identifiers losslessly. The host keeps
+the exact ID dictionary and immutable name/reference bindings. Copy every
+`bindings[].bindingIndex` once into `findings[].bindingIndex`; provide an
+original-evidence-supported observation for each. The host restores exact names,
+core references and all part questions verbatim, then measures expanded size and preflights
+binding completeness through the ordinary source validator before commitment.
+The failed proposal remains in the packet and journal. This creates only a source
+review receipt, never world truth, a global review, or certification. Unsupported
+bindings, missing indexes, unchanged correction, stale scope, a second failure,
+context pressure and budget stops preserve the failure and forbid further retries.
+
+For host-selected partitioned source work, `compactSourceIntegration` uses the
+same immutable binding representation without a prior failed parent proposal.
+It delivers the whole core plus complete originals for every part citation,
+merges overlapping text and keeps the ID dictionary host-side. The optional
+`preview_role_source_integration` checks expanded bindings and bytes without
+recording a proposal; it still uses the parent's model-call budget. All actual
+submissions pass the ordinary source validator. Missing/duplicate indexes,
+unsupported observations remain failures; expansion bytes are observational. Unchanged
+inputs, consumed invocation allowances and context/budget stops cannot be retried.
+This mode consumes the existing partition invocation and creates no new allowance.
+
+Source-part preview and commit share the same structural schema and citation-scope
+validator. A foreign `findings[].unitIds` makes preview invalid without creating
+a proposal failure. Its diagnostic names the invalid IDs and directs the model
+to copy exact `part.packet.fragments[].unitId` values. Preview success is only
+structural/scope validation, not semantic support. A real failed submission
+retains its original identity and correction bound; context stops still require
+host recovery rather than another unchanged call.
+
+### Original source-part citation correction after context pressure
+
+`inspectPartCitationCorrection` is a read-only host inspection for the sole
+failed `propose_role_source_part` citation submission. It requires one unused
+correction, unchanged source/plan/part packets, valid preceding receipts, both
+original invocation markers, unchanged retained budget, and the exact trace
+proving context pressure after that failed input. Sufficient original calls must
+remain for the unfinished parts and parent integration. No budget or invocation
+allowance is added.
+
+An explicitly scoped `sourcePartCitationCorrection` binds the preview authority
+and claims the interrupted partition once before model dispatch. The failed
+proposal and complete assigned part are delivered again. Copy exact
+`part.packet.fragments[].unitId` values from that same-scope packet; do not guess
+IDs or use another part. Preserve findings in name/order, existing valid refs and
+all open questions verbatim. Stop if the original evidence cannot support a
+finding. One corrected submission is allowed; failure, transport uncertainty,
+context pressure, stale scope or consumed claim forbids another launch. The
+remaining partition runs under the same parent budget and ordinary validators.
+No source coverage is recorded until parent integration succeeds; no global
+closure or certification follows from this local recovery.
+
+### Retired byte-watermark integration continuation
+
+`inspectIntegrationResume` is a read-only host preview for an unfinished parent
+with every original part receipt validated, no parent submission, no unresolved
+proposals, unchanged source/plan/context/budget, and a matching failed trace with
+zero model requests/tool submissions proving the retired byte-watermark stop.
+`sourceIntegrationResume` must bind that authority to one selected partitioned
+work and claims continuation once before dispatch. It does not repeat the parts,
+reset invocation markers, grant calls, or pardon a failed model proposal.
+Changed authority, incomplete evidence, spent budget, uncertain state, or a
+consumed claim stops. Native Pi context recovery then applies under the same
+remaining budget; the parent receipt and all later audits are still required.
+
+### Retained integration rejected only by obsolete total note size
+
+`reviewIntegrationSize` previews/revalidates only the exact sole failed parent
+integration whose entire failed history reports the retired total-byte validator.
+The host reconstructs original part packets and immutable bindings, validates
+all citations and questions, and expands the LAST retained model input without
+rewriting its text. The authority binds history, original source/context/parts,
+budget hash and expanded proposal hash. Apply under the compiler lock with that
+exact authority. Append a host-reviewed success through the ordinary source
+submission lifecycle; preserve every failed entry and invocation marker and do
+not charge a new model call or grant budget. Other defects, stale authority,
+already-reviewed state or missing parts stop. This produces only a local review
+receipt, not semantic certification or activation.
+
+### Host continuation after an aggregate call limit
+
+`inspectParentCallContinuation` previews one explicit revision of the original
+`continuation-window`, capped at 120 additional calls. It binds the exhausted
+budget, unchanged stopped child usage, failed run, source/batch, implementation
+and user-authorized host audit reference. `grantParentCallContinuation` requires
+that exact preview hash under the compiler lock. It preserves the blocked record
+and writes an immutable grant; `openParentCallContinuation` persists cumulative
+usage separately, starting from all previously charged calls and bytes. Pending
+publication, changed hashes, unknown failures and exhausted child budgets stop.
+The grant cannot be repeated, silently enlarged or used to reset a work budget.
+
+For the exact stopped source work, `sourceParentBudgetResume` must match this
+grant and an exact single-work scope. It verifies the retained trace, task hash,
+first context claim, unchanged child budget and absence of unresolved proposals.
+The replacement consumes the next original context round and invocation; the
+persisted work budget, three-session limit and proposal correction limits remain.
+Restore the immutable task with `read_role_session_context` and copy `nextOffset`
+until complete before proposing; summaries do not satisfy evidence gates.
+Changed scope, a previously consumed continuation or another stop forbids an
+unchanged retry. Discover identities in the original role plan and failed trace,
+never guess them or create replacement work IDs. Completion remains subject to
+all original source, claim and audit denominators.
+
+
+### Progress-controlled role compilation
+
+Production role work uses `modelCallsMode: progress`. Its `maxModelCalls: 12`
+is a stall window, not a lifetime allowance: stop before a thirteenth call without
+a new host-validated milestone. The host records the first valid draft, a
+validated terminal subtask receipt, or complete restoration of the exact original
+task after actual context recovery. Keys bind the immutable logical task. Every
+milestone counts once across tool names, reworded drafts and replacement sessions.
+Generic reads, new output hashes, model self-assessments, heartbeats, invalid
+previews and failed proposals do not advance this window. A draft milestone is
+structural/scope progress only; it is never certification or committed truth.
+
+Cumulative calls, payload bytes, validated milestones and the last-progress call
+are persisted together before further dispatch. A fresh process cannot clear
+stalled calls or replay an old milestone. A `no-progress` stop, prior blocked
+state, failed publication, exhausted correction or stale scope remains a host
+stop; never retry unchanged, rename work, delete counters or pardon a failure.
+An original task already present in a fresh context need not be read again using
+`read_role_session_context`. After recovery, use offset=0 and copy `nextOffset`
+until the immutable task is completely restored; additional decisive originals
+must still be delivered through ordinary same-source reads.
+
+Whole-plan aggregate calls are observational under the explicitly selected
+`validated-role-progress/v1` policy. The scheduler visits the finite original
+source-work plan, verifies each receipt, preserves blocked entries in that
+denominator and never rotates IDs to manufacture progress. Stop on host/state
+errors or unresolved proposals; a stalled work cannot be repeatedly rescheduled.
+There is no automatic global stop at 120 or 240 calls while validated work is
+advancing. An explicitly requested spending/time limit remains a separate bound.
+
+`inspectRoleProgressContinuation` previews migration of a retained aggregate
+call-limit stop. It binds both historical budgets, unchanged child usage, the
+failed trace, source/roster/structure, original role plan and validated receipts.
+`grantRoleProgressContinuation` applies that exact preview under the compiler
+lock using the existing user authorization; no model tool can grant it. Both
+blocked historical records remain immutable. A separate continuation starts at
+all charged calls/bytes with `modelCallsMode: observe`; the original per-work
+stall windows, session claims and proposal histories still govern execution.
+Pending writes, changed scope, stale proof or exhausted child progress windows
+stop migration. For its exact interrupted source work, use the existing
+`sourceParentBudgetResume` with `policy: progress`; this consumes the next
+original context round and invocation once, rather than creating another task.

@@ -168,6 +168,8 @@ const hostReviewSchema = z.object({
   accountingRefinementCorrection: accountingRefinementCorrectionSchema.optional(),
   annotationSelectorCorrection: annotationSelectorCorrectionSchema.optional(),
   roleRosterCorrection: roleRosterCorrectionSchema.optional(),
+  sourceIntegrationRevalidation: z.object({ authorityHash: sha256Schema, historyHash: sha256Schema }).strict().optional(),
+  sourcePartRevalidation: z.object({ authorityHash: sha256Schema, historyHash: sha256Schema }).strict().optional(),
 }).strict();
 const attemptSchema = z.object({
   tool: z.string(), proposalId: z.string(), inputHash: z.string(), input: z.unknown(),
@@ -446,9 +448,39 @@ export class CompilerProposalObligations {
   }
   /** Consult durable state before creating a model session, including after timeouts. */
   assertModelRecoveryAllowed() {
-    const blocked = this.requiringHostReview();
+    const host=hostProposalCorrection.getStore();
+    const blocked = this.requiringHostReview().filter(item=>!(host?.hostReview.sourceIntegrationRevalidation&&!host.used&&host.root===this.root&&host.sourceId===this.sourceId&&host.batchId===this.batchId
+      &&host.tool===item.tool&&host.proposalId===item.proposalId&&contentHash(this.history(item.tool,item.proposalId).at(-1))===host.priorHash));
     if (blocked.length) throw new CompilerHostReviewRequiredError(blocked.map((item) =>
       `${item.tool} proposal_id=${item.proposalId}: ${item.status === "running" ? "interrupted tool result" : "the original and corrected inputs both failed"}: ${item.diagnostic}`).join("\n"));
+  }
+  /** Host-only validator migration: retains the exact proposal and all failed attempts.
+   * The source-part reviewer verifies immutable packets before calling this method.
+   * This accepts navigation notes only, never world truth or parent coverage. */
+  recordSourcePartRevalidation(proposalId: string, historyHash: string, authorityHash: string, auditRef: string) {
+    const tool = "propose_role_source_part", history = this.history(tool, proposalId), last = history.at(-1);
+    if (!auditRef.trim() || !/^[a-f0-9]{64}$/.test(authorityHash) || contentHash(history) !== historyHash
+      || last?.status !== "failed" || history.some(a => a.hostReview || !["running", "failed"].includes(a.status))) {
+      throw new CompilerHostReviewRequiredError("stale or already reviewed source-part history");
+    }
+    const ledger = this.read({ tool, proposalId });
+    ledger.attempts.push({ ...last, status: "succeeded", diagnostic: "Exact retained notes revalidated by the host; parent integration and semantic audit remain required.",
+      updatedAt: new Date().toISOString(), hostReview: { reason: "Legacy part-size validator replaced by the shared source-note schema",
+        auditRef, sourcePartRevalidation: { authorityHash, historyHash } } });
+    this.write(ledger);
+  }
+  /** Host-only migration of source integration rejected solely by retired byte
+   * validation. Caller reconstructs exact original bindings under compiler lock. */
+  async withHostSourceIntegrationRevalidation<T>(input:unknown,historyHash:string,authorityHash:string,auditRef:string,action:()=>Promise<T>){
+    const tool='propose_role_source_review',identity=CompilerProposalObligations.identity(tool,input),history=this.history(tool,identity.proposalId),last=history.at(-1);
+    if(!auditRef.trim()||!/^[a-f0-9]{64}$/.test(authorityHash)||hostProposalCorrection.getStore()||last?.status!=='failed'||contentHash(history)!==historyHash
+      ||history.some(a=>a.hostReview||!['running','failed'].includes(a.status)))throw new Error('Source integration revalidation authority is stale or consumed');
+    for(const failed of history.filter(a=>a.status==='failed')){
+      let errors;try{errors=JSON.parse(failed.diagnostic);}catch{throw new Error('Not a pure legacy source-note size failure');}
+      if(!Array.isArray(errors)||errors.length!==1||errors[0].code!=='custom'||JSON.stringify(errors[0].path)!=='[]'||errors[0].message!=='Source work notes must fit 8000 UTF-8 bytes; keep precise evidence refs and open questions, not copied source passages')throw new Error('Not a pure legacy source-note size failure');
+    }
+    return hostProposalCorrection.run({root:this.root,sourceId:this.sourceId,batchId:this.batchId,...identity,priorHash:contentHash(last),used:false,
+      hostReview:{reason:'Exact retained model integration revalidated after byte size became observational; no semantic rewrite or budget reset',auditRef,sourceIntegrationRevalidation:{historyHash,authorityHash}}},action);
   }
   /** Under the compiler lock, run one exact source-reviewed selector correction through normal tools.
    * Failures remain unresolved until the tool actually succeeds; no restart receives this authority.

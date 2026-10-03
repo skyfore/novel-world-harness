@@ -7,7 +7,10 @@ import { ModelRequestBudget, type ModelRequestLimits, type ModelRequestUsage } f
 import { RoleReviewWorkStore, roleWorkStop } from "./role-review-work.js";
 import { TraceStore } from "../trace/store.js";
 const counter = z.number().int().nonnegative();
-const stateSchema = z.object({ usage: z.object({ modelCalls: counter, payloads: counter, totalPayloadBytes: counter, largestRequestBytes: counter }).strict(), blocked: z.boolean(), failure: z.object({ code: z.string(), message: z.string() }).strict().optional() }).strict();
+const stateSchema = z.object({ usage: z.object({ modelCalls: counter, payloads: counter, totalPayloadBytes: counter, largestRequestBytes: counter }).strict(), blocked: z.boolean(), failure: z.object({ code: z.string(), message: z.string() }).strict().optional(),
+  progress: z.object({lastProgressCall:counter,milestones:z.array(z.string().min(1))}).strict().optional() }).strict()
+  .refine(state=>!state.progress||(state.progress.lastProgressCall<=state.usage.modelCalls
+    &&new Set(state.progress.milestones).size===state.progress.milestones.length),"Invalid retained progress state");
 const grantSchema = z.object({ version: z.literal(1), planHash: z.string(), workId: z.string(), priorBudgetHash: z.string(), failedRunId: z.string(), failureTraceHash: z.string(), implementationRef: z.string().min(1), at: z.string(), reason: z.literal("request-size"), initial: stateSchema }).strict();
 function budgetPath(root: string, planHash: string, workId: string) { return path.join(worldStorageRoot(root), "compiler", "role-review-work", "budgets", planHash, `${contentHash(workId)}.json`); }
 function readBudget(file: string, planHash: string, workId: string, limits?: ModelRequestLimits) {
@@ -16,9 +19,16 @@ function readBudget(file: string, planHash: string, workId: string, limits?: Mod
   if (record.planHash !== planHash || record.workId !== workId || (limits && contentHash(record.limits) !== contentHash(limits)) || record.hash !== contentHash({ planHash, workId, limits: record.limits, state })) throw roleWorkStop("budget scope or integrity changed");
   return { ...record, state } as { hash: string; limits: ModelRequestLimits; state: z.infer<typeof stateSchema> };
 }
+
+/** Read-only preflight; never initializes usage or grants another allowance. */
+export function inspectRoleReviewBudget(root: string, planHash: string, workId: string) {
+  const base = budgetPath(root, planHash, workId);
+  if (fs.existsSync(`${base}.context-recovery.json`)) throw roleWorkStop("part revalidation does not support context-recovered budgets");
+  return readBudget(base, planHash, workId);
+}
 /** Charged before transport. Recovery uses an immutable grant + separate usage
  * continuation; the original blocked budget is never overwritten or cleared. */
-export function roleReviewBudget(root: string, planHash: string, workId: string, limits: ModelRequestLimits, requireExisting = false) {
+export function roleReviewBudget(root: string, planHash: string, workId: string, limits: ModelRequestLimits, requireExisting = false, modelCallsMode: "enforce" | "progress" = "enforce") {
   const base = budgetPath(root, planHash, workId);
   fs.mkdirSync(path.dirname(base), { recursive: true, mode: 0o700 });
   let file = base, initial: z.infer<typeof stateSchema> | undefined;
@@ -42,7 +52,13 @@ export function roleReviewBudget(root: string, planHash: string, workId: string,
   };
   initial ??= { usage: { modelCalls: 0, payloads: 0, totalPayloadBytes: 0, largestRequestBytes: 0 }, blocked: false };
   if (!fs.existsSync(file)) save(initial);
-  return new ModelRequestBudget(limits, { initial, save });
+  // Production review uses a rolling stall window; legacy host recovery can
+  // still explicitly enforce its retained fixed allowance. Neither resets usage.
+  return new ModelRequestBudget(limits, { initial, save }, { modelCallsMode, requestBytesMode: "observe", totalBytesMode: "observe" });
+}
+
+export function remainingRoleProgressCalls(budget: {limits:ModelRequestLimits;state:z.infer<typeof stateSchema>}) {
+  return Math.max(0,budget.limits.maxModelCalls-(budget.state.usage.modelCalls-(budget.state.progress?.lastProgressCall??0)));
 }
 
 /** Host-only under the compiler lock. A trace-proven request-size stop can be

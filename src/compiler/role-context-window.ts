@@ -12,8 +12,8 @@ export class RoleContextPressure extends Error {
     super(`ROLE_CONTEXT_REPACK_REQUIRED: ${phase} requires ${bytes} bytes; host must repack this work with its existing budget and evidence obligations.`);
   }
 }
-/** First in the budget chain: reject before charging/transport. No allowances are
- * owned here; actual calls/bytes are charged to the persistent work and parent. */
+/** Observe context sizes without predicting model capacity. Pi owns compaction.
+ * Explicit pressure is reserved for a diagnosed recovery failure, never bytes. */
 export class RoleContextWindow extends ModelRequestBudget {
   pressure?: RoleContextPressure;
   private measured = 0;
@@ -28,8 +28,9 @@ export class RoleContextWindow extends ModelRequestBudget {
     this.measured = Buffer.byteLength(JSON.stringify(value));
     const fields = value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key,item])=>[key,Buffer.byteLength(JSON.stringify(item)??'')])) : undefined;
     this.observe({phase,bytes:this.measured,fields});
-    if (this.measured > ROLE_CONTEXT_SOFT_BYTES) throw (this.pressure = new RoleContextPressure(this.measured, phase));
+
   }
+  requestFallback(phase: string) { this.pressure = new RoleContextPressure(this.measured, phase); return this.pressure; }
   /** Forecast is diagnostic, never a reason to end a session. Admission above
    * measures the actual context and provider payload before transport. */
   observeResult(args: unknown, result: unknown) {
@@ -39,7 +40,7 @@ export class RoleContextWindow extends ModelRequestBudget {
     this.observe({phase:'tool-result',bytes:this.measured,argumentBytes,resultBytes});
   }
   private observe(item:typeof this.observations[number]){this.observations.push(item);if(this.observations.length>64)this.observations.shift();}
-  metrics(){return {softBytes:ROLE_CONTEXT_SOFT_BYTES,forecastBytes:this.forecastBytes,observations:this.observations};}
+  metrics(){return {observationalWatermarkBytes:ROLE_CONTEXT_SOFT_BYTES,forecastBytes:this.forecastBytes,observations:this.observations};}
 }
 const accessSchema = z.object({
   id: z.string(), tool: z.string(), args: z.record(z.string(), z.unknown()), responseHash: z.string(),

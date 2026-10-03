@@ -81,6 +81,8 @@ export type PiAgentSessionOptions = {
   /** Observation-only trace for one isolated Pi invocation. */
   trace?: PiTraceInvocationInput;
   /** One caller-owned budget shared by all model steps and protocol retries. */
+  autoCompaction?: boolean;
+  onRequestObservation?: import("./request-observation.js").RequestObserver;
   requestBudget?: ModelRequestBudget | readonly ModelRequestBudget[];
 };
 
@@ -783,6 +785,7 @@ export class PiAgentSession {
       );
       const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
       const nwhSettingsOverrides = {
+        ...(this.options.autoCompaction === undefined ? {} : { compaction: { enabled: this.options.autoCompaction } }),
         quietStartup: true,
         enableInstallTelemetry: false,
         enableAnalytics: false,
@@ -882,7 +885,9 @@ export class PiAgentSession {
           customTools: configuredTools,
         });
       requestPolicy.install(created.session, this.runtime);
-      if (this.requestBudgets.length) installModelRequestBudget(created.session.agent, this.requestBudgets);
+      if (this.requestBudgets.length || this.options.onRequestObservation) {
+        installModelRequestBudget(created.session.agent, this.requestBudgets, this.options.onRequestObservation);
+      }
       if (this.options.trackLastOpenedSession && created.session.sessionFile) {
         await writeLastOpenedSession(this.options.workspace.root, this.stateDir, created.session.sessionFile);
       }

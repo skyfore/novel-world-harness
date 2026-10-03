@@ -26,8 +26,9 @@ export const roleSourceNotesSchema = z.object({
   summary: z.string().trim().min(1).max(1600), findings: z.array(findingSchema).max(64),
   openQuestions: z.array(z.string().trim().min(1).max(600)).max(24),
 }).strict();
-export const roleSourceWorkSchema = roleSourceNotesSchema.refine(value => Buffer.byteLength(JSON.stringify(value)) <= ROLE_SOURCE_NOTES_MAX_BYTES, "Source work notes must fit 8000 UTF-8 bytes; keep precise evidence refs and open questions, not copied source passages")
-  .describe("The complete JSON proposal must fit 8000 UTF-8 bytes, including IDs, keys and punctuation. Keep concise observations and all unresolved questions; do not copy source passages or drop responsibilities to fit. If it cannot fit, stop for host task decomposition.");
+/** Size is an observation, not an evidence/semantic validity condition. */
+export const roleSourceWorkSchema = roleSourceNotesSchema
+  .describe("Preserve all findings, exact evidence references and unresolved questions. Prefer concise notes; total UTF-8 JSON size is observed, never a reason to omit responsibilities or reject a supported proposal.");
 export const roleAuditWorkSchema = z.object({
   rationale: z.string().trim().min(1).max(2000),
   missingMajorCharacters: z.array(z.object({ name: z.string().trim().min(1).max(200),

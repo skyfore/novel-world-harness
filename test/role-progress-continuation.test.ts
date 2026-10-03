@@ -1,0 +1,63 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {afterEach,expect,it} from 'vitest';
+import {createEvidenceFixture} from './helpers/evidence.js';
+import {ensureSourceStructure} from '../src/compiler/structure.js';
+import {CanonicalModelStore} from '../src/world/canonical-model.js';
+import {loadCurrentRoleRoster} from '../src/compiler/role-roster-tools.js';
+import {RoleReviewWorkStore} from '../src/compiler/role-review-work.js';
+import {roleReviewBudget} from '../src/compiler/role-review-budget.js';
+import {inspectParentCallContinuation,grantParentCallContinuation,openParentCallContinuation,readParentCallUsage} from '../src/compiler/role-call-budget-continuation.js';
+import {inspectRoleProgressContinuation,grantRoleProgressContinuation,openRoleProgressContinuation,readRoleProgressContinuation} from '../src/compiler/role-progress-continuation.js';
+import {TraceStore} from '../src/trace/store.js';
+import {TraceRecorder} from '../src/trace/recorder.js';
+import {contentHash} from '../src/world/canonical.js';
+import {inspectRoleReviewBudget} from '../src/compiler/role-review-budget.js';
+const roots:string[]=[];
+afterEach(async()=>{await Promise.all(roots.splice(0).map(root=>fs.rm(root,{recursive:true,force:true})));});
+async function fixture(){
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'role-progress-policy-'));roots.push(root);
+ const f=await createEvidenceFixture(root,'Hero opens the door.\nHero walks outside.\n');await ensureSourceStructure(root,f.source);
+ await new CanonicalModelStore(root).putEntity({id:'hero',canonicalName:'Hero',kind:'character',aliases:[],evidence:f.evidence('Hero')});
+ const {roster,structure}=await loadCurrentRoleRoster(root,f.source.id),batchId=`role-roster-${f.source.id}-fixture`;
+ const plan={version:1 as const,sourceId:f.source.id,sourceHash:roster.sourceSha256,subjectHash:roster.subjectHash,batchId,structureHash:contentHash(structure),spans:[{start:0,end:21},{start:21,end:f.source.bytes}],legacyDraftHashes:[]};
+ const store=await RoleReviewWorkStore.open(root,plan),workId=store.workId('source',1),parentPlan=contentHash('parent');
+ await store.submit('source',0,{summary:'Reviewed the first source span.',findings:[],openQuestions:[]},()=>{});
+ const limits={maxModelCalls:2,maxRequestBytes:48000,maxTotalPayloadBytes:100000};
+ const parent=roleReviewBudget(root,parentPlan,'continuation-window',limits);parent.beginCall({});parent.beginCall({});expect(()=>parent.beginCall({})).toThrow('model-call limit');parent.close();
+ const child=roleReviewBudget(root,store.planHash,workId,{...limits,maxModelCalls:12});child.beginCall({});
+ const traceStop=async()=>{const r=await TraceRecorder.start(new TraceStore(root),{kind:'prepare',sourceId:f.source.id,operationId:batchId});await r.record('validation.completed',{phase:'role-review-work',workId,planHash:store.planHash});await r.record('validation.completed',{phase:'role-review-work-stopped',workId,budget:child.report()});await r.finish('failed',{}, {code:'ROLE_REVIEW_WORK_FAILED',message:'Error: Model request budget exhausted: model-call limit reached.',retryable:false});return r.manifest.id;};
+ const initialRun=await traceStop();
+ const original={planHash:parentPlan,workId:'continuation-window',expectedBudgetHash:inspectRoleReviewBudget(root,parentPlan,'continuation-window').hash,sourceId:f.source.id,batchId,failedRunId:initialRun,additionalCalls:2,auditRef:'old bounded continuation',implementationRef:'fixture'};
+ const p=await inspectParentCallContinuation(root,original);await grantParentCallContinuation(root,original,p.authorityHash);
+ const prior=openParentCallContinuation(root,original);prior.beginCall({});prior.beginCall({});expect(()=>prior.beginCall({})).toThrow('model-call limit');prior.close();
+ child.beginCall({});const failedRunId=await traceStop();child.close();
+ const retained=readParentCallUsage(root,original);
+ const input={planHash:parentPlan,workId:'continuation-window',expectedUsageHash:retained.hash,failedRunId,auditRef:'user-authorized-progress-policy',implementationRef:'fixture'};
+ return {root,input,retained,store,workId};
+}
+it('replaces only the aggregate policy and keeps every former charge and blocked record intact',async()=>{
+ const f=await fixture(),p=await inspectRoleProgressContinuation(f.root,f.input);
+ expect(p.authority.receipts).toHaveLength(1);expect(p.authority.initial.usage.modelCalls).toBe(4);
+ await expect(fs.stat(p.file)).rejects.toMatchObject({code:'ENOENT'});
+ await grantRoleProgressContinuation(f.root,f.input,p.authorityHash);
+ const budget=openRoleProgressContinuation(f.root,f.input);for(let i=0;i<20;i++)budget.beginCall({});budget.close();
+ const resumed=openRoleProgressContinuation(f.root,f.input);expect(resumed.snapshot().modelCalls).toBe(24);expect(resumed.report().modelCallsMode).toBe('observe');resumed.close();
+ expect(readParentCallUsage(f.root,f.input)).toEqual(f.retained);
+ await expect(grantRoleProgressContinuation(f.root,f.input,p.authorityHash)).rejects.toMatchObject({code:'EEXIST'});
+});
+it('rejects stale or unrelated authority and keeps failed publication recoverable',async()=>{
+ const f=await fixture(),p=await inspectRoleProgressContinuation(f.root,f.input);
+ await expect(inspectRoleProgressContinuation(f.root,{...f.input,expectedUsageHash:contentHash('wrong')})).rejects.toThrow('stop changed');
+ await expect(grantRoleProgressContinuation(f.root,f.input,contentHash('wrong'))).rejects.toThrow('preview changed');
+ await grantRoleProgressContinuation(f.root,f.input,p.authorityHash);
+ await fs.writeFile(p.file+'.usage.json.pending','retained charge');
+ expect(()=>openRoleProgressContinuation(f.root,f.input)).toThrow('uncertain aggregate');
+ const record=JSON.parse(await fs.readFile(p.file,'utf8'));record.authority.initial.usage.modelCalls=0;record.authorityHash=contentHash(record.authority);await fs.writeFile(p.file,JSON.stringify(record));
+ expect(()=>readRoleProgressContinuation(f.root,f.input)).toThrow('lineage changed');
+});
+it('refuses policy migration when the unfinished child changed after the stop',async()=>{
+ const f=await fixture();const child=roleReviewBudget(f.root,f.store.planHash,f.workId,{maxModelCalls:12,maxRequestBytes:48000,maxTotalPayloadBytes:100000},true);child.beginCall({});child.close();
+ await expect(inspectRoleProgressContinuation(f.root,f.input)).rejects.toThrow('stopped child changed');
+});

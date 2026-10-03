@@ -1,9 +1,11 @@
+import {describeRequest} from "../agent/request-observation.js";
+import {roleProgressTools} from "./role-validated-progress.js";
 import { RoleContextWindow, RoleContextPressure, RoleContextCheckpoint } from "../compiler/role-context-window.js";
 import { sourceNotesCorrection, assertSourceNotesCorrection } from "../compiler/role-source-correction.js";
 import { RoleEvidenceDelivery } from "../compiler/role-evidence-delivery.js";
 import { roleSourceParts } from "../compiler/role-source-parts.js";
 import { reviewSourceParts } from "./role-source-part-review.js";
-import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ToolDefinition, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 import { PiAgentSession } from "../agent/pi-session.js";
@@ -27,7 +29,7 @@ import { roleRosterEntrySchema } from "../compiler/role-roster.js";
 import { ROLE_CLAIM_AUDIT_TOOL } from "../compiler/role-review-work.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 
-export type RoleWorkInvocation = { workId: string; prompt: string; deliveredUnitIds?: string[]; retainedBudgetRequired?: boolean; contextWindow?: RoleContextWindow; sourcePage?:number; tools: ToolDefinition[]; complete: () => boolean };
+export type RoleWorkInvocation = { workId: string; prompt: string; deliveredUnitIds?: string[]; retainedBudgetRequired?: boolean; contextWindow?: RoleContextWindow; logicalTaskHash?:string; sessionOrdinal?:number; recoveryReason?:string; onContextEvent?: (event:AgentSessionEvent)=>void; onContextInvalidated?:()=>void; onContextRestored?:()=>void; sourcePage?:number; tools: ToolDefinition[]; complete: () => boolean };
 export type RoleWorkRunner = (work: RoleWorkInvocation) => Promise<void>;
 export type BoundedRoleReviewOptions = CompileCommandOptions & {
   sourceId: string;
@@ -36,6 +38,12 @@ export type BoundedRoleReviewOptions = CompileCommandOptions & {
   sourceWorkScope?: { planHash: string; workIds: string[] };
   sourceNotesRecovery?: { workId: string; failedInputHash: string };
   partitionedSourceWorkIds?: string[];
+  sourcePartContinuation?: { workId: string; authorityHash: string };
+  sourcePartCitationCorrection?: import('../compiler/role-part-citation-correction.js').PartCitationCorrection;
+  sourceIntegrationResume?: import('../compiler/role-integration-resume.js').IntegrationResume;
+  sourceIntegrationCorrection?: import('./role-integration-correction.js').IntegrationCorrection;
+  compactSourceIntegration?: boolean;
+  sourceParentBudgetResume?: import('./role-session-context.js').ParentBudgetSessionResume;
 };
 export const ROLE_WORK_LIMITS = { maxModelCalls: 12, maxRequestBytes: 48_000, maxTotalPayloadBytes: 1_572_864 } as const;
 const textResult = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
@@ -51,7 +59,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   const { CompilerProposalObligations } = await import("../compiler/proposal-obligations.js");
   const journal = new CompilerProposalObligations(root, sourceId, batchId);
   journal.assertModelRecoveryAllowed();
-  if (journal.unresolved().length && !options.sourceNotesRecovery) throw roleWorkStop("original journal has unresolved proposals");
+  if (journal.unresolved().length && !options.sourceNotesRecovery && !options.sourceIntegrationCorrection && !options.sourcePartCitationCorrection) throw roleWorkStop("original journal has unresolved proposals");
   const existing = (await RoleReviewWorkStore.plans(root, sourceId)).find(plan => plan.batchId === batchId);
   const store = await RoleReviewWorkStore.open(root, existing ?? {
     version: 1, sourceId, sourceHash: roster.sourceSha256, subjectHash: roster.subjectHash,
@@ -69,6 +77,29 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
     throw roleWorkStop("invalid source work scope; copy planHash and source work IDs from the existing plan for host review");
   }
   const recovery=options.sourceNotesRecovery;
+  if(options.sourceParentBudgetResume){
+    const {inspectStoppedRoleSession}=await import('./role-session-context.js');
+    const resumed=await inspectStoppedRoleSession(store,options.sourceParentBudgetResume);
+    if(sourceScope?.workIds.length!==1||sourceScope.workIds[0]!==resumed.workId||recovery||options.sourcePartContinuation
+      ||options.sourcePartCitationCorrection||options.sourceIntegrationResume||options.sourceIntegrationCorrection||options.partitionedSourceWorkIds)
+      throw roleWorkStop('parent-budget continuation requires only the exact stopped source work');
+  }
+  if(options.sourceIntegrationResume&&(recovery||options.sourcePartContinuation||options.sourcePartCitationCorrection||options.sourceIntegrationCorrection
+    ||sourceScope?.workIds.length!==1||sourceScope.workIds[0]!==options.sourceIntegrationResume.workId
+    ||options.partitionedSourceWorkIds?.length!==1||options.partitionedSourceWorkIds[0]!==options.sourceIntegrationResume.workId||!options.compactSourceIntegration))throw roleWorkStop('integration policy resume requires its exact single partitioned scope');
+  if(options.sourcePartCitationCorrection && (options.sourceNotesRecovery || options.sourcePartContinuation || options.sourceIntegrationCorrection
+    ||sourceScope?.workIds.length!==1||sourceScope.workIds[0]!==options.sourcePartCitationCorrection.workId
+    ||options.partitionedSourceWorkIds?.length!==1||options.partitionedSourceWorkIds[0]!==options.sourcePartCitationCorrection.workId||!options.compactSourceIntegration))throw roleWorkStop('citation correction requires its exact single partition scope and compact integration');
+  if (options.compactSourceIntegration && (!options.partitionedSourceWorkIds?.length || !sourceScope)) throw roleWorkStop('compact integration requires a host-selected partitioned source scope');
+  if (options.sourceIntegrationCorrection && (recovery || options.sourcePartContinuation || options.partitionedSourceWorkIds
+    || sourceScope?.workIds.length !== 1 || sourceScope.workIds[0] !== options.sourceIntegrationCorrection.workId)) {
+    throw roleWorkStop('integration correction requires only its exact single original source work scope');
+  }
+  if (options.sourcePartContinuation && (recovery || sourceScope?.workIds.length !== 1
+    || sourceScope.workIds[0] !== options.sourcePartContinuation.workId
+    || options.partitionedSourceWorkIds?.length !== 1 || options.partitionedSourceWorkIds[0] !== options.sourcePartContinuation.workId)) {
+    throw roleWorkStop('part continuation requires the exact single original partitioned work scope');
+  }
   if(recovery && (!sourceScope || sourceScope.workIds[0]!==recovery.workId
     || store.plan.spans.findIndex((_,page)=>sourceScope.workIds.includes(store.workId("source",page)))!==store.plan.spans.findIndex((_,page)=>store.workId("source",page)===recovery.workId))) {
     throw roleWorkStop('source note recovery must be the first selected source work under the original plan');
@@ -82,22 +113,39 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   const readClaims = new Set<string>();
   const fullyRead = new Set<string>();
   const delivery = new RoleEvidenceDelivery(bytes,units);
-  const runner: RoleWorkRunner = runOverride ?? (async work => {
+  const runSession: RoleWorkRunner = async work => {
     const traceStore = new TraceStore(root);
     const recorder = await TraceRecorder.start(traceStore, { kind: "prepare", operationId: batchId, sourceId });
-    const budget = roleReviewBudget(root, store.planHash, work.workId, ROLE_WORK_LIMITS, work.retainedBudgetRequired);
+    const budget = roleReviewBudget(root, store.planHash, work.workId, ROLE_WORK_LIMITS, work.retainedBudgetRequired, "progress");
+    let requestOrdinal=0,compactionActive=false,evidenceEpoch=0;
+    let lastTool:string|null=null;
+    const compactions: Array<Record<string,unknown>>=[];
     let session: PiAgentSession | undefined;
     const abort = () => { void session?.abort(); };
     try {
       await recorder.record("validation.completed", { phase: "role-review-work", workId: work.workId, planHash: store.planHash,
-        packetHash: contentHash(work.prompt), promptBytes: Buffer.byteLength(work.prompt), limits: ROLE_WORK_LIMITS });
+        packetHash: contentHash(work.prompt), promptBytes: Buffer.byteLength(work.prompt), limits: ROLE_WORK_LIMITS, modelCallsMode: "progress", stallWindowCalls: ROLE_WORK_LIMITS.maxModelCalls });
       session = await PiAgentSession.create({ workspace: await LocalFileWorkspace.create(root),
         ...(profile ? { profile } : {}), ...(options.model ? { model: options.model } : {}),
-        saveSession: false, includeProjectInstructions: false, includeLocalTools: false, includeNwhExtension: false,
-        interactionMode: "compiler", additionalTools: work.tools,
+        saveSession: false, autoCompaction: true, includeProjectInstructions: false, includeLocalTools: false, includeNwhExtension: false,
+        interactionMode: "compiler", additionalTools: roleProgressTools(work,budget,()=>Boolean(work.sessionOrdinal)||evidenceEpoch>0),
+        onRequestObservation:async observation=>{
+          if(observation.phase==='context')requestOrdinal++;
+          const blobRef=await recorder.putBlob(observation.value);
+          await recorder.record('validation.completed',{phase:'role-request-observation',workId:work.workId,planHash:store.planHash,requestOrdinal,logicalTaskHash:work.logicalTaskHash??contentHash(work.prompt),sessionOrdinal:work.sessionOrdinal??0,recoveryReason:work.recoveryReason??null,requestKind:compactionActive?'compaction':'task',evidenceEpoch,lastTool,measurement:describeRequest(observation),budget:budget.snapshot()},recorder.rootContext,{blobRef});
+        },
         systemPromptOverride: COMPILER_SYSTEM_PROMPT, systemPromptAppendix: protocol,
-        requestBudget: [...(work.contextWindow ? [work.contextWindow] : []), budget, ...(options.requestBudget ? (Array.isArray(options.requestBudget) ? options.requestBudget : [options.requestBudget]) : [])], onTool: options.onModelToolCall, onToolResult: options.onModelToolResult,
-        onText: options.onModelText, onThinking: options.onModelThinking, onEvent: options.onModelEvent,
+        requestBudget: [...(work.contextWindow ? [work.contextWindow] : []), budget, ...(options.requestBudget ? (Array.isArray(options.requestBudget) ? options.requestBudget : [options.requestBudget]) : [])], onTool:(name,args)=>{lastTool=name;options.onModelToolCall?.(name,args);}, onToolResult: options.onModelToolResult,
+        onText: options.onModelText, onThinking: options.onModelThinking, onEvent: event=>{
+          work.onContextEvent?.(event);
+          if(event.type==='compaction_start'||event.type==='compaction_end'){
+            compactionActive=event.type==='compaction_start';
+            if(event.type==='compaction_end'&&event.result)evidenceEpoch++;
+            compactions.push({type:event.type,reason:event.reason,...(event.type==='compaction_end'?{aborted:event.aborted,willRetry:event.willRetry,error:event.errorMessage,tokensBefore:event.result?.tokensBefore,estimatedTokensAfter:event.result?.estimatedTokensAfter}:{})});
+            options.onProgress?.(`Pi ${event.type} (${event.reason}) for ${work.workId}; original budget retained.`);
+          }
+          options.onModelEvent?.(event);
+        },
         trace: { parent: recorder.rootContext, invocationName: work.workId, attempt: 0,
           metadata: { sourceId, compilerBatchId: batchId },
           parts: [{ id: "role-review-work", kind: "compiler.batch", role: "user", authority: "untrusted-source", label: work.workId, content: work.prompt }] },
@@ -107,14 +155,27 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       await session.promptWithReport(work.prompt, { timeoutMs: options.promptTimeoutMs ?? 600_000 });
       if (work.contextWindow?.pressure && !work.complete()) throw work.contextWindow.pressure;
       if (!work.complete()) throw roleWorkStop("model ended without the assigned work receipt");
-      await recorder.record("validation.completed", {phase: "role-review-work-usage", workId: work.workId, budget: budget.report(),context:work.contextWindow?.metrics()});
+      await recorder.record("validation.completed", {phase: "role-review-work-usage", workId: work.workId, budget: budget.report(),compactions,context:work.contextWindow?.metrics()});
       await recorder.finish("succeeded");
     } catch (error) {
       if(work.contextWindow?.pressure && error instanceof Error && error.message.includes("ROLE_CONTEXT_REPACK_REQUIRED")) error=work.contextWindow.pressure;
-      await recorder.record("validation.completed", {phase:"role-review-work-stopped",workId:work.workId,budget:budget.report(),context:work.contextWindow?.metrics(),repack:error instanceof RoleContextPressure});
+      await recorder.record("validation.completed", {phase:"role-review-work-stopped",workId:work.workId,budget:budget.report(),compactions,context:work.contextWindow?.metrics(),repack:error instanceof RoleContextPressure});
       await recorder.finish("failed", {}, { code: "ROLE_REVIEW_WORK_FAILED", message: String(error), retryable: false }); throw error;
     } finally { options.signal?.removeEventListener("abort", abort); budget.close(); await session?.dispose(); }
+  };
+  const {runWithRoleContextRecovery}=await import('./role-session-context.js');
+  const runner:RoleWorkRunner=runOverride??(async work=>{
+    // Initialize a new task's counter before claiming its first context round.
+    const retained=roleReviewBudget(root,store.planHash,work.workId,ROLE_WORK_LIMITS,work.retainedBudgetRequired,"progress");retained.close();
+    await runWithRoleContextRecovery(store,work,runSession,options.onProgress,options.sourceParentBudgetResume);
   });
+  if (options.sourceIntegrationCorrection) {
+    const { runIntegrationCorrection } = await import('./role-integration-correction.js');
+    await runIntegrationCorrection(store,options.sourceIntegrationCorrection,runner);
+    options.onRoleWorkCompleted?.(options.sourceIntegrationCorrection.workId);
+    options.onProgress?.('Original source integration corrected; global review remains unfinished.');
+    return;
+  }
   async function dispatch(work: RoleWorkInvocation) {
     const needToolName = "request_role_work_evidence";
     const needId = `need-${contentHash({planHash: store.planHash, workId: work.workId})}`;
@@ -143,8 +204,23 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       // Exact original ranges from this same work; the old checkpoint remains intact.
       const evidence=reassembleRoleContext(bytes,units,[store.plan.spans[work.sourcePage]!],checkpoint.originalAccesses(),{page:work.sourcePage,spans:store.plan.spans},Number.MAX_SAFE_INTEGER);
       const parts=roleSourceParts(bytes,units,evidence.packet.ranges);
-      await store.beginAttempt(work.workId);
-      await reviewSourceParts({store,page:work.sourcePage,parts,parent:work,runner,ledger,signal:options.signal,onProgress:options.onProgress});
+      let citationCorrection;
+      if(options.sourceIntegrationResume){
+        const {claimIntegrationResume}=await import('../compiler/role-integration-resume.js');
+        await claimIntegrationResume(store,options.sourceIntegrationResume,contentHash({planHash:store.planHash,workId:work.workId,packets:parts.map(p=>p.packetHash)}));
+      } else if(options.sourcePartCitationCorrection){
+        const {claimPartCitationCorrection}=await import('../compiler/role-part-citation-correction.js');
+        citationCorrection=await claimPartCitationCorrection(store,options.sourcePartCitationCorrection,contentHash({planHash:store.planHash,workId:work.workId,packets:parts.map(p=>p.packetHash)}));
+      } else if (options.sourcePartContinuation) {
+        const { claimSourcePartContinuation } = await import('../compiler/role-source-part-recovery.js');
+        const bundleHash = contentHash({planHash:store.planHash,workId:work.workId,packets:parts.map(p=>p.packetHash)});
+        await claimSourcePartContinuation(store,work.workId,options.sourcePartContinuation.authorityHash,bundleHash);
+      } else await store.beginAttempt(work.workId);
+      await reviewSourceParts({store,page:work.sourcePage,parts,parent:work,runner,ledger,citationCorrection,signal:options.signal,onProgress:options.onProgress,
+        ...(options.compactSourceIntegration ? {integrationOriginals:(ids:string[])=>{
+          const spans=ids.map(id=>{const unit=units.find(u=>u.id===id);if(!unit)throw roleWorkStop('foreign integration evidence');return {start:unit.anchor.startByte,end:unit.anchor.endByte};});
+          return reassembleRoleContext(bytes,units,[store.plan.spans[work.sourcePage!]!,...spans],[],undefined,Number.MAX_SAFE_INTEGER).packet.fragments;
+        }} : {})});
       options.onRoleWorkCompleted?.(work.workId);
       return;
     }
@@ -208,7 +284,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
         const required=(work.deliveredUnitIds??[]).map(id=>units.find(u=>u.id===id)!).map(u=>({start:u.anchor.startByte,end:u.anchor.endByte}));
         if(work.sourcePage!==undefined)required.push({...store.plan.spans[work.sourcePage]!});
         for(const id of supplement?.manifest.includedRefs??[]){const u=units.find(u=>u.id===id)!;required.push({start:u.anchor.startByte,end:u.anchor.endByte});}
-        const contextEvidence=reassembleRoleContext(bytes,units,required,checkpoint.originalAccesses(),work.sourcePage!==undefined?{page:work.sourcePage,spans:store.plan.spans}:undefined);
+        const contextEvidence=reassembleRoleContext(bytes,units,required,[],undefined,Number.MAX_SAFE_INTEGER);
         if(work.sourcePage!==undefined) {
           const assigned={page:work.sourcePage,core:store.plan.spans[work.sourcePage],assignedCoreUnitIds:[...new Set(sourcePacket(work.sourcePage).fragments.map(f=>f.unitId).filter(Boolean))],evidenceLocation:"contextEvidence.fragments"};
           if(body.source)body.source=assigned;
@@ -221,9 +297,13 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
         prompt=`${prompt.slice(0,prompt.lastIndexOf("\n"))}\n${JSON.stringify({...body,contextHandoff:checkpoint.manifest(),contextEvidence:contextEvidence.packet})}`;
       }
       options.onProgress?.(`Role review work ${work.workId}${need ? " evidence supplement" : ""}; original scope and cumulative budget retained.`);
+      const initialReadIds=[...fullyRead];
+      const initialDelivery=delivery;
+      const invalidate=()=>{fullyRead.clear();readClaims.clear();initialDelivery.clear();deliveredResponses.clear();};
+      const restore=()=>{for(const id of initialReadIds){fullyRead.add(id);delivery.seed(id,'restored original task');}if(work.sourcePage!==undefined)delivery.seedSpan(store.plan.spans[work.sourcePage]!,'restored original core');};
       const hadNeed = Boolean(need);
       try {
-        await runner({...work, prompt, contextWindow, retainedBudgetRequired: attempt > 1 || hadNeed || sessions>0, tools: [...tools, ...(!hadNeed ? [needTool] : [])], complete: () => work.complete() || Boolean(contextWindow.pressure) || (!hadNeed && Boolean(retainedNeed()))});
+        await runner({...work, prompt, contextWindow, onContextInvalidated:invalidate,onContextRestored:restore, retainedBudgetRequired: attempt > 1 || hadNeed || sessions>0, tools: [...tools, ...(!hadNeed ? [needTool] : [])], complete: () => work.complete() || Boolean(contextWindow.pressure) || (!hadNeed && Boolean(retainedNeed()))});
       } catch(error) {
         if(!(error instanceof RoleContextPressure)) throw error;
       }
@@ -244,8 +324,8 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   }
   function sourcePacket(page: number) {
     const span = store.plan.spans[page]!;
-    return { page, ...roleReviewSourcePacket(bytes, units, span), outputConstraints: {maxJsonUtf8Bytes:ROLE_SOURCE_NOTES_MAX_BYTES,
-      guidance:"The entire source-review proposal, including IDs and JSON syntax, must fit this byte limit. Be concise without omitting findings or unresolved questions. If required notes cannot fit, stop for host task decomposition."} };
+    return { page, ...roleReviewSourcePacket(bytes, units, span), outputConstraints: {observationalJsonUtf8Bytes:ROLE_SOURCE_NOTES_MAX_BYTES,
+      guidance:"Total JSON size is observational. Preserve all findings, exact citations and questions; use preview/refactor to improve clarity without dropping responsibilities."} };
   }
 
   const evidenceTool: ToolDefinition = defineTool({ name: "read_role_work_evidence", label: "Read role work evidence",
@@ -322,22 +402,9 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   function requireRead(ids: string[]) {
     if (ids.some(id => !fullyRead.has(id))) throw new Error("Unread role work evidence. Call read_role_work_evidence with each cited unitId and every nextOffset before one corrected submission; notes and search snippets cannot substitute for the original text.");
   }
-  function receiptTool(kind: "source" | "audit", page: number): ToolDefinition {
+  function receiptTool(kind: "source" | "audit", page: number, preview=false): ToolDefinition {
     const schema = kind === "source" ? roleSourceWorkSchema : roleAuditWorkSchema.required({questionDispositions:true, discoveryDispositions:true, atlasRevision:true});
-    const { $schema: _, ...json } = z.toJSONSchema(schema);
-    return defineTool({ name: kind === "source" ? ROLE_SOURCE_WORK_TOOL : ROLE_AUDIT_WORK_TOOL,
-      label: "Submit assigned role review work", description: "Submit this one source work or audit. This is single-use, source-bound review metadata, not world truth or global finish. Correct an invalid proposal once under the same work identity.",
-      executionMode: "sequential", parameters: Type.Unsafe<Record<string, unknown>>(json as TSchema),
-      prepareArguments(raw) {
-        const tool = kind === "source" ? ROLE_SOURCE_WORK_TOOL : ROLE_AUDIT_WORK_TOOL;
-        const envelope = { proposal_id: store.workId(kind, page), planHash: store.planHash, payload: raw, ...(kind === "audit" ? { entriesHash: store.entriesHash() } : {}) };
-        journal.assertRetryAllowed(tool, envelope);
-        try { return schema.parse(raw) as Record<string, unknown>; }
-        catch (error) { recordValidationFailure(tool, envelope, error); }
-      },
-      async execute(_id, raw, signal) {
-        signal?.throwIfAborted();
-        await store.submit(kind, page, raw, payload => {
+    const validate=(payload:RoleSourceWork|RoleAuditWork)=>{
           if(kind==='source' && failedNotes && recovery?.workId===store.workId(kind,page)) assertSourceNotesCorrection(failedNotes,payload as RoleSourceWork);
           const ids = kind === "source" ? (payload as RoleSourceWork).findings.flatMap(f => f.unitIds) : (payload as RoleAuditWork).missingMajorCharacters.flatMap(f => f.basisUnitIds);
           const allowed = kind === "source" ? new Set(sourcePacket(page).fragments.map(u => u.unitId)) : new Set(units.map(u => u.id));
@@ -355,7 +422,26 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
             requireRead([...ids, ...audit.questionDispositions.flatMap(q => q.basisUnitIds), ...audit.discoveryDispositions.flatMap(d => d.basisUnitIds)]);
           }
           if (ids.some(id => !allowed.has(id))) throw new Error("Unknown or out-of-scope evidence. Copy fragments[].unitId from this work packet (audit: use read_role_work_evidence units[].unitId). Correct the original work once; never guess IDs or repeat unchanged inputs.");
-        });
+
+    };
+    const { $schema: _, ...json } = z.toJSONSchema(schema);
+    if(preview)return defineTool({name:kind==='source'?'preview_role_source_review':'preview_role_review_audit',label:'Preview and refactor review draft',description:'Read-only schema, scope, evidence and responsibility validation. Invalid drafts never commit or consume proposal attempts; every model call is charged. Correct invalid fields from exact same-scope discovery results; preserve every question. Byte size is observation only. Never retry host, scope or exhausted-loop stops.',executionMode:'sequential',parameters:Type.Unsafe<Record<string,unknown>>(json as TSchema),execute:async(_id,raw)=>{
+      try{const value=schema.parse(raw);validate(value);return textResult({valid:true,jsonUtf8Bytes:Buffer.byteLength(JSON.stringify(value)),committed:false});}
+      catch(error){return textResult({valid:false,diagnostic:String(error),committed:false,guidance:'Inspect the diagnostic and original evidence. Refactor this draft before proposing; use the supplied discovery/read tools and exact returned IDs. Preserve all responsibilities. A new session does not clear failed proposals or loop counts.'});}
+    }});
+    return defineTool({ name: kind === "source" ? ROLE_SOURCE_WORK_TOOL : ROLE_AUDIT_WORK_TOOL,
+      label: "Submit assigned role review work", description: "Submit this one source work or audit. This is single-use, source-bound review metadata, not world truth or global finish. Correct an invalid proposal once under the same work identity.",
+      executionMode: "sequential", parameters: Type.Unsafe<Record<string, unknown>>(json as TSchema),
+      prepareArguments(raw) {
+        const tool = kind === "source" ? ROLE_SOURCE_WORK_TOOL : ROLE_AUDIT_WORK_TOOL;
+        const envelope = { proposal_id: store.workId(kind, page), planHash: store.planHash, payload: raw, ...(kind === "audit" ? { entriesHash: store.entriesHash() } : {}) };
+        journal.assertRetryAllowed(tool, envelope);
+        try { return schema.parse(raw) as Record<string, unknown>; }
+        catch (error) { recordValidationFailure(tool, envelope, error); }
+      },
+      async execute(_id, raw, signal) {
+        signal?.throwIfAborted();
+        await store.submit(kind, page, raw, validate);
         if (kind === "source") await ledger.registerRoleQuestions(store.questions(page));
         else for (const disposition of store.read("audit", page)!.questionDispositions ?? []) await ledger.recordRoleQuestionDisposition(store.planHash, contentHash(store.read("audit", page)), disposition);
         return { ...textResult({ workCompleted: true, globalBatchFinished: false }), terminate: true };
@@ -371,7 +457,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       if(refs.some(id=>!allowed.has(id)))throw roleWorkStop('failed source notes contain out-of-core evidence; size correction cannot repair scope');
       const required=[store.plan.spans[page]!,...refs.map(id=>{const u=units.find(u=>u.id===id)!;return {start:u.anchor.startByte,end:u.anchor.endByte};})];
       const evidence=reassembleRoleContext(bytes,units,required,[]);
-      const prompt=`${protocol}\nCorrect only the total output size of the exact failed proposal below. Preserve the meaning, order and number of findings and open questions; keep every finding name and unitIds exactly unchanged. Condense wording, never remove responsibilities or invent new facts. The old proposal is unvalidated. Check it against the supplied original evidence. Aim below 6000 UTF-8 bytes; the complete JSON must fit 8000 bytes including IDs and syntax. If preserving meaning is impossible, stop for host review. Submit the corrected propose_role_source_review once.\n${JSON.stringify({recovery,assignedCore:store.plan.spans[page],failedProposal:failedNotes,evidence:evidence.packet,outputConstraints:sourcePacket(page).outputConstraints})}`;
+      const prompt=`${protocol}\nCorrect only the total output size of the exact failed proposal below. Preserve the meaning, order and number of findings and open questions; keep every finding name and unitIds exactly unchanged. Condense wording, never remove responsibilities or invent new facts. The old proposal is unvalidated. Check it against the supplied original evidence. Prefer concise wording; total JSON size is now observational. If preserving meaning is impossible, stop for host review. Submit the corrected propose_role_source_review once.\n${JSON.stringify({recovery,assignedCore:store.plan.spans[page],failedProposal:failedNotes,evidence:evidence.packet,outputConstraints:sourcePacket(page).outputConstraints})}`;
       const contextWindow=new RoleContextWindow();
       contextWindow.beginCall({prompt}); // Reject oversized packets before consuming an invocation.
       options.signal?.throwIfAborted();
@@ -383,7 +469,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       options.onRoleWorkCompleted?.(recovery.workId);
       continue;
     }
-    await dispatch({ workId: store.workId("source", page), sourcePage:page, deliveredUnitIds:sourcePacket(page).fragments.filter(f=>f.unitId&&!f.continued).map(f=>f.unitId!), tools: [evidenceTool, notesTool, neighborTool(page), receiptTool("source", page)],
+    await dispatch({ workId: store.workId("source", page), sourcePage:page, deliveredUnitIds:sourcePacket(page).fragments.filter(f=>f.unitId&&!f.continued).map(f=>f.unitId!), tools: [evidenceTool, notesTool, neighborTool(page), receiptTool("source", page), receiptTool("source",page,true)],
       prompt: `${protocol}\nIndependently inspect this entire core for people, causal decisions, relationships, viewpoints, development and counterevidence. Discover people even when absent from an extractor inventory. Preserve ambiguity, unresolved pronouns and cross-chapter questions. Use the evidence tool for complete continued units. Historical notes are optional navigation: inspect only relevant details, not every prior note; carry unresolved cross-core questions forward. Submit propose_role_source_review, including findings=[] with an evidenced explanation if none.\n${JSON.stringify(sourcePacket(page))}`,
       complete: () => Boolean(store.read("source", page)) });
   }
@@ -462,7 +548,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   for (let page = 0; page < store.plan.spans.length; page++) {
     const existingAudit = store.read("audit", page);
     if (existingAudit?.unresolved.length) throw roleWorkStop(`audit ${page} retains unresolved semantic work`);
-    await dispatch({ workId: store.workId("audit", page), sourcePage:page, tools: [evidenceTool, notesTool, neighborTool(page), inventoryTool, atlasTool, receiptTool("audit", page)],
+    await dispatch({ workId: store.workId("audit", page), sourcePage:page, tools: [evidenceTool, notesTool, neighborTool(page), inventoryTool, atlasTool, receiptTool("audit", page),receiptTool("audit",page,true)],
       complete: () => Boolean(store.read("audit", page)),
       prompt: `${protocol}\nAudit this source core against this review's findings and the frozen inventory. Only the first ten inventory names are supplied; use read_role_audit_inventory with query or pagination for the complete denominator. Detect missing major people, consequential late arrivals, contradictory importance/development and unresolved source questions. Read exact evidence and detailed inventory for every mapped claim. Dispose of ALL expectedQuestions and discoveries exactly once; empty lists cannot erase responsibilities. Use resolved only with evidence, otherwise blocked. Copy atlasRevision. Do not silently accept extractor completeness. Record missingMajorCharacters with evidence; record every remaining issue in unresolved rather than claim success. Submit propose_role_review_audit.\n${JSON.stringify({ source: sourcePacket(page), summary: store.read("source", page)!.summary, atlasRevision: store.atlasRevision(), expectedQuestions: store.questions(page), discoveries: store.read("source", page)!.findings.map((finding, index) => ({ findingId: roleFindingId(store.planHash, page, index), ...finding })), candidates: roster.candidates.slice(0,10).map(c => ({ id: c.id, name: c.name })), inventory: {total: roster.candidates.length, suppliedNames: Math.min(10,roster.candidates.length), tool:"read_role_audit_inventory"} })}` });
     const settled = store.read("audit", page)!;

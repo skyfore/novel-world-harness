@@ -636,7 +636,18 @@ export function buildNwhToolRecoveryAdvice(
       steps: ["The complete JSON proposal must fit 8000 UTF-8 bytes, including keys, IDs and punctuation. Shorten wording and avoid copied source passages while preserving findings, evidence references and unresolved questions.",
         "Do not re-read source solely to fix output length. If required notes cannot fit, or context/attempt limits stop correction, preserve the exact failed input and stop for host task decomposition. Never clear the journal or rotate work IDs."] };
   }
-  if (["read_role_context_history", "request_role_work_evidence", "read_role_work_evidence", "read_role_work_neighbor", "read_role_review_notes", "read_role_review_atlas", "read_role_audit_inventory", "propose_role_claim_audit", "propose_role_source_review", "propose_role_review_audit"].includes(toolName)) {
+  if (toolName === "preview_role_review_audit" || toolName === "propose_role_review_audit") {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected retry in this assigned work while its original context, proposal correction and no-progress allowances remain available; host stops take precedence.",
+      steps: [
+        "Correct all reported paths together against the assigned packet, preserving every expectedQuestions[].questionId and discoveries[].findingId plus its evidence and unresolved dependencies.",
+        "Only mapped discoveries may contain candidateIds. For blocked, missing-major or nonmajor, use candidateIds=[] and retain the relevant identities in rationale or unresolved; do not reread a nonexistent judgment to satisfy an invalid disposition.",
+        "For an unknown candidate ID, call read_role_audit_inventory with query or offset=0 and copy candidates[].id. For an unread existing entry, use that exact candidateId in read_role_audit_inventory. An inventory name without an entry is a missing judgment: preserve blocked or evidence-based missing-major instead of mapping or retrying the read.",
+        "For missing original evidence, use each exact unreadUnitIds value with read_role_work_evidence unitId and follow every nextOffset. For an unknown unit, search with read_role_work_evidence query in this source and copy units[].unitId. Do not reread evidence already fully delivered.",
+        "Use preview_role_review_audit to check the corrected draft before the remaining proposal attempt. A preview never commits or adds correction allowance. Stop on a repeated diagnostic, exhausted budget or host review; never guess IDs, restart, or rename the work.",
+      ] };
+  }
+  if (["read_role_context_history", "request_role_work_evidence", "read_role_work_evidence", "read_role_work_neighbor", "read_role_review_notes", "read_role_review_atlas", "read_role_audit_inventory", "propose_role_claim_audit", "propose_role_source_review"].includes(toolName)) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
       retryCondition: "Only one materially corrected retry in this assigned work, if the durable allowance remains available; host and budget stops take precedence.",
       steps: ["For evidence, call read_role_work_evidence with query in this source, copy units[].unitId to unitId, and follow nextOffset for complete text. Source-work citations must come from the supplied packet fragments[].unitId.",

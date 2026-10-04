@@ -14,10 +14,15 @@ import type {RoleWorkInvocation, RoleWorkRunner} from './role-review-bounded.js'
 const READ='read_role_session_context';
 export const ROLE_CONTEXT_MAX_SESSIONS=3;
 export type ParentBudgetSessionResume={planHash:string;workId:string;authorityHash:string;policy?:'progress'};
+export type RoleSessionResume=ParentBudgetSessionResume|import('../compiler/role-host-interruption.js').RoleHostInterruptionResume;
 
 /** One host-selected continuation after a diagnosed aggregate call stop. The
  * next context consumes the original three-session and per-work call limits. */
-export async function inspectStoppedRoleSession(store:RoleReviewWorkStore,input:ParentBudgetSessionResume){
+export async function inspectStoppedRoleSession(store:RoleReviewWorkStore,input:RoleSessionResume){
+  if(input.policy==='host-interruption'){
+    const {inspectInterruptedRoleSession}=await import('../compiler/role-host-interruption.js');
+    return inspectInterruptedRoleSession(store,input);
+  }
   const record=input.policy==='progress'?readRoleProgressContinuation(store.root,input):readParentCallContinuation(store.root,input),a=record.authority;
   if(record.authorityHash!==input.authorityHash||a.childPlanHash!==store.planHash
     ||a.sourceId!==store.plan.sourceId||a.batchId!==store.plan.batchId)throw roleWorkStop('parent grant does not authorize this original role work');
@@ -101,7 +106,7 @@ export class RoleSessionContext {
 }
 /** Every session claim is durable. Restarts do not reset the three-round loop,
  * original proposal correction bounds or the parent's cumulative model calls. */
-export async function runWithRoleContextRecovery(store:RoleReviewWorkStore,work:RoleWorkInvocation,run:RoleWorkRunner,onProgress?:(s:string)=>void,resume?:ParentBudgetSessionResume){
+export async function runWithRoleContextRecovery(store:RoleReviewWorkStore,work:RoleWorkInvocation,run:RoleWorkRunner,onProgress?:(s:string)=>void,resume?:RoleSessionResume){
   const taskHash=contentHash(work.prompt),base=path.join(worldStorageRoot(store.root),'compiler','role-review-work');
   const legacy=path.join(base,'native-context-fallbacks',store.planHash,`${contentHash(work.workId)}.json`);
   try{await fs.access(legacy);throw roleWorkStop('legacy native context fallback already consumed; preserve it for explicit host review');}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}

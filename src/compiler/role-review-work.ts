@@ -197,6 +197,11 @@ export class RoleReviewWorkStore {
     } catch (error) { this.journal.record(tool, input, "failed", String(error)); throw error; }
   }
   /** Attempts survive zero-proposal exits. New invocations never reset allowance. */
+  async assertUnstarted(workId: string) {
+    const dir = path.join(directory(this.root, this.plan.sourceId), "attempts", contentHash(this.plan.batchId), contentHash(workId));
+    const files = await fs.readdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error; });
+    if (files.length) throw roleWorkStop('work already started; preserve its original task prompt and claims, do not opt into a different draft workflow');
+  }
   async beginAttempt(workId: string) {
     const dir = path.join(directory(this.root, this.plan.sourceId), "attempts", contentHash(this.plan.batchId), contentHash(workId));
     await fs.mkdir(dir, { recursive: true });

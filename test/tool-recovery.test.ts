@@ -10,6 +10,17 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it.each(["preview_role_review_audit", "propose_role_review_audit"])("keeps audit schema recovery actionable without overriding host stops: %s", (tool) => {
+    const advice = buildNwhToolRecoveryAdvice(tool, "Validation failed: discoveryDispositions/0/candidateIds must NOT have more than 0 items");
+    expect(advice).toMatchObject({ category: "invalid-arguments", retryable: true });
+    expect(advice.steps.join(" ")).toContain("candidateIds=[]");
+    expect(advice.steps.join(" ")).toContain("candidates[].id");
+    expect(advice.steps.join(" ")).toContain("missing judgment");
+    expect(advice.steps.join(" ")).toContain("unreadUnitIds");
+    expect(advice.retryCondition).toContain("original context");
+    expect(buildNwhToolRecoveryAdvice(tool, "ROLE_REVIEW_WORK_HOST_REQUIRED: no-progress").retryable).toBe(false);
+    expect(buildNwhToolRecoveryAdvice(tool, "Compiler proposal obligation requires host review: original and corrected inputs failed.").retryable).toBe(false);
+  });
   it("keeps role-review ID recovery inside its dedicated tools and stops stale scopes", () => {
     const advice = buildNwhToolRecoveryAdvice("propose_role_roster_entry", "ROSTER_UNKNOWN_EVIDENCE_UNIT /entries/0/basisUnitIds/0: Unknown source unit guessed.\nRecovery SOP: some offset guidance");
     expect(advice).toMatchObject({ retryable: true, suggestedCall: { tool: "read_role_roster", arguments: { offset: 0 } } });

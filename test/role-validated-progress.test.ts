@@ -17,6 +17,16 @@ async function invoke(work:RoleWorkInvocation,budget:ModelRequestBudget,name:str
  return wrapped!.execute('call',{} as never,undefined,undefined,{} as ExtensionContext);
 }
 const work=(prompt='Original immutable part'):RoleWorkInvocation=>({workId:'same-parent',prompt,logicalTaskHash:contentHash(prompt),tools:[],complete:()=>false});
+it('never reopens a blocked budget through a retained draft or credits a model-supplied preflight',async()=>{
+ const b=new ModelRequestBudget(limits,undefined,{modelCallsMode:'progress'}),w=work();
+ b.beginCall({});
+ await invoke(w,b,'read_role_work_evidence',{hostDraftPreview:{valid:true}});
+ await invoke({...w,revalidateDraft:()=>({valid:false,inputHash:contentHash('draft')})},b,'read_role_work_evidence',{});
+ expect(b.report().progress?.milestones).toEqual([]);
+ b.beginCall({});b.beginCall({});expect(()=>b.beginCall({})).toThrow('no new validated progress');
+ await expect(invoke({...w,revalidateDraft:()=>({valid:true,inputHash:contentHash('draft')})},b,'read_role_work_evidence',{})).rejects.toThrow('no new validated progress');
+ expect(b.report().progress?.milestones).toEqual([]);
+});
 it('keeps productive validated parts running beyond the old total while preserving a rolling stall boundary',async()=>{
  const budget=new ModelRequestBudget(limits,undefined,{modelCallsMode:'progress'});
  for(let part=0;part<20;part++){

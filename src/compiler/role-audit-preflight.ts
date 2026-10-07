@@ -32,6 +32,7 @@ export type RoleAuditAccess = {
  * created here. Submission and draft rechecks use the same checks. */
 export function roleAuditIssues(audit: RoleAuditWork, access: RoleAuditAccess): RoleAuditIssue[] {
   const issues: RoleAuditIssue[] = [];
+  const unresolvedCandidates = new Set<string>();
   const responsibility = "Copy atlasRevision, expectedQuestions[].questionId and discoveries[].findingId from the assigned packet. Preserve every responsibility and correct the same draft once; never guess or change scope.";
   if (audit.atlasRevision !== access.atlasRevision) issues.push({code:"atlas-revision",path:"atlasRevision",message:"Stale audit revision",guidance:responsibility});
   if (!audit.questionDispositions || !sameIds(audit.questionDispositions.map(q => q.questionId), access.questionIds)) issues.push({code:"question-responsibilities",path:"questionDispositions",message:"Incomplete audit responsibilities",guidance:responsibility});
@@ -51,8 +52,11 @@ export function roleAuditIssues(audit: RoleAuditWork, access: RoleAuditAccess): 
         guidance:"The inventory name has no entry to read. Preserve this discovery as blocked or evidenced missing-major with candidateIds=[] and retain its dependency in unresolved; do not retry reads, invent a judgment, or claim support."});
       else if (!candidate.read) issues.push({code:"unread-judgment",path:`${field}.candidateIds`,candidateIds:[id],message:"Unread mapped claim",
         guidance:"Call read_role_audit_inventory with this exact candidateId and read candidates[].entry. Correct once; never guess or reread unrelated candidates."});
-      if (candidate && !candidate.supported && !audit.unresolved.some(issue => issue.includes(id))) issues.push({code:"unverified-dependency",path:"unresolved",candidateIds:[id],message:"Mapped claim is unverified",
-        guidance:"Retain this exact candidate ID in unresolved together with its evidence boundary. Mapping does not repair or support the claim. Correct once under the same work ID."});
+      if (candidate && !candidate.supported && !audit.unresolved.some(issue => issue.includes(id)) && !unresolvedCandidates.has(id)) {
+        unresolvedCandidates.add(id);
+        issues.push({code:"unverified-dependency",path:"unresolved",candidateIds:[id],message:"Mapped claim is unverified",
+          guidance:"Add this exact candidate ID to unresolved together with its evidence boundary. This field correction does not require rereading the inventory. Mapping does not repair or support the claim. Correct once under the same work ID."});
+      }
     }
     const discovery = access.discoveries.find(f => f.findingId === d.findingId);
     if (d.disposition === "missing-major" && discovery && !audit.missingMajorCharacters.some(m => m.name === discovery.name)) issues.push({code:"missing-major-retention",path:"missingMajorCharacters",message:`Missing-major discovery must retain ${discovery.name}`,

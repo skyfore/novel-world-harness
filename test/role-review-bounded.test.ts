@@ -16,10 +16,10 @@ import { RoleRosterStore, validateRosterReview } from "../src/compiler/role-rost
 const runBoundedRoleReview = (options: Parameters<typeof runReview>[0], runner: NonNullable<Parameters<typeof runReview>[1]>) => runReview(options, runner, async () => {});
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
-async function setup(text = "Hero helps Friend.\nFriend thanks Hero.\n") {
+async function setup(text = "Hero helps Friend.\nFriend thanks Hero.\n", additionalNames: string[] = []) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-role-bounded-")); roots.push(root);
   const f = await createEvidenceFixture(root, text); await ensureSourceStructure(root, f.source);
-  for (const name of ["Hero", "Friend"]) await new CanonicalModelStore(root).putEntity({ id: name.toLowerCase(), canonicalName: name,
+  for (const name of ["Hero", "Friend", ...additionalNames]) await new CanonicalModelStore(root).putEntity({ id: name.toLowerCase(), canonicalName: name,
     kind: "character", aliases: [], evidence: f.evidence(name) });
   const batchId = `role-roster-${f.source.id}-bounded`;
   const options = { root, sourceId: f.source.id, compilerBatchId: batchId, configPath: path.join(root, "absent.yaml") };
@@ -272,8 +272,8 @@ async function scopedClaimFixture(registerGap = true) {
   return {...f, store, roster, unit, workId, scope, beforeBudget, ledger};
 }
 
-async function diagnosticSourceFixture(registerGaps = true, text?: string) {
-  const f = await setup(text ?? 'Hero helps Friend.\n' + 'x'.repeat(6000) + '\n' + 'Friend thanks Hero.\n' + 'y'.repeat(6000) + '\n');
+async function diagnosticSourceFixture(registerGaps = true, text?: string, additionalNames: string[] = []) {
+  const f = await setup(text ?? 'Hero helps Friend.\n' + 'x'.repeat(6000) + '\n' + 'Friend thanks Hero.\n' + 'y'.repeat(6000) + '\n', additionalNames);
   const {roster} = await loadCurrentRoleRoster(f.root, f.f.source.id), unit = roster.unitIds[0]!;
   await expect(runBoundedRoleReview(f.options, async () => {throw Error('original source stop');})).rejects.toThrow('original source stop');
   const store = new RoleReviewWorkStore(f.root, (await RoleReviewWorkStore.plans(f.root,f.f.source.id))[0]!);
@@ -285,8 +285,8 @@ async function diagnosticSourceFixture(registerGaps = true, text?: string) {
   await store.submitClaim({candidateId,claimRevision:contentHash(entry(candidateId,unit)),atlasRevision:store.atlasRevision(),packetHash:contentHash('packet'),verdict:'insufficient',rationale:'Continuity not established',basisUnitIds:[unit],counterevidence:{searchedUnitIds:[unit],rationale:'Boundary retained'},checks:fixtureChecks(unit).map(c=>({...c,verdict:'insufficient'}))},candidateId,()=>{});
   const {RequirementLedger}=await import('../src/compiler/requirement-ledger.js');
   const ledger=new RequirementLedger(f.root,f.f.source.id), missingSourceWorkId=store.workId('source',0);
-  const scope={planHash:store.planHash,atlasRevision:store.atlasRevision(),entriesHash:store.entriesHash(),claimAuditsHash:contentHash(store.claimAudits()),workIds:pages.map(page=>store.workId('audit',page)),missingSourceWorkIds:[missingSourceWorkId],missingCandidateIds:[missingCandidateId],unresolvedClaimWorkIds:[store.claimWorkId(candidateId)]};
-  if(registerGaps)for(const workId of [missingSourceWorkId,`candidate-${missingCandidateId}`,store.claimWorkId(candidateId)])await ledger.recordRoleEvidenceNeed(store.planHash,workId,{question:'Original responsibility remains open',missing:'Bound original diagnostic',decisionImpact:'Critical; no retry granted',searchedUnitIds:[],requestedUnitIds:[unit]});
+  const scope={planHash:store.planHash,atlasRevision:store.atlasRevision(),entriesHash:store.entriesHash(),claimAuditsHash:contentHash(store.claimAudits()),workIds:pages.map(page=>store.workId('audit',page)),missingSourceWorkIds:[missingSourceWorkId],missingCandidateIds:roster.candidates.slice(1).map(c=>c.id),unresolvedClaimWorkIds:[store.claimWorkId(candidateId)]};
+  if(registerGaps)for(const workId of [missingSourceWorkId,...scope.missingCandidateIds.map(id=>`candidate-${id}`),store.claimWorkId(candidateId)])await ledger.recordRoleEvidenceNeed(store.planHash,workId,{question:'Original responsibility remains open',missing:'Bound original diagnostic',decisionImpact:'Critical; no retry granted',searchedUnitIds:[],requestedUnitIds:[unit]});
   return {...f,store,roster,unit,ledger,scope,candidateId,missingCandidateId,pages};
 }
 
@@ -303,7 +303,7 @@ it('records independent source diagnostics with the full missing inventory and k
     expect(packet(work).coverage).toMatchObject({missingSourceWorkIds:f.scope.missingSourceWorkIds,missingCandidateIds:[f.missingCandidateId],unresolvedClaimWorkIds:f.scope.unresolvedClaimWorkIds});
     expect(work.tools.some(t=>t.name==='propose_role_roster_entry'||t.name==='propose_role_claim_audit'||t.name==='finish_compiler_batch')).toBe(false);
     await readCompleteWorkUnit(work,f.unit);
-    const inventory=await invoke(work,'read_role_audit_inventory',{});
+    const inventory=await invoke(work,'read_role_audit_inventory',{candidateId:f.candidateId});
     expect(JSON.parse((inventory.content[0] as {text:string}).text).candidates[0].claimAudit.verdict).toBe('insufficient');
     const draft={...fixtureAudit(work,f.unit),unresolved:[`Unverified claim ${f.candidateId}`]};
     draft.questionDispositions=draft.questionDispositions.map((q:any)=>({...q,status:'blocked'}));
@@ -334,16 +334,60 @@ it('rejects stale diagnostic scopes, dropped gaps, foreign work and mixed author
   expect(runner).not.toHaveBeenCalled();
 });
 
+it('discovers the complete 76-candidate denominator in four directory pages without granting entry access or progress',async()=>{
+  const names=Array.from({length:74},(_,i)=>`Guest_${String(i).padStart(2,'0')}`);
+  const f=await diagnosticSourceFixture(true,'Hero helps Friend.\n'+names.map(name=>`${name} visits.\n`).join('')+'x'.repeat(6000)+'\nFriend thanks Hero.\n'+'y'.repeat(6000)+'\n',names);
+  const {ModelRequestBudget}=await import('../src/runtime/model-request-budget.js');
+  const {roleProgressTools}=await import('../src/workflow/role-validated-progress.js');
+  await runReview({...f.options,sourceAuditScope:{...f.scope,workIds:[f.scope.workIds[0]!]}},async original=>{
+    const budget=new ModelRequestBudget({maxModelCalls:12,maxRequestBytes:100000,maxTotalPayloadBytes:1000000},undefined,{modelCallsMode:'progress'});
+    const work={...original,tools:roleProgressTools(original,budget,()=>false)};
+    let offset:number|undefined=0;const ids:string[]=[],sizes:number[]=[];
+    do {
+      budget.beginCall({});
+      const result=JSON.parse(((await invoke(work,'read_role_audit_inventory',{offset})).content[0] as {text:string}).text);
+      expect(result.mode).toBe('directory');expect(result.total).toBe(76);
+      expect(result.candidates.every((c:any)=>!Object.hasOwn(c,'entry'))).toBe(true);
+      expect(Buffer.byteLength(JSON.stringify(result.candidates))).toBeLessThanOrEqual(16000);
+      sizes.push(result.candidates.length);ids.push(...result.candidates.map((c:any)=>c.id));offset=result.nextOffset;
+    } while(offset!==undefined);
+    expect(sizes).toEqual([25,25,25,1]);expect(ids).toEqual(f.roster.candidates.map(c=>c.id));
+    expect(budget.report().progress?.milestones).toEqual([]);
+    await readCompleteWorkUnit(work,f.unit);
+    const draft={...fixtureAudit(work,f.unit),unresolved:[`Unverified ${f.candidateId}`]};
+    const preview=await invoke(work,'preview_role_review_audit',draft);
+    expect(JSON.parse((preview.content[0] as {text:string}).text)).toMatchObject({valid:false,issues:expect.arrayContaining([expect.objectContaining({code:'unread-judgment',candidateIds:[f.candidateId]})])});
+    await invoke(work,'read_role_audit_inventory',{candidateId:f.candidateId});
+    expect(budget.report().progress?.milestones).toHaveLength(1);
+    await invoke(work,'propose_role_review_audit',draft);budget.close();
+  },vi.fn());
+});
+
+it('reports each missing unresolved candidate ID once and accepts its exact field correction without rereading',async()=>{
+  const f=await diagnosticSourceFixture();
+  const page=f.pages[0]!,originalNote=f.store.read('source',page)!;
+  // A second finding maps the same unverified candidate, as in a real core.
+  const findings=[...originalNote.findings,{...originalNote.findings[0]!,observation:'Second responsibility'}];
+  const {roleAuditIssues}=await import('../src/compiler/role-audit-preflight.js');
+  const {roleFindingId}=await import('../src/compiler/role-review-verification.js');
+  const access={atlasRevision:f.store.atlasRevision(),questionIds:[],discoveries:findings.map((v,i)=>({findingId:roleFindingId(f.store.planHash,page,i),name:v.name})),
+    candidates:[{id:f.candidateId,hasEntry:true,read:true,supported:false}],fullyRead:new Set([f.unit]),knownUnits:new Set([f.unit])};
+  const draft={atlasRevision:access.atlasRevision,rationale:'Two findings retain one unverified dependency',missingMajorCharacters:[],unresolved:[],questionDispositions:[],discoveryDispositions:access.discoveries.map(d=>({findingId:d.findingId,disposition:'mapped' as const,candidateIds:[f.candidateId],rationale:'Locate existing judgment only',basisUnitIds:[f.unit]}))};
+  const issues=roleAuditIssues(draft,access);expect(issues).toHaveLength(1);expect(issues[0]).toMatchObject({code:'unverified-dependency',candidateIds:[f.candidateId]});
+  expect(issues[0]!.guidance).toContain('does not require rereading');
+  expect(roleAuditIssues({...draft,unresolved:[`Unverified ${f.candidateId}; source support remains unresolved`]},access)).toEqual([]);
+});
+
 it('does not turn an unread inventory name or unsupported mapped claim into a closed source audit',async()=>{
   const f=await diagnosticSourceFixture();
   await runReview({...f.options,sourceAuditScope:{...f.scope,workIds:[f.scope.workIds[0]!]}},async work=>{
     await readCompleteWorkUnit(work,f.unit);
-    await invoke(work,'read_role_audit_inventory',{});
+    await invoke(work,'read_role_audit_inventory',{candidateId:f.candidateId});
     const preview=async(draft:unknown)=>JSON.parse(((await invoke(work,'preview_role_review_audit',draft)).content[0] as {text:string}).text);
     const draft=fixtureAudit(work,f.unit);
     expect(await preview({...draft,questionDispositions:[]})).toMatchObject({valid:false,diagnostic:expect.stringContaining('responsibilities')});
     expect(await preview(draft)).toMatchObject({valid:false,diagnostic:expect.stringContaining('Mapped claim is unverified')});
-    await invoke(work,'read_role_audit_inventory',{offset:1});
+    await invoke(work,'read_role_audit_inventory',{candidateId:f.missingCandidateId});
     const missing={...draft,discoveryDispositions:draft.discoveryDispositions.map((d:any)=>({...d,candidateIds:[f.missingCandidateId]}))};
     expect(await preview(missing)).toMatchObject({valid:false,issues:expect.arrayContaining([{code:'missing-judgment',path:'discoveryDispositions[0].candidateIds',candidateIds:[f.missingCandidateId],message:'Candidate has no judgment entry',guidance:expect.stringContaining('no entry to read')}])});
     expect(f.store.journal.history('propose_role_review_audit',work.workId)).toEqual([]);
@@ -365,14 +409,14 @@ it('delivers complete boundary context without changing core ownership and inval
     expect(packet(work).source.fragments.find((v:{unitId:string})=>v.unitId===boundary.id)).toMatchObject({continued:true});
     expect(packet(work).source.core).toEqual(span);
     expect(packet(work).source.boundaryContext).toMatchObject({contextOnly:true,manifest:{includedRefs:expect.arrayContaining([boundary.id])}});
-    await invoke(work,'read_role_audit_inventory',{});
+    await invoke(work,'read_role_audit_inventory',{candidateId:f.candidateId});
     const draft={...fixtureAudit(work,complete.id),unresolved:[`Unverified claim ${f.candidateId}`]};
     const preview=async(raw:unknown)=>JSON.parse(((await invoke(work,'preview_role_review_audit',raw)).content[0] as {text:string}).text);
     // No original read tool is needed for text already delivered in full.
     expect(await preview(draft)).toMatchObject({valid:true,committed:false});
     const partial={...draft,questionDispositions:draft.questionDispositions.map((q:any)=>({...q,basisUnitIds:[boundary.id]}))};
     expect(await preview(partial)).toMatchObject({valid:true});
-    work.onContextInvalidated!();await invoke(work,'read_role_audit_inventory',{});
+    work.onContextInvalidated!();await invoke(work,'read_role_audit_inventory',{candidateId:f.candidateId});
     expect(await preview(draft)).toMatchObject({valid:false,diagnostic:expect.stringContaining(complete.id)});
     expect(await preview(partial)).toMatchObject({valid:false,diagnostic:expect.stringContaining(boundary.id)});
     work.onContextRestored!();

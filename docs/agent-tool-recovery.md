@@ -2512,6 +2512,26 @@ read, but it grants no proposal, context, or retry allowance. Retained blocked
 budgets and previously stopped source/claim/audit work remain blocked, with no
 retroactive progress credit or renamed replacement work.
 
+Untouched diagnostic source audits now default unfiltered
+`read_role_audit_inventory` calls to a compact directory: up to 25 complete
+identity/status records per page, further bounded by 16000 UTF-8 bytes without
+truncating an item. Copy `nextOffset` for the full denominator and
+`candidates[].id` into `candidateId` for the relevant full judgment. `mode=detail`
+and literal queries retain the full single-entry read. `mode=directory` can
+filter the directory with a query; it cannot combine with `candidateId`.
+Directory responses never satisfy judgment-read gates or earn progress. Missing
+entries remain visible. A cursor miss uses the same tool with `offset=0`, then
+the returned `nextOffset`; correct once, never guess or repeat unchanged.
+Oversized single items stop for host review, with no truncated evidence or retry.
+
+An `unverified-dependency` preview issue identifies a field correction, not
+missing access. Copy each unique reported candidate ID into `unresolved`, retain
+its evidence boundary, and correct the draft before optional navigation. The
+validator reports each such candidate once even when multiple findings map it.
+This does not certify that claim or reopen stopped work. A no-progress task
+retains its original budget, context and attempt records; the directory change
+applies only to untouched diagnostic work, whose start guard remains mandatory.
+
 ### Durable compiler handoff delivery
 
 The local supervisor uses `tools/compiler-wakeup/` to connect to the existing

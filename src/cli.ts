@@ -25,6 +25,8 @@ import { reparseCommand } from "./commands/reparse.js";
 import { migrateLegacyAcquisitions } from "./compiler/acquisition-migration.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
+import { compileNovelCommand } from "./commands/compile-novel.js";
+import { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
 import { WorkspaceOperationLock } from "./util/workspace-lock.js";
 import { withCompilerSignals, CompilerInterruptedError } from "./util/compiler-signals.js";
 import { activatePreparedCacheRevisionCommand, inspectNovelClosureCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
@@ -80,6 +82,62 @@ compilerLock.command("recover")
 function rootFor(options: { root?: string }): string {
   return options.root ?? program.opts().root ?? process.cwd();
 }
+
+const compileNovel = program.command("compile-novel")
+  .description("Compile a whole novel through independent evaluation, certification, activation and playable branch delivery (resume by default)")
+  .argument("[novel]", "UTF-8 source novel path; omit to continue a registered source");
+const novelOptions = (command: Command) => command
+  .option("--root <path>", "local novel workspace")
+  .option("-c, --config <path>", "configuration file")
+  .option("--source <id>", "registered source ID")
+  .option("--model <model>", "model override for compiler and evaluation")
+  .option("--branch <id>", "new playable branch ID; existing revision-pinned histories are preserved")
+  .option("--evaluation-plan <path>", "independent evaluation input JSON; otherwise generate/reuse a source-reviewed plan")
+  .option("--plan-hash <hash>", "exact previously frozen independent evaluation plan")
+  .option("--upstream-plan <hash>", "exact authorized upstream repair plan")
+  .option("--upstream-finish <path>", "original host finish review for the authorized upstream plan");
+novelOptions(compileNovel).option("--rebuild", "recompile all source batches; an interrupted rebuild resumes its original generation");
+const runCompileNovel = async (command: Command, novel?: string, phase?: NovelCompilationPhase | "status", batchStage?: "structure" | "observation" | "semantic" | "executable" | "boundary") => {
+  // Commander optsWithGlobals lets the root's default cwd overwrite --root
+  // on a subcommand. Explicit options nearer the selected action win here.
+  const options = { ...program.opts(), ...compileNovel.opts(), ...command.opts() };
+  await withCompilerSignals(signal => compileNovelCommand({
+    root: rootFor(options), configPath: options.config ? path.resolve(options.config) : undefined,
+    novelPath: novel, sourceId: options.source, branchId: options.branch, model: options.model,
+    rebuild: Boolean(options.rebuild), phase, batchStage, evaluationPlanFile: options.evaluationPlan,
+    evaluationPlanHash: options.planHash, upstreamRepairPlan: options.upstreamPlan,
+    upstreamRepairFinishFile: options.upstreamFinish, signal,
+  }));
+};
+compileNovel.action(async (novel, _options, command) => runCompileNovel(command, novel));
+const phaseDescriptions: Record<NovelCompilationPhase, string> = {
+  source: "Verify/register immutable source and prepare the current structure plan",
+  recover: "Recover original finish receipts and already-authorized upstream repairs before new model work",
+  batches: "Resume all observation, identity/semantic, executable and boundary batches",
+  converge: "Validate and commit pending proposals; retain rejected drafts and unresolved obligations",
+  opening: "Compile the evidence-backed initial world",
+  roles: "Complete independent source character reviews and register core-role requirements",
+  repair: "Resume authorized upstream repairs and reconcile world/graph gaps",
+  requirements: "Re-evaluate all registered requirements and global closure gates",
+  archive: "Archive an immutable candidate without activation or a completeness claim",
+  "evaluation-plan": "Generate/reuse or import and freeze independent gold, support reviews and scenarios",
+  evaluate: "Run/resume independent live Pi experiments against the frozen candidate",
+  certify: "Certify and archive the current candidate without activating it",
+  activate: "Activate only the current certified candidate",
+  branch: "Create/reuse a playable branch pinned to the current certified revision",
+};
+for (const phase of NOVEL_COMPILATION_PHASES) {
+  const command = novelOptions(compileNovel.command(phase).description(phaseDescriptions[phase]));
+  if (phase === "source") command.argument("[novel]", "UTF-8 source novel path")
+    .action(async (novel, _options, child) => runCompileNovel(child, novel, phase));
+  else command.action(async (_options, child) => runCompileNovel(child, undefined, phase));
+}
+for (const stage of ["structure", "observation", "semantic", "executable", "boundary"] as const) {
+  novelOptions(compileNovel.command(stage).description(`Run only ${stage} compiler batches; prior stage dependencies still apply`))
+    .action(async (_options, child) => runCompileNovel(child, undefined, "batches", stage));
+}
+novelOptions(compileNovel.command("status").description("Read current source/phase/obligation/candidate status without models, migration or certification"))
+  .action(async (_options, child) => runCompileNovel(child, undefined, "status"));
 
 const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and run bounded host-reviewed corrections");
 program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")

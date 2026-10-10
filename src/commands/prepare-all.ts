@@ -71,6 +71,8 @@ export type PrepareAllCommandOptions = {
   reconciliationFocus?: "opening-driver";
   /** Internal recovery mode: establish a validated opening world, then return before semantic repair or branch creation. */
   stopAfterInitialWorld?: boolean;
+  /** Run just this preparation phase. Used by the full lifecycle and its stage commands. */
+  onlyPhase?: "opening" | "repair" | "requirements";
   signal?: AbortSignal;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
@@ -163,7 +165,8 @@ export async function prepareAllCommand(
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
   sourceId = inspection.source!.id;
-  const upstreamPlans = options.upstreamRepairPlan ? [options.upstreamRepairPlan] : await pendingAuthorizedUpstreamRepairs(root, sourceId);
+  const upstreamPlans = options.onlyPhase && options.onlyPhase !== "repair" ? []
+    : options.upstreamRepairPlan ? [options.upstreamRepairPlan] : await pendingAuthorizedUpstreamRepairs(root, sourceId);
   for (const planHash of upstreamPlans) {
     const config = await loadOptionalConfig(configPath);
     const input: unknown = options.upstreamRepairFinishFile ? JSON.parse(await fs.readFile(options.upstreamRepairFinishFile, "utf8")) : undefined;
@@ -199,7 +202,7 @@ export async function prepareAllCommand(
   const preparedCache = new PreparedNovelCache(root, options.cacheRoot);
   const cachedBeforePreparation = await preparedCache.lookup(inspection.source!);
   if (
-    options.reparseBaselineBundleHash
+    !options.onlyPhase && options.reparseBaselineBundleHash
     && cachedBeforePreparation.bundleHash
     && cachedBeforePreparation.bundleHash !== options.reparseBaselineBundleHash
   ) {
@@ -224,7 +227,7 @@ export async function prepareAllCommand(
       `No active prepared revision is currently published; finalizing against immutable baseline ${options.reparseBaselineBundleHash}.`,
     );
   }
-  if (!options.reparseBaselineBundleHash && cachedBeforePreparation.requiresReparse) {
+  if (!options.onlyPhase && !options.reparseBaselineBundleHash && cachedBeforePreparation.requiresReparse) {
     const decision = await ask({
       header: "Pipeline upgrade",
       question: "The active prepared novel uses older world semantics. Reparse the whole novel before continuing?",
@@ -265,7 +268,7 @@ export async function prepareAllCommand(
     }
   }
   if (
-    inspection.stage === "repair"
+    !options.onlyPhase && inspection.stage === "repair"
     && !(
       inspection.audit
       && (
@@ -276,7 +279,7 @@ export async function prepareAllCommand(
     )
   ) throw preparationFailure(inspection);
 
-  if (options.restoreCache !== false) {
+  if (!options.onlyPhase && options.restoreCache !== false) {
     const restored = await preparedCache.restore(inspection.source!);
     if (restored.status === "restored") {
       report(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; model compilation is not required.`);
@@ -287,7 +290,10 @@ export async function prepareAllCommand(
     }
   }
 
-  if (inspection.stage === "compile") {
+  if (options.onlyPhase && inspection.completedBatches !== inspection.totalBatches) {
+    throw new Error(`COMPILATION_BATCHES_REQUIRED: finish nwh compile-novel batches --source ${sourceId} before ${options.onlyPhase}; existing checkpoints are retained.`);
+  }
+  if (!options.onlyPhase && inspection.stage === "compile") {
     options.signal?.throwIfAborted();
     const decision = await ask({
       header: "Compile",
@@ -321,7 +327,10 @@ export async function prepareAllCommand(
   inspection = await inspectPreparation(root, { sourceId, branchId });
   await refreshDerivedBranchId();
   options.signal?.throwIfAborted();
-  if (inspection.pending.length) {
+  if (options.onlyPhase && inspection.pending.length) {
+    throw new Error(`COMPILATION_CONVERGENCE_REQUIRED: run nwh compile-novel converge --source ${sourceId} before ${options.onlyPhase}; do not discard pending proposals.`);
+  }
+  if (!options.onlyPhase && inspection.pending.length) {
     const decision = await ask({
       header: "Proposals",
       question: `Accept all ${inspection.pending.length} pending proposal(s) that pass deterministic validation?`,
@@ -336,7 +345,7 @@ export async function prepareAllCommand(
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
 
-  if (inspection.stage === "needs-initial-world") {
+  if ((!options.onlyPhase || options.onlyPhase === "opening") && inspection.stage === "needs-initial-world") {
     const decision = await ask({
       header: "Opening state",
       question: "No accepted opening world exists. Ask the compiler to propose one from opening evidence?",
@@ -417,13 +426,18 @@ export async function prepareAllCommand(
     }
   }
 
-  if (options.stopAfterInitialWorld) {
+  if (options.stopAfterInitialWorld || options.onlyPhase === "opening") {
     if (inspection.stage === "needs-initial-world") throw preparationFailure(inspection);
+    if (options.onlyPhase === "opening") {
+      const { InitialWorldStore } = await import("../world/initial.js");
+      const opening = await new InitialWorldStore(root).get();
+      if (!opening?.evidence.some(reference => reference.span.sourceId === sourceId)) throw preparationFailure(inspection);
+    }
     report("Opening world is available for rollback-baseline publication; deferred later semantic repair.");
     return inspection;
   }
 
-  if (!cacheVerified) {
+  if (!options.onlyPhase && !cacheVerified) {
     report("Reviewing the independent major-character roster before planning semantic repairs.");
     try { await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
       ...(options.model ? { model: options.model } : {}), signal: options.signal,
@@ -437,7 +451,7 @@ export async function prepareAllCommand(
   }
 
   if (
-    inspection.audit
+    options.onlyPhase !== "requirements" && inspection.audit
     && !options.reconciliationFocus
     && narrativeGraphRepairIsTargetable(inspection.audit)
   ) {
@@ -472,7 +486,7 @@ export async function prepareAllCommand(
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
   }
-  if (inspection.audit?.consistency.narrativeGraphNavigable === false) {
+  if (options.onlyPhase !== "requirements" && inspection.audit?.consistency.narrativeGraphNavigable === false) {
     const canReconcile = semanticRepairIsIsolated(inspection.audit)
       || (Boolean(options.reparseBaselineBundleHash) && semanticRepairRequiresReparse(inspection.audit));
     if (!canReconcile) throw preparationFailure(inspection);
@@ -482,7 +496,7 @@ export async function prepareAllCommand(
     );
   }
 
-  if (inspection.audit && semanticRepairIsIsolated(inspection.audit)) {
+  if (options.onlyPhase !== "requirements" && inspection.audit && semanticRepairIsIsolated(inspection.audit)) {
     const decision = await ask({
       header: "World semantics",
       question: "The novel-scale audit found timeline/effect/character-growth gaps. Run a bounded whole-world reconciliation pass?",
@@ -513,7 +527,7 @@ export async function prepareAllCommand(
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
   } else if (
-    options.reparseBaselineBundleHash
+    options.onlyPhase !== "requirements" && options.reparseBaselineBundleHash
     && inspection.audit
     && semanticRepairRequiresReparse(inspection.audit)
   ) {
@@ -554,6 +568,8 @@ export async function prepareAllCommand(
     || inspection.audit.consistency.semanticReady === false
   )) throw preparationFailure(inspection);
 
+  if (options.onlyPhase === "repair") return inspection;
+
   await assertReconciliationDeferralsReviewed(root, sourceId);
   if (["create-branch", "ready"].includes(inspection.stage)) {
     const { UpstreamRepairLedger } = await import("../compiler/upstream-repair-ledger.js");
@@ -565,6 +581,10 @@ export async function prepareAllCommand(
   }
   const requirements = await settleSourceRequirements(root, sourceId);
   if (requirements.issues.length) throw new Error(`Registered capability requirements block publication: ${requirements.issues.join("; ")}. Inspect nwh requirements inspect --source ${sourceId}; preserve unresolved requirements and stop for host source review. Do not rotate namespaces or retry unchanged.`);
+  if (options.onlyPhase === "requirements") {
+    if (!["create-branch", "ready"].includes(inspection.stage)) throw preparationFailure(inspection);
+    return inspection;
+  }
 
   if (["create-branch", "ready"].includes(inspection.stage) && !cacheVerified) {
     options.signal?.throwIfAborted();

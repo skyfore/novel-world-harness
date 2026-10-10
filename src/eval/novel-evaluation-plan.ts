@@ -66,7 +66,26 @@ export function validateEvaluationPlan(plan: NovelEvaluationPlan, bundle: Prepar
 export class NovelEvaluationPlanStore {
   readonly root: string;
   constructor(root: string) { this.root = path.join(worldStorageRoot(root), "compiler", "evaluation-plans", "v1"); }
+  async findCurrent(bundle: PreparedNovelBundle, input?: unknown): Promise<{ hash: string; plan: NovelEvaluationPlan } | null> {
+    let names: string[];
+    try { names = await fs.readdir(this.root); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+    const subject = preparedSubjectHash(bundle), matches: Array<{ hash: string; plan: NovelEvaluationPlan }> = [];
+    const parsed = input === undefined ? undefined : novelEvaluationPlanInputSchema.parse(input);
+    for (const name of names.filter(name => /^[a-f0-9]{64}\.json$/.test(name))) {
+      const digest = name.slice(0, -5), plan = await this.read(digest);
+      if (plan.subjectSnapshotHash !== subject) continue;
+      validateEvaluationPlan(plan, bundle);
+      const { version: _version, sourceId: _source, sourceSha256: _sha, subjectSnapshotHash: _subject,
+        rosterHash: _roster, frozenAt: _at, ...planInput } = plan;
+      if (parsed !== undefined && contentHash(parsed) !== contentHash(planInput)) continue;
+      matches.push({ hash: digest, plan });
+    }
+    return matches.sort((a, b) => b.plan.frozenAt.localeCompare(a.plan.frozenAt) || a.hash.localeCompare(b.hash))[0] ?? null;
+  }
   async freeze(input: unknown, bundle: PreparedNovelBundle): Promise<{ hash: string; plan: NovelEvaluationPlan }> {
+    const existing = await this.findCurrent(bundle, input);
+    if (existing) return existing;
     const plan = novelEvaluationPlanSchema.parse({ ...novelEvaluationPlanInputSchema.parse(input), version: 1, sourceId: bundle.source.id,
       sourceSha256: bundle.source.contentSha256, subjectSnapshotHash: preparedSubjectHash(bundle), rosterHash: contentHash(bundle.compilerSnapshot.roleRoster), frozenAt: new Date().toISOString() });
     validateEvaluationPlan(plan, bundle);

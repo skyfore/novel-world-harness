@@ -380,6 +380,24 @@ export function buildNwhToolRecoveryAdvice(
   // can contain arbitrary novel wording, including "unknown" or "offset".
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
+  if (/evaluation_review_host_required|evaluation_review_no_progress|evaluation_review_scope_changed|evaluation_source_index_stale/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "The host must inspect the original evaluation draft, source scope and retained failure counters before continuation.",
+      steps: ["Stop. Preserve the review ID, typed drafts, source offsets and traces. Do not repeat calls, rename item keys or rotate the plan to reset attempts; inspect compile-novel status and follow the concrete diagnostic."] };
+  }
+  if (lower.includes("evaluation_plan_already_frozen")) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+      retryCondition: "The single-use evaluation finish has succeeded; end this review.", steps: ["Use the returned planHash. Do not call the finish or proposal tools again."] };
+  }
+  if (["read_evaluation_input", "propose_evaluation_item", "finish_evaluation_plan"].includes(toolName)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected retry in the unchanged source/candidate scope; a repeated failure requires host review.",
+      steps: ["Read read_evaluation_input section=index and copy sections[] or itemSections[] exactly; read section=schema for the named item's fields.",
+        "Read section=draft before correcting the same stable item key. Copy candidateId/entityId/entryCutHash from section=roles and assertion/assertionHash from section=assertions; do not guess identifiers.",
+        "Copy nextOffset exactly when paging. For missing original text use find_source_evidence query=*, then read_source_evidence with the exact results[].ref until its final page.",
+        "Repair every named finish diagnostic; do not drop gold items, shrink the major-role denominator or mark applicable layers exempt to pass."],
+      suggestedCall: { tool: "read_evaluation_input", arguments: { section: "index" } } };
+  }
   if (lower.includes("role_review_work_host_required")) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
       retryCondition: "The owning host must inspect the unchanged role review work, plan and journal before continuation.",

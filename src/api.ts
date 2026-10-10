@@ -111,6 +111,8 @@ export {
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
 export { PreparedNovelCache, preparedNovelBundleSchema, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
 export { rebuildCommand } from "./commands/rebuild.js";
+export { compileNovelCommand, inspectNovelCompilation, type CompileNovelOptions } from "./commands/compile-novel.js";
+export { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
 export { repairExistingCommand, type RepairExistingCommandOptions, type RepairExistingCommandResult } from "./commands/repair-existing.js";
 export { eventExecutionSchema, applyEventExecutions, validateEventExecutions, type EventExecution } from "./world/event-execution.js";
 export { buildPreparedClosure, affectedClosureNodes, staleClosureNodes, closureGraphSchema, type ClosureGraph, type ClosureKind } from "./compiler/closure.js";

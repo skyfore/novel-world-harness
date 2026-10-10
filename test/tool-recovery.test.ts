@@ -10,6 +10,16 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it("keeps independent evaluation corrections in the same draft and honors host/single-use stops", () => {
+    const advice = buildNwhToolRecoveryAdvice("propose_evaluation_item", "Unknown evaluation section");
+    expect(advice).toMatchObject({ retryable: true, suggestedCall: { tool: "read_evaluation_input", arguments: { section: "index" } } });
+    expect(advice.steps.join(" ")).toContain("itemSections[]");
+    expect(advice.steps.join(" ")).toContain("entryCutHash");
+    expect(advice.retryCondition).toContain("one materially corrected retry");
+    for (const error of ["EVALUATION_REVIEW_HOST_REQUIRED", "EVALUATION_REVIEW_NO_PROGRESS", "EVALUATION_REVIEW_SCOPE_CHANGED", "EVALUATION_SOURCE_INDEX_STALE", "EVALUATION_PLAN_ALREADY_FROZEN"]) {
+      expect(buildNwhToolRecoveryAdvice("finish_evaluation_plan", error).retryable).toBe(false);
+    }
+  });
   it.each(["preview_role_review_audit", "propose_role_review_audit"])("keeps audit schema recovery actionable without overriding host stops: %s", (tool) => {
     const advice = buildNwhToolRecoveryAdvice(tool, "Validation failed: discoveryDispositions/0/candidateIds must NOT have more than 0 items");
     expect(advice).toMatchObject({ category: "invalid-arguments", retryable: true });

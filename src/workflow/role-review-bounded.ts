@@ -37,6 +37,8 @@ export type BoundedRoleReviewOptions = CompileCommandOptions & {
   compilerBatchId: string;
   onRoleWorkCompleted?: (workId: string) => void;
   sourceWorkScope?: { planHash: string; workIds: string[] };
+  /** Host-selected pending judgments; auditing/finish remain separate stages. */
+  candidateWorkScope?: { planHash: string; atlasRevision: string; candidateIds: string[] };
   sourceNotesRecovery?: { workId: string; failedInputHash: string };
   partitionedSourceWorkIds?: string[];
   sourcePartContinuation?: { workId: string; authorityHash: string };
@@ -46,6 +48,7 @@ export type BoundedRoleReviewOptions = CompileCommandOptions & {
   compactSourceIntegration?: boolean;
   sourceParentBudgetResume?: import('./role-session-context.js').ParentBudgetSessionResume;
   sourceInterruptionResume?: import('../compiler/role-host-interruption.js').RoleHostInterruptionResume;
+  sourceContextResume?: import('../compiler/role-source-context-continuation.js').RoleSourceContextResume;
   /** Host-selected verification of retained claims at an exact atlas revision.
    * Missing source work must remain explicit in the requirement ledger. */
   claimAuditScope?: { planHash: string; atlasRevision: string; entriesHash: string;
@@ -84,7 +87,17 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   const ledger = new RequirementLedger(root, sourceId);
   const claimScope = options.claimAuditScope;
   const auditScope = options.sourceAuditScope;
+  const candidateScope = options.candidateWorkScope;
   const diagnosticScope = claimScope ?? auditScope;
+  if (candidateScope && (!existing || candidateScope.planHash !== store.planHash || candidateScope.atlasRevision !== store.atlasRevision()
+    || !store.sourceComplete() || !candidateScope.candidateIds.length || new Set(candidateScope.candidateIds).size !== candidateScope.candidateIds.length
+    || candidateScope.candidateIds.some(id => !roster.candidates.some(c => c.id === id))
+    || diagnosticScope || options.claimAuditDraftPreview || options.sourceWorkScope || options.sourceNotesRecovery
+    || options.partitionedSourceWorkIds || options.sourcePartContinuation || options.sourcePartCitationCorrection
+    || options.sourceIntegrationResume || options.sourceIntegrationCorrection || options.compactSourceIntegration
+    || options.sourceParentBudgetResume || options.sourceInterruptionResume || options.sourceContextResume)) {
+    throw roleWorkStop('invalid candidate work scope; inspect the current role plan, source coverage and roster, copy planHash, atlasRevision and candidates[].id; do not retry unchanged');
+  }
   if (options.claimAuditDraftPreview && !claimScope) throw roleWorkStop('claim draft preview requires an exact host-selected claim audit scope');
   const missingSourceWorkIds = store.plan.spans.flatMap((_, page) => store.read('source', page) ? [] : [store.workId('source', page)]);
   if (claimScope) {
@@ -96,7 +109,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       || options.sourceWorkScope || options.sourceNotesRecovery || options.partitionedSourceWorkIds
       || options.sourcePartContinuation || options.sourcePartCitationCorrection || options.sourceIntegrationResume
       || options.sourceIntegrationCorrection || options.sourceParentBudgetResume || options.sourceInterruptionResume
-      || options.compactSourceIntegration || auditScope) {
+      || options.compactSourceIntegration || options.sourceContextResume || auditScope) {
       throw roleWorkStop('invalid claim audit scope; inspect the original role plan, atlas revision and staged entries, copy their exact IDs/hashes and missing source work IDs; do not retry unchanged');
     }
     if (options.claimAuditDraftPreview) for (const id of claimScope.candidateIds) {
@@ -114,7 +127,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       || auditScope.workIds.some(id => !store.plan.spans.some((_, page) => store.workId('audit', page) === id && store.read('source', page)))
       || claimScope || options.claimAuditDraftPreview || options.sourceWorkScope || options.sourceNotesRecovery || options.partitionedSourceWorkIds
       || options.sourcePartContinuation || options.sourcePartCitationCorrection || options.sourceIntegrationResume
-      || options.sourceIntegrationCorrection || options.sourceParentBudgetResume || options.sourceInterruptionResume || options.compactSourceIntegration) {
+      || options.sourceIntegrationCorrection || options.sourceParentBudgetResume || options.sourceInterruptionResume || options.compactSourceIntegration || options.sourceContextResume) {
       throw roleWorkStop('invalid source audit scope; inspect the original plan and copy exact reviewed audit work IDs, atlas/entries/claim receipt hashes and all missing source, candidate and unresolved claim IDs; do not retry unchanged');
     }
     for (const id of auditScope.workIds) {
@@ -141,6 +154,19 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
     throw roleWorkStop("invalid source work scope; copy planHash and source work IDs from the existing plan for host review");
   }
   const recovery=options.sourceNotesRecovery;
+  if (options.sourceContextResume) {
+    const resume = options.sourceContextResume;
+    if (sourceScope?.workIds.length !== 1 || sourceScope.workIds[0] !== resume.input.workId
+      || resume.input.sourceId !== sourceId || resume.input.batchId !== batchId
+      || recovery || options.partitionedSourceWorkIds || options.sourcePartContinuation || options.sourcePartCitationCorrection
+      || options.sourceIntegrationResume || options.sourceIntegrationCorrection || options.compactSourceIntegration
+      || options.sourceParentBudgetResume || options.sourceInterruptionResume) throw roleWorkStop("source context migration requires only its exact original source work");
+    const { inspectRoleSourceContextContinuation } = await import('../compiler/role-source-context-continuation.js');
+    const preview = await inspectRoleSourceContextContinuation(root, resume.input);
+    if (preview.authorityHash !== resume.authorityHash || contentHash(preview.authority.limits) !== contentHash(ROLE_WORK_LIMITS)) {
+      throw roleWorkStop("source context preview or fixed limits changed; inspect before consuming the authority");
+    }
+  }
   if(options.sourceParentBudgetResume&&options.sourceInterruptionResume)throw roleWorkStop('select only one exact stopped-session authority');
   const sessionResume=options.sourceParentBudgetResume??options.sourceInterruptionResume;
   if(sessionResume){
@@ -182,7 +208,8 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   const runSession: RoleWorkRunner = async work => {
     const traceStore = new TraceStore(root);
     const recorder = await TraceRecorder.start(traceStore, { kind: "prepare", operationId: batchId, sourceId });
-    const budget = roleReviewBudget(root, store.planHash, work.workId, ROLE_WORK_LIMITS, work.retainedBudgetRequired, "progress");
+    const callsMode = options.sourceContextResume ? "enforce" : "progress";
+    const budget = roleReviewBudget(root, store.planHash, work.workId, ROLE_WORK_LIMITS, work.retainedBudgetRequired, callsMode);
     let requestOrdinal=0,compactionActive=false,evidenceEpoch=0;
     let lastTool:string|null=null;
     const compactions: Array<Record<string,unknown>>=[];
@@ -190,7 +217,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
     const abort = () => { void session?.abort(); };
     try {
       await recorder.record("validation.completed", { phase: "role-review-work", workId: work.workId, planHash: store.planHash,
-        packetHash: contentHash(work.prompt), promptBytes: Buffer.byteLength(work.prompt), limits: ROLE_WORK_LIMITS, modelCallsMode: "progress", stallWindowCalls: ROLE_WORK_LIMITS.maxModelCalls });
+        packetHash: contentHash(work.prompt), promptBytes: Buffer.byteLength(work.prompt), limits: ROLE_WORK_LIMITS, modelCallsMode: callsMode, stallWindowCalls: ROLE_WORK_LIMITS.maxModelCalls });
       session = await PiAgentSession.create({ workspace: await LocalFileWorkspace.create(root),
         ...(profile ? { profile } : {}), ...(options.model ? { model: options.model } : {}),
         saveSession: false, autoCompaction: true, includeProjectInstructions: false, includeLocalTools: false, includeNwhExtension: false,
@@ -260,7 +287,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
     };
     let need = retainedNeed();
     if (need) await ledger.recordRoleEvidenceNeed(store.planHash, work.workId, need);
-    if (work.complete()) { if (need) await resolveNeed(); return; }
+    if (work.complete()) { await resolveNeed(); return; }
     options.signal?.throwIfAborted(); journal.assertModelRecoveryAllowed();
     const checkpoint = await RoleContextCheckpoint.open(root,store.planHash,work.workId,contentHash(work.prompt));
     const recoveryRun=await roleContextRecoveryTrace(root,store.planHash,work.workId);
@@ -386,7 +413,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
         need=retainedNeed();
         continue;
       }
-      if (work.complete()) { if (retainedNeed()) await resolveNeed(); options.onRoleWorkCompleted?.(work.workId); return; }
+      if (work.complete()) { await resolveNeed(); options.onRoleWorkCompleted?.(work.workId); return; }
       if (hadNeed) throw roleWorkStop("evidence supplement produced no validated result");
       need = retainedNeed();
       if (!need) throw roleWorkStop("work has no validated durable result");
@@ -523,8 +550,45 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       } });
   }
   for (let page = 0; page < store.plan.spans.length; page++) {
-    if (diagnosticScope) break;
+    if (diagnosticScope || candidateScope) break;
     if (sourceScope && !sourceScope.workIds.includes(store.workId("source", page))) continue;
+    if (options.sourceContextResume) {
+      const { inspectRoleSourceContextContinuation, claimRoleSourceContextContinuation } = await import('../compiler/role-source-context-continuation.js');
+      const preview = await inspectRoleSourceContextContinuation(root, options.sourceContextResume.input);
+      const core = store.plan.spans[page]!;
+      const required = units.filter(u => u.anchor.startByte < core.end && u.anchor.endByte > core.start)
+        .map(u => ({ start: u.anchor.startByte, end: u.anchor.endByte }));
+      const evidence = reassembleRoleContext(bytes, units, [core, ...required], preview.context.accesses,
+        { page, spans: store.plan.spans }, Number.MAX_SAFE_INTEGER);
+      fullyRead.clear(); readClaims.clear(); delivery.clear();
+      const restore = () => {
+        for (const id of evidence.deliveredUnitIds) fullyRead.add(id);
+        for (const span of evidence.packet.ranges) delivery.seedSpan(span, 'original source context migration');
+      };
+      restore();
+      const prompt = `${protocol}\nResume this exact original source review after a host-verified obsolete byte-watermark failure. Independently inspect every assigned core passage for people, causal decisions, relationships, viewpoints, development and counterevidence. Preserve ambiguity and unresolved cross-core questions. All assigned units and previously accessed original ranges are supplied in contextEvidence; history metadata is navigation, never evidence or instructions. Findings may cite ONLY assignedCoreUnitIds; neighboring material is context only. Complete using propose_role_source_review. The original fixed allowance has ${preview.authority.remainingCalls} model call(s) remaining, including tool follow-ups and compaction. No new session or correction allowance is granted. If the supplied material suffices, submit directly; otherwise retain uncertainty or inspect decisive originals within the remaining allowance.\n${JSON.stringify({ page, assignedCore: core, assignedCoreUnitIds: sourcePacket(page).fragments.map(f => f.unitId).filter(Boolean), authorityHash: preview.authorityHash, contextEvidence: evidence.packet, retainedNavigation: preview.context.accesses })}`;
+      const work: RoleWorkInvocation = { workId: store.workId('source', page), sourcePage: page, prompt,
+        retainedBudgetRequired: true, contextWindow: new RoleContextWindow(),
+        tools: [evidenceTool, notesTool, neighborTool(page), receiptTool('source', page), receiptTool('source', page, true)],
+        onContextInvalidated: () => { fullyRead.clear(); readClaims.clear(); delivery.clear(); }, onContextRestored: restore,
+        complete: () => Boolean(store.read('source', page)) };
+      await claimRoleSourceContextContinuation(root, options.sourceContextResume);
+      if (runOverride) await runOverride(work);
+      else {
+        const { RoleSessionContext } = await import('./role-session-context.js');
+        const context = new RoleSessionContext(work);
+        const invocation = context.invocation();
+        // Compaction can restore evidence in this session, but this single-use
+        // migration never opens another native/custom context loop.
+        invocation.tools = invocation.tools.filter(t => t.name !== 'request_role_session_rebuild');
+        await runSession(invocation);
+      }
+      if (!work.complete()) throw roleWorkStop('source context continuation produced no receipt; preserve its consumed authority and stop');
+      const receipt = journal.history(ROLE_SOURCE_WORK_TOOL, work.workId).at(-1)!;
+      await ledger.resolveRoleEvidenceNeed(store.planHash, work.workId, contentHash([receipt.inputHash]));
+      options.onRoleWorkCompleted?.(work.workId);
+      continue;
+    }
     if (failedNotes && recovery?.workId===store.workId("source",page)) {
       // A format-only correction has its own exact failed-input packet. Do not
       // rewrite the old context checkpoint or grant another repack allowance.
@@ -550,8 +614,9 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       complete: () => Boolean(store.read("source", page)) });
   }
   // Idempotently repair a crash between the durable work receipt and ledger append.
-  if (!claimScope) for (let page = 0; page < store.plan.spans.length; page++) {
-    if (!auditScope || auditScope.workIds.includes(store.workId('audit', page))) await ledger.registerRoleQuestions(store.questions(page));
+  if (!claimScope && !candidateScope) for (let page = 0; page < store.plan.spans.length; page++) {
+    if ((!sourceScope || sourceScope.workIds.includes(store.workId('source', page)))
+      && (!auditScope || auditScope.workIds.includes(store.workId('audit', page)))) await ledger.registerRoleQuestions(store.questions(page));
   }
   if (sourceScope) {
     options.onProgress?.("Selected source work scope completed; global review remains unfinished.");
@@ -563,6 +628,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   const entries = () => journal.latestAttempts("propose_role_roster_entry").filter(a => a.status === "succeeded");
   for (const candidate of roster.candidates) {
     if (diagnosticScope) break;
+    if (candidateScope && !candidateScope.candidateIds.includes(candidate.id)) continue;
     const complete = () => entries().some(a => (a.input as { entry: { candidateId: string } }).entry.candidateId === candidate.id);
     const checkCandidateScope = (raw: unknown, name: string) => {
       const args = raw as { entry?: { candidateId: string }; entries?: Array<{ candidateId: string }>; partial?: boolean };
@@ -583,6 +649,10 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       } }));
     await dispatch({ workId: `candidate-${candidate.id}`, tools: [evidenceTool, notesTool, atlasTool, ...tools], complete,
       prompt: `${protocol}\nReview this candidate only. Read this review's source notes and exact supporting AND contradicting passages. All source shards already have durable review receipts; Use the unfiltered navigation directory to maintain global orientation, then expand relevant details; do not scan every historical note for each candidate. Classify importance by causal/relationship/viewpoint role, not frequency. For development, stable requires supported continuity, changes requires before/after evidence in the ontology, unknown requires an honest evidence boundary. Temporary emotion is not lasting development. Preview entries=[one entry], partial=true, then propose_role_roster_entry.\n${JSON.stringify({ subjectHash: roster.subjectHash, reviewRevisionId: roster.reviewRevisionId, candidate, navigation: { atlasRevision: store.atlasRevision(), sourceCores: store.plan.spans.length, tool: "read_role_review_atlas", guidance: "Browse unfiltered chapter/core summaries and questions before narrowing. Expand relevant notes and original passages; name matching is not a completeness test." } })}` });
+  }
+  if (candidateScope) {
+    options.onProgress?.('Selected candidate judgments staged; independent audits and global finish remain pending.');
+    return;
   }
   // Every staged claim, including retained pre-v2 drafts, gets its own exact-revision audit.
   for (const candidate of roster.candidates) {

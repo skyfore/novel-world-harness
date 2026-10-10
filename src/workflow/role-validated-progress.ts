@@ -15,7 +15,12 @@ export function roleProgressTools(work: RoleWorkInvocation, budget: ModelRequest
       if (item.type !== "text") return [];
       try { return [JSON.parse(item.text) as Record<string,unknown>]; } catch { return []; }
     });
-    if (tool.name.startsWith("preview_role_") && values.some(value => value?.valid === true)) {
+    const validDraft = values.some(value => tool.name === "preview_role_roster_review"
+      ? value?.structuralValid === true && value.requiresHostReview === false
+        && Array.isArray(value.unresolvedObligations) && value.unresolvedObligations.length === 0
+        && Array.isArray(value.unreadSourcePages) && value.unreadSourcePages.length === 0
+      : value?.valid === true);
+    if (tool.name.startsWith("preview_role_") && validDraft) {
       budget.recordValidatedProgress(`draft:${taskHash}`);
     }
     // A read earns nothing by itself. Recheck the retained, unchanged proposal

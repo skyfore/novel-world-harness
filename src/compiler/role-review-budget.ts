@@ -26,6 +26,25 @@ export function inspectRoleReviewBudget(root: string, planHash: string, workId: 
   if (fs.existsSync(`${base}.context-recovery.json`)) throw roleWorkStop("part revalidation does not support context-recovered budgets");
   return readBudget(base, planHash, workId);
 }
+/** Host inspection of the existing size-recovery lineage. This never creates a
+ * continuation, clears a stop, or changes the remaining fixed call allowance. */
+export function inspectRetainedRoleReviewBudget(root: string, planHash: string, workId: string) {
+  const base = budgetPath(root, planHash, workId), original = readBudget(base, planHash, workId);
+  const files: Record<string, string> = { [base]: contentHash(fs.readFileSync(base, "utf8")) };
+  const grantFile = `${base}.context-recovery.json`;
+  if (!fs.existsSync(grantFile)) return { ...original, file: base, files };
+  const record = JSON.parse(fs.readFileSync(grantFile, "utf8")), grant = grantSchema.parse(record.grant);
+  if (record.hash !== contentHash(grant) || grant.priorBudgetHash !== original.hash || grant.planHash !== planHash
+    || grant.workId !== workId || !original.state.blocked || grant.initial.blocked
+    || contentHash(grant.initial.usage) !== contentHash(original.state.usage)) throw roleWorkStop("invalid context recovery lineage");
+  const file = `${base}.after-context-recovery.json`, retained = readBudget(file, planHash, workId, original.limits);
+  if ((Object.keys(original.state.usage) as Array<keyof ModelRequestUsage>).some(k => retained.state.usage[k] < original.state.usage[k])) {
+    throw roleWorkStop("context recovery usage regressed");
+  }
+  files[grantFile] = contentHash(fs.readFileSync(grantFile, "utf8"));
+  files[file] = contentHash(fs.readFileSync(file, "utf8"));
+  return { ...retained, file, files };
+}
 /** Charged before transport. Recovery uses an immutable grant + separate usage
  * continuation; the original blocked budget is never overwritten or cleared. */
 export function roleReviewBudget(root: string, planHash: string, workId: string, limits: ModelRequestLimits, requireExisting = false, modelCallsMode: "enforce" | "progress" = "enforce") {

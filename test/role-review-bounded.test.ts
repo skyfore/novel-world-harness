@@ -13,6 +13,7 @@ import { runBoundedRoleReview as runReview, type RoleWorkInvocation } from "../s
 import { buildNwhToolRecoveryAdvice } from "../src/agent/tool-recovery.js";
 import { contentHash } from "../src/world/canonical.js";
 import { RoleRosterStore, validateRosterReview } from "../src/compiler/role-roster.js";
+import { RequirementLedger } from "../src/compiler/requirement-ledger.js";
 const runBoundedRoleReview = (options: Parameters<typeof runReview>[0], runner: NonNullable<Parameters<typeof runReview>[1]>) => runReview(options, runner, async () => {});
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
@@ -67,6 +68,37 @@ it("partitions UTF-8 continuously, including oversized paragraphs", () => {
   expect(Buffer.concat(spans.map(s => b.subarray(s.start, s.end)))).toEqual(b);
   for (const [i, s] of spans.entries()) { expect(s.start).toBe(i ? spans[i - 1]!.end : 0); expect(s.end - s.start).toBeLessThanOrEqual(6000); expect(b.subarray(s.start, s.end).toString()).not.toContain("�"); }
 });
+it("resumes selected candidate judgments only after complete source coverage and settles host-recorded needs", async () => {
+  const f = await setup(), { roster, structure } = await loadCurrentRoleRoster(f.root, f.f.source.id);
+  const store = await RoleReviewWorkStore.open(f.root, { version: 1, sourceId: f.f.source.id, sourceHash: roster.sourceSha256,
+    subjectHash: roster.subjectHash, batchId: f.batchId, structureHash: contentHash(structure),
+    spans: [{ start: 0, end: f.f.source.bytes }], legacyDraftHashes: [] });
+  const unit = roster.unitIds[0]!, candidateId = roster.candidates[0]!.id;
+  const scope = () => ({ planHash: store.planHash, atlasRevision: store.atlasRevision(), candidateIds: [candidateId] });
+  let calls = 0;
+  await expect(runBoundedRoleReview({ ...f.options, candidateWorkScope: scope() }, async () => { calls++; })).rejects.toThrow("invalid candidate work scope");
+  const ledger = new RequirementLedger(f.root, f.f.source.id);
+  for (const workId of [store.workId('source', 0), `candidate-${candidateId}`]) await ledger.recordRoleEvidenceNeed(store.planHash, workId, {
+    question: 'Complete original work', missing: 'No accepted receipt', decisionImpact: 'Blocks full review', searchedUnitIds: [], requestedUnitIds: [unit],
+  });
+  await runBoundedRoleReview({ ...f.options, sourceWorkScope: { planHash: store.planHash, workIds: [store.workId('source', 0)] } }, work => completeFixtureWork(work, unit));
+  const sourceHash = contentHash(store.read('source', 0));
+  await expect(runBoundedRoleReview({ ...f.options, candidateWorkScope: { ...scope(), atlasRevision: contentHash('stale') } }, async () => { calls++; })).rejects.toThrow("invalid candidate work scope");
+  await expect(runBoundedRoleReview({ ...f.options, candidateWorkScope: scope(), sourceWorkScope: { planHash: store.planHash, workIds: [store.workId('source', 0)] } }, async () => { calls++; })).rejects.toThrow("invalid candidate work scope");
+  expect(calls).toBe(0);
+  await runBoundedRoleReview({ ...f.options, candidateWorkScope: scope() }, async work => {
+    calls++; expect(work.workId).toBe(`candidate-${candidateId}`);
+    await completeFixtureWork(work, unit);
+  });
+  expect(calls).toBe(1);
+  expect(store.stagedEntries().map(e => e.candidateId)).toEqual([candidateId]);
+  expect(contentHash(store.read('source', 0))).toBe(sourceHash);
+  expect(store.claimAudits()).toEqual([]);
+  await store.assertUnstarted(`candidate-${roster.candidates[1]!.id}`);
+  const history = await ledger.history();
+  expect(history.filter(r => r.payload.kind === 'role-review-evidence-resolution').map(r => r.payload.workId).sort()).toEqual([store.workId('source', 0), `candidate-${candidateId}`].sort());
+  expect(await new RoleRosterStore(f.root).read(f.f.source.id)).toBeNull();
+});
 it("persists source work before candidates; resumes without rereading and retains the ordinary finish gate", async () => {
   const f = await setup(); const { roster } = await loadCurrentRoleRoster(f.root, f.f.source.id); const unit = roster.unitIds[0]!;
   await expect(runBoundedRoleReview(f.options, async work => {
@@ -99,6 +131,41 @@ it("persists source work before candidates; resumes without rereading and retain
   expect(validateRosterReview({ ...saved, reviews: [] }, legacyProof).map(x=>x.code)).toContain("ROSTER_WORK_EVIDENCE_REQUIRED");
   const changed = structuredClone(saved.reviews[0]!); changed.entries[0]!.rationale = "Tampered";
   expect(validateRosterReview({ ...saved, reviews: [] }, changed).map(x=>x.code)).toContain("ROSTER_WORK_EVIDENCE_MISMATCH");
+});
+it("previews and stages missing candidates after source receipts invalidate old audits without relaxing assembly", async () => {
+  const f = await setup(), { roster, structure } = await loadCurrentRoleRoster(f.root, f.f.source.id);
+  const store = await RoleReviewWorkStore.open(f.root, { version: 1, sourceId: f.f.source.id, sourceHash: roster.sourceSha256,
+    subjectHash: roster.subjectHash, batchId: f.batchId, structureHash: contentHash(structure),
+    spans: [{ start: 0, end: 18 }, { start: 18, end: f.f.source.bytes }], legacyDraftHashes: [] });
+  const unit = roster.unitIds[0]!, first = entry(roster.candidates[0]!.id, unit), second = entry(roster.candidates[1]!.id, unit);
+  await store.submit('source', 0, { summary: 'First core reviewed', findings: [], openQuestions: [] }, () => {});
+  store.journal.record('propose_role_roster_entry', { subjectHash: roster.subjectHash, entry: first }, 'succeeded');
+  await store.submitClaim({ candidateId: first.candidateId, claimRevision: contentHash(first), atlasRevision: store.atlasRevision(),
+    packetHash: contentHash('packet'), verdict: 'supported', rationale: 'Fixture supports exchange', basisUnitIds: [unit],
+    counterevidence: { searchedUnitIds: [unit], rationale: 'No contrary fixture passage' }, checks: fixtureChecks(unit) }, first.candidateId, () => {});
+  await store.submit('audit', 0, { rationale: 'First core audited', missingMajorCharacters: [], unresolved: [],
+    questionDispositions: [], discoveryDispositions: [], atlasRevision: store.atlasRevision() }, () => {});
+  const historical = store.reviewFreshness();
+  await store.submit('source', 1, { summary: 'Second core reviewed', findings: [], openQuestions: [] }, () => {});
+  expect(() => store.auditComplete()).toThrow('claim or atlas changed');
+  const tools = createCompilerProposalToolset(f.root); await tools.beginBatch([], f.batchId, f.f.source.id);
+  const call = (name: string, input: unknown) => tools.tools.find(t => t.name === name)!.execute(name, input as never, undefined, undefined, {} as ExtensionContext);
+  const preview = async (input: unknown) => JSON.parse(((await call('preview_role_roster_review', input)).content[0] as {text: string}).text);
+  expect(await preview({ subjectHash: roster.subjectHash, entries: [second], partial: true })).toMatchObject({
+    structuralValid: true, complete: false, nextAction: 'needs_candidate_work', semanticSupport: 'not-verified',
+    auditStatus: { currentSourceAudits: 0, staleSourceAudits: 1, currentClaimAudits: 0, staleClaimAudits: 1 },
+  });
+  await call('propose_role_roster_entry', { subjectHash: roster.subjectHash, entry: second });
+  expect(store.stagedEntries()).toHaveLength(2);
+  expect(await preview({ subjectHash: roster.subjectHash })).toMatchObject({
+    structuralValid: true, complete: false, nextAction: 'needs_global_audit', missingCandidateIds: [],
+  });
+  const current = store.reviewFreshness();
+  expect(current.sourceAudits[0]!.receiptHash).toBe(historical.sourceAudits[0]!.receiptHash);
+  expect(current.claimAudits[0]!.receiptHash).toBe(historical.claimAudits[0]!.receiptHash);
+  await expect(call('propose_role_roster_review', { subjectHash: roster.subjectHash, staged: true })).rejects.toThrow(/claim or atlas changed|global audit incomplete/);
+  await expect(call('finish_compiler_batch', { outcome: 'complete', reviewed_segments: [], summary: 'Attempted stale assembly' })).rejects.toThrow();
+  expect(await new RoleRosterStore(f.root).read(f.f.source.id)).toBeNull();
 });
 it("preserves zero-proposal work attempts and stops a third dispatch", async () => {
   const f = await setup(); let count = 0;

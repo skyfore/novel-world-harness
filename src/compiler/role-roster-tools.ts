@@ -178,18 +178,34 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       const issues = validateRosterReview(roster, review, { partial: input.partial });
       const included = new Set(entries.map(entry => entry.candidateId));
       const unresolved = journal().unresolved().map(attempt => ({ tool: attempt.tool, proposalId: attempt.proposalId, status: attempt.status, diagnostic: attempt.diagnostic }));
-      if (workStore?.auditComplete()) await workStore.assertQuestionLedger();
       const requiresHostReview = journal().requiringHostReview().length > 0;
       const missing = roster.candidates.filter(candidate => !included.has(candidate.id)).map(candidate => candidate.id);
-      const nextAction = requiresHostReview ? "host_review_required" : unresolved.length ? "needs_correction" : unreadPages().length ? "needs_source_work"
-        : missing.length ? "needs_candidate_work" : workStore && !workStore.auditComplete() ? "needs_global_audit" : issues.length ? "needs_correction" : "ready_to_assemble";
+      const unreadSourcePages = unreadPages();
+      // A partial draft is upstream of global audit. Retained receipts may be
+      // stale after source/candidate work; inspect them without accepting them
+      // as current or letting the strict assembly gate block local preflight.
+      const freshness = workStore?.reviewFreshness();
+      const auditStatus = freshness ? {
+        currentSourceAudits: freshness.sourceAudits.filter(a => a.current).length,
+        staleSourceAudits: freshness.sourceAudits.filter(a => !a.current).length,
+        currentClaimAudits: freshness.claimAudits.filter(a => a.current).length,
+        staleClaimAudits: freshness.claimAudits.filter(a => !a.current).length,
+      } : undefined;
+      const auditReady = !workStore || (!input.partial && missing.length === 0 && unreadSourcePages.length === 0
+        && !auditStatus?.staleSourceAudits && !auditStatus?.staleClaimAudits && workStore.auditComplete());
+      if (workStore && auditReady) await workStore.assertQuestionLedger();
+      const nextAction = requiresHostReview ? "host_review_required" : unresolved.length ? "needs_correction" : unreadSourcePages.length ? "needs_source_work"
+        : missing.length ? "needs_candidate_work" : !auditReady ? "needs_global_audit" : issues.length ? "needs_correction" : "ready_to_assemble";
       const result = { nextAction, guidance: nextAction === "needs_candidate_work"
         ? "Missing candidates are pending work, not a terminal error. Read the next candidate's exact evidence, preview entries=[one entry] with partial=true, then propose_role_roster_entry. Preserve existing drafts."
-        : nextAction === "host_review_required" ? "Stop; do not retry or rotate IDs." : "Complete the indicated work in the original review scope.", structuralValid: issues.length === 0, complete: !input.partial && issues.length === 0 && unreadPages().length === 0 && unresolved.length === 0 && (!workStore || workStore.auditComplete()),
+        : nextAction === "host_review_required" ? "Stop; do not retry or rotate IDs."
+        : nextAction === "needs_global_audit" ? "Do not assemble yet. The host must inspect reviewFreshness() in the original plan and arrange missing or stale audit work in a supported scope. Preserve historical receipts; do not overwrite them or retry assembly unchanged."
+        : "Complete the indicated work in the original review scope.", structuralValid: issues.length === 0, complete: !input.partial && issues.length === 0 && unreadSourcePages.length === 0 && unresolved.length === 0 && auditReady,
         unresolvedObligations: unresolved, requiresHostReview,
+        ...(auditStatus ? { auditStatus } : {}),
         semanticSupport: "not-verified", issues, totalCandidates: roster.candidates.length,
-        missingCandidateIds: roster.candidates.filter(candidate => !included.has(candidate.id)).map(candidate => candidate.id),
-        stagedCandidateIds: stagedEntries(roster).map(entry => entry.candidateId), unreadSourcePages: unreadPages(),
+        missingCandidateIds: missing,
+        stagedCandidateIds: stagedEntries(roster).map(entry => entry.candidateId), unreadSourcePages,
         recovery: requiresHostReview ? "Stop model submissions. Preserve the original source, batch, candidate IDs and failed inputs for host review; do not retry, rotate IDs or finish with no-artifacts." : recovery };
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
     },

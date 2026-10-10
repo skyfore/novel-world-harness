@@ -145,6 +145,36 @@ export class RoleReviewWorkStore {
   }
   stagedEntries() { return this.journal.latestAttempts("propose_role_roster_entry").filter(a => a.status === "succeeded").map(a => (a.input as {entry: {candidateId: string}}).entry); }
   claimAudits() { return this.stagedEntries().flatMap(e => { const audit = this.claimAudit(e.candidateId); return audit ? [audit] : []; }); }
+  /** Read-only version accounting. Old receipts remain inspectable without
+   * being accepted by the strict current-revision accessors or finish gates. */
+  reviewFreshness() {
+    const atlasRevision = this.atlasRevision(), entriesHash = this.entriesHash();
+    const retained = (tool: string, workId: string) => {
+      const record = this.journal.history(tool, workId).at(-1);
+      if (!record || record.status !== "succeeded") return;
+      const input = record.input as { planHash: string; payload: unknown; entriesHash?: string };
+      if (input.planHash !== this.planHash || record.inputHash !== CompilerProposalObligations.identity(tool, input).inputHash) {
+        throw roleWorkStop("review receipt integrity mismatch");
+      }
+      return { input, receiptHash: contentHash(record) };
+    };
+    const sourceAudits = this.plan.spans.flatMap((_, page) => {
+      const workId = this.workId("audit", page), record = retained(ROLE_AUDIT_WORK_TOOL, workId);
+      if (!record) return [];
+      const audit = roleAuditWorkSchema.parse(record.input.payload);
+      return [{ workId, page, receiptHash: record.receiptHash, audit,
+        current: audit.atlasRevision === atlasRevision && record.input.entriesHash === entriesHash }];
+    });
+    const claimAudits = this.stagedEntries().flatMap(entry => {
+      const workId = this.claimWorkId(entry.candidateId), record = retained(ROLE_CLAIM_AUDIT_TOOL, workId);
+      if (!record) return [];
+      const audit = roleClaimAuditSchema.parse(record.input.payload);
+      if (audit.candidateId !== entry.candidateId) throw roleWorkStop("claim audit candidate identity changed");
+      return [{ workId, candidateId: entry.candidateId, receiptHash: record.receiptHash, audit,
+        current: audit.atlasRevision === atlasRevision && audit.claimRevision === contentHash(entry) }];
+    });
+    return { atlasRevision, entriesHash, sourceAudits, claimAudits };
+  }
   auditComplete() {
     return this.sourceComplete() && this.stagedEntries().length > 0 && this.stagedEntries().every(e => this.claimAudit(e.candidateId)?.verdict === "supported")
       && this.plan.spans.every((_, page) => {

@@ -63,6 +63,24 @@ it('credits only complete original-task restoration after real recovery, once pe
  await invoke(w,b,'read_role_session_context',{complete:true,taskHash:w.logicalTaskHash},{recovery:true,isError:false});
  expect(b.report().progress?.callsWithoutProgress).toBe(1);
 });
+it('credits a structurally valid roster draft once despite stale downstream audits, without reopening stopped work',async()=>{
+ const b=new ModelRequestBudget(limits,undefined,{modelCallsMode:'progress'}),w=work();
+ const draft={structuralValid:true,complete:false,requiresHostReview:false,unresolvedObligations:[],unreadSourcePages:[],
+  auditStatus:{staleSourceAudits:130,staleClaimAudits:26},semanticSupport:'not-verified'};
+ b.beginCall({});
+ for(const invalid of [{...draft,structuralValid:false},{...draft,requiresHostReview:true},
+  {...draft,unresolvedObligations:[{status:'failed'}]},{...draft,unreadSourcePages:[1]}]) {
+  await invoke(w,b,'preview_role_roster_review',invalid);
+ }
+ await invoke(w,b,'preview_role_roster_review',draft,{recovery:false,isError:true});
+ expect(b.report().progress?.milestones).toEqual([]);
+ await invoke(w,b,'preview_role_roster_review',draft);
+ expect(b.report().progress?.milestones).toEqual([`draft:${w.logicalTaskHash}`]);
+ for(let i=0;i<3;i++){b.beginCall({});await invoke(w,b,'preview_role_roster_review',draft);}
+ expect(b.report().progress?.callsWithoutProgress).toBe(3);
+ expect(()=>b.beginCall({})).toThrow('no new validated progress');
+ await expect(invoke(w,b,'preview_role_roster_review',draft)).rejects.toThrow('no new validated progress');
+});
 it('persists verified milestones and stalled calls across fresh sessions without resetting cumulative usage',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'role-stall-'));roots.push(root);const plan=contentHash('plan');
  const first=roleReviewBudget(root,plan,'work',limits,false,'progress');

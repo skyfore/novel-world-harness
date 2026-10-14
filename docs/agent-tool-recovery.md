@@ -1,5 +1,199 @@
 # Agent tool failure recovery
 
+## Ordinary compile source-audit recovery
+
+`compile-novel` and its `roles` phase enable bounded orchestration in the current
+role plan. A trace-proven, settled Codex quota refusal may continue an unfinished
+source audit only when its original prompt can be reconstructed exactly, tool
+results are complete and read-only, dependency hashes still match, and the original
+session and progress allowances remain. The compiler-lock owner claims one grant
+for the stopped run; it reuses the original invocation and charges the original
+budget. Restore all `read_role_session_context` pages using `nextOffset`, then
+reread decisive evidence before proposing. A changed scope, pending write, tool
+failure, missing trace, consumed grant or exhausted allowance stops continuation.
+Do not retry these stops, clear counters, change work IDs or substitute a new plan.
+
+A successful negative source audit is a retained finding. After collecting all
+source diagnostics, the host may bind one `compile-source-audit-repair-v1`
+revision to that exact receipt and frozen atlas, entries and claim verifications.
+`propose_role_source_audit_repair` submits a revised audit; a separate session uses
+`propose_role_source_audit_repair_check` to check every original question, discovery
+and unresolved issue. Their previews validate structure and evidence access, not
+semantic support. Both tasks inherit cumulative usage and share one budget; each
+has one invocation and one context session. No source, candidate or world writes
+are exposed. A valid negative proposal or check consumes its task and cannot be
+replayed. Only a supported complete check can supersede the active audit, and its
+full proof must be in the requirement journal before assembly or archival.
+
+These tools use Pi's `withNwhToolRecovery` registration. Copy `revisionId`,
+`proposalHash`, `expectedQuestions[].questionId`, `discoveries[].findingId` and
+the indexes of `predecessor.unresolved` from the task. For unknown evidence call
+`read_role_work_evidence` with a same-source query, copy `units[].unitId` and follow
+`nextOffset`; for candidates call `read_role_audit_inventory` and copy
+`candidates[].id`, then read the complete relevant entry. Preserve the original
+failure; allow at most one materially corrected proposal, never a guessed or
+unchanged retry. Host, scope, single-use and circuit-breaker stops forbid retries.
+Schema failures also consume the original proposal correction allowance.
+
+## Migrated source audit revalidation
+
+A host-authorized subject revision may retain completed old source audits as
+history while requiring new audits of the changed subject. Diagnostic selection
+must distinguish inherited consumption from a task already started in the current
+plan. It must not silently discard inherited consumption or reuse the old verdict.
+
+Discover the active plan with `activeRoleWorkPlans`, copy its `batchId`, and copy
+the exact audit ID returned by `store.workId("audit", page)`. Call the read-only
+`inspectMigratedSourceAudit(store, workId)` and copy its complete proof into
+`sourceAuditScope.migratedAudits`, alongside the ordinary frozen scope hashes.
+Correct an ID selection once using these same-scope fields; never guess IDs or
+retry unchanged. The existing subject-revision authority and every retained file
+must still verify. A verified terminal predecessor receipt and remaining original
+invocation/context/progress allowances are required. Any current-plan attempt,
+checkpoint, budget, audit proposal, exhausted allowance, native fallback, missing
+usage or blocked budget stops selection without another dispatch.
+
+The compiler-lock owner rechecks the proof before using the ordinary audit
+workflow. Invocation and context ordinals continue from the inherited values;
+all old calls, progress milestones, limits and receipts remain intact. The new
+auditor rereads original evidence and current judgments through the existing
+tools and validators. Failed revalidation stops with its original records. A
+negative diagnostic remains a critical finding; it does not complete the roster,
+resolve an existing audit, certify a world or activate a candidate. A settled
+current-plan audit is never overwritten through this path.
+
+## Explicit quota-refusal dispatch recovery
+
+An explicit user request to resume may use `inspectRoleQuotaContinuation` after
+one original claim request was refused by `openai-codex` with zero provider
+output/usage and no tool calls. This narrow host protocol applies only when an
+ordinary restart already reserved invocation 2 and then stopped at
+`context loop round already claimed`, before a second physical session began.
+It is not automatic quota polling and does not establish that provider quota
+has reset. Other provider, validation, no-progress or uncertain-write failures
+remain stops under their own protocols.
+
+Discover the original plan with `RoleReviewWorkStore.plans`, copying `batchId`;
+copy `candidateId` from `stagedEntries()` and `runId` from the same source's
+failed `TraceStore.peekRuns` result. Supply the explicit user authorization and
+verified implementation references. Inspect the preview's source, task, trace,
+budget, reserved attempt, scheduling receipt and retained-file hashes; copy its
+exact `authorityHash` into `grantRoleQuotaContinuation` under the compiler lock.
+Correct a lookup once using those same-scope returned fields; never guess IDs
+or retry unchanged. A later model run, changed evidence, prior audit, exhausted
+budget, other recovery, unknown context or missing receipt blocks dispatch.
+
+Use that grant as `claimQuotaResume` for `runBoundedRoleReview`, with its exact
+original model and no other scope or runner override. The original immutable
+task must still match. Dispatch consumes a durable single-use claim, reuses the
+already reserved invocation 2, and claims physical session ordinal 1. Neither
+attempt record is replaced; the first request stays charged in the original
+budget with unchanged limits. No third invocation, evidence-supplement session
+or session-rebuild tool is granted. The model must restore the original task and
+read decisive originals before ordinary audit validation accepts a submission.
+Negative judgments remain findings and never become certification. Another quota
+refusal or any failed recovery retains all records and stops; do not redispatch,
+rename the authority or clear counts. This local claim result does not finish
+source auditing, the roster, global closure, certification or activation.
+
+## Audit contract revisions
+
+An already consumed, unversioned claim audit is never replayed or relabelled
+after a contract correction. The host may authorize one independent audit under
+the versioned evidence-faithfulness contract. This is a new contract task on the
+unchanged entry, source, atlas and evidence packet; it is not another semantic
+correction. A host diagnosis and explicit authorization are mandatory. Negative
+results under the current contract cannot use this channel again.
+
+Preview `nwh requirements authorize-role-audit-contract --source ID --batch BATCH
+--plan-hash HASH --candidate ID --receipt-hash HASH --authorization-ref REF
+--diagnosis-ref REF`. Discover the plan using `requirements inspect`, copying
+`roleReviewPlans[].batchId` and `planHash`. Discover the exact negative receipt
+using `compile-novel status`, copying `roleReviewWork[].claimFindings[].candidateId`
+and `receiptHash`. Correct a lookup once; never guess or repeat unchanged. Copy
+the preview's `authorityHash` into `--apply --authority-hash HASH`. The owning
+compiler lock and unchanged preview are required. Reusing the exact authority
+is idempotent; renaming it grants nothing. Missing usage, blocked budgets,
+unresolved proposals, changed history, source audits or finish receipts stop
+this operation without retry or implicit dependency invalidation.
+
+The authority retains all predecessor receipts and allowance files. Its new
+budget inherits cumulative usage, progress and unchanged limits; old budget
+files stay immutable. Invocation and context ordinals continue from their prior
+values. One explicitly authorized session is appended even if a completed old
+contract used all its sessions; no old retry/context counter is reset. Budget
+stops, native fallback stops and exhausted handoffs cannot be cleared. This new
+task has no session-rebuild tool. A missing receipt or a negative result consumes
+the authority and stops. A durable supported result can finish ledger publication
+on restart without another model call. All historic findings remain recorded.
+
+The isolated auditor can read evidence and propose an audit only. Copy the exact
+candidate, claim, atlas and packet hashes from its task. Evidence lookup uses
+`read_role_work_evidence query`, then exact `units[].unitId` and `nextOffset`.
+Invalid submissions permit at most one corrected proposal, never an unchanged
+retry. Host, scope, single-use and budget failures forbid retry. `supported`
+means the classification follows the evidence, including an honest `unknown`
+boundary. Major-role development with `unknown` still fails the independent
+certification gate; this authority never changes importance or world truth.
+
+## Versioned role judgment repair
+
+A successful `propose_role_claim_audit` with `insufficient` or `contradicted`
+records a semantic finding. It is not a transport error, failed proposal, or
+permission to retry that audit. Normal compilation records the exact finding in
+the requirement journal and stops unless the host has authorized this review's
+bounded repair policy. Diagnostic audit scopes remain observational.
+
+The host previews `nwh requirements authorize-role-judgment-repairs --source ID
+--batch BATCH --plan-hash HASH --authorization-ref REF`. Discover `BATCH` and
+`HASH` with `requirements inspect`, copying `roleReviewPlans[].batchId` and
+`roleReviewPlans[].planHash`; correct a lookup once without guessing. Inspect
+the returned policy and copy `authorityHash` into `--apply --authority-hash HASH`.
+Apply requires the compiler lock. The same policy/reference is idempotent;
+renaming the reference cannot replenish an allowance. This policy authorizes
+work for the existing candidate denominator, never any literary conclusion.
+
+This first repair scope requires completed source work and no source audit,
+roster submission or finish receipt. Existing downstream receipts require an
+explicit dependency revision; stop and preserve them. The host records one
+authority per unsupported candidate in the existing proposal journal, retaining
+the predecessor entry, exact negative audit/receipt, original attempts, context
+consumption and budget-file hashes. Migrated drafts use the same mechanism.
+
+The assigned model receives only `preview_role_judgment_revision` and
+`propose_role_judgment_revision` as judgment tools. Copy `revisionId` and
+`candidateId` from its packet. For evidence discovery use
+`read_role_work_evidence query`, copy `units[].unitId`, then follow `nextOffset`
+until complete. Read original support and counterevidence; review notes and old
+claims are untrusted proposals. Correct invalid arguments once under the same
+revision identity; never guess, retry unchanged, or overwrite an old entry.
+Host, scope, single-use, unresolved-proposal and budget failures forbid retry.
+
+The successor must change the same candidate's judgment. Independently supported
+importance cannot be lowered or otherwise changed in this repair scope. A valid
+preview establishes structure/access only. An isolated new session must audit
+the successor's exact claim, atlas and evidence-packet hashes, with no judgment
+write tools. The audit verdict measures whether the entry's classification is
+faithful to the evidence; it is not a certification result. An evidence-supported
+`unknown` boundary therefore receives a supported claim audit while the separate
+deterministic development-certification gate remains blocked. `insufficient`
+means the asserted boundary itself was not established or source coverage prevents
+judgment, not merely that `unknown` cannot certify development. Only a supported
+successor audit resolves the historical finding.
+Another negative verdict is retained and stops compilation: this scope permits
+one successor and one invocation per new task, not repeated repairs until pass.
+
+The proposal and successor audit share a cumulative budget initialized from the
+predecessor audit's retained usage and progress, with unchanged limits. Original
+budget files remain immutable. Candidate/audit attempts and context consumption
+are carried separately; stopped or exhausted work is not renewed. Restart after
+a durable proposal/audit skips that model invocation and completes the pending
+ledger publication. Assembly and archive verification require the revision,
+its independent audit, and matching authority/finding/resolution journal.
+`unknown` remains a valid evidence boundary, but cannot certify a required major
+role's development. Full-source review, questions, discovery coverage, two
+independent roster reviews, closure, certification and activation stay separate.
+
 Role-review source pages now return `units[]` records pairing `unitId` with its
 exact source `text`. A null ID marks an uncitable gap; `continued=true` identifies
 a unit crossing a page boundary. `read_roster_evidence` performs same-source
@@ -75,6 +269,53 @@ supplement that would open another session. Native compaction still invalidates
 read gates: restore the original task and re-read decisive originals before
 submitting. A stopped continuation retains its claim and charged usage.
 
+A claim audit with no proposal history can independently hit the same navigation
+stall. Ordinary claim audits expose `preview_role_claim_audit` with the submission
+schema and complete-original-evidence gates. Only the first valid draft advances
+the existing progress window; reads and repeated previews do not. A valid preview
+is structural feedback, never semantic support, a receipt, or certification.
+
+For an already blocked audit, the owning host may preview
+`inspectRoleClaimContinuation`. Discover the original `batchId` with
+`RoleReviewWorkStore.plans`, copy `candidates[].id` from the same roster and `runId`
+from its failed trace, and supply the authorization, diagnosis, verified repair
+reference and at most 12 additional calls. Copy the returned `authorityHash` into
+one `continueRoleClaim` call under the compiler lock. This requires an original
+claim's first invocation, one intact physical session, complete source work,
+only successful reads, an exact local no-progress stop, and no proposal history,
+inherited consumption, context recovery or downstream review. The failed trace's
+full claim/evidence packet must still match. A local pre-transport budget refusal
+with zero provider usage is distinct from a provider failure; the latter blocks.
+
+The grant binds source, plan, entry, atlas, evidence packet, failed trace, original
+prompt/checkpoint and budget. It consumes the unused second invocation and uses
+session ordinal 1, retaining the old task and creating a versioned checkpoint.
+The new finite counter starts at all previously charged calls/bytes; previews
+cannot increase it. Retained navigation is untrusted and does not deliver source
+evidence. The unchanged independent audit validator and exact original proposal
+identity still apply, including the existing one-correction rule. The runner
+offers no session rebuild or evidence-supplement restart. Negative findings stay
+negative; evidence-faithful `unknown` still cannot pass required major-character
+development certification. Later allowance capture includes all new charges and
+retains the old blocked state, so this grant cannot become a fresh rolling window
+for a semantic successor. Ordinary compilation and finish check the retained
+history and final receipt. Changed scope, used attempts, failed/pending tools,
+quota/provider errors, drafts, negative receipts, uncertain publication or an
+already claimed grant require separate host diagnosis; never retry unchanged,
+rename the work, clear the budget or invoke the grant again.
+
+Validate the host configuration before claiming this grant. If an older host
+invocation failed before dispatch, `inspectRoleClaimStartRecovery` can inspect the
+same grant with its original input/authority hash, exact failed result hash and
+verified repair reference. It requires unchanged initial cumulative usage,
+no second invocation, no new physical session/checkpoint, no proposal and intact
+predecessor history. Copy its returned `authorityHash` into the optional
+`startRecovery` argument of one `continueRoleClaim` call. This claims dispatch of
+the existing grant once; it adds no calls, attempts, session allowance or proposal
+corrections. Both the first failure and the recovery outcome remain immutable
+records. Any charge, started invocation/session, unknown publication or consumed
+start recovery forbids this path; preserve the original result and stop.
+
 When the complete preview passes, `propose_role_roster_review` with `staged=true`
 assembles the durable entries; ordinary finish still validates the complete
 candidate denominator and commits the review. Complete-input host/legacy calls
@@ -98,6 +339,20 @@ speaker and addressees, stages a new correction envelope, and passes normal
 annotation/finish validation while preserving original revisions and receipts.
 Never remove content assertions or change acquisition mode to evade the check.
 Legacy artifacts without exact object assertions are not certified by this check.
+
+A queued two-segment boundary calibration is already an explicit source-repair
+scope for those two immutable segments. If finish proves that a committed source
+annotation is incomplete only across their shared split, and the matching
+`propose_*` source-record tool is exposed, stage the corrected annotation under
+a new `proposal_id` while preserving its `annotation_id`. Accepted prior
+revisions and their receipts remain immutable history; do not withdraw or rebind
+them, and do not call `replace_boundary_proposal`, which applies only to pending
+world proposals. Any current-batch world draft that froze the old annotation
+revision must receive a normal same-logical-ID successor before only that
+defective draft is withdrawn. Retry finish once after this material correction.
+Evidence outside the two segments, unavailable proposal authority, or an
+unresolved identity decision still stops for host source review with all drafts
+intact.
 
 Host-reviewed knowledge supplements use an immutable `knowledge-repairs` plan
 linked to the original completed receipt and deferred target report. Their finish
@@ -262,6 +517,22 @@ pending `new-*` proposal, a superseded resolution, or a missing dependency; thos
 retain the normal same-finish and graph-closure checks.
 
 Explicit reparse, `resume=false`, and prepared-revision materialization archive replaced finish receipts with a reason; original receipt history remains on disk. Legacy checkpoints without receipts remain readable, but every new production finish/checkpoint follows the new protocol. Atomic rename supports process-interruption recovery; this is not a filesystem power-loss transaction or a multi-file database commit. Read-only status reports receipt checksums and timestamps; host recovery performs the full dependency and finish validation.
+
+A current-plan checkpoint marker without an active verifiable finish receipt is
+not a completed production batch. If no original receipt exists, the source loop
+must not reconstruct one from checkpoint counts, accepted outputs, summaries, or
+retained trace prose. It reopens only that exact current-plan batch in memory,
+hydrates its retained pending proposals and only those accepted source records
+whose exact immutable payload is still the current revision, redelivers the
+immutable source slice, and requires an ordinary validated
+`finish_compiler_batch` before the existing marker can be trusted again.
+Superseded accepted annotations and resolutions remain immutable history; they
+are never rebound over a later current revision merely to recreate an old batch
+finish. The marker and proposal history stay intact. A prepared receipt uses
+original host finish recovery instead; a corrupt, dependency-invalid,
+specialized, or ambiguous receipt stops for host review. This evidence-based
+re-review is batch recovery only and does not certify semantic closure,
+executable readiness, or Play activation.
 
 When effective pipeline migration reopens a batch from the current deterministic
 source plan, its older active finish receipt cannot authorize the new checkpoint.
@@ -774,6 +1045,36 @@ command: copy the original `id`, `priorRosterHash`,
 new reviews and does not start another epoch. An unchanged-scope partial review
 must be resumed rather than reset. A changed source identity needs another
 explicit host decision; saved reviews are never silently replaced.
+
+When an unfinished bounded plan belongs to the prior subject, inspection also
+returns `roleReviewPlans[].planHash`. Copy that exact same-source field into
+`--work-plan HASH` on the host revision command; a stale selection permits at most
+one corrected invocation. The narrow migration requires unchanged source bytes,
+structure and candidate inventory. It freezes the original plan, proposal history,
+attempts, context handoffs and budget files, and records one authorized successor
+in the existing review-revision journal. Original source notes and staged entries
+remain proposals; completed independent reviews, claim audits and source audits
+do not count toward the successor. Every current claim and question must pass
+fresh verification. Used calls, progress counters, invocation limits, context
+allowances and blocked budgets carry forward without a reset. A retained hard
+stop still stops; do not rename work, clear counters or reopen the predecessor.
+Changed inventories, unresolved proposals or missing usage records require host
+dependency review and must not be retried unchanged. For an interrupted migration,
+replay the exact original revision decision including its `--work-plan` value;
+do not select a new batch or use the successor hash as the predecessor.
+
+A host interruption between claiming a migrated claim-audit invocation and
+publishing its first session claim does not authorize a fresh invocation. The
+host may inspect `inspectRoleStartInterruption`, bind `expectedAttemptHash` to
+the canonical hash of the exact existing attempt record, and grant the returned
+`authorityHash` under the compiler lock. This requires the original recovered
+lock archive, unchanged inherited usage, and no session/context claim or uncertain
+budget write. It consumes one continuation of the same attempt record; calls,
+attempt count, context allowances and prior failures are unchanged. A published
+session claim, advanced budget, changed identity, missing recovery proof or used
+grant stops this path. Preserve those records for their original host recovery
+protocol; never delete the attempt, infer zero usage, change work IDs, or retry
+the grant unchanged. This is host-only and is not a model-side recovery tool.
 
 The host attaches `reviewRevisionId` to each captured review and its finish
 metadata. Models cannot select or change it. An old in-flight or prepared review
@@ -2550,6 +2851,12 @@ milestone counts once across tool names, reworded drafts and replacement session
 Generic reads, new output hashes, model self-assessments, heartbeats, invalid
 previews and failed proposals do not advance this window. A draft milestone is
 structural/scope progress only; it is never certification or committed truth.
+The model-facing role protocol states this 12-call window explicitly: every model
+response consumes a call even when it only requests reads, reads do not renew the
+window, and the model must reserve a response for the exposed proposal tool.
+Atlas-directory pagination is optional navigation, not evidence or a completeness
+gate; follow another directory page only when it is relevant to the assigned
+claim, then verify decisive support and counterevidence in original source units.
 
 Cumulative calls, payload bytes, validated milestones and the last-progress call
 are persisted together before further dispatch. A fresh process cannot clear

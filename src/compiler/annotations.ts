@@ -209,6 +209,9 @@ export type SourceAnnotationProposalSummary = {
   compilerBatchId?: string;
   createdAt: string;
 };
+export type RecoverableSourceAnnotationProposalSummary = SourceAnnotationProposalSummary & {
+  proposalStatus: "pending" | "accepted";
+};
 
 const storedAnnotationRefSchema = z.object({
   version: z.literal(1),
@@ -306,6 +309,51 @@ export class SourceAnnotationStore {
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
+  /**
+   * Select the live annotation proposals for an idempotent retry of one
+   * compiler batch. Accepted envelopes are immutable history, so replay one
+   * only while its exact payload remains the current annotation revision.
+   * A pending same-batch revision wins over an accepted predecessor for the
+   * same logical annotation.
+   */
+  async listRecoverableBatchProposals(
+    sourceIdInput: string,
+    compilerBatchIdInput: string,
+  ): Promise<RecoverableSourceAnnotationProposalSummary[]> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const compilerBatchId = idSchema.parse(compilerBatchIdInput);
+    const [pending, accepted] = await Promise.all([
+      this.listProposals(sourceId, "pending"),
+      this.listProposals(sourceId, "accepted"),
+    ]);
+    const pendingInBatch = pending.filter((summary) => summary.compilerBatchId === compilerBatchId);
+    const occupiedAnnotations = new Set(pendingInBatch.map((summary) => summary.annotationId));
+    const acceptedMatches: SourceAnnotationProposalSummary[] = [];
+    for (const summary of accepted) {
+      if (summary.compilerBatchId !== compilerBatchId || occupiedAnnotations.has(summary.annotationId)) continue;
+      const current = await this.read(sourceId, summary.annotationId).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (!current) continue;
+      const proposal = await this.readProposal(sourceId, "accepted", summary.id);
+      if (contentHash(current) === contentHash(proposal.payload)) acceptedMatches.push(summary);
+    }
+    acceptedMatches.sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt)
+      || right.id.localeCompare(left.id));
+    const recoverable: RecoverableSourceAnnotationProposalSummary[] = pendingInBatch.map((summary) => ({
+      ...summary,
+      proposalStatus: "pending",
+    }));
+    for (const summary of acceptedMatches) {
+      if (occupiedAnnotations.has(summary.annotationId)) continue;
+      recoverable.push({ ...summary, proposalStatus: "accepted" });
+      occupiedAnnotations.add(summary.annotationId);
+    }
+    return recoverable.sort((left, right) => left.id.localeCompare(right.id));
+  }
+
   async withdraw(sourceIdInput: string, proposalIdInput: string): Promise<void> {
     const sourceId = idSchema.parse(sourceIdInput);
     const proposalId = idSchema.parse(proposalIdInput);
@@ -329,6 +377,16 @@ export class SourceAnnotationStore {
         throw new Error(`Annotation ${proposal.payload.id} has more than one active proposal in this batch.`);
       }
       logicalIds.add(proposal.payload.id);
+    }
+    for (const { status, proposal } of proposals) {
+      if (status !== "accepted") continue;
+      const current = await this.read(sourceId, proposal.payload.id).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (!current || contentHash(current) !== contentHash(proposal.payload)) {
+        throw new Error(`Accepted annotation proposal ${proposal.id} is not the current revision and cannot be replayed.`);
+      }
     }
     for (const { status, proposal } of proposals) {
       const annotation = sourceAnnotationSchema.parse(proposal.payload);

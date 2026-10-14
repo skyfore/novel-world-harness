@@ -64,7 +64,9 @@ export async function reviewScenesCommand(root: string, specFile: string, regist
 export async function inspectRequirementsCommand(root: string, sourceId: string) {
   const ledger = new RequirementLedger(root, sourceId);
   const savedRoster = await new RoleRosterStore(root).read(sourceId);
-  console.log(JSON.stringify({ savedRoster, savedRosterHash: savedRoster ? contentHash(savedRoster) : null, reviewRevisions: await ledger.roleReviewRevisions(), definitions: await ledger.definitions(), coreRoleDefinitions: await ledger.coreRoleDefinitionHistory(), history: await ledger.history() }, null, 2));
+  const { RoleReviewWorkStore } = await import("../compiler/role-review-work.js");
+  const roleReviewPlans = (await RoleReviewWorkStore.plans(root, sourceId)).map(plan => ({ batchId: plan.batchId, planHash: contentHash(plan), subjectHash: plan.subjectHash, reviewRevisionId: plan.reviewRevisionId }));
+  console.log(JSON.stringify({ savedRoster, savedRosterHash: savedRoster ? contentHash(savedRoster) : null, roleReviewPlans, reviewRevisions: await ledger.roleReviewRevisions(), definitions: await ledger.definitions(), coreRoleDefinitions: await ledger.coreRoleDefinitionHistory(), history: await ledger.history() }, null, 2));
 }
 
 export async function registerCoreRoleRequirementsCommand(root: string, sourceId: string, decision: { predecessorRevision?: string; scopeDecisionRef: string; scopeChangeReason: string }) {

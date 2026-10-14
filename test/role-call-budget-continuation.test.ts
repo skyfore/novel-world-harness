@@ -65,7 +65,7 @@ it('resumes only the exact stopped task in the next original context round, once
  const taskHash=contentHash(work.prompt),dir=path.join(worldStorageRoot(f.root),'compiler','role-review-work','context-loops',f.childPlanHash,contentHash(work.workId),taskHash);
  const claim={planHash:f.childPlanHash,workId:work.workId,taskHash,ordinal:0};
  await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'0.json'),JSON.stringify({claim,hash:contentHash(claim)}));
- const store={root:f.root,planHash:f.childPlanHash,plan:{sourceId:'source',batchId:'batch'},journal:{assertModelRecoveryAllowed:()=>{},unresolved:()=>[]}} as unknown as RoleReviewWorkStore;
+ const store={root:f.root,planHash:f.childPlanHash,inheritedAllowance:()=>undefined,budgetWorkId:(id:string)=>id,plan:{sourceId:'source',batchId:'batch'},journal:{assertModelRecoveryAllowed:()=>{},unresolved:()=>[]}} as unknown as RoleReviewWorkStore;
  const resume={planHash:f.input.planHash,workId:f.input.workId,authorityHash:f.preview.authorityHash};
  const run=vi.fn(async(w:RoleWorkInvocation)=>{expect(w.sessionOrdinal).toBe(1);expect(w.retainedBudgetRequired).toBe(true);expect(w.prompt).toContain('read_role_session_context');complete=true;});
  await expect(runWithRoleContextRecovery(store,{...work,prompt:'Changed task'},run,undefined,resume)).rejects.toThrow('differs');

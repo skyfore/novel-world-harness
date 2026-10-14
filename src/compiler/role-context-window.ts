@@ -49,19 +49,22 @@ const accessSchema = z.object({
 }).strict();
 const checkpointSchema = z.object({
   version: z.literal(1), planHash: z.string(), workId: z.string(), packetHash: z.string(),
+  inheritedHandoffs: z.number().int().min(0).max(2).optional(),
   recoveryRunId: z.string().optional(), accesses: z.array(accessSchema), handoffs: z.array(z.object({ generation: z.number().int(), accessCount: z.number().int(), bytes: z.number(), phase: z.string() }).strict())
 }).strict();
 type Checkpoint = z.infer<typeof checkpointSchema>;
 /** Host access metadata only, never a semantic summary or a second truth ledger. */
 export class RoleContextCheckpoint {
   private constructor(private root: string, private file: string, private state: Checkpoint) { }
-  static async open(root: string, planHash: string, workId: string, packetHash: string) {
-    const file = path.join(worldStorageRoot(root), "compiler", "role-review-work", "context", planHash, `${contentHash(workId)}.json`);
+  static async open(root: string, planHash: string, workId: string, packetHash: string, inheritedHandoffs?: number, hostRevision?: string) {
+    if (hostRevision !== undefined && !/^[a-f0-9]{64}$/.test(hostRevision)) throw roleWorkStop("invalid host context revision");
+    const file = path.join(worldStorageRoot(root), "compiler", "role-review-work", "context", planHash, `${contentHash(workId)}.json${hostRevision ? `.continuation-${hostRevision}.json` : ''}`);
     try { await fs.access(`${file}.pending`); throw roleWorkStop("uncertain context checkpoint publication"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    let state: Checkpoint = { version: 1, planHash, workId, packetHash, accesses: [], handoffs: [] };
+    let state: Checkpoint = checkpointSchema.parse({ version: 1, planHash, workId, packetHash, accesses: [], handoffs: [], ...(inheritedHandoffs !== undefined ? { inheritedHandoffs } : {}) });
     try {
       const record = JSON.parse(await fs.readFile(file, "utf8")); state = checkpointSchema.parse(record.state);
       if (contentHash(state) !== record.hash || state.planHash !== planHash || state.workId !== workId || state.packetHash !== packetHash) throw roleWorkStop("context checkpoint scope or integrity changed");
+      if (state.inheritedHandoffs !== inheritedHandoffs || state.handoffs.length + (inheritedHandoffs ?? 0) > 2) throw roleWorkStop("context migration allowance changed; preserve inherited handoffs and stop");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     return new RoleContextCheckpoint(root, file, state);
   }
@@ -82,7 +85,7 @@ export class RoleContextCheckpoint {
     await this.save();
   }
   originalAccesses() { return this.state.accesses.map(({ tool, args, delivered }) => ({ tool, args, delivered })); }
-  get generation() { return this.state.handoffs.length; }
+  get generation() { return this.state.handoffs.length + (this.state.inheritedHandoffs ?? 0); }
   directory(offset = 0) {
     if (!Number.isInteger(offset) || offset < 0 || (offset !== 0 && offset >= this.state.accesses.length)) throw new Error("Unknown context history offset. Call read_role_context_history offset=0, copy nextOffset and retry once; never guess or repeat unchanged.");
     return { accesses: this.state.accesses.slice(offset, offset + 5), total: this.state.accesses.length, ...(offset + 5 < this.state.accesses.length ? { nextOffset: offset + 5 } : {}) };

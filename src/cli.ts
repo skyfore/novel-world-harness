@@ -272,14 +272,54 @@ requirementsCommand.command("refresh").requiredOption("--source <id>", "register
     await inspectRequirementsCommand(rootFor({}), options.source);
     if (issues.length) process.exitCode = 2;
   });
+requirementsCommand.command("authorize-role-judgment-repairs").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--batch <id>", "exact roleReviewPlans[].batchId from requirements inspect")
+  .requiredOption("--plan-hash <hash>", "exact roleReviewPlans[].planHash")
+  .requiredOption("--authorization-ref <ref>", "stable host decision authorizing one semantic successor per candidate")
+  .option("--apply", "publish the previewed policy under the compiler lock")
+  .option("--authority-hash <hash>", "exact authorityHash from the read-only preview, required with --apply")
+  .description("Preview or authorize bounded role judgment revision and independent re-audit; preserve predecessor evidence and consumed allowances")
+  .action(async options => {
+    const { inspectRoleJudgmentRepairAuthorization, authorizeRoleJudgmentRepairs } = await import("./compiler/role-judgment-repair-service.js");
+    const input = { sourceId: options.source, batchId: options.batch, planHash: options.planHash, authorizationRef: options.authorizationRef };
+    if (options.apply && !options.authorityHash) throw new Error("Preview without --apply, copy authorityHash, then apply once with --authority-hash; never guess or rotate the authorization reference.");
+    const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
+    const result = options.apply
+      ? await withWorkspaceOperationLock(rootFor({}), "compiler", () => authorizeRoleJudgmentRepairs(rootFor({}), input, options.authorityHash))
+      : await inspectRoleJudgmentRepairAuthorization(rootFor({}), input);
+    console.log(JSON.stringify({ applied: Boolean(options.apply), ...result }, null, 2));
+  });
+requirementsCommand.command("authorize-role-audit-contract").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--batch <id>", "roleReviewPlans[].batchId from requirements inspect")
+  .requiredOption("--plan-hash <hash>", "roleReviewPlans[].planHash")
+  .requiredOption("--candidate <id>", "roleReviewWork[].claimFindings[].candidateId from compile-novel status")
+  .requiredOption("--receipt-hash <hash>", "exact claimFindings[].receiptHash")
+  .requiredOption("--authorization-ref <ref>", "stable host authorization for this contract upgrade")
+  .requiredOption("--diagnosis-ref <ref>", "retained diagnosis of the old audit contract defect")
+  .option("--apply", "publish the exact preview under the compiler lock")
+  .option("--authority-hash <hash>", "authorityHash from the preview, required with --apply")
+  .description("Preview or authorize one independently audited contract revision with cumulative usage and immutable old receipts")
+  .action(async options => {
+    const { inspectRoleAuditContractAuthorization, authorizeRoleAuditContractRevision } = await import("./compiler/role-audit-contract-service.js");
+    const input = { sourceId: options.source, batchId: options.batch, planHash: options.planHash,
+      candidateId: options.candidate, predecessorReceiptHash: options.receiptHash,
+      authorizationRef: options.authorizationRef, diagnosisRef: options.diagnosisRef };
+    if (options.apply && !options.authorityHash) throw new Error("Preview without --apply, copy authorityHash, then apply once with --authority-hash; never guess or rename authority to renew usage.");
+    const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
+    const result = options.apply
+      ? await withWorkspaceOperationLock(rootFor({}), "compiler", () => authorizeRoleAuditContractRevision(rootFor({}), input, options.authorityHash))
+      : await inspectRoleAuditContractAuthorization(rootFor({}), input);
+    console.log(JSON.stringify({ applied: Boolean(options.apply), ...result }, null, 2));
+  });
 requirementsCommand.command("begin-core-role-review").requiredOption("--source <id>", "registered source ID")
   .requiredOption("--revision <id>", "stable host review revision ID; reuse the same ID to recover")
   .requiredOption("--roster-hash <hash>", "exact savedRosterHash from requirements inspect")
   .option("--predecessor <hash>", "last coreRoleDefinitions[].revisionHash, if registered")
+  .option("--work-plan <hash>", "exact unfinished roleReviewPlans[].planHash; retain its work and remaining allowances")
   .requiredOption("--scope-decision <ref>", "host audit reference authorizing a new independent review")
   .requiredOption("--reason <text>", "reason for reviewing again; this does not approve a reduced role scope")
   .action(async options => beginCoreRoleReviewCommand(rootFor({}), { sourceId: options.source, revisionId: options.revision,
-    priorRosterHash: options.rosterHash, predecessorDefinitionRevision: options.predecessor, scopeDecisionRef: options.scopeDecision, reason: options.reason }));
+    priorRosterHash: options.rosterHash, predecessorDefinitionRevision: options.predecessor, scopeDecisionRef: options.scopeDecision, reason: options.reason, expectedWorkPlanHash: options.workPlan }));
 requirementsCommand.command("register-core-roles").requiredOption("--source <id>", "registered source ID")
   .option("--predecessor <hash>", "last coreRoleDefinitions[].revisionHash from requirements inspect")
   .requiredOption("--scope-decision <ref>", "host audit reference for this independent source-review revision")

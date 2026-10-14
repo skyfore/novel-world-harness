@@ -1,3 +1,4 @@
+import { roleContractAuditWorkId } from '../compiler/role-audit-contract.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {defineTool, type AgentSessionEvent} from '@earendil-works/pi-coding-agent';
@@ -11,14 +12,26 @@ import {readParentCallContinuation} from '../compiler/role-call-budget-continuat
 import {readRoleProgressContinuation} from '../compiler/role-progress-continuation.js';
 import {TraceStore} from '../trace/store.js';
 import type {RoleWorkInvocation, RoleWorkRunner} from './role-review-bounded.js';
+import { sourceAuditAuthorities } from '../compiler/role-source-audit-repair.js';
+import { sourceAuditRepairWorkId, sourceAuditCheckWorkId } from '../compiler/role-source-audit-model.js';
 const READ='read_role_session_context';
 export const ROLE_CONTEXT_MAX_SESSIONS=3;
 export type ParentBudgetSessionResume={planHash:string;workId:string;authorityHash:string;policy?:'progress'};
-export type RoleSessionResume=ParentBudgetSessionResume|import('../compiler/role-host-interruption.js').RoleHostInterruptionResume;
+export type RoleSessionResume=ParentBudgetSessionResume|import('../compiler/role-host-interruption.js').RoleHostInterruptionResume
+  |import('../compiler/role-quota-continuation.js').RoleQuotaResume
+  |{policy:'compile-audit-quota'; preview: import('../compiler/role-automatic-resume.js').AutomaticRoleResume};
 
 /** One host-selected continuation after a diagnosed aggregate call stop. The
  * next context consumes the original three-session and per-work call limits. */
 export async function inspectStoppedRoleSession(store:RoleReviewWorkStore,input:RoleSessionResume){
+  if(input.policy==='compile-audit-quota'){
+    const {inspectClaimedAutomaticResume}=await import('../compiler/role-automatic-resume.js');
+    return inspectClaimedAutomaticResume(store,input.preview);
+  }
+  if(input.policy==='quota-refusal'){
+    const {inspectQuotaRoleSession}=await import('../compiler/role-quota-continuation.js');
+    return inspectQuotaRoleSession(store,input);
+  }
   if(input.policy==='host-interruption'){
     const {inspectInterruptedRoleSession}=await import('../compiler/role-host-interruption.js');
     return inspectInterruptedRoleSession(store,input);
@@ -108,26 +121,37 @@ export class RoleSessionContext {
  * original proposal correction bounds or the parent's cumulative model calls. */
 export async function runWithRoleContextRecovery(store:RoleReviewWorkStore,work:RoleWorkInvocation,run:RoleWorkRunner,onProgress?:(s:string)=>void,resume?:RoleSessionResume){
   const taskHash=contentHash(work.prompt),base=path.join(worldStorageRoot(store.root),'compiler','role-review-work');
+  const inherited=store.inheritedAllowance(work.workId);
+  const contract=store.auditContractAuthorities?.().find(a=>roleContractAuditWorkId(a.revisionId)===work.workId);
+  const sourceRepair=/^role-audit-(?:repair|check)-/.test(work.workId)
+    ?sourceAuditAuthorities(store).find(a=>sourceAuditRepairWorkId(a.revisionId)===work.workId||sourceAuditCheckWorkId(a.revisionId)===work.workId):undefined;
+  if(contract&&resume)throw roleWorkStop('contract revalidation cannot combine with old-task continuation authority');
+  const sessionLimit=resume?.policy==='quota-refusal'?2:sourceRepair?(inherited?.contextSessions??0)+1:contract?(inherited?.contextSessions??0)+contract.maxNewSessions:ROLE_CONTEXT_MAX_SESSIONS;
+  if(inherited?.nativeContextFallback)throw roleWorkStop('inherited native context fallback already consumed; preserve it for explicit host review');
   const legacy=path.join(base,'native-context-fallbacks',store.planHash,`${contentHash(work.workId)}.json`);
   try{await fs.access(legacy);throw roleWorkStop('legacy native context fallback already consumed; preserve it for explicit host review');}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
   const dir=path.join(base,'context-loops',store.planHash,contentHash(work.workId),taskHash);
   const retained=resume?await inspectStoppedRoleSession(store,resume):undefined;
   if(retained&&(retained.workId!==work.workId||retained.taskHash!==taskHash))throw roleWorkStop('continued task differs from the stopped immutable task');
   let recoveryInfo:unknown=retained?.recoveryInfo;
-  for(let ordinal=retained?1:0;ordinal<ROLE_CONTEXT_MAX_SESSIONS;ordinal++){
+  for(let ordinal=Math.max(retained && 'nextOrdinal' in retained ? Number(retained.nextOrdinal) : retained?1:0,inherited?.contextSessions??0);ordinal<sessionLimit;ordinal++){
     store.journal.assertModelRecoveryAllowed();
     // Draft previews may be revised freely within the call budget. A committed
     // proposal failure requires its original bounded correction, not a new ID.
     if(ordinal>0&&store.journal.unresolved().length)throw roleWorkStop('unresolved proposal blocks a fresh context loop; inspect original failure');
-    const budget=inspectRoleReviewBudget(store.root,store.planHash,work.workId);
+    const budget=inspectRoleReviewBudget(store.root,store.planHash,store.budgetWorkId(work.workId));
     if(budget.state.blocked||remainingRoleProgressCalls(budget)===0)throw roleWorkStop('context loop has no remaining progress window; preserve the stop');
     await fs.mkdir(dir,{recursive:true});
     const claim={planHash:store.planHash,workId:work.workId,taskHash,ordinal,budgetHash:budget.hash,recoveryInfo:recoveryInfo??null,at:new Date().toISOString()};
     try{await fs.writeFile(path.join(dir,`${ordinal}.json`),JSON.stringify({claim,hash:contentHash(claim)}),{flag:'wx',mode:0o600});}
     catch(e){if((e as NodeJS.ErrnoException).code==='EEXIST')throw roleWorkStop('context loop round already claimed; do not restart or reset counts');throw e;}
-    const context=new RoleSessionContext(work,ordinal>0);
+    const fresh=ordinal>0&&!contract&&!sourceRepair;
+    const context=new RoleSessionContext(work,fresh);
     try{
-      await run({...context.invocation(ordinal>0,ordinal,recoveryInfo),retainedBudgetRequired:ordinal>0||work.retainedBudgetRequired});
+      const invocation=context.invocation(fresh,ordinal,recoveryInfo);
+      if(contract||sourceRepair||resume?.policy==='quota-refusal')invocation.tools=invocation.tools.filter(t=>t.name!=='request_role_session_rebuild');
+      if(resume?.policy==='quota-refusal')invocation.tools=invocation.tools.filter(t=>t.name!=='request_role_work_evidence');
+      await run({...invocation,retainedBudgetRequired:ordinal>0||work.retainedBudgetRequired});
       if(work.complete()||!context.rebuildReason)return;
       recoveryInfo={reason:context.rebuildReason,refactor:context.refactor,nativeRecovery:context.events};
     }catch(error){
@@ -137,7 +161,7 @@ export async function runWithRoleContextRecovery(store:RoleReviewWorkStore,work:
       recoveryInfo={reason:String(error),refactor:context.refactor??null,nativeRecovery:context.events,analysis:'Pi native recovery returned without completion; rebuild task from paginated originals and reread decisive evidence on demand.'};
     }
     await fs.writeFile(path.join(dir,`${ordinal}.outcome.json`),JSON.stringify({taskHash,ordinal,recoveryInfo}),{flag:'wx',mode:0o600});
-    onProgress?.(`Context loop ${ordinal+1}/${ROLE_CONTEXT_MAX_SESSIONS} for ${work.workId}: preserve original evidence, diagnostics and cumulative calls.`);
+    onProgress?.(`Context loop ${ordinal+1}/${sessionLimit} for ${work.workId}: preserve original evidence, diagnostics and cumulative calls.`);
   }
   throw roleWorkStop('context loop session limit reached; preserve all round records and stop');
 }

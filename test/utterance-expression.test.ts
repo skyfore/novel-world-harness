@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { createEvidenceFixture } from "./helpers/evidence.js";
-import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
 import { canonicalEventSchema, propositionSchema, type EvidenceAssertion } from "../src/world/model.js";
 import { contentHash } from "../src/world/canonical.js";
 import { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, validateExpressionAcquisition } from "../src/world/utterance-expression.js";
@@ -116,6 +116,97 @@ it.each(scenes)("compiles and freezes a real expression through finish, closure,
   expect((await contexts.load(context.canonicalSnapshotHash!)).utteranceExpressions?.get(stored.id)).toEqual(stored);
   expect((await validateUtteranceExpressionTrace(root, stored)).some(item => item.code === "EXPRESSION_QUOTATION_REVISION_MISMATCH")).toBe(true);
   expect(validateUtteranceExpression(stored, { entities: context.entities, events: context.events!, propositions: new Map([[proposition.id, { ...proposition, object: { kind: "literal", value: false } }]]) }).some(item => item.code === "EXPRESSION_PROPOSITION_REVISION_MISMATCH")).toBe(true);
+});
+
+it("keeps addressee trace validation strict while a scoped same-ID quotation revision repairs its dependent expression", async () => {
+  const scene = scenes[0]!;
+  const { root, source, mentions, quotation, proposition, expression, paths } = await setup(scene);
+  const annotations = new SourceAnnotationStore(root);
+  const brokenQuotation = quotationSchema.parse({ ...quotation, addresseeMentionIds: [] });
+  await annotations.replaceCurrent(source.source.id, [...mentions, brokenQuotation]);
+
+  const toolset = createCompilerProposalToolset(root);
+  await toolset.beginBatch([], "quotation-expression-repair", source.source.id);
+  const tool = (name: string) => toolset.tools.find(item => item.name === name)!;
+  const expressionInput = (proposalId: string) => ({
+    proposal_id: proposalId,
+    payload: {
+      ontologyVersion: expression.ontologyVersion,
+      id: expression.id,
+      canonicalEventId: expression.canonicalEventId,
+      speakerId: expression.speakerId,
+      addresseeIds: expression.addresseeIds,
+      modality: expression.modality,
+      quotation: { quotationId: quotation.id },
+      fragments: [{ segment_id: source.segmentId, exact: scene.quote }],
+      propositionId: proposition.id,
+      propositions: [{ propositionId: proposition.id }],
+    },
+    evidence_segment_ids: [source.segmentId],
+    evidence_selectors: paths.map(target_path => ({
+      segment_id: source.segmentId,
+      exact: scene.quote,
+      target_path,
+      relation: "supports",
+      strength: "explicit",
+    })),
+  });
+  const finishInput = {
+    outcome: "complete",
+    reviewed_segments: [],
+    summary: "Validate the quotation-bound expression revision.",
+  };
+
+  await tool("propose_utterance_expression").execute(
+    "broken-expression",
+    expressionInput("expression-old-quotation") as never,
+    undefined,
+    undefined,
+    {} as never,
+  );
+  await expect(tool("finish_compiler_batch").execute(
+    "finish-broken",
+    finishInput as never,
+    undefined,
+    undefined,
+    {} as never,
+  )).rejects.toThrow("EXPRESSION_ADDRESSEE_TRACE_MISMATCH");
+
+  await tool("propose_quotation").execute("repair-quotation", {
+    proposal_id: "quotation-addressee-revision",
+    annotation_id: quotation.id,
+    selector: { segment_id: source.segmentId, exact: scene.quote },
+    mode: quotation.mode,
+    speaker_mention_id: quotation.speakerMentionId,
+    addressee_mention_ids: quotation.addresseeMentionIds,
+    attribution_confidence: quotation.attributionConfidence,
+  } as never, undefined, undefined, {} as never);
+  await tool("propose_utterance_expression").execute(
+    "repair-expression",
+    expressionInput("expression-current-quotation") as never,
+    undefined,
+    undefined,
+    {} as never,
+  );
+  await tool("withdraw_compiler_proposal").execute("withdraw-old-expression", {
+    proposal_id: "expression-old-quotation",
+    reason: "The expression froze the quotation revision before its supported addressee correction.",
+  } as never, undefined, undefined, {} as never);
+  await expect(tool("finish_compiler_batch").execute(
+    "finish-repaired",
+    finishInput as never,
+    undefined,
+    undefined,
+    {} as never,
+  )).resolves.toMatchObject({ details: { compilerBatchFinished: true } });
+
+  const repairedQuotation = quotationSchema.parse(await annotations.read(source.source.id, quotation.id));
+  expect(repairedQuotation.addresseeMentionIds).toEqual(quotation.addresseeMentionIds);
+  const proposals = new ProposalStore(root);
+  const repairedExpression = utteranceExpressionSchema.parse((await proposals.readEnvelope("pending", "expression-current-quotation")).payload);
+  expect(repairedExpression.id).toBe(expression.id);
+  expect(repairedExpression.quotation.revisionHash).toBe(contentHash(repairedQuotation));
+  await expect(proposals.readEnvelope("rejected", "expression-old-quotation")).resolves.toMatchObject({ kind: "utterance-expression" });
 });
 
 it.each(scenes)("requires this occurrence's content and conjunctive anchors; legacy stays unverified: $speaker", async scene => {

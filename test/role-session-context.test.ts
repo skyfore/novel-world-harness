@@ -29,8 +29,20 @@ it('compaction invalidates evidence and blocks writes until exact original pages
  await invoke(w,'propose_original');expect(f.execute).toHaveBeenCalledOnce();
  await expect(invoke(w,'read_role_session_context',{offset:999})).rejects.toThrow('copy nextOffset');
 });
-async function storeFixture(){const root=await fs.mkdtemp(path.join(os.tmpdir(),'role-native-'));roots.push(root);const planHash=contentHash('plan'),limits={maxModelCalls:6,maxRequestBytes:48000,maxTotalPayloadBytes:1000000};const budget=roleReviewBudget(root,planHash,'original-parent',limits);budget.beginCall({});budget.close();return {root,planHash,limits,store:{root,planHash,journal:{assertModelRecoveryAllowed:()=>{},unresolved:()=>[]}} as unknown as RoleReviewWorkStore};}
+async function storeFixture(){const root=await fs.mkdtemp(path.join(os.tmpdir(),'role-native-'));roots.push(root);const planHash=contentHash('plan'),limits={maxModelCalls:6,maxRequestBytes:48000,maxTotalPayloadBytes:1000000};const budget=roleReviewBudget(root,planHash,'original-parent',limits);budget.beginCall({});budget.close();return {root,planHash,limits,store:{root,planHash,inheritedAllowance:()=>undefined,budgetWorkId:(id:string)=>id,journal:{assertModelRecoveryAllowed:()=>{},unresolved:()=>[]}} as unknown as RoleReviewWorkStore};}
 const overflow=event({type:'message_end',message:{role:'assistant',stopReason:'error',errorMessage:'maximum context length exceeded',usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0}}});
+it('does not replenish context sessions or legacy fallback after version migration',async()=>{
+ const f=await storeFixture(),{work}=fixtureWork();
+ const allowance=vi.spyOn(f.store,'inheritedAllowance').mockReturnValue({key:work.workId,attempts:1,contextSessions:2});
+ const run=vi.fn(async(w:RoleWorkInvocation)=>{expect(w.sessionOrdinal).toBe(2);expect(await restore(w)).toBe(work.prompt);w.onContextEvent!(overflow);throw Error('overflow');});
+ await expect(runWithRoleContextRecovery(f.store,work,run)).rejects.toThrow('session limit reached');
+ expect(run).toHaveBeenCalledOnce();
+ allowance.mockReturnValue({key:work.workId,attempts:1,contextSessions:3});
+ await expect(runWithRoleContextRecovery(f.store,work,run)).rejects.toThrow('session limit reached');
+ allowance.mockReturnValue({key:work.workId,attempts:1,nativeContextFallback:true});
+ await expect(runWithRoleContextRecovery(f.store,work,run)).rejects.toThrow('inherited native context fallback');
+ expect(run).toHaveBeenCalledOnce();
+});
 it('falls back only after actual overflow, retains usage and persists a single recovery claim',async()=>{
  const f=await storeFixture(),{work}=fixtureWork();let calls=0;
  const run=async(w:RoleWorkInvocation)=>{calls++;if(calls===1){w.onContextEvent!(overflow);w.onContextEvent!(event({type:'compaction_end',reason:'overflow',aborted:false,willRetry:false,errorMessage:'cannot compact'}));throw Error('provider overflow');}expect(w.workId).toBe(work.workId);expect(w.prompt).not.toContain('龙');expect(w.retainedBudgetRequired).toBe(true);expect(await restore(w)).toBe(work.prompt);};

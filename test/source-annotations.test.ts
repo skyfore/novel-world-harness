@@ -21,6 +21,48 @@ afterEach(async () => {
 });
 
 describe("source annotation compilation", () => {
+  it("keeps superseded accepted annotation envelopes out of retry state and refuses to replay them", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-annotation-retry-leaf-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero waits.\n");
+    const firstBatch = `batch-${fixture.source.id}-first-observation`;
+    const secondBatch = `batch-${fixture.source.id}-host-revision`;
+    const finishBatch = async (batchId: string, proposalId: string, confidence: number) => {
+      const toolset = createCompilerProposalToolset(root);
+      await toolset.beginBatch([fixture.segmentId], batchId, fixture.source.id);
+      await toolset.tools.find((tool) => tool.name === "propose_entity_mention")!.execute(proposalId, {
+        proposal_id: proposalId,
+        annotation_id: "mention-hero",
+        selector: { segment_id: fixture.segmentId, exact: "Hero" },
+        surface: "Hero",
+        form: "proper",
+        kind_candidates: ["character"],
+        confidence,
+      } as never, undefined, undefined, context);
+      await toolset.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute(`finish-${proposalId}`, {
+        outcome: "complete",
+        reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Reviewed the source mention." }],
+        summary: "Committed one source observation.",
+      } as never, undefined, undefined, context);
+    };
+
+    await finishBatch(firstBatch, "mention-first", 0.8);
+    await finishBatch(secondBatch, "mention-current", 1);
+    const store = new SourceAnnotationStore(root);
+    const current = await store.read(fixture.source.id, "mention-hero");
+
+    await expect(store.listBatchProposals(fixture.source.id, firstBatch)).resolves.toContainEqual(
+      expect.objectContaining({ id: "mention-first", annotationId: "mention-hero" }),
+    );
+    await expect(store.listRecoverableBatchProposals(fixture.source.id, firstBatch)).resolves.toEqual([]);
+    await expect(store.commitProposals(fixture.source.id, ["mention-first"]))
+      .rejects.toThrow("is not the current revision and cannot be replayed");
+    await expect(store.read(fixture.source.id, "mention-hero")).resolves.toEqual(current);
+    await expect(store.listRecoverableBatchProposals(fixture.source.id, secondBatch)).resolves.toEqual([
+      expect.objectContaining({ id: "mention-current", annotationId: "mention-hero", proposalStatus: "accepted" }),
+    ]);
+  });
+
   it("commits a source-local entity/event/quotation/discourse graph without creating canonical truth", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-source-annotations-"));
     roots.push(root);

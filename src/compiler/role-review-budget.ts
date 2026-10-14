@@ -6,6 +6,8 @@ import { worldStorageRoot } from "../world/paths.js";
 import { ModelRequestBudget, type ModelRequestLimits, type ModelRequestUsage } from "../runtime/model-request-budget.js";
 import { RoleReviewWorkStore, roleWorkStop } from "./role-review-work.js";
 import { TraceStore } from "../trace/store.js";
+import type { RoleWorkAllowance } from "./role-work-allowance.js";
+import { readRoleClaimContinuation } from "./role-claim-continuation.js";
 const counter = z.number().int().nonnegative();
 const stateSchema = z.object({ usage: z.object({ modelCalls: counter, payloads: counter, totalPayloadBytes: counter, largestRequestBytes: counter }).strict(), blocked: z.boolean(), failure: z.object({ code: z.string(), message: z.string() }).strict().optional(),
   progress: z.object({lastProgressCall:counter,milestones:z.array(z.string().min(1))}).strict().optional() }).strict()
@@ -31,6 +33,21 @@ export function inspectRoleReviewBudget(root: string, planHash: string, workId: 
 export function inspectRetainedRoleReviewBudget(root: string, planHash: string, workId: string) {
   const base = budgetPath(root, planHash, workId), original = readBudget(base, planHash, workId);
   const files: Record<string, string> = { [base]: contentHash(fs.readFileSync(base, "utf8")) };
+  const continuation = readRoleClaimContinuation(root, planHash, workId);
+  if (continuation) {
+    if (continuation.authority.budget.hash !== original.hash || !original.state.blocked) throw roleWorkStop("claim continuation predecessor budget changed");
+    // Later revisions must account for every new charge AND the original stop.
+    // The finite host grant cannot silently become a fresh rolling allowance.
+    const suffixes = ['', '.usage.json', '.result.json'];
+    if (fs.existsSync(continuation.file + '.start-recovery.json')) suffixes.push('.start-recovery.json', '.start-recovery.result.json');
+    for (const suffix of suffixes) {
+      const file = continuation.file + suffix;
+      if (!fs.existsSync(file)) throw roleWorkStop("claim continuation lineage is unfinished; inspect the original grant, do not restart or discard charges");
+      files[file] = contentHash(fs.readFileSync(file, "utf8"));
+    }
+    const state = stateSchema.parse({ ...original.state, usage: continuation.usage.usage });
+    return { ...original, state, hash: contentHash({ prior: original.hash, authority: continuation.authorityHash, state }), file: base, files };
+  }
   const grantFile = `${base}.context-recovery.json`;
   if (!fs.existsSync(grantFile)) return { ...original, file: base, files };
   const record = JSON.parse(fs.readFileSync(grantFile, "utf8")), grant = grantSchema.parse(record.grant);
@@ -47,7 +64,7 @@ export function inspectRetainedRoleReviewBudget(root: string, planHash: string, 
 }
 /** Charged before transport. Recovery uses an immutable grant + separate usage
  * continuation; the original blocked budget is never overwritten or cleared. */
-export function roleReviewBudget(root: string, planHash: string, workId: string, limits: ModelRequestLimits, requireExisting = false, modelCallsMode: "enforce" | "progress" = "enforce") {
+export function roleReviewBudget(root: string, planHash: string, workId: string, limits: ModelRequestLimits, requireExisting = false, modelCallsMode: "enforce" | "progress" = "enforce", inherited?: RoleWorkAllowance["budget"]) {
   const base = budgetPath(root, planHash, workId);
   fs.mkdirSync(path.dirname(base), { recursive: true, mode: 0o700 });
   let file = base, initial: z.infer<typeof stateSchema> | undefined;
@@ -62,6 +79,12 @@ export function roleReviewBudget(root: string, planHash: string, workId: string,
       initial = readBudget(file, planHash, workId, limits).state;
       if ((Object.keys(grant.initial.usage) as Array<keyof ModelRequestUsage>).some(k => initial!.usage[k] < grant.initial.usage[k])) throw roleWorkStop("context recovery usage regressed");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; initial = grant.initial; }
+  }
+  if (inherited) {
+    if (contentHash(inherited.limits) !== contentHash(limits)) throw roleWorkStop("migrated budget limits changed; retain the original limits and stop for host review");
+    if (initial && ((Object.keys(inherited.state.usage) as Array<keyof ModelRequestUsage>).some(key => initial!.usage[key] < inherited.state.usage[key])
+      || (inherited.state.blocked && !initial.blocked))) throw roleWorkStop("migrated budget regressed or cleared a retained stop");
+    initial ??= stateSchema.parse(structuredClone(inherited.state));
   }
   if (!initial && requireExisting) throw roleWorkStop("prior work has no retained usage record; recover original usage from trace, never assume zero usage");
   const save = (state: z.infer<typeof stateSchema>) => {

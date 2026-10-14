@@ -153,7 +153,11 @@ export async function compileNovelCommand(options: CompileNovelOptions): Promise
             const rank = (batch: typeof batches[number]) => stages.indexOf(batch.purpose === "structure-discovery" ? "structure"
               : batch.purpose === "boundary-calibration" ? "boundary" : batch.semanticStage ?? "executable");
             const completed = new Set((await new CompilerBatchStore(root).read(source.id)).completedBatchIds);
-            const prerequisites = batches.filter(batch => rank(batch) < stages.indexOf(options.batchStage!) && !completed.has(batch.id));
+            const prerequisites = [];
+            for (const batch of batches.filter(batch => rank(batch) < stages.indexOf(options.batchStage!))) {
+              const verified = completed.has(batch.id) && await new CompilerFinishReceipts(root, source.id, batch.id).hasVerifiedCompletedReceipt();
+              if (!verified) prerequisites.push(batch);
+            }
             if (prerequisites.length) throw new Error(`COMPILATION_STAGE_DEPENDENCIES: finish prior batches ${prerequisites.map(batch => batch.id).join(", ")} using compile-novel batches, or the corresponding earlier stage commands.`);
             batchIds = batches.filter(batch => options.batchStage === "structure" ? batch.purpose === "structure-discovery"
               : options.batchStage === "boundary" ? batch.purpose === "boundary-calibration" : batch.semanticStage === options.batchStage).map(batch => batch.id);

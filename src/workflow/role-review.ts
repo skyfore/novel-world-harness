@@ -1,14 +1,16 @@
 import crypto from "node:crypto";
 import { RoleReviewWorkStore, roleWorkStop } from "../compiler/role-review-work.js";
-import { runBoundedRoleReview } from "./role-review-bounded.js";
+import { runBoundedRoleReview, type BoundedRoleReviewOptions } from "./role-review-bounded.js";
 import { type CompileCommandOptions } from "../commands/compile.js";
 import { loadCurrentRoleRoster, roleRosterEntryInputSchema } from "../compiler/role-roster-tools.js";
 import { validateRoleRoster } from "../compiler/role-roster.js";
 import { registerReviewedCoreRoles } from "../compiler/core-role-requirement-service.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
+import { RequirementLedger } from "../compiler/requirement-ledger.js";
+import { activeRoleWorkPlans, assertRoleWorkPlanAuthority } from "../compiler/role-work-migration.js";
 
-export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "prompt" | "compilerBatchId"> & { sourceId: string }, review: (options: CompileCommandOptions & { sourceId: string; compilerBatchId: string }) => Promise<void> = runBoundedRoleReview): Promise<void> {
+export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "prompt" | "compilerBatchId"> & { sourceId: string }, review: (options: BoundedRoleReviewOptions) => Promise<void> = runBoundedRoleReview): Promise<void> {
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(options.root, "compiler", () =>
       reviewNovelRoles({ ...options, acquireLock: false }, review));
@@ -22,8 +24,11 @@ export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "pro
     }
   }
   let stagedBatchId: string | undefined;
+  const revisions = await new RequirementLedger(options.root, options.sourceId).roleReviewRevisions();
+  const retiredBatches = new Set(revisions.flatMap(revision => revision.workMigration ? [revision.workMigration.priorPlan.batchId] : []));
   for (const batchId of CompilerProposalObligations.listBatchIds(options.root, options.sourceId)) {
     if (!batchId.startsWith(`role-roster-${options.sourceId}-`)) continue;
+    if (retiredBatches.has(batchId)) continue;
     const journal = new CompilerProposalObligations(options.root, options.sourceId, batchId);
     const roleHistory = journal.history("propose_role_roster_review", "role-roster-review");
     const receipt = await new CompilerFinishReceipts(options.root, options.sourceId, batchId).read();
@@ -36,7 +41,8 @@ export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "pro
       stagedBatchId = batchId;
     }
   }
-  for (const plan of await RoleReviewWorkStore.plans(options.root, options.sourceId)) {
+  for (const plan of await activeRoleWorkPlans(options.root, options.sourceId)) {
+    await assertRoleWorkPlanAuthority(options.root, plan);
     const receipt = await new CompilerFinishReceipts(options.root, options.sourceId, plan.batchId).read();
     if (receipt?.state === "completed") continue;
     if (stagedBatchId && stagedBatchId !== plan.batchId) throw roleWorkStop("multiple unfinished review scopes");
@@ -60,7 +66,7 @@ export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "pro
   while (roster.reviews.length < 2) {
     options.signal?.throwIfAborted();
     const subjectHash = roster.subjectHash, reviewRevisionId = roster.reviewRevisionId, reviewCount = roster.reviews.length;
-    await review({ ...options, compilerBatchId: stagedBatchId ?? `role-roster-${options.sourceId}-${crypto.randomUUID()}` });
+    await review({ ...options, automaticRecovery: true, compilerBatchId: stagedBatchId ?? `role-roster-${options.sourceId}-${crypto.randomUUID()}` });
     stagedBatchId = undefined;
     ({ roster } = await loadCurrentRoleRoster(options.root, options.sourceId));
     if (roster.subjectHash !== subjectHash || roster.reviewRevisionId !== reviewRevisionId || roster.reviews.length !== reviewCount + 1) throw new Error("ROSTER_REVIEW_NOT_COMMITTED: the review did not finish against unchanged source identity. Stop and inspect compiler diagnostics; do not repeat unchanged work.");

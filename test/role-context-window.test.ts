@@ -58,6 +58,18 @@ it('merges UTF-8 core, neighbor and paginated originals exactly once',async()=>{
  expect(result.packet.ranges).toEqual([{start:0,end:bytes.length}]);
  expect(result.deliveredUnitIds).toEqual(['long']);
 });
+it('carries used context handoffs across a host-authorized review migration',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'role-context-migration-'));roots.push(root);
+ const plan=contentHash('successor'),packet=contentHash('packet');
+ const store=await RoleContextCheckpoint.open(root,plan,'work',packet,1);
+ expect(store.generation).toBe(1);
+ await store.record('read_role_work_evidence',{unitId:'unit'},{content:[{type:'text',text:JSON.stringify({units:[{unitId:'unit',text:'evidence'}]})}]});
+ await store.handoff(new RoleContextPressure(37000,'context'));
+ const restored=await RoleContextCheckpoint.open(root,plan,'work',packet,1);
+ expect(restored.generation).toBe(2);
+ await expect(restored.handoff(new RoleContextPressure(37000,'context'))).rejects.toThrow('allowance exhausted');
+ await expect(RoleContextCheckpoint.open(root,plan,'work',packet,0)).rejects.toThrow('allowance changed');
+});
 it('never promotes partial originals or discovery excerpts to complete evidence',async()=>{
  const {reassembleRoleContext}=await import('../src/compiler/role-review-context.js');
  const bytes=Buffer.from('龙'.repeat(4500));

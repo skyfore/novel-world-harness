@@ -14,6 +14,8 @@ import { buildNwhToolRecoveryAdvice } from "../src/agent/tool-recovery.js";
 import { contentHash } from "../src/world/canonical.js";
 import { RoleRosterStore, validateRosterReview } from "../src/compiler/role-roster.js";
 import { RequirementLedger } from "../src/compiler/requirement-ledger.js";
+import { beginCoreRoleReviewRevision } from "../src/compiler/role-review-revision-service.js";
+import { assertRetainedRoleWork } from "../src/compiler/role-work-migration.js";
 const runBoundedRoleReview = (options: Parameters<typeof runReview>[0], runner: NonNullable<Parameters<typeof runReview>[1]>) => runReview(options, runner, async () => {});
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
@@ -57,6 +59,40 @@ async function completeFixtureWork(work: RoleWorkInvocation, unit: string) {
   }
 }
 function fixtureChecks(unit: string) { return ["importance", "identity", "development"].map(kind => ({kind, verdict:"supported", rationale:"Fixture evidence supports this dimension", basisUnitIds:[unit]})); }
+it("requires new independent audits for migrated proposals and preserves the old source and judgments", async () => {
+  const f = await setup(), { roster, structure } = await loadCurrentRoleRoster(f.root, f.f.source.id);
+  const unit = roster.unitIds[0]!;
+  const old = await RoleReviewWorkStore.open(f.root, { version: 1, sourceId: f.f.source.id, sourceHash: roster.sourceSha256,
+    subjectHash: roster.subjectHash, batchId: f.batchId, structureHash: contentHash(structure), spans: [{ start: 0, end: f.f.source.bytes }], legacyDraftHashes: [] });
+  await old.submit("source", 0, { summary: "Original source review", findings: [{ name: "Hero", observation: "Interaction", unitIds: [unit] }], openQuestions: [] }, () => {});
+  for (const candidate of roster.candidates) old.journal.record("propose_role_roster_entry", { subjectHash: roster.subjectHash, entry: entry(candidate.id, unit) }, "succeeded");
+  const saved = { ...roster, reviews: [{ runId: "legacy-independent", subjectHash: roster.subjectHash, reviewedUnitIds: roster.unitIds, entries: roster.candidates.map(c => entry(c.id, unit)), missingMajorCharacters: [] }] };
+  await new RoleRosterStore(f.root).write(saved);
+  const canon = new CanonicalModelStore(f.root), hero = await canon.getEntity("hero"); await canon.putEntity({ ...hero, aliases: ["Source alias"] });
+  const revision = await beginCoreRoleReviewRevision(f.root, { sourceId: f.f.source.id, revisionId: "current-subject", priorRosterHash: contentHash(saved), expectedWorkPlanHash: old.planHash, scopeDecisionRef: "fixture-host-decision", reason: "Revalidate the changed subject with unchanged original source and candidates" });
+  const next = revision.workMigration!.nextPlan, migrated = new RoleReviewWorkStore(f.root, next);
+  expect(migrated.sourceComplete()).toBe(true);
+  expect(migrated.auditComplete()).toBe(false);
+  const previewTools = createCompilerProposalToolset(f.root); await previewTools.beginBatch([], next.batchId, f.f.source.id);
+  const preview = await previewTools.tools.find(t => t.name === "preview_role_roster_review")!.execute("p", { subjectHash: next.subjectHash } as never, undefined, undefined, {} as ExtensionContext);
+  expect(JSON.parse((preview.content[0] as {text: string}).text)).toMatchObject({ complete: false, nextAction: "needs_global_audit", semanticSupport: "not-verified" });
+  const workIds: string[] = [];
+  await runBoundedRoleReview({ ...f.options, compilerBatchId: next.batchId }, async work => { workIds.push(work.workId); await completeFixtureWork(work, unit); });
+  expect(workIds.filter(id => id.startsWith("role-claim"))).toHaveLength(roster.candidates.length);
+  expect(workIds.some(id => id.startsWith("role-source") || id.startsWith("candidate"))).toBe(false);
+  expect(workIds.filter(id => id.startsWith("role-audit"))).toHaveLength(1);
+  expect(migrated.auditComplete()).toBe(true);
+  expect((await new RoleRosterStore(f.root).read(f.f.source.id))!.reviews).toEqual([]);
+  await assertRetainedRoleWork(f.root, revision.workMigration!);
+  const tools = createCompilerProposalToolset(f.root); await tools.beginBatch([], next.batchId, f.f.source.id);
+  const call = (name: string, input: unknown) => tools.tools.find(t => t.name === name)!.execute(name, input as never, undefined, undefined, {} as ExtensionContext);
+  await call("propose_role_roster_review", { subjectHash: next.subjectHash, staged: true, missingMajorCharacters: [] });
+  await call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independently revalidated migrated work" });
+  const current = (await new RoleRosterStore(f.root).read(f.f.source.id))!;
+  expect(current.reviews).toHaveLength(1);
+  expect(current.reviews[0]!.subjectHash).toBe(next.subjectHash);
+  expect((await new RequirementLedger(f.root, f.f.source.id).roleReviewRevisions())[0]!.priorRoster).toEqual(saved);
+});
 function fixtureAudit(work: RoleWorkInvocation, unit: string) {
   const p = packet(work);
   return { rationale: "All people in this core are accounted for", missingMajorCharacters: [], unresolved: [], atlasRevision: p.atlasRevision,
@@ -569,6 +605,10 @@ it('audits frozen retained claims while preserving exhausted source work and eve
     const p = packet(work);
     expect(p.sourceReviewCoverage).toEqual({total:1, reviewed:0, missingSourceWorkIds:[f.workId]});
     expect(work.prompt).toContain('Missing atlas notes never prove absence');
+    expect(work.prompt).toContain('12-model-call no-progress window');
+    expect(work.prompt).toContain('reserve a response for the exposed proposal tool');
+    expect(work.prompt).toContain('instead of exhausting every directory page');
+    expect(work.tools.find(tool => tool.name === 'read_role_review_atlas')?.description).toContain('copy nextOffset only when another directory page is relevant');
     if (called.length === 1) await invoke(work, 'propose_role_claim_audit', {candidateId:p.candidateId, claimRevision:p.claimRevision, atlasRevision:p.atlasRevision, packetHash:p.packetHash,
       verdict:'insufficient', rationale:'The coverage gap prevents a supported judgment', basisUnitIds:[f.unit], counterevidence:{searchedUnitIds:[f.unit], rationale:'Gap retained'}, checks:fixtureChecks(f.unit).map(c => ({...c, verdict:'insufficient'}))});
     else await completeFixtureWork(work, f.unit);

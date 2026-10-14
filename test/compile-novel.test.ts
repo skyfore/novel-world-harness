@@ -92,6 +92,28 @@ it("blocks a semantic subcommand until its observation prerequisites are checkpo
   expect(compiler).not.toHaveBeenCalled();
 });
 
+it("does not accept marker-only observation prerequisites for a semantic subcommand", async () => {
+  const { root, source } = await fixture();
+  const batches = await prepareCompilerBatches(root, source);
+  const stages = ["structure", "observation", "semantic", "executable", "boundary"];
+  const rank = (batch: typeof batches[number]) => stages.indexOf(batch.purpose === "structure-discovery" ? "structure"
+    : batch.purpose === "boundary-calibration" ? "boundary" : batch.semanticStage ?? "executable");
+  const prerequisites = batches.filter(batch => rank(batch) < stages.indexOf("semantic"));
+  await new CompilerBatchStore(root).replaceCompleted(source.id, prerequisites.map(batch => batch.id));
+  const compiler = vi.spyOn(sourceCompiler, "compileSourceCommand");
+
+  await expect(compileNovelCommand({
+    root,
+    sourceId: source.id,
+    phase: "batches",
+    batchStage: "semantic",
+    onProgress() {},
+  })).rejects.toThrow("COMPILATION_STAGE_DEPENDENCIES");
+
+  expect(prerequisites.length).toBeGreaterThan(0);
+  expect(compiler).not.toHaveBeenCalled();
+});
+
 it("does not treat all completed batch markers as verified finish receipts", async () => {
   const { root, source } = await fixture();
   const batches = await prepareCompilerBatches(root, source);

@@ -10,6 +10,17 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it.each(["preview_role_source_audit_proposal", "preview_role_source_audit_verification", "propose_role_source_audit_repair", "propose_role_source_audit_repair_check"])("keeps source repair recovery inside its revision: %s", tool => {
+    const advice = buildNwhToolRecoveryAdvice(tool, "Unknown original evidence unit");
+    expect(advice).toMatchObject({ category: "invalid-arguments", retryable: true });
+    for (const field of ["read_role_work_evidence", "units[].unitId", "read_role_audit_inventory", "candidates[].id", "expectedQuestions[].questionId", "predecessor.unresolved"]) {
+      expect(advice.steps.join(" ")).toContain(field);
+    }
+    expect(advice.retryCondition).toContain("one materially corrected");
+    for (const diagnostic of ["ROLE_REVIEW_WORK_HOST_REQUIRED: already settled", "ROLE_REVIEW_WORK_HOST_REQUIRED: scope changed", "Compiler proposal obligation requires host review: attempts exhausted", "tool-call safety fuse exhausted"]) {
+      expect(buildNwhToolRecoveryAdvice(tool, diagnostic).retryable).toBe(false);
+    }
+  });
   it("keeps independent evaluation corrections in the same draft and honors host/single-use stops", () => {
     const advice = buildNwhToolRecoveryAdvice("propose_evaluation_item", "Unknown evaluation section");
     expect(advice).toMatchObject({ retryable: true, suggestedCall: { tool: "read_evaluation_input", arguments: { section: "index" } } });
@@ -368,6 +379,47 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("defer_boundary_artifact");
     expect(advice.steps.join(" ")).toContain("replace_boundary_proposal");
     expect(advice.steps.join(" ")).toContain("one-sided scene/event");
+  });
+
+  it("repairs a boundary-scoped quotation trace through a same-ID source revision", () => {
+    const diagnostic = "Utterance expression trace is incomplete:\n- expression-draft: EXPRESSION_ADDRESSEE_TRACE_MISMATCH: Expression addressees must exactly match this quotation's resolved addressee mentions.";
+    const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", diagnostic, {
+      activeToolNames: [
+        "find_compiler_artifacts",
+        "read_compiler_artifact",
+        "find_source_annotations",
+        "read_source_annotation",
+        "find_identity_resolutions",
+        "read_identity_resolution",
+        "propose_quotation",
+        "propose_utterance_expression",
+        "withdraw_compiler_proposal",
+        "finish_compiler_batch",
+      ],
+    });
+
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_compiler_artifacts",
+        arguments: { kind: "utterance-expression", query: "expression-draft", status: "pending", max_results: 20 },
+      },
+    });
+    expect(advice.steps.join(" ")).toContain("results[].readArguments.ref");
+    expect(advice.steps.join(" ")).toContain("payload.quotation.quotationId");
+    expect(advice.steps.join(" ")).toContain("new proposal_id while preserving annotation_id");
+    expect(advice.steps.join(" ")).toContain("results[].ref into read_identity_resolution.ref");
+    expect(advice.steps.join(" ")).toContain("Accepted prior annotation revisions remain immutable history");
+    expect(advice.steps.join(" ")).toContain("never withdraw them or pass them to replace_boundary_proposal");
+    expect(advice.steps.join(" ")).toContain("preserving payload.id");
+    expect(advice.steps.join(" ")).toContain("Retry finish once");
+
+    const restricted = buildNwhToolRecoveryAdvice("finish_compiler_batch", diagnostic, {
+      activeToolNames: ["find_source_annotations", "read_source_annotation", "finish_compiler_batch"],
+    });
+    expect(restricted.steps.join(" ")).toContain("does not expose the complete quotation-revision lifecycle");
+    expect(restricted.steps.join(" ")).toContain("stop for host source review");
   });
 
   it("pairs source-accounting misses and finish gaps with bounded unit discovery", () => {

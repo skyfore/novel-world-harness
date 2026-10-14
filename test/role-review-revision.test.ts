@@ -22,6 +22,74 @@ import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { preparedSubjectHash } from "../src/compiler/certification.js";
 import { WorkspaceOperationLock } from "../src/util/workspace-lock.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
+import { RoleReviewWorkStore } from "../src/compiler/role-review-work.js";
+import { roleReviewBudget } from "../src/compiler/role-review-budget.js";
+import { ROLE_WORK_LIMITS } from "../src/workflow/role-review-bounded.js";
+import { assertRetainedRoleWork } from "../src/compiler/role-work-migration.js";
+import { runWithRoleContextRecovery } from "../src/workflow/role-session-context.js";
+
+it("authorizes an unfinished plan once, retains proposals and carries spent allowances without accepting old audits", async () => {
+  const f = await fixture(1), structure = await ensureSourceStructure(f.root, f.source.source);
+  const old = await RoleReviewWorkStore.open(f.root, { version: 1, sourceId: f.source.source.id, sourceHash: f.saved.sourceSha256,
+    subjectHash: f.saved.subjectHash, batchId: `role-roster-${f.source.source.id}-bounded`, structureHash: contentHash(structure),
+    spans: [{ start: 0, end: f.source.source.bytes }], legacyDraftHashes: [] });
+  await old.submit("source", 0, { summary: "Original evidence", findings: [], openQuestions: ["What happens later?"] }, () => {});
+  const entry = { ...f.saved.reviews[0]!.entries[0]!, developmentExpectation: { kind: "unknown", rationale: "No later evidence", basisUnitIds: f.saved.unitIds } };
+  old.journal.record("propose_role_roster_entry", { subjectHash: f.saved.subjectHash, entry }, "succeeded");
+  await old.submit("audit", 0, { rationale: "Incomplete original audit", missingMajorCharacters: [], unresolved: ["Original open question"] }, () => {});
+  const claim = old.claimWorkId(entry.candidateId), audit = old.workId("audit", 0);
+  await old.beginAttempt(claim);
+  const priorBudget = roleReviewBudget(f.root, old.planHash, claim, ROLE_WORK_LIMITS, false, "progress");
+  priorBudget.beginCall({ original: true });
+  await expect(runWithRoleContextRecovery(old, { workId: claim, prompt: "Original claim verification", tools: [], complete: () => false }, async () => {
+    throw new Error("Original context interrupted");
+  })).rejects.toThrow("Original context interrupted");
+  const stopped = roleReviewBudget(f.root, old.planHash, audit, ROLE_WORK_LIMITS, false, "progress");
+  for (let call = 0; call < ROLE_WORK_LIMITS.maxModelCalls; call++) stopped.beginCall({ call });
+  expect(() => stopped.beginCall({ unchanged: true })).toThrow("no new validated progress");
+  const hero = await f.canon.getEntity("hero"); await f.canon.putEntity({ ...hero, aliases: ["A source-backed alias"] });
+  await expect(beginCoreRoleReviewRevision(f.root, f.input)).rejects.toThrow("--work-plan");
+  expect(await f.ledger.roleReviewRevisions()).toEqual([]);
+  const input = { ...f.input, expectedWorkPlanHash: old.planHash };
+  const write = vi.spyOn(RoleRosterStore.prototype, "write").mockRejectedValueOnce(new Error("pointer interrupted"));
+  await expect(beginCoreRoleReviewRevision(f.root, input)).rejects.toThrow("pointer interrupted");
+  expect(await f.store.read(f.source.source.id)).toEqual(f.saved);
+  write.mockRestore();
+  const revision = await beginCoreRoleReviewRevision(f.root, input);
+  await beginCoreRoleReviewRevision(f.root, input);
+  expect(await f.ledger.roleReviewRevisions()).toHaveLength(1);
+  expect(revision.priorRoster).toEqual(f.saved);
+  const migrated = await RoleReviewWorkStore.open(f.root, revision.workMigration!.nextPlan);
+  expect(migrated.read("source", 0)).toEqual(old.read("source", 0));
+  expect(migrated.stagedEntries()).toEqual([entry]);
+  expect(migrated.read("audit", 0)).toBeUndefined();
+  expect(migrated.claimAudits()).toEqual([]);
+  expect((await f.store.read(f.source.source.id))!.reviews).toEqual([]);
+  await expect(RoleReviewWorkStore.open(f.root, old.plan)).rejects.toThrow("superseded history");
+  await expect(RoleReviewWorkStore.open(f.root, { ...migrated.plan, batchId: migrated.plan.batchId + "-renamed" })).rejects.toThrow("exact host revision");
+  const inheritedClaim = migrated.inheritedAllowance(migrated.claimWorkId(entry.candidateId))!;
+  expect(inheritedClaim.attempts).toBe(1);
+  expect(inheritedClaim.contextSessions).toBe(1);
+  const continued = roleReviewBudget(f.root, migrated.planHash, migrated.claimWorkId(entry.candidateId), ROLE_WORK_LIMITS, true, "progress", inheritedClaim.budget);
+  expect(continued.snapshot()).toEqual(priorBudget.snapshot());
+  continued.beginCall({ revalidation: true });
+  expect(continued.snapshot().modelCalls).toBe(2);
+  expect(await migrated.beginAttempt(migrated.claimWorkId(entry.candidateId))).toBe(2);
+  await expect(migrated.beginAttempt(migrated.claimWorkId(entry.candidateId))).rejects.toThrow("allowance exhausted");
+  const inheritedStop = migrated.inheritedAllowance(migrated.workId("audit", 0))!;
+  const stillStopped = roleReviewBudget(f.root, migrated.planHash, migrated.workId("audit", 0), ROLE_WORK_LIMITS, false, "progress", inheritedStop.budget);
+  expect(() => stillStopped.beginCall({ renamed: true })).toThrow("retained hard stop");
+  await assertRetainedRoleWork(f.root, revision.workMigration!);
+  const compile = vi.fn(async (options: { compilerBatchId?: string }) => {
+    expect(options.compilerBatchId).toBe(migrated.plan.batchId);
+    throw new Error("Reached authorized successor");
+  });
+  await expect(reviewNovelRoles({ root: f.root, sourceId: f.source.source.id }, compile)).rejects.toThrow("Reached authorized successor");
+  expect(compile).toHaveBeenCalledOnce();
+  await expect(beginCoreRoleReviewRevision(f.root, { ...input, expectedWorkPlanHash: "0".repeat(64) })).rejects.toThrow("replay differs");
+  priorBudget.beginCall({ forbiddenOldScopeChange: true });
+  await expect(RoleReviewWorkStore.open(f.root, migrated.plan)).rejects.toThrow("retained work or budget changed");
+});
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });

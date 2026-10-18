@@ -10,7 +10,7 @@ import * as service from "../src/compiler/identity-requirement-service.js";
 import { identityRequirementDirectory } from "../src/compiler/identity-requirements.js";
 import { runIdentityRequirements } from "../src/workflow/identity-requirements.js";
 import { contentHash as h } from "../src/world/canonical.js";
-import { identityIntentSchema, identityRequirementId, identityRequirementsReady, identitySemanticHash, identityStages,
+import { identityIntentSchema, identityRequirementId, identityRequirementsReady, identitySemanticHash, identityStages, identityConsumersReviewable, identityDefinitionGaps,
   validateIdentityHistory, validateIdentityOutput, type IdentityRecord } from "../src/compiler/identity-requirements.js";
 import { identityStageInput, identityStageCatalog, identityConsumerView } from "../src/workflow/identity-requirements.js";
 import { buildIdentityRepairPlan } from "../src/compiler/identity-requirement-upstream.js";
@@ -23,6 +23,9 @@ import { TraceRecorder } from "../src/trace/recorder.js";
 import { TraceStore } from "../src/trace/store.js";
 import { digest } from "../src/runtime/compile-loop/workspace.js";
 import { prerequisiteStop } from "../src/compiler/role-source-prerequisites.js";
+import { inspectIdentityConsumerContinuation, type IdentityConsumerContinuation } from "../src/compiler/identity-consumer-continuation.js";
+import { verifySemanticCorrectionJournal } from "../src/compiler/role-semantic-scope-correction.js";
+import * as anchors from "../src/compiler/text-anchors.js";
 
 function fixture() {
   const taskId = h("original-prerequisite"), evidence = [{ segment_id: "seg", exact: "Ada waits." }], questionIds = [h("critical-1"), h("critical-2"), h("critical-3")];
@@ -55,6 +58,83 @@ function fixture() {
   return { p, records, intent, semantic, inventory };
 }
 const rechain = (records: IdentityRecord[]) => { for (let i = 1; i < records.length; i++) { records[i]!.predecessorRecordHash = h(records[i - 1]); if ("proposalHash" in records[i]!.output) (records[i]!.output as any).proposalHash = h(records[i - 1]!.output); } };
+
+function withDefinitionGaps(f = fixture(), classified = true) {
+  const definition = f.records[0]!.output;
+  if (definition.phase !== "identity-definition") throw Error("fixture");
+  definition.requirements.forEach((r, i) => { r.missingCondition = `Original identity bridge ${i} remains unknown`; });
+  for (const r of f.records.slice(2)) {
+    if (r.output.phase === "identity-consumers") {
+      r.output.definitionHash = h(definition);
+      if (classified) for (const b of r.output.bindings) b.definitionGap = { conditionHash: h(definition.requirements.find(d => d.id === b.requirementId)!.missingCondition),
+        disposition: "retained-boundary", rationale: "Finite unresolved representation preserves the original question", evidence: definition.requirements[0]!.evidence };
+    } else if (r.output.phase === "identity-consumers-check" && classified) for (const j of r.output.judgments) j.definitionGap = {
+      conditionHash: h(definition.requirements.find(d => d.id === j.id)!.missingCondition), disposition: "retained-boundary", verdict: "supported",
+      rationale: "Fresh review of the exact payload and retained boundary", evidence: definition.requirements[0]!.evidence };
+  }
+  rechain(f.records); return f;
+}
+
+it("separates read-only consumer review from authority while preserving every original gap", () => {
+  const f = withDefinitionGaps(), original = structuredClone(f.records.slice(0, 2)), frozen = h(f.semantic);
+  expect(identityConsumersReviewable(original)).toBe(true); expect(identityRequirementsReady(original)).toBe(false);
+  validateIdentityOutput(f.intent, f.records, f.inventory, f.semantic);
+  const plan = buildIdentityRepairPlan(f.p, f.records);
+  expect(plan.identityRequirements!.recordHashes).toEqual(f.records.map(h));
+  expect(f.records.slice(0, 2)).toEqual(original); expect(h(f.semantic)).toBe(frozen);
+  expect(plan.requirementIds).not.toEqual(f.inventory.originalQuestionIds);
+  expect((identityStageInput(f.p, "identity-consumers", original, 0) as any).definitionGaps).toEqual(identityDefinitionGaps(original[0]!.output));
+});
+
+it("never infers repair permission from supported legacy gaps or incomplete typed checks", () => {
+  const legacy = withDefinitionGaps(fixture(), false), old = h(legacy.records);
+  expect(identityConsumersReviewable(legacy.records.slice(0, 2))).toBe(true);
+  expect(identityRequirementsReady(legacy.records)).toBe(false);
+  expect(() => buildIdentityRepairPlan(legacy.p, legacy.records)).toThrow("no repair authority"); expect(h(legacy.records)).toBe(old);
+  for (const mutate of [(r: any[]) => { delete r[2].output.bindings[0].definitionGap; delete r[3].output.judgments[0].definitionGap; },
+    (r: any[]) => { delete r[3].output.judgments[0].definitionGap; },
+    (r: any[]) => { r[3].output.judgments[0].definitionGap.verdict = "blocked"; },
+    (r: any[]) => { r[2].output.bindings[0].missingCondition = "Finite repair needs independent evidence"; },
+    ...["repair-prerequisite", "unknown"].map(disposition => (r: any[]) => {
+      r[2].output.bindings[0].definitionGap.disposition = disposition; r[3].output.judgments[0].definitionGap.disposition = disposition;
+    })]) {
+    const f = withDefinitionGaps(); mutate(f.records); rechain(f.records);
+    expect(identityRequirementsReady(f.records)).toBe(false); expect(() => buildIdentityRepairPlan(f.p, f.records)).toThrow("no repair authority");
+  }
+  const negative = withDefinitionGaps(); (negative.records[1]!.output as any).judgments[0].verdict = "blocked"; rechain(negative.records);
+  expect(identityConsumersReviewable(negative.records)).toBe(false);
+  const gap = withDefinitionGaps(); (gap.records[0]!.output as any).requirements[0].disposition = "evidence-gap"; rechain(gap.records);
+  expect(identityConsumersReviewable(gap.records.slice(0, 2))).toBe(false);
+});
+
+it("binds gap assessments to the exact immutable condition and independent disposition", () => {
+  for (const mutate of [(r: any[]) => { r[2].output.bindings[0].definitionGap.conditionHash = h("different gap"); },
+    (r: any[]) => { r[3].output.judgments[0].definitionGap.disposition = "unknown"; },
+    (r: any[]) => { r[3].output.judgments[0].definitionGap.conditionHash = h("different gap"); }]) {
+    const f = withDefinitionGaps(); mutate(f.records); rechain(f.records);
+    expect(() => validateIdentityHistory(f.records)).toThrow(/condition|disposition/);
+  }
+});
+
+it("verifies old semantic correction history after exact identity appends without reopening dispatch", () => {
+  const f = fixture(), review: any = { taskId: f.intent.taskId, revisionHash: f.intent.revisionHash, scope: {
+    sourceId: f.intent.sourceId, sourceHash: f.intent.sourceHash, parentStateHash: f.intent.parentStateHash, planHash: f.intent.originalPlanHash, originalBudgetHash: f.intent.originalBudgetHash } };
+  const semantic = f.semantic.map(s => ({ ...s, taskId: f.intent.taskId }));
+  const prefix: any[] = [{ hash: h("pending"), payload: { kind: "role-dependency-review", review } },
+    ...semantic.map(record => ({ hash: h(record), payload: { kind: "role-semantic-scope", record } }))];
+  for (const r of f.records) { r.intent.semanticRecordHashes = semantic.map(h); r.intent.requirementPrefix = { length: 3, head: prefix[2]!.hash }; r.output.intentHash = h(r.intent); }
+  for (const r of f.records) if (r.output.phase === "identity-consumers") r.output.definitionHash = h(f.records[0]!.output);
+  rechain(f.records);
+  const history = [...prefix, ...f.records.map(record => ({ hash: h(record), payload: { kind: "identity-requirements", record } }))] as any;
+  expect(() => verifySemanticCorrectionJournal(history, review, false)).not.toThrow();
+  expect(() => verifySemanticCorrectionJournal(history, review, true)).toThrow("consumed");
+  for (const mutate of [(h: any[]) => { h[3].payload.record.intent.requirementPrefix.head = h[0].hash; },
+    (h: any[]) => { h[3].payload.record.intent.taskId = "f".repeat(64); },
+    (h: any[]) => { h.push({ payload: { kind: "role-dependency-review", review } }); },
+    (h: any[]) => { h[2].payload.record.output.phase = "changed"; }]) {
+    const bad = structuredClone(history); mutate(bad); expect(() => verifySemanticCorrectionJournal(bad, review, false)).toThrow();
+  }
+});
 
 it("keeps independent definition blind to frozen repair payloads, consumers and candidate outcomes", () => {
   const f = fixture();
@@ -220,5 +300,94 @@ it("registers the original retained proposal once and charges only the next stag
     const receipt = JSON.parse(await fs.readFile(path.join(f.dir, "host-recovery/registration-receipt.json"), "utf8"));
     expect(receipt.providerCalls).toBe(0); expect(receipt.worldWrites).toBe(0); expect(receipt.cumulative.modelCalls).toBe(146);
     await expect(runIdentityRequirements(options)).rejects.toThrow(); expect(calls).toBe(1); expect(registered).toHaveLength(1);
+  } finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
+});
+
+async function retainedConsumerFixture() {
+  const f = await retainedDefinitionFixture(); withDefinitionGaps(f);
+  const trace = await TraceRecorder.start(new TraceStore(f.root), { kind: "prepare", sourceId: f.intent.sourceId,
+    operationId: `identity-requirements-${f.intent.taskId}-identity-definition-check` });
+  await trace.finish("succeeded"); f.records[1]!.traceRunId = trace.manifest.id; rechain(f.records);
+  const originalPid = f.proof.originalPid, { bytes, ...context } = f.p;
+  const state = { phase: "BREAK", stage: "identity-definition-check", childPid: null, traceRunId: null,
+    intentHash: h(f.intent), newModelCalls: 6, cumulativeModelCalls: 149,
+    reason: String(prerequisiteStop("Independent definition retains a gap or negative review; no consumer dispatch and no definition retry")) };
+  await fs.mkdir(path.join(f.dir, "host-recovery"));
+  const values = { "context.json": { ...context, sourceBytesBase64: Buffer.from(bytes).toString("base64") },
+    "identity-definition.proposal.json": f.records[0]!.output, "identity-definition.record.json": f.records[0],
+    "identity-definition-check.invocation.json": { pid: originalPid }, "identity-definition-check.input.json": identityStageInput(f.p, "identity-definition-check", f.records.slice(0, 1)),
+    "identity-definition-check.proposal.json": f.records[1]!.output, "identity-definition-check.record.json": f.records[1],
+    "identity-definition-check.budget.json": { state: { usage: { modelCalls: 3, totalPayloadBytes: 6000 } }, cumulative: { modelCalls: 149, totalPayloadBytes: f.intent.priorUsage.totalPayloadBytes + 11000 } },
+    "host-recovery/start.json": { pid: originalPid, taskId: f.intent.taskId, intentHash: h(f.intent) }, "host-recovery/state.json": state,
+    "host-recovery/intent.json": f.proof, "host-recovery/hooks.jsonl": "retained recovery hook", "host-recovery/registration-receipt.json": { recordHash: h(f.records[0]) } };
+  for (const [name, value] of Object.entries(values)) await fs.writeFile(path.join(f.dir, name), JSON.stringify(value));
+  const retainedFiles: Record<string, string> = {};
+  for (const prefix of ["", "host-recovery/"]) for (const entry of await fs.readdir(path.join(f.dir, prefix), { withFileTypes: true })) {
+    if (entry.isFile()) retainedFiles[prefix + entry.name] = createHash("sha256").update(await fs.readFile(path.join(f.dir, prefix, entry.name))).digest("hex");
+  }
+  const continuation: IdentityConsumerContinuation = { version: 1, policy: "identity-consumer-gap-review/v1", intentHash: h(f.intent),
+    stoppedStateHash: digest(state), stoppedDirectory: "host-recovery", recordHashes: f.records.slice(0, 2).map(h), originalPid,
+    host: await identityRecoveryHost(), reviewedFixRef: "reviewed-source-gap-fix", authorizationRef: "Continue only original unconsumed consumer reviews", retainedFiles };
+  return { ...f, continuation };
+}
+
+it("rejects consumer continuation on changed history, wrong host, negative review or an already invoked shard", async () => {
+  const f = await retainedConsumerFixture();
+  try {
+    vi.spyOn(identityTrace, "verifyIdentityRecord").mockResolvedValue();
+    vi.spyOn(RequirementLedger.prototype, "identityRequirements").mockResolvedValue(f.records.slice(0, 2));
+    const valid = await inspectIdentityConsumerContinuation(f.root, f.p, f.continuation);
+    expect(valid.cumulative.modelCalls).toBe(149); expect(valid.remainingStages.map(s => s.stage)).toEqual(identityStages(f.intent).slice(2).map(s => s.stage));
+    await expect(inspectIdentityConsumerContinuation(f.root, f.p, { ...f.continuation, host: { ...f.continuation.host, pidNamespace: "other" } })).rejects.toThrow("owning-host");
+    const drift = structuredClone(f.continuation); drift.retainedFiles["identity-definition-check.proposal.json"] = h("changed");
+    await expect(inspectIdentityConsumerContinuation(f.root, f.p, drift)).rejects.toThrow("Retained identity file changed");
+    const omitted = structuredClone(f.continuation); delete omitted.retainedFiles["identity-definition.budget.json"];
+    await expect(inspectIdentityConsumerContinuation(f.root, f.p, omitted)).rejects.toThrow("freeze every original file");
+    const check = f.records[1]!.output as any; check.judgments[0].verdict = "blocked";
+    await expect(inspectIdentityConsumerContinuation(f.root, f.p, f.continuation)).rejects.toThrow("registrations"); check.judgments[0].verdict = "supported";
+    const dispatched = await TraceRecorder.start(new TraceStore(f.root), { kind: "prepare", sourceId: f.intent.sourceId,
+      operationId: `identity-requirements-${f.intent.taskId}-identity-consumers-0` });
+    await dispatched.finish("failed");
+    await expect(inspectIdentityConsumerContinuation(f.root, f.p, f.continuation)).rejects.toThrow("already invoked");
+  } finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
+});
+
+it.each([false, true])("continues only fixed consumer stages with inherited charges and preserves the consumed definitions (negative=%s)", async negative => {
+  const f = await retainedConsumerFixture(), registered = f.records.slice(0, 2), dispatched: string[] = [];
+  try {
+    vi.spyOn(service, "prepareIdentityRequirements").mockResolvedValue(f.p);
+    vi.spyOn(identityTrace, "verifyIdentityRecord").mockResolvedValue();
+    vi.spyOn(RequirementLedger.prototype, "identityRequirements").mockImplementation(async () => registered);
+    vi.spyOn(RequirementLedger.prototype, "recordIdentityRequirements").mockImplementation(async r => { registered.push(r); });
+    vi.spyOn(anchors, "resolveTextSelectorAnchor").mockResolvedValue(f.records[0]!.evidence[0]!.anchor);
+    vi.spyOn(ModelRuntime, "create").mockResolvedValue({ checkAuth: async () => ({ type: "oauth" }), getProvider: () => ({ auth: { oauth: { isSubscription: true } } }), getModel: () => ({}) } as any);
+    vi.spyOn(PiAgentSession, "create").mockImplementation(async options => {
+      const stage = identityStages(f.intent)[registered.length]!.stage; dispatched.push(stage);
+      return { id: `fresh-${stage}`, model: options.model, abort: async () => {}, dispose: async () => {}, async promptWithReport(raw: string) {
+        const input = JSON.parse(raw); expect(input.definitionGaps).toEqual(identityDefinitionGaps(f.records[0]!.output));
+        options.requestBudget!.beginCall({}); options.requestBudget!.admitPayload(input);
+        const call = (name: string, args: any) => options.additionalTools!.find(t => t.name === name)!.execute(name, args, undefined as any, undefined as any, undefined as any);
+        await call("read_identity_source", { segmentIds: ["seg"] });
+        await call("read_identity_dependencies", { collection: "dependencies", refs: input.requiredDependencyRefs });
+        await call("read_identity_dependencies", { collection: "consumers", refs: input.inventory.consumers.map((c: any) => c.ref) });
+        const output = structuredClone(f.records[registered.length]!.output) as any;
+        if (input.proposalHash) { output.proposalHash = input.proposalHash; if (negative) output.judgments[0].definitionGap.verdict = "blocked"; }
+        await call("submit_identity_requirements", output);
+      } } as any;
+    });
+    const options = { root: f.root, input: {} as any, authorizationRef: f.intent.authorizationRef, priorUsage: f.intent.priorUsage,
+      expectedIntentHash: h(f.intent), assertOriginal: async () => {}, continueConsumers: f.continuation };
+    if (negative) await expect(runIdentityRequirements(options)).rejects.toThrow("Consumer shard retains"); else await runIdentityRequirements(options);
+    expect(dispatched).toEqual(identityStages(f.intent).slice(2, negative ? 4 : undefined).map(s => s.stage));
+    expect(registered.slice(0, 2).map(h)).toEqual(f.continuation.recordHashes);
+    const first = JSON.parse(await fs.readFile(path.join(f.dir, "identity-consumers-0.budget.json"), "utf8"));
+    expect(first.cumulative.modelCalls).toBe(150); expect(first.cumulative.totalPayloadBytes).toBe(f.intent.priorUsage.totalPayloadBytes + 11000 + first.state.usage.totalPayloadBytes);
+    for (const [name, hash] of Object.entries(f.continuation.retainedFiles)) expect(createHash("sha256").update(await fs.readFile(path.join(f.dir, name))).digest("hex")).toBe(hash);
+    const state = JSON.parse(await fs.readFile(path.join(f.dir, "consumer-review/state.json"), "utf8"));
+    expect(state.phase).toBe(negative ? "BREAK" : "DONE"); expect(state.authorityGranted).toBe(false); expect(state.parentCompileResumeAllowed).toBe(false);
+    const receipt = JSON.parse(await fs.readFile(path.join(f.dir, "consumer-review/continuation-receipt.json"), "utf8"));
+    expect(receipt.registrationWrites).toBe(0); expect(receipt.cumulative.modelCalls).toBe(149);
+    const count = dispatched.length; await expect(runIdentityRequirements(options)).rejects.toThrow(); expect(dispatched).toHaveLength(count);
+    if (negative) await expect(fs.stat(path.join(f.dir, "upstream-plan.preview.json"))).rejects.toThrow();
   } finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
 });

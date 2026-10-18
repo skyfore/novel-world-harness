@@ -5,7 +5,8 @@ import { contentHash } from "../world/canonical.js";
 import { TraceStore } from "../trace/store.js";
 import { ModelRequestBudget } from "../runtime/model-request-budget.js";
 import { WorkspaceOperationLock } from "../util/workspace-lock.js";
-import { RequirementLedger } from "./requirement-ledger.js";
+import { RequirementLedger, type LedgerRecord } from "./requirement-ledger.js";
+import { validateIdentityHistory } from "./identity-requirements.js";
 import { prepareCoreRoleDependencyReview, type RoleDependencyReviewInput } from "./role-dependency-review-service.js";
 import type { RoleDependencyReview } from "./role-dependency-review.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
@@ -20,6 +21,32 @@ const exists = async (file: string) => fs.lstat(file).then(() => true, (e: NodeJ
 function stop(reason: string): never { throw prerequisiteStop(`Semantic scope correction: ${reason}`); }
 export const semanticScopeCorrectionDirectory = (root: string, review: RoleDependencyReview) => path.join(roleSemanticScopeDirectory(root, review.taskId, review.scope.sourceId), "correction");
 export const semanticScopeCorrectionStage = "semantic-scope-correction";
+
+/** Historical verification may see later same-task identity records. They are
+ * not permission to dispatch the consumed correction again. */
+export function verifySemanticCorrectionJournal(history: LedgerRecord[], review: RoleDependencyReview, forDispatch: boolean) {
+  const pending = history.findIndex(r => r.payload.kind === "role-dependency-review" && r.payload.review.taskId === review.taskId);
+  if (pending < 0 || contentHash(history[pending]!.payload.kind === "role-dependency-review" && history[pending]!.payload.review) !== contentHash(review)
+    || (forDispatch && history.length !== pending + 1)) stop("original pending requirement prefix has changed or correction is consumed");
+  const suffix = history.slice(pending + 1), firstIdentity = suffix.findIndex(r => r.payload.kind === "identity-requirements");
+  const semantic = firstIdentity < 0 ? suffix : suffix.slice(0, firstIdentity);
+  if (semantic.length > 2 || semantic.some(r => r.payload.kind !== "role-semantic-scope" || r.payload.record.taskId !== review.taskId)) stop("unexpected semantic correction history");
+  if (firstIdentity < 0) return pending;
+  const records = suffix.slice(firstIdentity).map(r => {
+    if (r.payload.kind !== "identity-requirements") return stop("unrelated append after semantic correction");
+    return r.payload.record;
+  });
+  validateIdentityHistory(records);
+  const intent = records[0]!.intent, prefixLength = pending + 1 + semantic.length;
+  if (semantic.length !== 2 || intent.taskId !== review.taskId || intent.revisionHash !== review.revisionHash
+    || intent.sourceId !== review.scope.sourceId || intent.sourceHash !== review.scope.sourceHash || intent.parentStateHash !== review.scope.parentStateHash
+    || intent.originalPlanHash !== review.scope.planHash || intent.originalBudgetHash !== review.scope.originalBudgetHash
+    || intent.requirementPrefix.length !== prefixLength || intent.requirementPrefix.head !== history[prefixLength - 1]!.hash
+    || contentHash(intent.semanticRecordHashes) !== contentHash(semantic.map(r => r.payload.kind === "role-semantic-scope" ? contentHash(r.payload.record) : null))) {
+    stop("identity append is not bound to the exact original semantic prefix");
+  }
+  return pending;
+}
 
 /** A host-only, explicitly authorized envelope correction, never a new semantic task/grant.
  * The failed trace and every consumed file remain immutable. No normalized proposal is produced. */
@@ -102,9 +129,7 @@ export async function prepareSemanticScopeCorrection(root: string, input: RoleDe
       || JSON.parse(operation.payloadJson).supersedesResolutionId !== operation.baseline.id)) stop("predecessor is not already preserved by the unchanged payload and readableRefs");
   }
   const history = await new RequirementLedger(root, review.scope.sourceId).history();
-  const pending = history.findIndex(r => r.payload.kind === "role-dependency-review" && r.payload.review.taskId === review.taskId);
-  if (pending < 0 || history.slice(pending + 1).some(r => r.payload.kind !== "role-semantic-scope" || r.payload.record.taskId !== review.taskId)
-    || (forDispatch && history.length !== pending + 1)) stop("original pending requirement prefix has changed or correction is consumed");
+  const pending = verifySemanticCorrectionJournal(history, review, forDispatch);
   const retainedNames = ["start.json", "state.json", "provider.json", "hooks.jsonl", "revision.json", "catalog.json", "discovery.json",
     "semantic-scope-plan.input.json", "semantic-scope-plan.invocation.json", "semantic-scope-plan.budget.json", failureNames[0]!].sort();
   const retainedFiles = [];

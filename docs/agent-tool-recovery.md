@@ -3235,3 +3235,13 @@ missing-condition report cannot satisfy it. See
 身份定义若已成功完成 Pi 调用、提交并留存原 record，却因宿主错误地将预算 `largestRequestBytes` 等同于发送载荷最大值而在入账处停止，可在源码修复及测试后使用 `inspectIdentityDefinitionRecovery` 只读核验。预算最大值包含逻辑上下文与发送载荷两者；总字节仍只累计真实载荷，调用数、载荷数、逐次总和及全部上限必须继续匹配。该入口仅接受原首阶段的精确宿主停止、完整文件哈希、成功 trace、已退出的原宿主进程及未消费的后续固定阶段；宿主/PID 命名空间不同、任何文件漂移、未结算调用、已入账或已调用的后续阶段均禁止恢复。
 
 恢复只登记同一个原 record，继承其全部计费，再运行原 intent 中未消费的独立检查与固定消费者分片。原 `start/state/hooks/input/proposal/record/trace/budget` 不变；单次宿主恢复 intent、入账收据与后续状态写入原目录下的 `host-recovery`。该目录不是新语义 task、重试、预算或 grant。负面语义结果仍按原门禁停止；恢复失败不得再次启动或借此恢复主编译器。
+
+### 身份缺口的消费者分流
+
+定义的 `missingCondition` 不得由宿主清空或解释为修复许可。独立复核支持有限的不确定性表示，只允许后续只读审查；真正写入仍须通过全部消费者分片、精确上游计划、register/authorize 与实际 pending 图独立验收。
+
+`submit_identity_requirements` 的消费者阶段从当前输入 `definitionGaps[]` 复制 `requirementId` 与 `conditionHash`，分别写入对应 binding／judgment 的 `definitionGap`。每个缺项须有来源证据和明确分类：`retained-boundary` 保留原问题未定状态，`repair-prerequisite` 阻塞当前修复，`unknown` 表示尚不能分类。独立复核必须检查同一条件与分类。缺少分类不会按空值默认通过；绑定自己的 `missingCondition` 仍表示本次修复缺少前提，必须保留。ID/hash 错误只可按同一输入精确字段纠正一次；不得猜测、按文本相似度匹配或原样重试。来源查找仍用 `read_identity_source`，依赖发现仍用原 collection 的 `read_identity_dependencies`。
+
+旧定义缺口门禁的宿主续行须调用 `inspectIdentityConsumerContinuation`，绑定已退出的原宿主进程、精确 BREAK、两份已登记成功记录、全部旧文件及当前 inventory。新 `consumer-review` 目录仅记录一次原未消费阶段的续行，不是新 task、预算或 grant；旧记录和字节保持不变。未通过独立定义、目录/来源漂移、进程仍存活、未结算 trace、任何消费者阶段已有 invocation 或 trace、预算不一致均停止，不允许再次恢复或重跑。分片复核为前提不足、未知、负面或额外修复时保留提案和独立结果，立即停止放权；不能靠删缺口、换 ID、换分片或续发 grant 继续。
+
+历史范围更正的只读校验允许精确绑定原语义前缀的同 task 身份记录追加；实际更正 dispatch 仍要求原空后缀，不会重新打开已消费更正。

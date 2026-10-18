@@ -43,12 +43,20 @@ export const identityDefinitionSchema = z.object({ ...common, phase: z.literal("
   }).strict()).length(3),
 }).strict();
 const judgment = z.object({ id: text, verdict: z.enum(["supported", "blocked"]), rationale: text, evidence }).strict();
+// A definition can preserve an unresolved original question while defining a
+// valid, finite uncertainty representation. Only Pi may classify that boundary
+// against the frozen repair payload, and a fresh consumer check must agree.
+const definitionGap = z.object({ conditionHash: hash,
+  disposition: z.enum(["retained-boundary", "repair-prerequisite", "unknown"]),
+  rationale: text, evidence }).strict();
+const checkedDefinitionGap = definitionGap.extend({ verdict: z.enum(["supported", "blocked"]) }).strict();
 export const identityDefinitionCheckSchema = z.object({ ...common, phase: z.literal("identity-definition-check"), proposalHash: hash,
   judgments: z.array(judgment).length(3) }).strict();
 export const identityConsumerSchema = z.object({ ...common, phase: z.literal("identity-consumers"), shard: z.number().int().nonnegative(), definitionHash: hash, inventoryHash: hash,
   bindings: z.array(z.object({ requirementId: text, slot: z.number().int().positive(), payloadHash: hash,
     dependencyRefs: z.array(text).min(1).max(128), verdict: z.enum(["supported", "blocked"]), rationale: text,
-    missingCondition: z.string().max(6000), evidence }).strict()).length(3),
+    missingCondition: z.string().max(6000), evidence,
+    definitionGap: definitionGap.nullable().optional() }).strict()).length(3),
   consumers: z.array(z.object({ ref: text, revisionHash: hash,
     disposition: z.enum(["unaffected", "preserve-blocked", "revalidate-required", "additional-repair-required", "unknown"]),
     rationale: text, requiredAction: text }).strict()).max(4096),
@@ -57,7 +65,7 @@ export const identityConsumerSchema = z.object({ ...common, phase: z.literal("id
   parentResumeAllowed: z.literal(false), renewConsumedGrant: z.literal(false), evidence,
 }).strict();
 export const identityConsumerCheckSchema = z.object({ ...common, phase: z.literal("identity-consumers-check"), shard: z.number().int().nonnegative(), proposalHash: hash, inventoryHash: hash,
-  judgments: z.array(judgment).length(3),
+  judgments: z.array(judgment.extend({ definitionGap: checkedDefinitionGap.nullable().optional() }).strict()).length(3),
   consumers: z.array(z.object({ ref: text, verdict: z.enum(["supported", "blocked"]), rationale: text }).strict()).max(4096),
   denominatorVerdict: z.enum(["supported", "blocked"]), denominatorRationale: text,
 }).strict();
@@ -77,7 +85,15 @@ export type IdentityInventory = {
 export const sameIdentitySet = (a: readonly unknown[], b: readonly unknown[]) => new Set(a).size === a.length && contentHash([...a].sort()) === contentHash([...b].sort());
 export function identitySelectors(o: IdentityOutput) {
   return o.phase === "identity-definition" ? o.requirements.flatMap(r => r.evidence)
-    : o.phase === "identity-consumers" ? [...o.bindings.flatMap(b => b.evidence), ...o.evidence] : o.judgments.flatMap(j => j.evidence);
+    : o.phase === "identity-consumers" ? [...o.bindings.flatMap(b => [...b.evidence, ...(b.definitionGap?.evidence ?? [])]), ...o.evidence]
+      : o.phase === "identity-consumers-check" ? o.judgments.flatMap(j => [...j.evidence, ...(j.definitionGap?.evidence ?? [])])
+        : o.judgments.flatMap(j => j.evidence);
+}
+/** Exact retained text is supplied for copying, never classified by host heuristics. */
+export function identityDefinitionGaps(output: IdentityOutput) {
+  return output.phase === "identity-definition" ? output.requirements.filter(r => r.missingCondition.trim()).map(r => ({
+    requirementId: r.id, questionIds: r.questionIds, condition: r.missingCondition, conditionHash: contentHash(r.missingCondition),
+  })) : [];
 }
 export function validateIdentityHistory(records: IdentityRecord[]) {
   const stages = records.length ? identityStages(records[0]!.intent) : [];
@@ -107,6 +123,17 @@ export function validateIdentityHistory(records: IdentityRecord[]) {
     if (c?.phase === "identity-consumers" && (c.definitionHash !== contentHash(p) || c.inventoryHash !== records[0]!.intent.inventoryHash)) throw prerequisiteStop("Consumer binding changed independent definition or inventory");
     if (c?.phase === "identity-consumers" && check?.phase === "identity-consumers-check" && (check.inventoryHash !== c.inventoryHash
       || !sameIdentitySet(check.consumers.map(c => c.ref), c.consumers.map(c => c.ref)))) throw prerequisiteStop("Independent consumer check omitted an affected consumer");
+    if (c?.phase === "identity-consumers" && p?.phase === "identity-definition") {
+      for (const b of c.bindings) {
+        const gap = identityDefinitionGaps(p).find(g => g.requirementId === b.requirementId);
+        if (b.definitionGap && b.definitionGap.conditionHash !== gap?.conditionHash) throw prerequisiteStop("Consumer gap classification changed the exact retained condition");
+        if (check?.phase === "identity-consumers-check") {
+          const j = check.judgments.find(j => j.id === b.requirementId);
+          if (j?.definitionGap && (!b.definitionGap || j.definitionGap.conditionHash !== b.definitionGap.conditionHash
+            || j.definitionGap.disposition !== b.definitionGap.disposition)) throw prerequisiteStop("Independent gap check changed the proposed condition or disposition");
+        }
+      }
+    }
   }
 }
 export function validateIdentityOutput(intent: IdentityIntent, records: IdentityRecord[], inventory: IdentityInventory, semantic: SemanticScopeRecord[]) {
@@ -138,10 +165,35 @@ export function identityStages(intent: IdentityIntent): { stage: string; phase: 
 export function identityRequirementsReady(records: IdentityRecord[]) {
   if (!records.length) return false;
   validateIdentityHistory(records);
-  const [d, dc] = records.map(r => r.output);
-  return records.length === identityStages(records[0]!.intent).length && d?.phase === "identity-definition" && dc?.phase === "identity-definition-check"
-    && d.requirements.every(r => r.disposition === "uncertainty-preservation" && !r.missingCondition.trim()) && dc.judgments.every(j => j.verdict === "supported")
+  return records.length === identityStages(records[0]!.intent).length && identityConsumersReviewable(records)
+    && records.filter(r => r.phase === "identity-consumers-check").every(r => identityConsumerShardReady(records, r.stage))
     && records.slice(2).every(r => r.output.phase === "identity-consumers"
       ? r.output.bindings.every(b => b.verdict === "supported" && !b.missingCondition.trim()) && r.output.consumers.every(c => !["unknown", "additional-repair-required"].includes(c.disposition))
       : r.output.phase === "identity-consumers-check" && r.output.judgments.every(j => j.verdict === "supported") && r.output.consumers.every(c => c.verdict === "supported") && r.output.denominatorVerdict === "supported");
+}
+
+/** Read-only review eligibility is deliberately weaker than repair authority. */
+export function identityConsumersReviewable(records: IdentityRecord[]) {
+  validateIdentityHistory(records);
+  const d = records[0]?.output, check = records[1]?.output;
+  return d?.phase === "identity-definition" && check?.phase === "identity-definition-check"
+    && d.requirements.every(r => r.disposition === "uncertainty-preservation" && r.requiredStatus !== null)
+    && check.judgments.every(j => j.verdict === "supported");
+}
+
+/** Missing/unclassified/negative assessments never acquire implicit approval,
+ * including legacy consumer records which have no typed gap assessment. */
+export function identityConsumerShardReady(records: IdentityRecord[], checkStage: string) {
+  validateIdentityHistory(records);
+  const i = records.findIndex(r => r.stage === checkStage), c = records[i - 1]?.output, check = records[i]?.output;
+  if (c?.phase !== "identity-consumers" || check?.phase !== "identity-consumers-check" || !identityConsumersReviewable(records)
+    || c.bindings.some(b => b.verdict !== "supported" || b.missingCondition.trim())
+    || c.consumers.some(c => ["unknown", "additional-repair-required"].includes(c.disposition))
+    || check.judgments.some(j => j.verdict !== "supported") || check.consumers.some(c => c.verdict !== "supported") || check.denominatorVerdict !== "supported") return false;
+  return identityDefinitionGaps(records[0]!.output).every(g => {
+    const b = c.bindings.find(b => b.requirementId === g.requirementId)?.definitionGap;
+    const j = check.judgments.find(j => j.id === g.requirementId)?.definitionGap;
+    return b?.conditionHash === g.conditionHash && b.disposition === "retained-boundary"
+      && j?.conditionHash === g.conditionHash && j.disposition === b.disposition && j.verdict === "supported";
+  });
 }

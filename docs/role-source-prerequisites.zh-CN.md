@@ -68,3 +68,11 @@ Pi 读取不可变原文及当前来源注解，提出具体注解 payload 和�
 新记录进入原 RequirementLedger 的 `identity-requirements` 类型，invocation/input/proposal/record/trace/budget 与前缀均须验证。仅全部独立要求、精确依赖和所有消费者复核有效时才能产生 `upstream-plan.preview.json`。预览仍需现有 `verifyUpstreamRepairPlan`、`UpstreamRepairLedger.register/authorize`；允许的写入只有原三个精确决议 payload，宿主仅可加入执行 provenance。原已消费语义提案不得修订。新的来源身份断言、消费者写入、名单激活均不在此权限内。
 
 上游 finish 必须验证独立 Pi 对实际 pending 决议图的验收记录、原 typed proposal 会话、计费和来源读取；无验收不能提交。新要求满足只证明对应不确定性表示，原问题、全局闭合与可执行认证继续单独判定。任何 gap、额外修复需求、负面复核或未知影响保留并停止放权。后台只回调完成、阻塞或异常退出，正常进度保持安静。
+
+### 未定边界与修复前提
+
+独立定义及复核支持有限 `uncertainty-preservation` 要求时，可以继续原固定的**只读**消费者审查。定义里的 `missingCondition` 原样保留；它本身不说明缺的是原身份问题的证据，还是当前有限修复的前提。宿主不能按措辞自行分类，也不能因 `supported` 将它清空。
+
+每片 Pi 消费者提案必须针对原缺项的精确 `conditionHash` 填写绑定中的 `definitionGap`，明确为 `retained-boundary`、`repair-prerequisite` 或 `unknown`，附理由和原文证据。随后独立 Pi 会话在同一 requirement 的 judgment 中复核同一条件、同一分类。只有每片都支持 `retained-boundary`，当前 payload 的独立验收条件满足、绑定自身 `missingCondition` 为空，且完整消费者影响复核通过，才能构建原精确上游预览。缺分类的旧记录、真正的修复前提、未知、负面复核及额外修复需求均不能放权。原问题缺项、critical/blocked 和未定边界继续保留，来源证据不会因此升级为身份事实。
+
+对旧的“定义已有支持，但因非空缺项禁止消费者审查”停止，可在修复经审查测试后使用 `inspectIdentityConsumerContinuation` 检查原宿主、完整文件哈希、两份已登记记录、当前源与消费者清单以及全部未消费阶段。`continueConsumers` 仅继续原 intent 的固定消费者分片，不重跑或重登记定义，不修改原 taskId、失败、grants、分母、分片、每阶段预算或累计计费。单次续行凭证、零写入收据和状态写入 `consumer-review`；原 `state` 与 `host-recovery` 保持原样。任意分片复核不通过即停止；后续不得借此重启已消费阶段。该入口不恢复主编译器。

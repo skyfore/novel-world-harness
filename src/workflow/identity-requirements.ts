@@ -18,9 +18,11 @@ import { prerequisiteStop } from "../compiler/role-source-prerequisites.js";
 import { type RoleDependencyReviewInput } from "../compiler/role-dependency-review-service.js";
 import { prepareIdentityRequirements, type PreparedIdentityRequirements } from "../compiler/identity-requirement-service.js";
 import { inspectIdentityDefinitionRecovery, type IdentityDefinitionRecovery } from "../compiler/identity-definition-recovery.js";
+import { inspectIdentityConsumerContinuation, type IdentityConsumerContinuation } from "../compiler/identity-consumer-continuation.js";
 import { identityStages, IDENTITY_REQUIREMENT_LIMITS, identityRequirementDirectory, identityOutputSchema,
   identityDefinitionSchema, identityDefinitionCheckSchema, identityConsumerSchema, identityConsumerCheckSchema,
-  identitySelectors, validateIdentityOutput, identityRequirementsReady, type IdentityRecord, type IdentityIntent, type IdentityRequirementPhase } from "../compiler/identity-requirements.js";
+  identitySelectors, validateIdentityOutput, identityRequirementsReady, identityConsumersReviewable, identityConsumerShardReady, identityDefinitionGaps,
+  type IdentityRecord, type IdentityIntent, type IdentityRequirementPhase } from "../compiler/identity-requirements.js";
 
 const once = (file: string, value: unknown) => fs.writeFile(file, JSON.stringify(value, null, 2) + "\n", { flag: "wx", mode: 0o600 });
 const parameters = (s: z.ZodType) => { const { $schema: _, ...value } = z.toJSONSchema(s); return value; };
@@ -41,6 +43,7 @@ export function identityStageInput(p: PreparedIdentityRequirements, phase: Ident
     requiredSourceSegmentIds: p.intent.requiredSourceSegmentIds,
     requiredDependencyRefs: defining ? identityStageCatalog(p, phase).map(c => c.ref) : [...new Set(p.semantic[0]!.output.phase === "semantic-scope-plan" ? p.semantic[0]!.output.operations.flatMap(o => o.readableRefs.map(r => `${r.kind}:${r.id}`)) : [])],
     ...(defining ? {} : { definition: records[0]!.output, definitionCheck: records[1]!.output, frozenScope: p.semantic[0]!.output,
+      ...(identityDefinitionGaps(records[0]!.output).length ? { definitionGaps: identityDefinitionGaps(records[0]!.output) } : {}),
       inventory: { graphHash: p.inventory.graphHash, roots: p.inventory.roots, closureIssues: p.inventory.closureIssues,
         consumers: p.inventory.consumers.filter(c => p.intent.consumerShards[shard ?? -1]?.refs.includes(c.ref)).map(({ payload: _, ...c }) => c), sourcePages: p.inventory.sourcePages, candidateIds: p.inventory.candidateIds,
         originalQuestionIds: p.inventory.originalQuestionIds } }),
@@ -51,25 +54,28 @@ export function identityStageInput(p: PreparedIdentityRequirements, phase: Ident
  * dispatch, repair grant, world write, roster activation or compiler resume. */
 export async function runIdentityRequirements(options: { root: string; input: RoleDependencyReviewInput; authorizationRef: string;
   priorUsage: IdentityIntent["priorUsage"]; expectedIntentHash: string; assertOriginal: () => Promise<void>;
-  recoverDefinition?: IdentityDefinitionRecovery }) {
+  recoverDefinition?: IdentityDefinitionRecovery; continueConsumers?: IdentityConsumerContinuation }) {
   const { root, input, assertOriginal } = options;
+  if (options.recoverDefinition && options.continueConsumers) throw prerequisiteStop("Choose only one exact identity continuation; consumed definition recovery cannot run again");
   await assertOriginal();
   const prepared = await prepareIdentityRequirements(root, input, options.authorizationRef, options.priorUsage);
   if (contentHash(prepared.intent) !== options.expectedIntentHash) throw prerequisiteStop("Reviewed new identity intent changed before reservation");
   const { intent, manifest, inventory } = prepared, taskId = intent.taskId;
   const directory = identityRequirementDirectory(root, intent.sourceId, taskId);
-  const recovery = options.recoverDefinition;
+  const recovery = options.recoverDefinition, continuation = options.continueConsumers;
   if (recovery) await inspectIdentityDefinitionRecovery(root, prepared, recovery);
-  const statusDirectory = recovery ? path.join(directory, "host-recovery") : directory;
+  if (continuation) await inspectIdentityConsumerContinuation(root, prepared, continuation);
+  const statusDirectory = continuation ? path.join(directory, "consumer-review") : recovery ? path.join(directory, "host-recovery") : directory;
   await fs.mkdir(directory, { recursive: true });
   await fs.mkdir(statusDirectory, { recursive: true });
   try { await once(path.join(statusDirectory, "start.json"), { taskId, intentHash: contentHash(intent), pid: process.pid,
-    ...(recovery ? { recoveryHash: contentHash(recovery) } : {}) }); }
+    ...(recovery ? { recoveryHash: contentHash(recovery) } : {}), ...(continuation ? { continuationHash: contentHash(continuation) } : {}) }); }
   catch (e) { if ((e as NodeJS.ErrnoException).code === "EEXIST") throw prerequisiteStop("Identity requirement intent already reserved; inspect its original state and owning process, never redispatch"); throw e; }
   const state: Record<string, unknown> = { version: 1, root, sourceId: intent.sourceId, sourceHash: intent.sourceHash, taskId,
     parentStateHash: intent.parentStateHash, revisionHash: intent.revisionHash, scopeHash: contentHash(intent), intentHash: contentHash(intent),
     authorityGranted: false, parentCompileResumeAllowed: false, certificationGranted: false, oldModelCalls: intent.priorUsage.modelCalls,
-    ...(recovery ? { recoveryHash: contentHash(recovery), originalStoppedStateHash: recovery.stoppedStateHash } : {}) };
+    ...(recovery ? { recoveryHash: contentHash(recovery), originalStoppedStateHash: recovery.stoppedStateHash } : {}),
+    ...(continuation ? { continuationHash: contentHash(continuation), originalStoppedStateHash: continuation.stoppedStateHash } : {}) };
   const publish = async (phase: string, patch: object = {}) => {
     Object.assign(state, patch, { phase, childPid: ["DONE", "BREAK"].includes(phase) ? null : process.pid, updatedAt: new Date().toISOString() });
     const file = path.join(statusDirectory, "state.json"), tmp = file + ".tmp";
@@ -81,7 +87,7 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
       await assertOriginal();
       const current = await prepareIdentityRequirements(root, input, options.authorizationRef, options.priorUsage, false);
       if (contentHash(current.intent) !== contentHash(intent)) throw prerequisiteStop("Identity scope changed while acquiring compiler ownership");
-      if (!recovery) {
+      if (!recovery && !continuation) {
         await once(path.join(directory, "intent.json"), intent); await once(path.join(directory, "inventory.json"), inventory);
         const { bytes, ...context } = prepared;
         await once(path.join(directory, "context.json"), { ...context, sourceBytesBase64: Buffer.from(bytes).toString("base64") });
@@ -89,9 +95,9 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
       const runtime = await ModelRuntime.create({ authPath: getAgentDir() + "/auth.json", modelsPath: getAgentDir() + "/models.json", refreshOnCreate: false });
       const auth = await runtime.checkAuth("openai-codex");
       if (auth?.type !== "oauth" || !runtime.getProvider("openai-codex")?.auth?.oauth?.isSubscription || !runtime.getModel("openai-codex", "gpt-6.1-sol")) throw prerequisiteStop("Required Pi subscription unavailable; no fallback");
-      if (!recovery) await once(path.join(directory, "provider.json"), { provider: "openai-codex", model: "gpt-6.1-sol", subscription: true, credentialType: "oauth" });
+      if (!recovery && !continuation) await once(path.join(directory, "provider.json"), { provider: "openai-codex", model: "gpt-6.1-sol", subscription: true, credentialType: "oauth" });
       const traces = new TraceStore(root), ledger = new RequirementLedger(root, intent.sourceId);
-      if ((await traces.peekRuns({ status: "running", limit: 100 })).length || (await ledger.identityRequirements(taskId)).length) throw prerequisiteStop("Unsettled trace or already consumed identity phases");
+      if ((await traces.peekRuns({ status: "running", limit: 100 })).length || (!continuation && (await ledger.identityRequirements(taskId)).length)) throw prerequisiteStop("Unsettled trace or already consumed identity phases");
       const records: IdentityRecord[] = [], texts = new Map(manifest.segments.map(s => [s.id, Buffer.from(prepared.bytes).subarray(s.startByte, s.endByte).toString("utf8")]));
       let newCalls = 0, newBytes = 0;
       if (recovery) {
@@ -102,6 +108,14 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
         await once(path.join(statusDirectory, "registration-receipt.json"), { intentHash: contentHash(intent), recoveryHash: contentHash(recovery),
           recordHash: contentHash(retained.record), traceRunId: retained.record.traceRunId, cumulative: retained.cumulative,
           requirementHead: (await ledger.history()).at(-1)!.hash, providerCalls: 0, worldWrites: 0, originalFailurePreserved: true });
+      }
+      if (continuation) {
+        const retained = await inspectIdentityConsumerContinuation(root, current, continuation);
+        await once(path.join(statusDirectory, "intent.json"), continuation);
+        records.push(...retained.records); newCalls = retained.usage.modelCalls; newBytes = retained.usage.totalPayloadBytes;
+        await once(path.join(statusDirectory, "continuation-receipt.json"), { intentHash: contentHash(intent), continuationHash: contentHash(continuation),
+          recordHashes: retained.records.map(contentHash), cumulative: retained.cumulative, remainingStages: retained.remainingStages,
+          providerCalls: 0, worldWrites: 0, registrationWrites: 0, originalFailurePreserved: true });
       }
       for (const { phase, stage, shard } of identityStages(intent).slice(records.length)) {
         await assertOriginal();
@@ -163,7 +177,7 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
             if (a.offset > values.length) throw new Error("Discover offset=0 and copy nextOffset; correct once.");
             return result({ items: values.slice(a.offset, a.offset + 32).map(c => ({ ref: c.ref, revisionHash: c.revisionHash })), total: values.length, nextOffset: a.offset + 32 < values.length ? a.offset + 32 : null });
           }); } }), defineTool({ name: "submit_identity_requirements", label: "Retain independent identity requirement or consumer review", description:
-          "Single-use read-only submission. Definition covers all exact requirement IDs; consumer review covers every frozen operation and inventory ref, full 78-candidate denominator and all original questions/pages. All 13 original missing criteria and 14 boundaries (or supplied counts) remain unchanged. A supported gap is not authority. Negative findings are retained. Correct malformed input once; explicit host, consumed-phase or budget stops forbid retry.",
+          "Single-use read-only submission. Definition covers all exact requirement IDs; consumer review covers every frozen operation and inventory ref, full candidate denominator and all original questions/pages. Preserve all original missing criteria and unresolved boundaries. For each input.definitionGaps entry copy requirementId and conditionHash into its binding/judgment definitionGap; independently classify retained-boundary, repair-prerequisite or unknown against the exact payload. Never erase missingCondition to pass. A supported gap is not authority. Correct malformed input once; explicit host, consumed-phase or budget stops forbid retry.",
           parameters: parameters(phase === "identity-definition" ? identityDefinitionSchema : phase === "identity-definition-check" ? identityDefinitionCheckSchema : phase === "identity-consumers" ? identityConsumerSchema : identityConsumerCheckSchema),
           async execute(_id, raw) { return guarded("submission", raw, async () => {
             if (record) throw prerequisiteStop("Identity submission already consumed");
@@ -198,11 +212,8 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
           await once(path.join(directory, `${stage}.record.json`), record); await ledger.recordIdentityRequirements(record); records.push(record);
           newCalls += budget.snapshot().modelCalls; newBytes += budget.snapshot().totalPayloadBytes;
           await publish("RUNNING", { stage, traceRunId: null, newModelCalls: newCalls, cumulativeModelCalls: intent.priorUsage.modelCalls + newCalls });
-          if (phase === "identity-definition-check") {
-            const definition = records[0]!.output, check = records[1]!.output;
-            if (definition.phase !== "identity-definition" || definition.requirements.some(r => r.disposition !== "uncertainty-preservation" || r.missingCondition.trim())
-              || check.phase !== phase || check.judgments.some(j => j.verdict !== "supported")) throw prerequisiteStop("Independent definition retains a gap or negative review; no consumer dispatch and no definition retry");
-          }
+          if (phase === "identity-definition-check" && !identityConsumersReviewable(records)) throw prerequisiteStop("Independent definition is unsupported or independently rejected; no consumer dispatch and no definition retry");
+          if (phase === "identity-consumers-check" && !identityConsumerShardReady(records, stage)) throw prerequisiteStop("Consumer shard retains a repair prerequisite, unclassified gap, negative review or additional repair; preserve records and stop without authority or retry");
         } catch (e) { if (!trace.manifest.endedAt) await trace.finish("failed").catch(() => {}); throw e; }
         finally { budget.close(); await session?.dispose(); }
       }
@@ -227,7 +238,8 @@ export function identityRequirementPrompt(phase: IdentityRequirementPhase) {
   if (phase.startsWith("identity-definition")) return common + (phase.endsWith("-check")
     ? "Independently re-read source and actual target mentions/predecessors and review each supplied definition. You cannot inspect the frozen repair payloads or consumers; do not reverse-engineer acceptance from a proposed outcome. Judge every exact requirement ID; do not repair/rewrite a definition. A supported gap remains a gap."
     : "Define independent bounded requirements for the three supplied target mentions and their uncertainty representation from SOURCE first. You have no access to proposed repair outcomes. Supply exact allocated requirement IDs, target mention IDs, original question IDs, meaningful acceptance criteria, source evidence and missing conditions. requiredStatus can be unresolved/ambiguous only if evidence supports that requirement; otherwise retain an evidence-gap or unsupported-type with null requiredStatus and precise missingCondition. A finite uncertainty-preservation requirement is distinct from resolving the original critical question: unresolved cross-layer identities and historical/voice relationships stay unresolved. Do not invent candidates or resolve the original questions.");
-  return common + (phase.endsWith("-check")
+  const gaps = " Definition missingCondition is immutable. Distinguish the original unresolved question from a prerequisite of this finite repair: copy input.definitionGaps[].conditionHash into each binding/judgment definitionGap. retained-boundary means the EXACT proposed uncertainty representation can satisfy the independent requirement while that original condition remains unresolved; it never settles the original question. repair-prerequisite means that missing evidence is needed before this payload is lawful; unknown means classification is not established. Supply source evidence and rationale for every assessment; a consumer check explicitly supports or blocks the same proposed disposition. Keep local unmet repair requirements in bindings[].missingCondition. Do not classify by text overlap, invent evidence, or clear retained conditions. An omitted assessment is not approval. ";
+  return common + gaps + (phase.endsWith("-check")
     ? "Independently verify the actual independent definitions, fixed payloads, complete typed and source-review consumer inventory, and every consumer disposition. Re-read ALL consumer refs in the supplied fixed shard fully. This checks this shard; global readiness requires every shard. Judge every requirement and every consumer; separately judge the full candidate/page/question denominator and activation conditions. Never correct the proposal, approve additional writes, restore old grants, or activate the parent loop. Supported may support retained blockers."
     : "Bind each independently checked requirement to its exact immutable operation slot and full payloadHash; copy every readable dependency ref. Test the fixed payload against the independent requirement; if unsuitable retain blocked and missingCondition, never change payloadJson. Review ALL supplied consumer refs in this fixed shard (other shards have separate sessions under the same task): typed reverse closure, all staged role entries and old/new denominator. Each needs its current revisionHash, disposition and exact requiredAction. Distinguish typed dependency from source-review coverage; neither source overlap nor a supported verdict grants writes. Explicitly inspect transitive effects of superseding the old resolution; do not silently delete identity-linked world artifacts or claim they remain valid. If more repairs are required, report additional-repair-required and stop authority. Include every supplied candidate ID, source page and original question ID, with exact activation prerequisites preserving original cumulative budgets. The three resolutions can at most repair uncertainty representation, never settle the original 3 questions or activate the 76-to-78 consumer revision.");
 }

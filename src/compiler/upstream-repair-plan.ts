@@ -6,6 +6,8 @@ import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { sourceAnnotationSchema } from "./annotations.js";
 import { identityResolutionSchema } from "./entity-resolution.js";
 import { eventResolutionSchema } from "./event-resolution.js";
+import { representationAuthoritySchema, representationSemanticHash } from "./source-representation.js";
+import { identitySemanticHash } from "./identity-requirements.js";
 import {
   sourcePatternObligationRequirementId,
   sourcePatternObligationRequirementSetHash,
@@ -39,7 +41,7 @@ export function repairPointerTokens(pointer: string): string[] {
   if (!pointer.startsWith("/") || /~(?:[^01]|$)/.test(pointer)) throw new Error("Invalid repair JSON Pointer");
   return pointer.slice(1).split("/").map(token => token.replace(/~1/g, "/").replace(/~0/g, "~"));
 }
-const writeSchema = refSchema.extend({ pointers: z.array(text).min(1).max(32) }).strict().superRefine((write, ctx) => {
+export const upstreamRepairWriteSchema = refSchema.extend({ pointers: z.array(text).min(1).max(32) }).strict().superRefine((write, ctx) => {
   if (!unique(write.pointers)) ctx.addIssue({ code: "custom", message: "Duplicate repair pointers" });
   for (const pointer of write.pointers) {
     try {
@@ -54,10 +56,15 @@ const identitySchema = z.object({
   version: z.literal(1), planId: idSchema, batchId: idSchema,
   requirementSetHash: hash, requirementIds: z.array(text).min(1).max(128),
   proposalObligation: sourcePatternUpstreamAuthoritySchema.optional(),
+  identityRequirements: z.object({ taskId: hash, intentHash: hash, recordHashes: z.array(hash).min(4).max(130),
+    semanticSlots: z.array(z.object({ id: idSchema, payloadHash: hash }).strict()).length(3) }).strict().optional(),
+  sourceRepresentation: representationAuthoritySchema.extend({
+    semanticSlots: z.array(z.object({ id: idSchema, payloadHash: hash }).strict()).min(1).max(48),
+  }).strict().optional(),
   predecessorReceiptRefs: z.array(hash).max(128),
   sourceScope: z.object({ sourceId: idSchema, sourceSha256: hash, segmentIds: z.array(idSchema).min(1).max(128) }).strict(),
   baselineRefs: z.array(upstreamRepairReadableRefSchema.extend({ revisionHash: hash }).strict()).max(256),
-  allowedWrites: z.array(writeSchema).max(128),
+  allowedWrites: z.array(upstreamRepairWriteSchema).max(128),
   // Host allocates one exact logical ID per dependency slot; no model-chosen IDs.
   allowedCreations: z.array(refSchema.extend({ maxCount: z.literal(1), dependencyOf: text }).strict()).max(128),
   resolutionAbsences: z.array(z.object({ kind: z.enum(["entity-resolution", "event-resolution"]), id: idSchema, mentionId: idSchema }).strict()).max(128).optional(),
@@ -90,6 +97,18 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
   for (const values of [plan.requirementIds, plan.predecessorReceiptRefs, plan.sourceScope.segmentIds, plan.citableEvidenceRefs, plan.postconditionIds,
     plan.baselineRefs.map(key), plan.allowedWrites.map(key), plan.allowedCreations.map(key), plan.readableRefs.map(key)]) if (!unique(values)) fail("Duplicate repair plan member");
   if (!plan.allowedWrites.length && !plan.allowedCreations.length) fail("Repair plan has no bounded mutation");
+  if (plan.identityRequirements) {
+    if (plan.sourceRepresentation || plan.proposalObligation || plan.allowedWrites.length || plan.semanticEventCreations?.length
+      || plan.allowedCreations.length !== 3 || plan.allowedCreations.some(c => c.kind !== "entity-resolution")
+      || !unique(plan.identityRequirements.semanticSlots.map(s => s.id))
+      || contentHash(plan.allowedCreations.map(c => c.id).sort()) !== contentHash(plan.identityRequirements.semanticSlots.map(s => s.id).sort())) fail("Independent identity authority permits only its three exact reviewed resolution creations");
+  }
+  if (plan.sourceRepresentation) {
+    if (plan.proposalObligation || plan.allowedWrites.length || plan.resolutionAbsences?.length || plan.resolutionRevisions?.length || plan.semanticEventCreations?.length
+      || plan.allowedCreations.some(c => !["entity-mention", "event-mention", "quotation", "discourse-segment"].includes(c.kind))
+      || !unique(plan.sourceRepresentation.semanticSlots.map(s => s.id))
+      || contentHash(plan.allowedCreations.map(c => c.id).sort()) !== contentHash(plan.sourceRepresentation.semanticSlots.map(s => s.id).sort())) fail("Source representation authority permits only its exact reviewed annotation creations");
+  }
   if (plan.proposalObligation) {
     const requirementId = sourcePatternObligationRequirementId(plan.proposalObligation);
     if (plan.sourceScope.sourceId !== plan.proposalObligation.sourceId
@@ -175,7 +194,7 @@ export function assertUpstreamResolutionAbsences(plan: UpstreamRepairPlan, paylo
   }
 }
 
-function payloadFor(kind: UpstreamRepairKind, raw: unknown) {
+export function parseUpstreamRepairPayload(kind: UpstreamRepairKind, raw: unknown) {
   if (kind === "entity-resolution") return identityResolutionSchema.parse(raw);
   if (kind === "event-resolution") return eventResolutionSchema.parse(raw);
   if (kind === "canonical-event") return canonicalEventSchema.parse(raw);
@@ -260,7 +279,15 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
   if (input.sourceSha256 !== plan.sourceScope.sourceSha256 || input.requirementSetHash !== plan.requirementSetHash) stop("Source or requirement revision changed");
   for (const ref of plan.baselineRefs) if (input.activeRevisions.get(key(ref)) !== ref.revisionHash) stop(`Active baseline changed: ${key(ref)}`);
   if (!input.citedSegmentIds.length || input.citedSegmentIds.some(id => !plan.citableEvidenceRefs.includes(id))) stop("Evidence is not citable under this plan");
-  const next = payloadFor(input.kind, input.payload);
+  const next = parseUpstreamRepairPayload(input.kind, input.payload);
+  if (plan.identityRequirements) {
+    const expected = plan.identityRequirements.semanticSlots.find(s => s.id === input.id);
+    if (input.kind !== "entity-resolution" || !expected || expected.payloadHash !== identitySemanticHash(next)) stop("Identity proposal differs from the independent exact semantic payload");
+  }
+  if (plan.sourceRepresentation) {
+    const expected = plan.sourceRepresentation.semanticSlots.find(s => s.id === input.id);
+    if (!expected || expected.payloadHash !== representationSemanticHash(sourceAnnotationSchema.parse(next))) stop("Source annotation differs from the independently reviewed exact semantic payload");
+  }
   if (next.id !== input.id || ("sourceId" in next && next.sourceId !== plan.sourceScope.sourceId)) stop("Payload identity or source escapes plan");
   const absence = plan.resolutionAbsences?.find(ref => ref.kind === input.kind && ref.id === input.id);
   if (absence) {
@@ -316,7 +343,7 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
     return;
   }
   const write = plan.allowedWrites.find(ref => key(ref) === target);
-  const baseline = payloadFor(input.kind, input.baseline);
+  const baseline = parseUpstreamRepairPayload(input.kind, input.baseline);
   const ref = plan.baselineRefs.find(ref => key(ref) === target);
   if (!write || !ref || contentHash(baseline) !== ref.revisionHash || baseline.id !== input.id
     || ("sourceId" in baseline && "sourceId" in next && baseline.sourceId !== next.sourceId)) stop("Mutation lacks exact frozen baseline");
@@ -339,7 +366,7 @@ export function recoverUpstreamResolutionBaselines(plan: UpstreamRepairPlan, pay
     if (next && outputs.get(nextKey) === contentHash(next)) {
       const original = baselines.find(ref => `${ref.kind}:${ref.id}` === priorKey);
       if (!original || original.revisionHash !== expected.revisionHash || contentHash(original.payload) !== expected.revisionHash) throw new Error("UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: Missing original resolution baseline; stop retries and preserve receipt");
-      const parsed = payloadFor(revision.kind, next);
+      const parsed = parseUpstreamRepairPayload(revision.kind, next);
       const predecessors = "mentionId" in parsed ? [parsed.supersedesResolutionId] : "supersedesResolutionIds" in parsed ? parsed.supersedesResolutionIds : [];
       if (contentHash(predecessors) !== contentHash([revision.predecessorId])) throw new Error("UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: Resolution successor changed; stop retries");
       for (const [candidateKey, raw] of payloads) {

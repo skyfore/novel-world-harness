@@ -1,4 +1,10 @@
 import { roleAuditContractAuthoritySchema, roleAuditContractProofSchema, type RoleAuditContractAuthority, type RoleAuditContractProof } from "./role-audit-contract.js";
+import { prerequisiteRecordSchema, validatePrerequisiteHistory, prerequisiteStop, type PrerequisiteRecord } from "./role-source-prerequisites.js";
+import { representationRecordSchema, validateRepresentationHistory, assertRepresentationAnchors, type RepresentationRecord } from "./source-representation.js";
+import { roleDependencyReviewSchema, type RoleDependencyReview } from "./role-dependency-review.js";
+import { semanticScopeRecordSchema, validateSemanticScopeHistory, type SemanticScopeRecord } from "./role-semantic-scope.js";
+import { identityRecordSchema, validateIdentityHistory, type IdentityRecord } from "./identity-requirements.js";
+import { textAnchorForByteRange } from "./text-anchors.js";
 import { sourceAuditProofSchema, type SourceAuditProof } from "./role-source-audit-model.js";
 import { roleQuestionSchema, roleQuestionDispositionSchema, type RoleQuestion, type RoleQuestionDisposition, roleQuestions, roleEvidenceNeedSchema, type RoleEvidenceNeed } from "./role-review-verification.js";
 import { roleClaimAuditSchema, type RoleClaimAudit } from "./role-review-verification.js";
@@ -34,6 +40,11 @@ export const requirementSetSchema = z.object({
 });
 export type RequirementSet = z.infer<typeof requirementSetSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("identity-requirements"), record: identityRecordSchema }).strict(),
+  z.object({ kind: z.literal("role-dependency-review"), review: roleDependencyReviewSchema }).strict(),
+  z.object({ kind: z.literal("role-semantic-scope"), record: semanticScopeRecordSchema }).strict(),
+  z.object({ kind: z.literal("source-representation"), record: representationRecordSchema }).strict(),
+  z.object({ kind: z.literal("role-source-prerequisite"), record: prerequisiteRecordSchema }).strict(),
   z.object({ kind: z.literal("role-source-audit-repair"), proof: sourceAuditProofSchema }).strict(),
   z.object({ kind: z.literal("role-audit-contract-authority"), authority: roleAuditContractAuthoritySchema }).strict(),
   z.object({ kind: z.literal("role-audit-contract-resolution"), findingRef: hash, proof: roleAuditContractProofSchema }).strict(),
@@ -199,6 +210,14 @@ export class RequirementLedger {
     if (incoming.some(record => record.sourceId !== this.sourceId)) throw new Error("Requirement journal restore source mismatch; stop for host review");
     if (incoming.length && !bytes) throw new Error("Requirement journal restore needs immutable source bytes; stop for host storage review");
     for (const record of incoming) {
+      if (record.payload.kind === "identity-requirements" && (record.payload.record.intent.sourceHash !== crypto.createHash("sha256").update(bytes!).digest("hex")
+        || record.payload.record.evidence.some(e => contentHash(e.anchor) !== contentHash(textAnchorForByteRange(this.sourceId, bytes!, e.anchor.startByte, e.anchor.endByte))
+          || Buffer.from(bytes!).subarray(e.anchor.startByte, e.anchor.endByte).toString("utf8") !== e.selector.exact))) throw prerequisiteStop("Identity requirement restore evidence mismatch");
+      if (record.payload.kind === "role-dependency-review" && record.payload.review.scope.sourceHash !== crypto.createHash("sha256").update(bytes!).digest("hex")) throw prerequisiteStop("Dependency review restore source hash mismatch");
+      if (record.payload.kind === "role-semantic-scope" && record.payload.record.evidence.some(e => contentHash(e.anchor) !== contentHash(textAnchorForByteRange(this.sourceId, bytes!, e.anchor.startByte, e.anchor.endByte))
+        || Buffer.from(bytes!).subarray(e.anchor.startByte, e.anchor.endByte).toString("utf8") !== e.selector.exact)) throw prerequisiteStop("Semantic scope restore source evidence mismatch");
+      if (record.payload.kind === "source-representation") assertRepresentationEvidence(record.payload.record, bytes!);
+      if (record.payload.kind === "role-source-prerequisite") assertPrerequisiteEvidence(record.payload.record, bytes!);
       if (record.payload.kind === "role-audit-contract-authority" && record.payload.authority.sourceHash !== crypto.createHash("sha256").update(bytes!).digest("hex")) throw new Error("Role audit contract source hash mismatch");
       if (record.payload.kind === "role-judgment-repair-policy" && record.payload.policy.sourceHash !== crypto.createHash("sha256").update(bytes!).digest("hex")) throw new Error("Role judgment repair source hash mismatch; stop for host source review");
       if (record.payload.kind === "core-role-review-snapshot" && record.payload.roster.sourceSha256 !== crypto.createHash("sha256").update(bytes!).digest("hex")) throw new Error("Role review snapshot source hash mismatch; stop for host source review");
@@ -234,6 +253,47 @@ export class RequirementLedger {
   }
   async roleReviewRevisions(): Promise<RoleReviewRevision[]> {
     return (await this.history()).flatMap(record => record.payload.kind === "core-role-review-revision" ? [record.payload.revision] : []);
+  }
+  async roleDependencyReviews(): Promise<RoleDependencyReview[]> {
+    return (await this.history()).flatMap(r => r.payload.kind === "role-dependency-review" ? [r.payload.review] : []);
+  }
+  async recordRoleDependencyReview(raw: RoleDependencyReview): Promise<void> {
+    const review = roleDependencyReviewSchema.parse(raw), previous = (await this.roleDependencyReviews()).find(r => r.taskId === review.taskId);
+    if (previous) {
+      if (contentHash(previous) !== contentHash(review)) throw prerequisiteStop("Pending dependency review already has different frozen input");
+      return;
+    }
+    if (review.scope.sourceId !== this.sourceId) throw prerequisiteStop("Dependency review source mismatch");
+    const { prepareCoreRoleDependencyReview } = await import("./role-dependency-review-service.js");
+    const actual = await prepareCoreRoleDependencyReview(this.root, { scope: review.scope, upstreamPlanHash: review.upstream.planHash, authorizationRef: review.authorizationRef });
+    if (contentHash(actual.review) !== contentHash(review)) throw prerequisiteStop("Pending dependency review differs from actual retained state");
+    await this.publish({ kind: "role-dependency-review", review });
+  }
+  async roleSemanticScopes(taskId: string): Promise<SemanticScopeRecord[]> {
+    return (await this.history()).flatMap(r => r.payload.kind === "role-semantic-scope" && r.payload.record.taskId === taskId ? [r.payload.record] : []);
+  }
+  async identityRequirements(taskId: string): Promise<IdentityRecord[]> {
+    return (await this.history()).flatMap(r => r.payload.kind === "identity-requirements" && r.payload.record.intent.taskId === taskId ? [r.payload.record] : []);
+  }
+  async recordIdentityRequirements(raw: IdentityRecord): Promise<void> {
+    const record = identityRecordSchema.parse(raw), previous = await this.identityRequirements(record.intent.taskId);
+    const existing = previous.find(r => r.stage === record.stage);
+    if (existing) { if (contentHash(existing) !== contentHash(record)) throw prerequisiteStop("Identity phase already consumed"); return; }
+    validateIdentityHistory([...previous, record]);
+    const { verifyIdentityRecord } = await import("./identity-requirement-trace.js");
+    await verifyIdentityRecord(this.root, record, previous);
+    await this.publish({ kind: "identity-requirements", record });
+  }
+  async recordRoleSemanticScope(raw: SemanticScopeRecord): Promise<void> {
+    const record = semanticScopeRecordSchema.parse(raw), review = (await this.roleDependencyReviews()).find(r => r.taskId === record.taskId);
+    if (!review) throw prerequisiteStop("Semantic scope lacks the exact pending denominator revision");
+    const previous = await this.roleSemanticScopes(record.taskId);
+    const existing = previous.find(r => r.phase === record.phase);
+    if (existing) { if (contentHash(existing) !== contentHash(record)) throw prerequisiteStop("Semantic scope phase already consumed"); return; }
+    validateSemanticScopeHistory(review, [...previous, record]);
+    const { verifySemanticScopeRecord } = await import("./role-semantic-scope-trace.js");
+    await verifySemanticScopeRecord(this.root, review, record);
+    await this.publish({ kind: "role-semantic-scope", record });
   }
   async beginRoleReviewRevision(input: Omit<RoleReviewRevision, "revisionHash">, bytes: Uint8Array): Promise<RoleReviewRevision> {
     input = { ...input, scopeDecisionRef: input.scopeDecisionRef.trim(), reason: input.reason.trim() };
@@ -466,6 +526,48 @@ export class RequirementLedger {
       }
     }
   }
+  async sourcePrerequisites(taskId: string): Promise<PrerequisiteRecord[]> {
+    return (await this.history()).flatMap(r => r.payload.kind === "role-source-prerequisite" && r.payload.record.taskId === taskId ? [r.payload.record] : []);
+  }
+  async sourceRepresentations(taskId: string): Promise<RepresentationRecord[]> {
+    return (await this.history()).flatMap(r => r.payload.kind === "source-representation" && r.payload.record.scope.taskId === taskId ? [r.payload.record] : []);
+  }
+  /** Retain a proposed exact source-only write scope; upstream authorization is separate. */
+  async recordSourceRepresentation(raw: RepresentationRecord, bytes: Uint8Array): Promise<void> {
+    const record = representationRecordSchema.parse(raw), scope = record.scope.prerequisiteScope;
+    const { WorkspaceOperationLock } = await import("../util/workspace-lock.js");
+    if ((await WorkspaceOperationLock.inspect(this.root)).owner?.pid !== process.pid || scope.sourceId !== this.sourceId) throw prerequisiteStop("Representation publication requires its owning compiler lock and source");
+    const history = await this.history(), previous = await this.sourceRepresentations(record.scope.taskId);
+    validateRepresentationHistory(await this.sourcePrerequisites(record.scope.taskId), [...previous, record]);
+    for (const question of scope.questions) {
+      const disposition = history.findLast(r => r.payload.kind === "role-review-question-disposition" && r.payload.disposition.questionId === question.questionId)?.payload;
+      if (disposition?.kind !== "role-review-question-disposition" || disposition.disposition.status !== "blocked") throw prerequisiteStop("Original representation question is no longer blocked");
+    }
+    assertRepresentationEvidence(record, bytes);
+    const { verifyRepresentationTrace } = await import("./source-representation-trace.js");
+    await verifyRepresentationTrace(this.root, record);
+    await this.publish({ kind: "source-representation", record });
+  }
+  /** Append source review evidence only; this never settles a question or grants a repair. */
+  async recordSourcePrerequisite(raw: PrerequisiteRecord, bytes: Uint8Array): Promise<void> {
+    const record = prerequisiteRecordSchema.parse(raw);
+    if (record.scope.sourceId !== this.sourceId) throw prerequisiteStop("Prerequisite publication changed its registered source");
+    const { WorkspaceOperationLock } = await import("../util/workspace-lock.js");
+    if ((await WorkspaceOperationLock.inspect(this.root)).owner?.pid !== process.pid) throw prerequisiteStop("Prerequisite publication requires the owning compiler lock");
+    const previous = await this.sourcePrerequisites(record.taskId);
+    if (previous.some(p => p.phase === record.phase)) throw prerequisiteStop("This original prerequisite stage is consumed");
+    validatePrerequisiteHistory([...previous, record]);
+    assertPrerequisiteEvidence(record, bytes);
+    const history = await this.history();
+    for (const question of record.scope.questions) {
+      if (!history.some(r => r.payload.kind === "role-review-question" && contentHash(r.payload.question) === contentHash(question))) throw prerequisiteStop("Missing original registered question");
+      const disposition = history.findLast(r => r.payload.kind === "role-review-question-disposition" && r.payload.disposition.questionId === question.questionId)?.payload;
+      if (disposition?.kind !== "role-review-question-disposition" || disposition.disposition.status !== "blocked") throw prerequisiteStop("Original question is no longer blocked");
+    }
+    const { verifyPrerequisiteTrace } = await import("./role-source-prerequisite-trace.js");
+    await verifyPrerequisiteTrace(this.root, record);
+    await this.publish({ kind: "role-source-prerequisite", record });
+  }
   async recordRoleQuestionDisposition(planHash: string, auditRef: string, disposition: RoleQuestionDisposition): Promise<void> {
     const history = await this.history();
     if (!history.some(r => r.payload.kind === "role-review-question" && r.payload.question.planHash === planHash && r.payload.question.questionId === disposition.questionId)) throw new Error("Unknown role question; preserve scope and stop for host review");
@@ -578,15 +680,68 @@ export const requirementJournalSchema = z.array(recordSchema).superRefine((recor
     const attempts = new Map<string, CompilerFinishReceipt>();
     const settlementKeys = new Set<string>();
     const reviewRevisions: RoleReviewRevision[] = [];
+    const dependencyReviews = new Map<string, RoleDependencyReview>();
+    const semanticScopes = new Map<string, SemanticScopeRecord[]>();
+    const identityHistories = new Map<string, IdentityRecord[]>();
+    for (const [index, r] of records.entries()) {
+      if (r.payload.kind === "role-dependency-review") {
+        const d = r.payload.review;
+        if (dependencyReviews.has(d.taskId) || d.scope.sourceId !== sourceId || d.requirementPrefix.length !== index
+          || d.requirementPrefix.head !== records[index - 1]?.hash) throw prerequisiteStop("Dependency revision lost its original requirement prefix or reused a task");
+        const prefix = records.slice(0, index);
+        const priorSpecs = prefix.flatMap(r => r.payload.kind === "role-source-prerequisite" && r.payload.record.taskId === d.taskId ? [contentHash(r.payload.record)] : []);
+        const priorRepresentations = prefix.flatMap(r => r.payload.kind === "source-representation" && r.payload.record.scope.taskId === d.taskId ? [contentHash(r.payload.record)] : []);
+        if (contentHash(priorSpecs) !== contentHash(d.prerequisiteRecordHashes) || contentHash(priorRepresentations) !== contentHash(d.representationRecordHashes)) throw prerequisiteStop("Pending dependency review lacks the exact consumed specification and representation prefix");
+        dependencyReviews.set(d.taskId, d);
+      }
+      if (r.payload.kind === "role-semantic-scope") {
+        const s = r.payload.record, d = dependencyReviews.get(s.taskId);
+        if (!d) throw prerequisiteStop("Semantic scope has no preceding exact denominator revision");
+        if (s.correction && (s.correction.requirementPrefix.length !== index || s.correction.requirementPrefix.head !== records[index - 1]?.hash)) throw prerequisiteStop("Semantic correction lost the original pending requirement prefix");
+        const current = [...(semanticScopes.get(s.taskId) ?? []), s];
+        validateSemanticScopeHistory(d, current); semanticScopes.set(s.taskId, current);
+      }
+      if (r.payload.kind === "identity-requirements") {
+        const entry = r.payload.record, intent = entry.intent, d = dependencyReviews.get(intent.taskId);
+        const previous = identityHistories.get(intent.taskId) ?? [];
+        if (!d || intent.sourceId !== sourceId || intent.sourceHash !== d.scope.sourceHash || intent.parentStateHash !== d.scope.parentStateHash
+          || intent.originalPlanHash !== d.scope.planHash || intent.originalBudgetHash !== d.scope.originalBudgetHash || intent.revisionHash !== d.revisionHash
+          || contentHash(intent.semanticRecordHashes) !== contentHash((semanticScopes.get(intent.taskId) ?? []).map(contentHash))
+          || (!previous.length && (intent.requirementPrefix.length !== index || intent.requirementPrefix.head !== records[index - 1]?.hash))) throw prerequisiteStop("Identity requirement lost original scope, consumed phases or ledger prefix");
+        const current = [...previous, entry]; validateIdentityHistory(current); identityHistories.set(intent.taskId, current);
+      }
+    }
     const retainedReviews = new Map<string, string>();
     const reviewSnapshots = new Map<string, RoleRoster>();
+    const prerequisites = new Map<string, PrerequisiteRecord[]>();
+    const representations = new Map<string, RepresentationRecord[]>();
     for (const record of records) {
+      if (record.payload.kind === "role-dependency-review" || record.payload.kind === "role-semantic-scope" || record.payload.kind === "identity-requirements") continue; // Validated above; original question dispositions never change here.
       const roster = record.payload.kind === "core-role-definition" ? record.payload.definition.roster : record.payload.kind === "core-role-review-revision" ? record.payload.revision.priorRoster : record.payload.kind === "core-role-review-snapshot" ? record.payload.roster : undefined;
       for (const review of roster?.reviews ?? []) {
         if (retainedReviews.has(review.runId) && retainedReviews.get(review.runId) !== contentHash(review)) throw new Error("Retained role review run was rewritten");
         retainedReviews.set(review.runId, contentHash(review));
       }
-      if (record.payload.kind === "role-audit-contract-authority") {
+      if (record.payload.kind === "source-representation") {
+        const p = record.payload.record, prior = representations.get(p.scope.taskId) ?? [];
+        if (p.scope.prerequisiteScope.sourceId !== sourceId) throw prerequisiteStop("Representation journal changed source");
+        for (const q of p.scope.prerequisiteScope.questions) {
+          const disposition = records.slice(0, record.sequence).findLast(r => r.payload.kind === "role-review-question-disposition" && r.payload.disposition.questionId === q.questionId)?.payload;
+          if (disposition?.kind !== "role-review-question-disposition" || disposition.disposition.status !== "blocked") throw prerequisiteStop("Representation journal lacks the retained blocked question");
+        }
+        validateRepresentationHistory(prerequisites.get(p.scope.taskId) ?? [], [...prior, p]);
+        representations.set(p.scope.taskId, [...prior, p]);
+      } else if (record.payload.kind === "role-source-prerequisite") {
+        const p = record.payload.record;
+        if (p.scope.sourceId !== sourceId || p.scope.questions.some(q => !records.slice(0, record.sequence).some(r => r.payload.kind === "role-review-question" && contentHash(r.payload.question) === contentHash(q)))) throw prerequisiteStop("Prerequisite journal lacks original questions");
+        for (const q of p.scope.questions) {
+          const disposition = records.slice(0, record.sequence).findLast(r => r.payload.kind === "role-review-question-disposition" && r.payload.disposition.questionId === q.questionId)?.payload;
+          if (disposition?.kind !== "role-review-question-disposition" || disposition.disposition.status !== "blocked") throw prerequisiteStop("Prerequisite journal lacks a retained blocked question");
+        }
+        const prior = prerequisites.get(p.taskId) ?? [];
+        validatePrerequisiteHistory([...prior, p]);
+        prerequisites.set(p.taskId, [...prior, p]);
+      } else if (record.payload.kind === "role-audit-contract-authority") {
         const a = record.payload.authority;
         if (a.sourceId !== sourceId || records.slice(0, record.sequence).some(r => r.payload.kind === "role-audit-contract-authority"
           && r.payload.authority.revisionId === a.revisionId)
@@ -682,6 +837,19 @@ export const requirementJournalSchema = z.array(recordSchema).superRefine((recor
   } catch (error) { ctx.addIssue({ code: "custom", message: String(error) }); }
 });
 
+function assertPrerequisiteEvidence(record: PrerequisiteRecord, bytes: Uint8Array) {
+  if (crypto.createHash("sha256").update(bytes).digest("hex") !== record.scope.sourceHash
+    || record.evidence.some(e => contentHash(e.anchor) !== contentHash(textAnchorForByteRange(record.scope.sourceId, bytes, e.anchor.startByte, e.anchor.endByte))
+      || Buffer.from(bytes).subarray(e.anchor.startByte, e.anchor.endByte).toString("utf8") !== e.selector.exact)) throw prerequisiteStop("Prerequisite evidence differs from immutable source bytes");
+}
+function assertRepresentationEvidence(record: RepresentationRecord, bytes: Uint8Array) {
+  const scope = record.scope.prerequisiteScope;
+  if (crypto.createHash("sha256").update(bytes).digest("hex") !== scope.sourceHash
+    || record.evidence.some(e => contentHash(e.anchor) !== contentHash(textAnchorForByteRange(scope.sourceId, bytes, e.anchor.startByte, e.anchor.endByte))
+      || Buffer.from(bytes).subarray(e.anchor.startByte, e.anchor.endByte).toString("utf8") !== e.selector.exact)) throw prerequisiteStop("Representation evidence differs from immutable source bytes");
+  assertRepresentationAnchors(record.output, scope.sourceId, bytes);
+}
+
 export function requirementSnapshotInputs<T extends { requirementJournal?: LedgerRecord[] }>(snapshot: T): Omit<T, "requirementJournal"> {
   const { requirementJournal: _history, ...inputs } = snapshot;
   return inputs;
@@ -699,6 +867,8 @@ export function requirementJournalBindingIssues(snapshot: {
   const parsed = requirementJournalSchema.safeParse(snapshot.requirementJournal);
   if (!parsed.success) return ["REQUIREMENT_JOURNAL_INVALID"];
   const history = parsed.data, issues: string[] = [];
+  if (history.some(r => r.payload.kind === "source-representation" && r.payload.record.scope.prerequisiteScope.sourceHash !== sourceSha256)) issues.push("SOURCE_REPRESENTATION_SOURCE_MISMATCH");
+  if (history.some(r => r.payload.kind === "role-source-prerequisite" && r.payload.record.scope.sourceHash !== sourceSha256)) issues.push("ROLE_PREREQUISITE_SOURCE_MISMATCH");
   const reviewRevision = history.findLast(record => record.payload.kind === "core-role-review-revision");
   const expectedRevision = reviewRevision?.payload.kind === "core-role-review-revision" ? reviewRevision.payload.revision : undefined;
   if (contentHash(expectedRevision ?? null) !== contentHash(snapshot.coreRoleReviewRevision ?? null) || (snapshot.roleRoster?.reviewRevisionId && snapshot.roleRoster.reviewRevisionId !== expectedRevision?.id)) issues.push("CORE_ROLE_REVIEW_REVISION_MISMATCH");

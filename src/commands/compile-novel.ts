@@ -42,10 +42,11 @@ export type CompileNovelOptions = Pick<PrepareAllCommandOptions, "root" | "confi
 
 /** Read-only: no migrations, audit/probes, model calls or implicit publication. */
 export async function inspectNovelCompilation(root: string, sourceId?: string) {
+  const { inspectCompileLoop } = await import("../runtime/compile-loop/state.js");
   const status = await inspectCompilerStatus(root, sourceId), runs = new NovelCompilationRunStore(root);
   return { ...status, compilation: await Promise.all(status.sources.map(async source => {
     const run = await runs.read(source.sourceId);
-    return { sourceId: source.sourceId, run,
+    return { sourceId: source.sourceId, run, supervision: inspectCompileLoop(root, source.sourceId),
       evaluationReview: run?.subjectHash ? await inspectEvaluationReview(root, run.subjectHash) : null,
       evaluation: run?.subjectHash ? await new NovelPlayQualityStore(root).read(run.subjectHash) : null };
   })), interpretation: `${status.interpretation} Orchestration receipts are historical scheduling records, not current certification.` };

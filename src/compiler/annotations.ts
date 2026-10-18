@@ -157,12 +157,16 @@ export const discourseObservationSchema = z.object({
     "dream",
     "embedded-document",
     "narrator-commentary",
+    "unclassified",
   ]),
   anchors: z.array(textAnchorSchema).min(1).max(32),
   viewpointMentionId: idSchema.optional(),
   confidence: z.number().min(0).max(1),
   interpretation: z.string().trim().min(1).max(1_000).optional(),
 }).strict().superRefine((value, ctx) => {
+  if (value.kind === "unclassified" && !value.interpretation) {
+    ctx.addIssue({ code: "custom", path: ["interpretation"], message: "Unclassified discourse must retain its unresolved boundary" });
+  }
   if (value.anchors.some((anchor) => anchor.sourceId !== value.sourceId)) {
     ctx.addIssue({ code: "custom", path: ["anchors"], message: "Discourse anchors must belong to their source" });
   }

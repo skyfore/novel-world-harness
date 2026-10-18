@@ -112,6 +112,7 @@ export { PossibilityCommitService, type PossibilityValidation } from "./compiler
 export { PreparedNovelCache, preparedNovelBundleSchema, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
 export { rebuildCommand } from "./commands/rebuild.js";
 export { compileNovelCommand, inspectNovelCompilation, type CompileNovelOptions } from "./commands/compile-novel.js";
+export { compileNovelWithLoop, type SupervisedCompileOptions } from "./commands/compile-novel-loop.js";
 export { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
 export { repairExistingCommand, type RepairExistingCommandOptions, type RepairExistingCommandResult } from "./commands/repair-existing.js";
 export { eventExecutionSchema, applyEventExecutions, validateEventExecutions, type EventExecution } from "./world/event-execution.js";
@@ -485,6 +486,7 @@ export { createWebHost, isLoopbackHost, type CreateWebHostOptions, type NwhWebHo
 export { OperationManager, type OperationRunContext, type StartOperationInput } from "./web/operation-manager.js";
 
 export { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
+export { inspectRoleProviderResumption, authorizeRoleProviderResumption, type RoleProviderResumptionInput } from "./compiler/role-provider-resumption.js";
 export {
   buildRoleRosterObligationPreview,
   reviewRoleRosterObligation,
@@ -515,3 +517,7 @@ export { branchAcquisitionSchema, type BranchAcquisition } from "./world/model.j
 export { migrateLegacyAcquisitions, acquisitionMigrationManifestSchema, type AcquisitionMigrationManifest } from "./compiler/acquisition-migration.js";
 
 export { buildLiteraryReferenceIndex, type LiteraryReferenceIndex, type LiteraryReferenceRecord } from "./world/literary-reference.js";
+export { prepareCoreRoleDependencyReview, beginCoreRoleDependencyReview, type RoleDependencyReviewInput } from "./compiler/role-dependency-review-service.js";
+export { roleDependencyReviewSchema, type RoleDependencyReview } from "./compiler/role-dependency-review.js";
+export { runRoleSemanticScope, runRoleSemanticScopeCorrection } from "./workflow/role-semantic-scope.js";
+export { prepareSemanticScopeCorrection } from "./compiler/role-semantic-scope-correction.js";

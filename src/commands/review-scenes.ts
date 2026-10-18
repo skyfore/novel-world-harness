@@ -66,7 +66,13 @@ export async function inspectRequirementsCommand(root: string, sourceId: string)
   const savedRoster = await new RoleRosterStore(root).read(sourceId);
   const { RoleReviewWorkStore } = await import("../compiler/role-review-work.js");
   const roleReviewPlans = (await RoleReviewWorkStore.plans(root, sourceId)).map(plan => ({ batchId: plan.batchId, planHash: contentHash(plan), subjectHash: plan.subjectHash, reviewRevisionId: plan.reviewRevisionId }));
-  console.log(JSON.stringify({ savedRoster, savedRosterHash: savedRoster ? contentHash(savedRoster) : null, roleReviewPlans, reviewRevisions: await ledger.roleReviewRevisions(), definitions: await ledger.definitions(), coreRoleDefinitions: await ledger.coreRoleDefinitionHistory(), history: await ledger.history() }, null, 2));
+  const dependencyReviews = await ledger.roleDependencyReviews();
+  console.log(JSON.stringify({ savedRoster, savedRosterHash: savedRoster ? contentHash(savedRoster) : null, roleReviewPlans,
+    dependencyReviews: dependencyReviews.map(r => ({ taskId: r.taskId, revisionHash: r.revisionHash, authority: r.authority,
+      priorPlanHash: r.scope.planHash, priorCandidateCount: r.priorRoster.candidates.length, nextCandidateCount: r.nextRoster.candidates.length,
+      addedCandidateIds: r.addedCandidateIds, upstream: r.upstream })),
+    semanticScopeRecords: (await Promise.all(dependencyReviews.map(r => ledger.roleSemanticScopes(r.taskId)))).flat().map(r => ({ taskId: r.taskId, phase: r.phase, hash: contentHash(r), traceRunId: r.traceRunId })),
+    reviewRevisions: await ledger.roleReviewRevisions(), definitions: await ledger.definitions(), coreRoleDefinitions: await ledger.coreRoleDefinitionHistory(), history: await ledger.history() }, null, 2));
 }
 
 export async function registerCoreRoleRequirementsCommand(root: string, sourceId: string, decision: { predecessorRevision?: string; scopeDecisionRef: string; scopeChangeReason: string }) {

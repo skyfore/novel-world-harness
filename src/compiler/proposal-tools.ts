@@ -861,6 +861,7 @@ const discourseObservationParameters = Type.Object({
     Type.Literal("dream"),
     Type.Literal("embedded-document"),
     Type.Literal("narrator-commentary"),
+    Type.Literal("unclassified"),
   ]),
   selectors: Type.Array(modelTextSelectorParameters, { minItems: 1, maxItems: 32 }),
   viewpoint_mention_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),

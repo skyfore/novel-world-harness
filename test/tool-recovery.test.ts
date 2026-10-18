@@ -10,6 +10,21 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it.each(["submit_role_semantic_scope", "read_semantic_source", "read_semantic_dependencies", "submit_source_representation", "propose_entity_resolution"])("never turns an explicit prerequisite/upstream host stop into retry advice: %s", tool => {
+    for (const diagnostic of [
+      "ROLE_PREREQUISITE_HOST_REVIEW: Criterion lacks exact repair slots or its explicit missing condition.",
+      "Error: ROLE_PREREQUISITE_HOST_REVIEW: Error: ROLE_PREREQUISITE_HOST_REVIEW: Unknown dependency; requires current schema.",
+      "UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: Creation requires pointers=[]; source scope changed.",
+    ]) {
+      const advice = buildNwhToolRecoveryAdvice(tool, diagnostic);
+      expect(advice).toMatchObject({ category: "host-repair-required", retryable: false });
+      expect(advice.suggestedCall).toBeUndefined();
+      expect(advice.steps.join(" ")).toContain("Do not correct or resubmit this consumed stage");
+      const rendered = formatNwhToolError(tool, new Error(diagnostic));
+      expect(rendered).toContain(diagnostic);
+      expect(rendered).toContain('"retryable": false');
+    }
+  });
   it.each(["preview_role_source_audit_proposal", "preview_role_source_audit_verification", "propose_role_source_audit_repair", "propose_role_source_audit_repair_check"])("keeps source repair recovery inside its revision: %s", tool => {
     const advice = buildNwhToolRecoveryAdvice(tool, "Unknown original evidence unit");
     expect(advice).toMatchObject({ category: "invalid-arguments", retryable: true });

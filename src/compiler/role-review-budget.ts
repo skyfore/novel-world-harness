@@ -8,6 +8,10 @@ import { RoleReviewWorkStore, roleWorkStop } from "./role-review-work.js";
 import { TraceStore } from "../trace/store.js";
 import type { RoleWorkAllowance } from "./role-work-allowance.js";
 import { readRoleClaimContinuation } from "./role-claim-continuation.js";
+import { readAutomaticRoleCorrectionContinuation, readAutomaticRoleProgressContinuation } from "./role-automatic-resume.js";
+import { readRoleAuditHostRepair } from "./role-audit-host-repair.js";
+import { readRoleAuditNarrowRepair } from "./role-audit-narrow-repair.js";
+import { readRoleProviderResumption, settledProviderResumption } from "./role-provider-resumption.js";
 const counter = z.number().int().nonnegative();
 const stateSchema = z.object({ usage: z.object({ modelCalls: counter, payloads: counter, totalPayloadBytes: counter, largestRequestBytes: counter }).strict(), blocked: z.boolean(), failure: z.object({ code: z.string(), message: z.string() }).strict().optional(),
   progress: z.object({lastProgressCall:counter,milestones:z.array(z.string().min(1))}).strict().optional() }).strict()
@@ -33,6 +37,69 @@ export function inspectRoleReviewBudget(root: string, planHash: string, workId: 
 export function inspectRetainedRoleReviewBudget(root: string, planHash: string, workId: string) {
   const base = budgetPath(root, planHash, workId), original = readBudget(base, planHash, workId);
   const files: Record<string, string> = { [base]: contentHash(fs.readFileSync(base, "utf8")) };
+  if (readRoleProviderResumption(root, planHash, workId)) {
+    const resumed = settledProviderResumption(root, planHash, workId)!;
+    if (resumed.authority.budget.hash !== original.hash || contentHash(resumed.authority.budget.state) !== contentHash(original.state)) {
+      throw roleWorkStop("provider resumption predecessor budget changed");
+    }
+    for (const suffix of ["", ".started.json", ".availability.json", ".usage.json", ".result.json"]) {
+      const file = resumed.file + suffix;
+      files[file] = contentHash(fs.readFileSync(file, "utf8"));
+    }
+    if (resumed.checkpointFile) files[resumed.checkpointFile] = contentHash(fs.readFileSync(resumed.checkpointFile, "utf8"));
+    const state = stateSchema.parse({ ...original.state, usage: resumed.usage.usage });
+    return { ...original, state, hash: contentHash({ prior: original.hash, authority: resumed.authorityHash, state }), file: base, files };
+  }
+  const automatic = readAutomaticRoleProgressContinuation(root, planHash, workId);
+  if (automatic) {
+    if (automatic.authority.budget.hash !== original.hash || !original.state.blocked
+      || original.state.failure?.code !== "no-progress") throw roleWorkStop("automatic audit continuation predecessor budget changed");
+    for (const suffix of ["", ".usage.json", ".result.json"]) {
+      const file = automatic.file + suffix;
+      if (!fs.existsSync(file)) throw roleWorkStop("automatic audit continuation lineage is unfinished; inspect its grant, do not reset usage");
+      files[file] = contentHash(fs.readFileSync(file, "utf8"));
+    }
+    const result = JSON.parse(fs.readFileSync(`${automatic.file}.result.json`, "utf8"));
+    if (result.status !== "succeeded" || result.authorityHash !== automatic.authorityHash
+      || contentHash(result.usage) !== contentHash(automatic.usage)) throw roleWorkStop("automatic audit continuation result changed or failed");
+    const state = stateSchema.parse({ ...original.state, usage: automatic.usage.usage });
+    return { ...original, state, hash: contentHash({ prior: original.hash, authority: automatic.authorityHash, state }), file: base, files };
+  }
+  const correction = readAutomaticRoleCorrectionContinuation(root, planHash, workId);
+  if (correction) {
+    if (correction.authority.budget.hash !== original.hash || original.state.blocked || original.state.failure
+      || contentHash(correction.authority.budget.state) !== contentHash(original.state)) {
+      throw roleWorkStop("automatic audit correction predecessor budget changed");
+    }
+    for (const suffix of ["", ".usage.json", ".result.json"]) {
+      const file = correction.file + suffix;
+      if (!fs.existsSync(file)) throw roleWorkStop("automatic audit correction lineage is unfinished; inspect its grant, do not reset usage");
+      files[file] = contentHash(fs.readFileSync(file, "utf8"));
+    }
+    const result = JSON.parse(fs.readFileSync(`${correction.file}.result.json`, "utf8"));
+    const hostRepair = readRoleAuditHostRepair(correction);
+    const narrowRepair = readRoleAuditNarrowRepair(correction);
+    if (hostRepair && narrowRepair) throw roleWorkStop("automatic audit correction has conflicting host repair lineages");
+    const repaired = hostRepair ?? narrowRepair;
+    if (repaired) {
+      for (const suffix of ["", ".usage.json", ".started.json", ".result.json"]) {
+        const file = repaired.file + suffix;
+        if (!fs.existsSync(file)) throw roleWorkStop("host audit repair lineage is unfinished; do not reset usage");
+        files[file] = contentHash(fs.readFileSync(file, "utf8"));
+      }
+      const settled = JSON.parse(fs.readFileSync(`${repaired.file}.result.json`, "utf8"));
+      if (result.status !== "failed" || result.authorityHash !== correction.authorityHash
+        || contentHash(result.usage) !== contentHash(correction.usage) || settled.status !== "succeeded"
+        || settled.authorityHash !== repaired.authorityHash || contentHash(settled.usage) !== contentHash(repaired.usage)
+        || repaired.usage.blocked || repaired.usage.failure) throw roleWorkStop("host audit repair has no settled successful cumulative usage");
+      const state = stateSchema.parse({ ...original.state, usage: repaired.usage.usage });
+      return { ...original, state, hash: contentHash({ prior: original.hash, authority: repaired.authorityHash, state }), file: base, files };
+    }
+    if (result.status !== "succeeded" || result.authorityHash !== correction.authorityHash
+      || contentHash(result.usage) !== contentHash(correction.usage)) throw roleWorkStop("automatic audit correction result changed or failed");
+    const state = stateSchema.parse({ ...original.state, usage: correction.usage.usage });
+    return { ...original, state, hash: contentHash({ prior: original.hash, authority: correction.authorityHash, state }), file: base, files };
+  }
   const continuation = readRoleClaimContinuation(root, planHash, workId);
   if (continuation) {
     if (continuation.authority.budget.hash !== original.hash || !original.state.blocked) throw roleWorkStop("claim continuation predecessor budget changed");

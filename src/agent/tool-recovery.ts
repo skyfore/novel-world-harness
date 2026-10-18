@@ -380,6 +380,15 @@ export function buildNwhToolRecoveryAdvice(
   // can contain arbitrary novel wording, including "unknown" or "offset".
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
+  if (/role_prerequisite_host_review|upstream_repair_requires_host_review/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "No model-side retry. The host must verify the original intent, concrete repair, current authorization and checks before any legal continuation.",
+      steps: [
+        "Stop this model turn and preserve the original taskId, plan, exact failed input, trace, pending proposals, budgets and failure history.",
+        "Do not correct or resubmit this consumed stage, change namespaces, renew a grant, reset a budget, erase a missing condition or resume the parent compiler.",
+        "Report the exact host diagnostic. A read-only inspection or a supported finding is not repair authority or evidence that a critical question is resolved.",
+      ] };
+  }
   if (/evaluation_review_host_required|evaluation_review_no_progress|evaluation_review_scope_changed|evaluation_source_index_stale/u.test(lower)) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
       retryCondition: "The host must inspect the original evaluation draft, source scope and retained failure counters before continuation.",

@@ -9,6 +9,7 @@ import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
 import { RequirementLedger } from "../compiler/requirement-ledger.js";
 import { activeRoleWorkPlans, assertRoleWorkPlanAuthority } from "../compiler/role-work-migration.js";
+import { inspectAutomaticRoleResume } from "../compiler/role-automatic-resume.js";
 
 export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "prompt" | "compilerBatchId"> & { sourceId: string }, review: (options: BoundedRoleReviewOptions) => Promise<void> = runBoundedRoleReview): Promise<void> {
   if (options.acquireLock !== false) {
@@ -26,6 +27,7 @@ export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "pro
   let stagedBatchId: string | undefined;
   const revisions = await new RequirementLedger(options.root, options.sourceId).roleReviewRevisions();
   const retiredBatches = new Set(revisions.flatMap(revision => revision.workMigration ? [revision.workMigration.priorPlan.batchId] : []));
+  const activePlans = await activeRoleWorkPlans(options.root, options.sourceId);
   for (const batchId of CompilerProposalObligations.listBatchIds(options.root, options.sourceId)) {
     if (!batchId.startsWith(`role-roster-${options.sourceId}-`)) continue;
     if (retiredBatches.has(batchId)) continue;
@@ -34,14 +36,35 @@ export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "pro
     const receipt = await new CompilerFinishReceipts(options.root, options.sourceId, batchId).read();
     const capturedWithoutFinish = roleHistory.at(-1)?.status === "succeeded" && receipt?.state !== "completed";
     if (journal.unresolved().length || capturedWithoutFinish) {
-      throw new Error(`ROLE_REVIEW_REQUIRES_HOST_REVIEW: retained obligations in ${batchId}. Inspect compiler-obligations inspect --source ${options.sourceId} --batch ${batchId} and preserve the exact failed inputs. Recover this original scope through a supported host protocol before starting another review; do not retry in a fresh batch or reset attempt history.`);
+      const plan = activePlans.find(item => item.batchId === batchId);
+      let exactCorrection = false;
+      if (plan && receipt?.state !== "completed" && !capturedWithoutFinish) {
+        await assertRoleWorkPlanAuthority(options.root, plan);
+        const store = new RoleReviewWorkStore(options.root, plan);
+        const page = plan.spans.findIndex((_, index) => !store.read("audit", index));
+        if (page >= 0 && plan.migration && store.inheritedAllowance(store.workId("audit", page))?.attempts === 2) {
+          const { assertNoClaimedExhaustedMigratedSourceAudit } = await import('../compiler/role-source-audit-revalidation.js');
+          await assertNoClaimedExhaustedMigratedSourceAudit(store);
+        }
+        const recovery = page >= 0 ? await inspectAutomaticRoleResume(store, page) : undefined;
+        exactCorrection = recovery !== undefined && [
+          "compile-audit-correction-v1",
+          "compile-audit-host-tool-repair-v1",
+          "compile-audit-narrow-schema-repair-v1",
+        ].includes(recovery.authority.policy);
+      }
+      if (!exactCorrection) {
+        throw new Error(`ROLE_REVIEW_REQUIRES_HOST_REVIEW: retained obligations in ${batchId}. Inspect compiler-obligations inspect --source ${options.sourceId} --batch ${batchId} and preserve the exact failed inputs. Recover this original scope through a supported host protocol before starting another review; do not retry in a fresh batch or reset attempt history.`);
+      }
+      if (stagedBatchId && stagedBatchId !== batchId) throw roleWorkStop("multiple unfinished review scopes");
+      stagedBatchId = batchId;
     }
     if (receipt?.state !== "completed" && journal.latestAttempts("propose_role_roster_entry").some(attempt => attempt.status === "succeeded")) {
-      if (stagedBatchId) throw new Error("Multiple unfinished role-review draft scopes exist. Stop for host review; never merge independent reviews or rotate IDs.");
+      if (stagedBatchId && stagedBatchId !== batchId) throw new Error("Multiple unfinished role-review draft scopes exist. Stop for host review; never merge independent reviews or rotate IDs.");
       stagedBatchId = batchId;
     }
   }
-  for (const plan of await activeRoleWorkPlans(options.root, options.sourceId)) {
+  for (const plan of activePlans) {
     await assertRoleWorkPlanAuthority(options.root, plan);
     const receipt = await new CompilerFinishReceipts(options.root, options.sourceId, plan.batchId).read();
     if (receipt?.state === "completed") continue;

@@ -26,6 +26,7 @@ import { migrateLegacyAcquisitions } from "./compiler/acquisition-migration.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
 import { compileNovelCommand } from "./commands/compile-novel.js";
+import { compileNovelWithLoop } from "./commands/compile-novel-loop.js";
 import { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
 import { WorkspaceOperationLock } from "./util/workspace-lock.js";
 import { withCompilerSignals, CompilerInterruptedError } from "./util/compiler-signals.js";
@@ -96,17 +97,24 @@ const novelOptions = (command: Command) => command
   .option("--plan-hash <hash>", "exact previously frozen independent evaluation plan")
   .option("--upstream-plan <hash>", "exact authorized upstream repair plan")
   .option("--upstream-finish <path>", "original host finish review for the authorized upstream plan");
-novelOptions(compileNovel).option("--rebuild", "recompile all source batches; an interrupted rebuild resumes its original generation");
+novelOptions(compileNovel).option("--rebuild", "recompile all source batches; an interrupted rebuild resumes its original generation")
+  .option("--no-loop", "run one compiler invocation without the engineering supervisor")
+  .option("--engineer-model <model>", "Codex model for repair and independent review (default: gpt-5.6-sol)")
+  .option("--loop-history <path>", "adopt a settled legacy supervisor record without resetting its counters")
+  .option("--loop-resume <hash>", "resume a resolved host stop using the exact supervision.stateHash; counters remain charged")
+  .option("--loop-host-patch <hash>", "independently verify an exact host source repair without renewing exhausted engineering rounds")
+  .option("--loop-resolution <text>", "concrete host review authorizing migration of the legacy supervisor");
 const runCompileNovel = async (command: Command, novel?: string, phase?: NovelCompilationPhase | "status", batchStage?: "structure" | "observation" | "semantic" | "executable" | "boundary") => {
   // Commander optsWithGlobals lets the root's default cwd overwrite --root
   // on a subcommand. Explicit options nearer the selected action win here.
   const options = { ...program.opts(), ...compileNovel.opts(), ...command.opts() };
-  await withCompilerSignals(signal => compileNovelCommand({
+  await withCompilerSignals(signal => compileNovelWithLoop({
     root: rootFor(options), configPath: options.config ? path.resolve(options.config) : undefined,
     novelPath: novel, sourceId: options.source, branchId: options.branch, model: options.model,
     rebuild: Boolean(options.rebuild), phase, batchStage, evaluationPlanFile: options.evaluationPlan,
     evaluationPlanHash: options.planHash, upstreamRepairPlan: options.upstreamPlan,
-    upstreamRepairFinishFile: options.upstreamFinish, signal,
+    upstreamRepairFinishFile: options.upstreamFinish, signal, loop: options.loop,
+    engineerModel: options.engineerModel, loopHistory: options.loopHistory, loopResolution: options.loopResolution, loopResume: options.loopResume, loopHostPatch: options.loopHostPatch,
   }));
 };
 compileNovel.action(async (novel, _options, command) => runCompileNovel(command, novel));
@@ -320,6 +328,22 @@ requirementsCommand.command("begin-core-role-review").requiredOption("--source <
   .requiredOption("--reason <text>", "reason for reviewing again; this does not approve a reduced role scope")
   .action(async options => beginCoreRoleReviewCommand(rootFor({}), { sourceId: options.source, revisionId: options.revision,
     priorRosterHash: options.rosterHash, predecessorDefinitionRevision: options.predecessor, scopeDecisionRef: options.scopeDecision, reason: options.reason, expectedWorkPlanHash: options.workPlan }));
+requirementsCommand.command("begin-core-role-dependency-review")
+  .requiredOption("--scope <file>", "original prerequisite scope JSON; preserves its task and question IDs")
+  .requiredOption("--upstream-plan <hash>", "exact converged source-representation plan hash")
+  .requiredOption("--authorization-ref <text>", "user authorization for the changed-dependency scope review")
+  .option("--apply", "append the pending denominator revision; never resume audits or grant writes")
+  .action(async options => {
+    const { prerequisiteScopeSchema } = await import("./compiler/role-source-prerequisites.js");
+    const { prepareCoreRoleDependencyReview, beginCoreRoleDependencyReview } = await import("./compiler/role-dependency-review-service.js");
+    const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
+    const input = { scope: prerequisiteScopeSchema.parse(JSON.parse(await fs.readFile(options.scope, "utf8"))),
+      upstreamPlanHash: options.upstreamPlan, authorizationRef: options.authorizationRef };
+    const prepared = options.apply ? await withWorkspaceOperationLock(rootFor({}), "compiler", () => beginCoreRoleDependencyReview(rootFor({}), input))
+      : await prepareCoreRoleDependencyReview(rootFor({}), input);
+    console.log(JSON.stringify({ applied: Boolean(options.apply), review: prepared.review, grantsIssued: false,
+      nextStep: "Original plan remains blocked. Use the original task's single-use semantic scope proposal/check; only separately verified exact authority may execute repairs." }, null, 2));
+  });
 requirementsCommand.command("register-core-roles").requiredOption("--source <id>", "registered source ID")
   .option("--predecessor <hash>", "last coreRoleDefinitions[].revisionHash from requirements inspect")
   .requiredOption("--scope-decision <ref>", "host audit reference for this independent source-review revision")

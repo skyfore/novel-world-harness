@@ -9,7 +9,7 @@ import { RoleReviewWorkStore } from "../../src/compiler/role-review-work.js";
 import { contentHash } from "../../src/world/canonical.js";
 import { RequirementLedger } from "../../src/compiler/requirement-ledger.js";
 
-export async function sourceAuditFixture() {
+export async function sourceAuditFixture(options?: { findings?: Array<{ name: string; observation: string; unitIds?: string[] }> }) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-auto-audit-"));
   const evidence = await createEvidenceFixture(root, "Hero waits for a letter.\nLater, Hero receives Friend's letter.\n");
   await ensureSourceStructure(root, evidence.source);
@@ -19,7 +19,8 @@ export async function sourceAuditFixture() {
     subjectHash: roster.subjectHash, batchId: `role-roster-${roster.sourceId}-test`, structureHash: contentHash(structure),
     spans: [{ start: 0, end: evidence.source.bytes }], legacyDraftHashes: [] });
   const unit = roster.unitIds[0]!, candidate = roster.candidates[0]!;
-  await store.submit("source", 0, { summary: "A letter arrives later", findings: [], openQuestions: ["Does the letter arrive?"] }, () => {});
+  const findings = (options?.findings ?? []).map(finding => ({ ...finding, unitIds: finding.unitIds ?? [unit] }));
+  await store.submit("source", 0, { summary: "A letter arrives later", findings, openQuestions: ["Does the letter arrive?"] }, () => {});
   await new RequirementLedger(root, roster.sourceId).registerRoleQuestions(store.questions(0));
   const entry = { candidateId: candidate.id, importance: "major", rationale: "Hero drives the scene", basisUnitIds: [unit],
     developmentExpectation: { kind: "unknown", rationale: "No long term evidence", basisUnitIds: [unit] } };

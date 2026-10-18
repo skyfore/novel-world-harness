@@ -19,6 +19,7 @@ export const ROLE_CONTEXT_MAX_SESSIONS=3;
 export type ParentBudgetSessionResume={planHash:string;workId:string;authorityHash:string;policy?:'progress'};
 export type RoleSessionResume=ParentBudgetSessionResume|import('../compiler/role-host-interruption.js').RoleHostInterruptionResume
   |import('../compiler/role-quota-continuation.js').RoleQuotaResume
+  |import('../compiler/role-source-audit-revalidation.js').ExhaustedMigratedSourceAuditResume
   |{policy:'compile-audit-quota'; preview: import('../compiler/role-automatic-resume.js').AutomaticRoleResume};
 
 /** One host-selected continuation after a diagnosed aggregate call stop. The
@@ -31,6 +32,10 @@ export async function inspectStoppedRoleSession(store:RoleReviewWorkStore,input:
   if(input.policy==='quota-refusal'){
     const {inspectQuotaRoleSession}=await import('../compiler/role-quota-continuation.js');
     return inspectQuotaRoleSession(store,input);
+  }
+  if(input.policy==='migrated-audit-invocation'){
+    const {inspectClaimedExhaustedMigratedSourceAudit}=await import('../compiler/role-source-audit-revalidation.js');
+    return inspectClaimedExhaustedMigratedSourceAudit(store,input);
   }
   if(input.policy==='host-interruption'){
     const {inspectInterruptedRoleSession}=await import('../compiler/role-host-interruption.js');
@@ -126,7 +131,7 @@ export async function runWithRoleContextRecovery(store:RoleReviewWorkStore,work:
   const sourceRepair=/^role-audit-(?:repair|check)-/.test(work.workId)
     ?sourceAuditAuthorities(store).find(a=>sourceAuditRepairWorkId(a.revisionId)===work.workId||sourceAuditCheckWorkId(a.revisionId)===work.workId):undefined;
   if(contract&&resume)throw roleWorkStop('contract revalidation cannot combine with old-task continuation authority');
-  const sessionLimit=resume?.policy==='quota-refusal'?2:sourceRepair?(inherited?.contextSessions??0)+1:contract?(inherited?.contextSessions??0)+contract.maxNewSessions:ROLE_CONTEXT_MAX_SESSIONS;
+  const sessionLimit=resume?.policy==='quota-refusal'?2:resume?.policy==='migrated-audit-invocation'?(inherited?.contextSessions??0)+1:sourceRepair?(inherited?.contextSessions??0)+1:contract?(inherited?.contextSessions??0)+contract.maxNewSessions:ROLE_CONTEXT_MAX_SESSIONS;
   if(inherited?.nativeContextFallback)throw roleWorkStop('inherited native context fallback already consumed; preserve it for explicit host review');
   const legacy=path.join(base,'native-context-fallbacks',store.planHash,`${contentHash(work.workId)}.json`);
   try{await fs.access(legacy);throw roleWorkStop('legacy native context fallback already consumed; preserve it for explicit host review');}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
@@ -149,8 +154,8 @@ export async function runWithRoleContextRecovery(store:RoleReviewWorkStore,work:
     const context=new RoleSessionContext(work,fresh);
     try{
       const invocation=context.invocation(fresh,ordinal,recoveryInfo);
-      if(contract||sourceRepair||resume?.policy==='quota-refusal')invocation.tools=invocation.tools.filter(t=>t.name!=='request_role_session_rebuild');
-      if(resume?.policy==='quota-refusal')invocation.tools=invocation.tools.filter(t=>t.name!=='request_role_work_evidence');
+      if(contract||sourceRepair||resume?.policy==='quota-refusal'||resume?.policy==='migrated-audit-invocation'||resume?.policy==='compile-audit-quota')invocation.tools=invocation.tools.filter(t=>t.name!=='request_role_session_rebuild');
+      if(resume?.policy==='quota-refusal'||resume?.policy==='migrated-audit-invocation'||resume?.policy==='compile-audit-quota')invocation.tools=invocation.tools.filter(t=>t.name!=='request_role_work_evidence');
       await run({...invocation,retainedBudgetRequired:ordinal>0||work.retainedBudgetRequired});
       if(work.complete()||!context.rebuildReason)return;
       recoveryInfo={reason:context.rebuildReason,refactor:context.refactor,nativeRecovery:context.events};

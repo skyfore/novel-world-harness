@@ -4,6 +4,7 @@ import {describeRequest} from "../agent/request-observation.js";
 import {roleProgressTools} from "./role-validated-progress.js";
 import {roleAuditIssues, roleAuditSubmissionSchema, RoleAuditPreflightError} from "../compiler/role-audit-preflight.js";
 import { RoleContextWindow, RoleContextPressure, RoleContextCheckpoint } from "../compiler/role-context-window.js";
+import { ModelRequestBudget } from "../runtime/model-request-budget.js";
 import { sourceNotesCorrection, assertSourceNotesCorrection } from "../compiler/role-source-correction.js";
 import { RoleEvidenceDelivery } from "../compiler/role-evidence-delivery.js";
 import { roleSourceParts } from "../compiler/role-source-parts.js";
@@ -37,9 +38,9 @@ import { assertRoleClaimContinuationHistory, readRoleClaimContinuation } from ".
 import { repairRoleSourceAudit } from "./role-source-audit-repair.js";
 import { sourceAuditAuthorities } from "../compiler/role-source-audit-repair.js";
 import { sourceAuditBlocked } from "../compiler/role-source-audit-model.js";
-import { inspectAutomaticRoleResume, claimAutomaticRoleResume, type AutomaticRoleResume } from "../compiler/role-automatic-resume.js";
+import { assertAutomaticRoleProgressHistory, inspectAutomaticRoleResume, claimAutomaticRoleResume, type AutomaticRoleResume } from "../compiler/role-automatic-resume.js";
 
-export type RoleWorkInvocation = { workId: string; prompt: string; deliveredUnitIds?: string[]; retainedBudgetRequired?: boolean; contextWindow?: RoleContextWindow; logicalTaskHash?:string; sessionOrdinal?:number; recoveryReason?:string; onContextEvent?: (event:AgentSessionEvent)=>void; onContextInvalidated?:()=>void; onContextRestored?:()=>void; sourcePage?:number; tools: ToolDefinition[]; complete: () => boolean; revalidateDraft?: () => {inputHash:string;valid:boolean} | undefined };
+export type RoleWorkInvocation = { workId: string; prompt: string; deliveredUnitIds?: string[]; retainedBudgetRequired?: boolean; hardModelCallLimit?: number; contextWindow?: RoleContextWindow; logicalTaskHash?:string; sessionOrdinal?:number; recoveryReason?:string; onContextEvent?: (event:AgentSessionEvent)=>void; onContextInvalidated?:()=>void; onContextRestored?:()=>void; sourcePage?:number; tools: ToolDefinition[]; complete: () => boolean; revalidateDraft?: () => {inputHash:string;valid:boolean} | undefined };
 export type RoleWorkRunner = (work: RoleWorkInvocation) => Promise<void>;
 export type BoundedRoleReviewOptions = CompileCommandOptions & {
   sourceId: string;
@@ -90,8 +91,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   const units = baseStructuralUnits(structure).sort((a, b) => a.anchor.startByte - b.anchor.startByte);
   const { CompilerProposalObligations } = await import("../compiler/proposal-obligations.js");
   const journal = new CompilerProposalObligations(root, sourceId, batchId);
-  journal.assertModelRecoveryAllowed();
-  if (journal.unresolved().length && !options.sourceNotesRecovery && !options.sourceIntegrationCorrection && !options.sourcePartCitationCorrection) throw roleWorkStop("original journal has unresolved proposals");
+  const initiallyUnresolved = journal.unresolved();
   const existing = (await RoleReviewWorkStore.plans(root, sourceId)).find(plan => plan.batchId === batchId);
   const store = await RoleReviewWorkStore.open(root, existing ?? {
     version: 1, sourceId, sourceHash: roster.sourceSha256, subjectHash: roster.subjectHash,
@@ -100,6 +100,28 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
     legacyDraftHashes: journal.latestAttempts("propose_role_roster_entry").filter(x => x.status === "succeeded").map(x => contentHash(x)).sort(),
   });
   store.assertScope(roster, contentHash(structure), bytes.length);
+  journal.assertModelRecoveryAllowed();
+  let preflightAutomaticCorrection: AutomaticRoleResume | undefined;
+  if (initiallyUnresolved.length && !options.sourceNotesRecovery && !options.sourceIntegrationCorrection && !options.sourcePartCitationCorrection) {
+    if (!options.automaticRecovery) throw roleWorkStop("original journal has unresolved proposals");
+    const page = store.plan.spans.findIndex((_, index) => !store.read("audit", index));
+    if (page >= 0 && store.plan.migration && store.inheritedAllowance(store.workId("audit", page))?.attempts === 2) {
+      const { assertNoClaimedExhaustedMigratedSourceAudit } = await import('../compiler/role-source-audit-revalidation.js');
+      await assertNoClaimedExhaustedMigratedSourceAudit(store);
+    }
+    const preview = page >= 0 ? await inspectAutomaticRoleResume(store, page) : undefined;
+    if (!preview || ![
+      "compile-audit-correction-v1",
+      "compile-audit-host-tool-repair-v1",
+      "compile-audit-narrow-schema-repair-v1",
+    ].includes(preview.authority.policy)) {
+      throw roleWorkStop("original journal has unresolved proposals outside one exact automatic audit correction");
+    }
+    preflightAutomaticCorrection = preview;
+  }
+  await assertAutomaticRoleProgressHistory(store, preflightAutomaticCorrection
+    && ["compile-audit-host-tool-repair-v1", "compile-audit-narrow-schema-repair-v1"].includes(preflightAutomaticCorrection.authority.policy)
+    ? preflightAutomaticCorrection.authority.workId : undefined);
   await assertRoleClaimContinuationHistory(store, options.claimAuditContinuation?.authorityHash);
   const ledger = new RequirementLedger(root, sourceId);
   let judgmentRepairPolicy = await ledger.roleJudgmentRepairPolicy(store.planHash);
@@ -260,7 +282,15 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
   const delivery = new RoleEvidenceDelivery(bytes,units);
   const auditDraftChecks = new Map<number, () => {inputHash:string;valid:boolean}>();
   const automaticResumptions = new Map<string, AutomaticRoleResume>();
+  const migratedAuditResumptions = new Map<string, import('../compiler/role-source-audit-revalidation.js').ExhaustedMigratedSourceAuditResume>();
   const runSession: RoleWorkRunner = async work => {
+    if (work.hardModelCallLimit !== undefined && (!Number.isInteger(work.hardModelCallLimit)
+      || work.hardModelCallLimit < 1 || work.hardModelCallLimit > ROLE_WORK_LIMITS.maxModelCalls)) {
+      throw roleWorkStop("invalid hard call ceiling for exact audit recovery");
+    }
+    const hardCallBudget = work.hardModelCallLimit === undefined ? undefined : new ModelRequestBudget(
+      { ...ROLE_WORK_LIMITS, maxModelCalls: work.hardModelCallLimit }, undefined,
+      { modelCallsMode: "enforce", requestBytesMode: "observe", totalBytesMode: "observe" });
     const traceStore = new TraceStore(root);
     const recorder = await TraceRecorder.start(traceStore, { kind: "prepare", operationId: batchId, sourceId });
     const callsMode = options.sourceContextResume ? "enforce" : "progress";
@@ -283,7 +313,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
           await recorder.record('validation.completed',{phase:'role-request-observation',workId:work.workId,planHash:store.planHash,requestOrdinal,logicalTaskHash:work.logicalTaskHash??contentHash(work.prompt),sessionOrdinal:work.sessionOrdinal??0,recoveryReason:work.recoveryReason??null,requestKind:compactionActive?'compaction':'task',evidenceEpoch,lastTool,measurement:describeRequest(observation),budget:budget.snapshot()},recorder.rootContext,{blobRef});
         },
         systemPromptOverride: COMPILER_SYSTEM_PROMPT, systemPromptAppendix: protocol,
-        requestBudget: [...(work.contextWindow ? [work.contextWindow] : []), budget, ...(options.requestBudget ? (Array.isArray(options.requestBudget) ? options.requestBudget : [options.requestBudget]) : [])], onTool:(name,args)=>{lastTool=name;options.onModelToolCall?.(name,args);}, onToolResult: options.onModelToolResult,
+        requestBudget: [...(work.contextWindow ? [work.contextWindow] : []), ...(hardCallBudget ? [hardCallBudget] : []), budget, ...(options.requestBudget ? (Array.isArray(options.requestBudget) ? options.requestBudget : [options.requestBudget]) : [])], onTool:(name,args)=>{lastTool=name;options.onModelToolCall?.(name,args);}, onToolResult: options.onModelToolResult,
         onText: options.onModelText, onThinking: options.onModelThinking, onEvent: event=>{
           work.onContextEvent?.(event);
           if(event.type==='compaction_start'||event.type==='compaction_end'){
@@ -309,14 +339,40 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       if(work.contextWindow?.pressure && error instanceof Error && error.message.includes("ROLE_CONTEXT_REPACK_REQUIRED")) error=work.contextWindow.pressure;
       await recorder.record("validation.completed", {phase:"role-review-work-stopped",workId:work.workId,budget:budget.report(),compactions,context:work.contextWindow?.metrics(),repack:error instanceof RoleContextPressure});
       await recorder.finish("failed", {}, { code: "ROLE_REVIEW_WORK_FAILED", message: String(error), retryable: false }); throw error;
-    } finally { options.signal?.removeEventListener("abort", abort); budget.close(); await session?.dispose(); }
+    } finally { options.signal?.removeEventListener("abort", abort); hardCallBudget?.close(); budget.close(); await session?.dispose(); }
   };
   const {runWithRoleContextRecovery}=await import('./role-session-context.js');
   const runner:RoleWorkRunner=runOverride??(async work=>{
+    const automatic = automaticResumptions.get(work.workId);
+    const migratedAudit = migratedAuditResumptions.get(work.workId);
+    if (automatic?.authority.policy === "host-provider-resumption-v1") {
+      const { runRoleProviderResumption } = await import("./role-provider-resumption.js");
+      await runRoleProviderResumption(store, work, options, { ...automatic, authority: automatic.authority });
+      return;
+    }
+    if (automatic?.authority.policy === "compile-audit-narrow-schema-repair-v1") {
+      const { runRoleAuditNarrowRepair } = await import("./role-audit-narrow-repair.js");
+      await runRoleAuditNarrowRepair(store, work, options, { ...automatic, authority: automatic.authority });
+      return;
+    }
+    if (automatic?.authority.policy === "compile-audit-host-tool-repair-v1") {
+      const { runRoleAuditHostRepair } = await import("./role-audit-host-repair.js");
+      await runRoleAuditHostRepair(store, work, options, { ...automatic, authority: automatic.authority });
+      return;
+    }
+    if (automatic?.authority.policy === "compile-audit-no-progress-v1") {
+      const { runAutomaticRoleProgressContinuation } = await import("./role-audit-progress-continuation.js");
+      await runAutomaticRoleProgressContinuation(store, work, options, automatic);
+      return;
+    }
+    if (automatic?.authority.policy === "compile-audit-correction-v1") {
+      const { runAutomaticRoleCorrectionContinuation } = await import("./role-audit-correction-continuation.js");
+      await runAutomaticRoleCorrectionContinuation(store, work, options, automatic);
+      return;
+    }
     // Initialize a new task's counter before claiming its first context round.
     const retained=roleReviewBudget(root,store.planHash,store.budgetWorkId(work.workId),ROLE_WORK_LIMITS,work.retainedBudgetRequired,"progress",store.inheritedAllowance(work.workId)?.budget);retained.close();
-    const automatic = automaticResumptions.get(work.workId);
-    await runWithRoleContextRecovery(store,work,runSession,options.onProgress,automatic ? { policy: 'compile-audit-quota', preview: automatic } : sessionResume);
+    await runWithRoleContextRecovery(store,work,runSession,options.onProgress,migratedAudit ?? (automatic ? { policy: 'compile-audit-quota', preview: automatic } : sessionResume));
   });
   if (options.sourceIntegrationCorrection) {
     const { runIntegrationCorrection } = await import('./role-integration-correction.js');
@@ -354,15 +410,51 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
     if (work.complete()) { await resolveNeed(); return; }
     options.signal?.throwIfAborted(); journal.assertModelRecoveryAllowed();
     if (store.inheritedAllowance(work.workId)?.budget?.state.blocked) throw roleWorkStop(`inherited budget for ${work.workId} is blocked; preserve its failure and remaining attempts`);
-    const automatic = options.automaticRecovery && work.sourcePage !== undefined && work.workId === store.workId("audit", work.sourcePage)
-      ? await inspectAutomaticRoleResume(store, work.sourcePage) : undefined;
-    if (automatic) {
-      work = { ...work, prompt: automatic.originalPrompt };
-      automaticResumptions.set(work.workId, automatic);
-      options.onProgress?.(`Resuming quota-stopped audit ${work.sourcePage}; original task, draft, attempts and charged usage retained.`);
+    const inherited = store.inheritedAllowance(work.workId);
+    if (options.automaticRecovery && store.plan.migration && work.sourcePage !== undefined
+      && work.workId === store.workId("audit", work.sourcePage) && inherited?.attempts === 2) {
+      const { assertNoClaimedExhaustedMigratedSourceAudit } = await import('../compiler/role-source-audit-revalidation.js');
+      await assertNoClaimedExhaustedMigratedSourceAudit(store);
     }
-    const checkpoint = await RoleContextCheckpoint.open(root,store.planHash,work.workId,contentHash(work.prompt),store.inheritedAllowance(work.workId)?.contextHandoffs,options.claimAuditContinuation?.authorityHash);
-    const recoveryRun=await roleContextRecoveryTrace(root,store.planHash,work.workId);
+    const automatic = options.automaticRecovery && work.sourcePage !== undefined && work.workId === store.workId("audit", work.sourcePage)
+      ? preflightAutomaticCorrection?.authority.workId === work.workId
+        ? preflightAutomaticCorrection : await inspectAutomaticRoleResume(store, work.sourcePage) : undefined;
+    if (automatic) {
+      if (automatic.authority.policy === "host-provider-resumption-v1" && runOverride) {
+        throw roleWorkStop("provider resumption requires the original compiler runner, never a runner override");
+      }
+      const quota = automatic.authority.policy === "compile-audit-quota-v1" ? automatic.authority : undefined;
+      work = { ...work, prompt: automatic.originalPrompt, ...(quota ? {
+        retainedBudgetRequired: true, hardModelCallLimit: quota.maxAdditionalModelCalls,
+      } : {}) };
+      automaticResumptions.set(work.workId, automatic);
+      options.onProgress?.(automatic.authority.policy === "host-provider-resumption-v1"
+        ? `Resuming audit ${work.sourcePage} under explicit host authority; one session, ${automatic.authority.additionalCalls} remaining original calls, prior refusal retained.`
+        : automatic.authority.policy === "compile-audit-no-progress-v1"
+        ? `Continuing exact no-progress audit ${work.sourcePage}; predecessor stop, draft, obligations and cumulative usage retained.`
+        : automatic.authority.policy === "compile-audit-narrow-schema-repair-v1"
+          ? `Restoring an append-only audit schema for ${work.sourcePage}; the failed grant stays consumed and one original progress call remains.`
+        : automatic.authority.policy === "compile-audit-host-tool-repair-v1"
+          ? `Restoring host-failed reads for audit ${work.sourcePage}; original failed grant and cumulative ceiling retained.`
+        : automatic.authority.policy === "compile-audit-correction-v1"
+          ? `Continuing exact audit correction ${work.sourcePage}; failed input, final context, obligations and cumulative usage retained.`
+          : `Resuming quota-stopped audit ${work.sourcePage}; original task, draft, attempts and charged usage retained.`);
+    }
+    let migratedAudit: import('../compiler/role-source-audit-revalidation.js').ExhaustedMigratedSourceAuditPreview | undefined;
+    if (!automatic && options.automaticRecovery && store.plan.migration && work.sourcePage !== undefined
+      && work.workId === store.workId("audit", work.sourcePage) && inherited?.attempts === 2) {
+      if (runOverride) throw roleWorkStop("exhausted migrated-audit recovery is restricted to the ordinary compiler runner and cannot use an override");
+      const recoveryPrompt = `${work.prompt}\n\nHost recovery boundary: this is one current-subject revalidation after a terminally successful predecessor consumed both ordinary invocations before an authorized subject migration. The old audit remains history and is not a current verdict. Use only the current packet, original evidence and unchanged validators. One final inherited context and a hard retained call ceiling apply; no evidence supplement, context rebuild, new ID, semantic relaxation or receipt import is authorized.`;
+      const recovery = await import('../compiler/role-source-audit-revalidation.js');
+      migratedAudit = await recovery.inspectExhaustedMigratedSourceAudit(store, work.workId, contentHash(recoveryPrompt));
+      work = { ...work, prompt: recoveryPrompt, retainedBudgetRequired: true,
+        hardModelCallLimit: migratedAudit.authority.maxAdditionalModelCalls };
+      options.onProgress?.(`Revalidating exact migrated audit ${work.sourcePage} once; predecessor traces, both attempts, obligations and cumulative usage retained.`);
+    }
+    const providerResumption = automatic?.authority.policy === "host-provider-resumption-v1" ? automatic : undefined;
+    const checkpoint = await RoleContextCheckpoint.open(root,store.planHash,work.workId,contentHash(work.prompt),store.inheritedAllowance(work.workId)?.contextHandoffs,
+      providerResumption?.authorityHash ?? options.claimAuditContinuation?.authorityHash);
+    const recoveryRun=providerResumption ? undefined : await roleContextRecoveryTrace(root,store.planHash,work.workId);
     if(recoveryRun)await checkpoint.restoreNavigation(recoveryRun);
     if(options.partitionedSourceWorkIds?.includes(work.workId)) {
       if(work.sourcePage===undefined||need)throw roleWorkStop('partitioned review requires source work without a pending evidence supplement');
@@ -389,9 +481,15 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
       options.onRoleWorkCompleted?.(work.workId);
       return;
     }
-    const attempt = automatic ? await claimAutomaticRoleResume(store, automatic) : options.claimQuotaResume
-      ? await (await import('../compiler/role-quota-continuation.js')).claimReservedRoleQuotaAttempt(store, options.claimQuotaResume, contentHash(work.prompt))
-      : await store.beginAttempt(work.workId);
+    let attempt: number;
+    if (automatic) attempt = await claimAutomaticRoleResume(store, automatic);
+    else if (options.claimQuotaResume) attempt = await (await import('../compiler/role-quota-continuation.js')).claimReservedRoleQuotaAttempt(store, options.claimQuotaResume, contentHash(work.prompt));
+    else if (migratedAudit) {
+      const { claimExhaustedMigratedSourceAudit } = await import('../compiler/role-source-audit-revalidation.js');
+      const resume = await claimExhaustedMigratedSourceAudit(store, migratedAudit);
+      migratedAuditResumptions.set(work.workId, resume);
+      attempt = (store.inheritedAllowance(work.workId)?.attempts ?? 0) + 1;
+    } else attempt = await store.beginAttempt(work.workId);
     let sessions=0;
     for (let pass = 0; pass < 4; pass++) {
       const contextWindow = new RoleContextWindow();
@@ -451,7 +549,7 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
         return contextWindow.pressure && !work.complete() ? {...result,terminate:true} : result;
       }}));
       let prompt = supplement ? `${work.prompt.slice(0, work.prompt.lastIndexOf("\n"))}\n${JSON.stringify({...JSON.parse(work.prompt.split("\n").at(-1)!), evidenceNeed: need, supplement})}` : work.prompt;
-      if(checkpoint.generation) {
+      if(checkpoint.generation && !providerResumption) {
         const body=JSON.parse(prompt.split("\n").at(-1)!);
         const required=(work.deliveredUnitIds??[]).map(id=>units.find(u=>u.id===id)!).map(u=>({start:u.anchor.startByte,end:u.anchor.endByte}));
         if(work.sourcePage!==undefined)required.push({...store.plan.spans[work.sourcePage]!});
@@ -478,9 +576,10 @@ export async function runBoundedRoleReview(options: BoundedRoleReviewOptions, ru
         await runner({...work, prompt, contextWindow, onContextInvalidated:invalidate,onContextRestored:restore, retainedBudgetRequired: attempt > 1 || hadNeed || sessions>0, tools: [...tools, ...(!hadNeed ? [needTool] : [])], complete: () => work.complete() || Boolean(contextWindow.pressure) || (!hadNeed && Boolean(retainedNeed()))});
       } catch(error) {
         if(!(error instanceof RoleContextPressure)) throw error;
+        if (migratedAuditResumptions.has(work.workId)) throw roleWorkStop("migrated-audit recovery consumed its one context; preserve pressure diagnostics and do not repack or redispatch");
       }
       sessions++;
-      if ((options.claimAuditContinuation || options.claimQuotaResume) && !work.complete()) throw roleWorkStop('claim continuation consumed its single session without a receipt; preserve all charges and do not retry');
+      if ((options.claimAuditContinuation || options.claimQuotaResume || migratedAuditResumptions.has(work.workId)) && !work.complete()) throw roleWorkStop('single-use continuation consumed its session without a receipt; preserve all charges and do not retry');
       if (!work.complete() && store.auditContractAuthorities().some(a => `role-claim-contract-${a.revisionId}` === work.workId)) throw roleWorkStop("contract audit consumed its single session without a receipt; preserve charges and any evidence need, do not retry");
       if(contextWindow.pressure && !work.complete()) {
         if (journal.unresolved().length) throw roleWorkStop("unresolved proposal plus context pressure; inspect the original proposal failure and exact input before host recovery; context repack cannot erase a failed proposal");

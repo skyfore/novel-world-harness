@@ -2,6 +2,50 @@
 
 ## Full-command engineering supervisor
 
+Compiler hooks must not queue their originating user conversation. The dedicated
+engineering registry uses `purpose: nwh-rebuild-review`, exact workspace/source,
+model/effort, UUID, creation time and last-use time. Resume that exact UUID until
+its creation age is strictly greater than 72 hours; retain the old registry on
+rotation. A failed resume is never a reason to create another session.
+`COMPILE_LOOP_DEDICATED_SESSION_REQUIRED` means preserve the passive observation
+and hand the settled incident to its owning supervisor. Do not retry the queue,
+use a current-chat monitor, or launch while the worker/lock is still active.
+
+An authorized prerequisite attached to a stopped compiler can use
+`runPrerequisiteLoop` without reopening the parent's exhausted incident. Its
+single-use handoff binds the original task, stop, immutable files and inherited
+counters. The registered Codex engineer fixes source, a distinct read-only Codex
+session reviews the patch, and fixed host tests run before the exact domain
+recovery preflight. Only a successful preflight can launch the Pi worker. A
+consumed worker recovery is never repeated automatically; all new and old failure
+files and cumulative domain charges remain binding. Engineering limits do not
+grant extra model calls, bytes, semantic attempts or writes. Prerequisite DONE
+still requires receipt verification and never means global certification.
+
+Both the full command and prerequisite supervisor use the same canonical
+`run-records/longzu-rebuild-loop/reviewer-session.json` and exclusive owner locks.
+Codex agent tools use an explicit native permission profile with entire task trees,
+registry and owner locks read-only. Do not wrap the trusted Codex exec transport
+in an additional mount sandbox: its command service fails under that nesting.
+Host tests and workers use read-only mounts with mount-administration capabilities
+dropped. Type checks and tests additionally receive a read-only root filesystem
+with only a per-command scratch directory writable; they cannot add new task
+records. Worker writes remain subject to the separately reviewed domain authority.
+Real `command/exec` regressions must verify source edits plus rejected history
+overwrites, deletions and additions; a standalone shell probe is insufficient. Checks after exit remain
+a second guard. A newer private session field cannot replace the canonical registry
+or renew its creation timestamp. Original consumer proofs and the ordered budget
+inventory are verified, including each stage's scope and cumulative charges.
+The fixed incident's observed provider requests and payload bytes independently
+anchor the failed stage charge; repinning its budget/request cannot lower usage.
+Prerequisite handoffs use paths derived from the original source/task; changing a
+directory or lock cannot create another attempt. The parent BREAK, authorization,
+stopped stage and cumulative budget must agree with all frozen original files.
+Inspect/verify execute under a network-disabled, read-only `bwrap` mount, with
+only their output directory writable. Missing sandbox/implementation, a nonexact
+JSON result, altered history or consumed start keeps BREAK; do not retry under
+another directory, session or budget.
+
 The full `compile-novel` CLI starts an outer supervisor by default. Hooks only
 record observations; a settled worker failure is handed to a dedicated engineering
 session after the compiler releases its lock. An independent read-only review and

@@ -1,7 +1,4 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-const execute = promisify(execFile);
 
 /** A hard account quota is different from transient per-minute throttling. */
 export function isCompilerUsageLimit(message: string): boolean {
@@ -29,11 +26,12 @@ export function nextCompilerReset(now: Date, anchor: Date): Date {
   const windows = Math.max(0, Math.floor((now.getTime() - anchor.getTime()) / period) + 1);
   return new Date(anchor.getTime() + windows * period);
 }
-/** argv-only transport to the exact existing Codex task. No resume --last or new task. */
-export async function queueCodexCompileCallback(threadId: string, message: string): Promise<string> {
-  if (!/^[a-f0-9-]{36}$/i.test(threadId)) throw new Error("An exact Codex task UUID is required.");
-  const result = await execute("/root/.local/bin/codex", ["queue", "--thread", threadId, "--message", message], { timeout: 20_000, maxBuffer: 128_000 });
-  return result.stdout.trim();
+/** Kept as an explicit stop for retained external hooks. Compiler observations
+ * belong to the serialized supervisor, never an originating-chat wakeup. */
+export async function queueCodexCompileCallback(_threadId: string, _message: string): Promise<string> {
+  throw new Error("COMPILE_LOOP_DEDICATED_SESSION_REQUIRED: Preserve the passive hook observation. "
+    + "Hand the settled incident to the owning supervisor and its registered nwh-rebuild-review UUID; "
+    + "do not queue the originating chat, create a replacement task, or restart an active worker.");
 }
 
 export type CompilerFailureCause = {

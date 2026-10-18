@@ -10,6 +10,8 @@ import { runLoopChild, type ChildOutcome } from "./process.js";
 import type { WorkerRequest, WorkerResult } from "./worker.js";
 import type { inspectNovelCompilation } from "../../commands/compile-novel.js";
 import { compilerFailureFingerprint } from "../codex-compile-loop.js";
+import { dedicatedSessionSchema, dedicatedSessionMode, dedicatedSessionArgs, acceptDedicatedSession,
+  dedicatedRegistryPath, captureRecordTree, fileHash, type DedicatedSession } from "./dedicated-session.js";
 
 type Snapshot = Awaited<ReturnType<typeof inspectNovelCompilation>> & { supervisionTrace?: { workId?: string; planHash?: string } | null };
 export const succeeded = (r: ChildOutcome) => r.code === 0 && !r.error && !r.signal && !r.timedOut && !r.cancelled;
@@ -28,6 +30,10 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
   const report = options.onProgress ?? console.log;
   let state: CompileLoopState | undefined;
   let hostPatchHash: string | undefined;
+  const registryFile = dedicatedRegistryPath(root), registryLock = path.join(path.dirname(registryFile), "supervisor.lock");
+  let registryLocked = false, registryHash: string | undefined;
+  let engineeringSession: DedicatedSession | null = null;
+  const engineeringScope = { workspace: root, sourceId: request.sourceId, model: options.engineerModel, effort: "max" as const };
   const persist = () => { state!.updatedAt = new Date().toISOString(); save(stateFile, state); };
   const phase = (value: CompileLoopState["phase"], reason: string) => { state!.phase = value; state!.reason = reason; persist(); report(`Compilation loop: ${value}: ${reason}`); };
   const requestFile = path.join(directory, "request.json");
@@ -35,6 +41,8 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
   const nodeArgs = existsSync(sourceEntry) ? ["--import", "tsx", sourceEntry] : [fileURLToPath(new URL("./worker.js", import.meta.url))];
   const policy = { version: 1, request, engineerModel: options.engineerModel, effort: "max", sourceHash: options.sourceHash, limits, protectedPaths, fixedTests };
   try {
+    mkdirSync(path.dirname(registryFile), { recursive: true });
+    writeFileSync(registryLock, JSON.stringify({ token, pid: process.pid, sourceId: request.sourceId }), { flag: "wx", mode: 0o600 }); registryLocked = true;
     if (existsSync(stateFile)) {
       state = loopStateSchema.parse(read(stateFile));
       if (state.policyHash !== digest(policy)) throw new Error("COMPILE_LOOP_POLICY_CHANGED: inspect the saved policy and original source before revising it; no reset or unchanged retry.");
@@ -63,15 +71,38 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
       }
       save(path.join(directory, "policy.json"), policy); save(requestFile, request); persist();
     }
+    if (existsSync(registryFile)) {
+      engineeringSession = dedicatedSessionSchema.parse(read(registryFile)); dedicatedSessionMode(engineeringSession, engineeringScope, Date.now());
+    }
+    // A private legacy field is not authority to replace or rejuvenate the
+    // canonical registry. Import it only when no canonical registry exists.
+    if (state.engineerSession && !engineeringSession) {
+      engineeringSession = { version: 1, purpose: "nwh-rebuild-review", ...engineeringScope, threadId: state.engineerSession.id,
+        createdAt: new Date(state.engineerSession.createdAt).toISOString(), lastUsedAt: new Date().toISOString() };
+      save(registryFile, engineeringSession);
+    }
+    registryHash = existsSync(registryFile) ? fileHash(registryFile) : undefined;
     const command = async (executable: string, args: string[], label: string, timeoutMs: number, stdin?: string, onLine?: (line: string) => void) => {
       signal.throwIfAborted();
       if (state!.legacy && digest(readFileSync(state!.legacy.file, "utf8")) !== state!.legacy.hash) throw new Error("COMPILE_LOOP_HISTORY_CHANGED: preserve both records for host review.");
       const prefix = path.join(directory, `${String(++state!.commands).padStart(5, "0")}-${label}`); persist();
+      const readOnlyRootDirectory = ["types", "tests"].includes(label) ? prefix + ".sandbox" : undefined;
+      if (readOnlyRootDirectory) mkdirSync(readOnlyRootDirectory);
       const sealed = captureWorkspace(directory);
+      const recordsDirectory = path.join(root, "run-records"), recordsBefore = captureRecordTree(recordsDirectory), registryKey = path.relative(recordsDirectory, registryFile);
+      if (recordsBefore[registryKey] !== registryHash) throw new Error("COMPILE_LOOP_REGISTRY_CHANGED: inspect the registered dedicated session before dispatch.");
       const outcome = await (options.runner ?? runLoopChild)({ command: executable, args, cwd: root, prefix, signal, timeoutMs, stdin, onLine,
+        immutablePaths: [recordsDirectory, lock, ...Object.keys(sealed).map(f => path.join(directory, f)), ...(state!.legacy ? [state!.legacy.file] : [])],
+        ...(executable === "codex" ? { codexFilePolicy: label === "repair" ? "workspace-write" as const : "read-only" as const } : {}),
+        ...(executable === "codex" ? { immutablePaths: [recordsDirectory, directory, lock, ...(state!.legacy ? [state!.legacy.file] : [])] } : {}),
+        ...(readOnlyRootDirectory ? { readOnlyRootDirectory } : {}),
         onSpawn(pid) { state!.childPid = pid; persist(); sealed["state.json"] = captureWorkspace(directory)["state.json"]!; } });
       const after = captureWorkspace(directory);
       if (Object.keys(sealed).some(file => sealed[file] !== after[file])) throw new Error("COMPILE_LOOP_AUDIT_CHANGED: retain the original child and records; no redispatch.");
+      const recordsAfter = captureRecordTree(recordsDirectory);
+      if (recordsAfter[registryKey] !== registryHash) throw new Error("COMPILE_LOOP_REGISTRY_CHANGED: engineering changed the canonical registry.");
+      delete recordsBefore[registryKey]; delete recordsAfter[registryKey];
+      if (changes(recordsBefore, recordsAfter).length) throw new Error("COMPILE_LOOP_HISTORY_CHANGED: engineering changed protected run history.");
       state!.childPid = null; persist(); signal.throwIfAborted();
       if (outcome.cancelled || outcome.timedOut || outcome.signal || outcome.error) throw new Error(`COMPILE_LOOP_CHILD_STOP: ${JSON.stringify(outcome)}; inspect ${prefix}; no unchanged retry.`);
       return outcome;
@@ -111,21 +142,24 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
           auditDirectory: directory, workerRequest: request, inheritedHistory: state!.legacy }),
       ].join("\n");
       save(`${output}.prompt.json`, { prompt });
-      const retained = mode === "repair" ? state!.engineerSession : null;
-      const resume = retained && Date.now() - retained.createdAt < 72 * 60 * 60_000;
-      const args = ["exec", ...(resume ? ["resume"] : ["--cd", root]), "--model", options.engineerModel,
-        "-c", 'model_reasoning_effort="max"', "-c", `sandbox_mode="${mode === "repair" ? "workspace-write" : "read-only"}"`,
-        "-c", 'approval_policy="never"', "--json", "--output-schema", schemaFile, "--output-last-message", output,
-        ...(resume ? [retained.id] : []), "-"];
+      const retained = mode === "repair" ? engineeringSession : null;
+      const dispatchAt = Date.now(), sessionMode = dedicatedSessionMode(retained, engineeringScope, dispatchAt);
+      const args = dedicatedSessionArgs(engineeringScope, retained, dispatchAt, schemaFile, output, mode === "review");
       let thread: string | undefined;
       const result = await command("codex", args, mode, limits.engineeringMs, prompt, line => {
         let event: { type?: string; thread_id?: string }; try { event = JSON.parse(line); } catch { return; }
         if (event.type !== "thread.started") return;
         const next = z.string().uuid().parse(event.thread_id);
-        if ((thread && thread !== next) || (resume && next !== retained.id)) throw new Error("COMPILE_LOOP_REVIEW_ID_CHANGED: retain the original session and stop.");
+        if ((thread && thread !== next) || (mode === "review" && next === engineeringSession?.threadId)) throw new Error("COMPILE_LOOP_REVIEW_ID_CHANGED: retain the original session and stop.");
+        if (thread) return;
         thread = next;
+        if (mode === "repair") {
+          const accepted = acceptDedicatedSession(engineeringScope, retained, next, dispatchAt);
+          if (sessionMode === "rotate" && retained) save(path.join(directory, `reviewer-session-${retained.threadId}.json`), retained);
+          engineeringSession = accepted; save(registryFile, accepted); registryHash = fileHash(registryFile);
+        }
       });
-      if (mode === "repair" && thread) { state!.engineerSession = { id: thread, createdAt: resume ? retained.createdAt : Date.now() }; persist(); }
+      if (mode === "repair" && thread && engineeringSession) { state!.engineerSession = { id: thread, createdAt: Date.parse(engineeringSession.createdAt) }; persist(); }
       if (!succeeded(result) || !thread) throw new Error(`COMPILE_LOOP_${mode.toUpperCase()}_FAILED: inspect the ${mode} logs; no model fallback, new session or unchanged retry.`);
       return schema.parse(read(output));
     };
@@ -173,7 +207,7 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
         let checkFailed = false;
         for (const [label, args] of [
           ["types", ["node_modules/typescript/bin/tsc", "-p", "tsconfig.json", "--noEmit"]],
-          ["tests", ["node_modules/vitest/vitest.mjs", "run", ...new Set([...fixedTests, ...regressions])]],
+          ["tests", ["node_modules/vitest/vitest.mjs", "run", "--no-cache", "--configLoader", "runner", ...new Set([...fixedTests, ...regressions])]],
         ] as const) {
           if (!succeeded(await command(process.execPath, [...args], label, limits.checkMs))) { checkFailed = true; break; }
         }
@@ -207,6 +241,7 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
     if (!state) throw error;
     phase("BREAK", String(error)); return state;
   } finally {
+    if (registryLocked && read<{ token: string }>(registryLock).token === token) unlinkSync(registryLock);
     if (read<{ token: string }>(lock).token === token) unlinkSync(lock);
   }
 }

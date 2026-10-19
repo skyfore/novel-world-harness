@@ -36,7 +36,9 @@ async function fixture() {
       compilation: [{ run: { history: [{ phase: "roles", status: "blocked", error: "exact host fault" }] } }],
       supervisionTrace: { planHash: "original-plan", workId: "audit-57" } }));
     if (label === "worker") {
-      await fs.writeFile(output, JSON.stringify({ status: repairedByHost ? "succeeded" : "failed", error: "exact host fault" }));
+      await fs.writeFile(output, JSON.stringify(repairedByHost ? { status: "succeeded", delivery: {
+        runId: "original-run", completed: true, candidateBundleHash: "b".repeat(64), branchId: "original-branch" } }
+        : { status: "failed", error: "exact host fault" }));
       return { ...ok, code: repairedByHost ? 0 : 1 };
     }
     if (label === "delivery") await fs.writeFile(input.args.at(-2)!, JSON.stringify({ verified: true, reason: "independent delivery" }));

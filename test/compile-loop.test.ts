@@ -87,8 +87,9 @@ it("repeated failure retains its identity and exhausted engineering allowance ac
   const f = await fixture({ repeatFailure: true }); const state = await runCompileLoop(f.input);
   expect(state.phase).toBe("BREAK"); expect(state.reason).toContain("COMPILE_LOOP_NO_PROGRESS");
   expect(state.repairs).toBe(2); expect(state.workers).toBe(2);
-  const calls = f.labels.length, again = await runCompileLoop(f.input);
-  expect(f.labels).toHaveLength(calls); expect(again.repairs).toBe(2); expect(again.workers).toBe(2);
+  const calls = f.labels.length, before = await fs.readFile(path.join(f.directory, "state.json"), "utf8");
+  await expect(runCompileLoop(f.input)).rejects.toThrow("COMPILE_LOOP_RETAINED_STOP");
+  expect(f.labels).toHaveLength(calls); expect(await fs.readFile(path.join(f.directory, "state.json"), "utf8")).toBe(before);
   const stateHash = inspectCompileLoop(f.root, "source-1")!.stateHash;
   const reviewed = await runCompileLoop({ ...f.input, resumeStateHash: stateHash, resolution: "Host reviewed the original failure; counters remain binding." });
   expect(reviewed.reason).toContain("COMPILE_LOOP_NO_PROGRESS"); expect(reviewed.repairs).toBe(2);

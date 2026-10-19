@@ -9,7 +9,7 @@ import type { PrerequisiteLoopSpec } from "./prerequisite-supervisor.js";
 
 export function prerequisiteHandoffPaths(root: string, sourceId: string, taskId: string) {
   const parent = compileLoopDirectory(root, sourceId), identity = path.join(parent, "prerequisites", taskId, "identity-requirements");
-  const registry = dedicatedRegistryPath(root);
+  const registry = dedicatedRegistryPath(root, sourceId);
   return { parent, identity, directory: path.join(identity, "consumer-review/engineering"), registry,
     locks: [path.join(path.dirname(parent), "supervisor.lock"), path.join(path.dirname(registry), "supervisor.lock")] };
 }

@@ -6,11 +6,11 @@ import { withCompilerSignals } from "../../util/compiler-signals.js";
 import { RuntimeHooks, withRuntimeHooks } from "../hooks.js";
 import { redactTraceSecrets } from "../../trace/redaction.js";
 import { read, save } from "./state.js";
-import { verifyNovelDelivery, type NovelDelivery } from "./delivery.js";
+import { verifyNovelDelivery, workerResultSchema, type WorkerResult } from "./delivery.js";
 import { TraceStore } from "../../trace/store.js";
 
 export type WorkerRequest = Omit<CompileNovelOptions, "signal" | "onProgress"> & { sourceId: string };
-export type WorkerResult = { status: "succeeded" | "failed"; error?: string; delivery?: NovelDelivery };
+export type { WorkerResult } from "./delivery.js";
 
 /** A separate executable prevents a verified source repair from using stale ESM modules. */
 export async function compileLoopWorker(operation: string, requestFile: string, output: string, resultFile?: string) {
@@ -23,8 +23,8 @@ export async function compileLoopWorker(operation: string, requestFile: string, 
       workId: work?.data?.workId, planHash: work?.data?.planHash } : null }); return;
   }
   if (operation === "verify") {
-    const result = read<WorkerResult>(resultFile!);
-    save(output, result.delivery ? await verifyNovelDelivery(request.root, request.sourceId, result.delivery)
+    const result = workerResultSchema.parse(read(resultFile!));
+    save(output, result.status === "succeeded" ? await verifyNovelDelivery(request.root, request.sourceId, result.delivery)
       : { verified: false, reason: "Worker supplied no full delivery" });
     return;
   }
@@ -45,8 +45,8 @@ export async function compileLoopWorker(operation: string, requestFile: string, 
       const run = await withRuntimeHooks(hooks, () => compileNovelCommand({ ...request, signal: workerSignal }));
       if (auditError) throw auditError;
       if (!run?.completed) throw new Error("The full compiler did not complete all delivery phases");
-      save(output, { status: "succeeded", delivery: { runId: run.id, candidateBundleHash: run.bundleHash,
-        branchId: run.branchId, completed: run.completed } } satisfies WorkerResult);
+      save(output, workerResultSchema.parse({ status: "succeeded", delivery: { runId: run.id, candidateBundleHash: run.bundleHash,
+        branchId: run.branchId, completed: run.completed } }));
     } catch (error) {
       save(output, { status: "failed", error: String(error) } satisfies WorkerResult);
       throw error;

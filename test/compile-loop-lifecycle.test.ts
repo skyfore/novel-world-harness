@@ -1,0 +1,164 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, expect, it, vi } from "vitest";
+import { runCompileLoop } from "../src/runtime/compile-loop/supervisor.js";
+import { compileLoopDirectory, inspectCompileLoop } from "../src/runtime/compile-loop/state.js";
+import type { runLoopChild } from "../src/runtime/compile-loop/process.js";
+import { dedicatedRegistryPath } from "../src/runtime/compile-loop/dedicated-session.js";
+
+const directories: string[] = [];
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await Promise.all(directories.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
+});
+const ok = { code: 0, signal: null, error: null, timedOut: false, cancelled: false };
+const engineerId = "00000000-0000-4000-8000-000000000001";
+const reviewerId = "00000000-0000-4000-8000-000000000002";
+
+async function fixture() {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-loop-lifecycle-")); directories.push(base);
+  const root = path.join(base, "checkout"); vi.stubEnv("NWH_HOME", path.join(base, "state"));
+  for (const dir of ["src/runtime/compile-loop", "test", "node_modules/typescript/bin"]) {
+    await fs.mkdir(path.join(root, dir), { recursive: true });
+  }
+  for (const file of ["src/runtime/compile-loop/worker.ts", "node_modules/typescript/bin/tsc", "src/example.ts"]) {
+    await fs.writeFile(path.join(root, file), "");
+  }
+  const labels: string[] = [], completed = new Set<string>(), blocked = new Set<string>();
+  let verification: unknown = { verified: true, reason: "Current certificate and revision binding verified" };
+  const input = (sourceId = "source-a") => {
+    const runner: typeof runLoopChild = async command => {
+      const label = path.basename(command.prefix).replace(/^\d+-/, ""); labels.push(label);
+      command.onSpawn?.(12345);
+      if (label === "inspect") {
+        await fs.writeFile(command.args.at(-1)!, JSON.stringify({ compilerLock: { present: false },
+          sources: [{ sourceId, sourceSha256: "a".repeat(64), sourceIntegrity: "verified" }],
+          compilation: [{ run: completed.has(sourceId) ? { completed: true, history: [{ phase: "deliver", status: "completed" }] }
+            : blocked.has(sourceId) ? { completed: false, history: [{ phase: "roles", status: "blocked", error: "source defect" }] } : null }] }));
+      } else if (command.command === "codex") {
+        command.onLine?.(JSON.stringify({ type: "thread.started", thread_id: label === "repair" ? engineerId : reviewerId }));
+        const output = command.args[command.args.indexOf("--output-last-message") + 1]!;
+        if (label === "repair") {
+          await fs.appendFile(path.join(root, "src/example.ts"), "source fix\n");
+          await fs.writeFile(path.join(root, "test/regression.test.ts"), "regression");
+          await fs.writeFile(output, JSON.stringify({ action: "repair", reason: "source defect fixed",
+            whyRetryDiffers: "validated implementation correction", evidence: ["original trace"] }));
+        } else await fs.writeFile(output, JSON.stringify({ architecturePreserved: true, checksPreserved: true,
+          addressesFailure: true, reason: "independent review" }));
+      } else if (label === "worker") {
+        completed.add(sourceId);
+        await fs.writeFile(command.args.at(-1)!, JSON.stringify({ status: "succeeded", delivery: {
+          runId: `run-${sourceId}`, completed: true, candidateBundleHash: "b".repeat(64), branchId: `branch-${sourceId}` } }));
+      } else if (label === "delivery") await fs.writeFile(command.args.at(-2)!, JSON.stringify(verification));
+      return ok;
+    };
+    return { request: { root, sourceId }, sourceHash: "a".repeat(64), engineerModel: "test-model",
+      signal: new AbortController().signal, onProgress() {}, runner };
+  };
+  return { root, input, labels, blocked, setVerification(value: unknown) { verification = value; },
+    stateFile: (sourceId = "source-a") => path.join(compileLoopDirectory(root, sourceId), "state.json") };
+}
+
+it("revalidates a completed delivery without reopening compilation or spending another worker", async () => {
+  const f = await fixture(), first = await runCompileLoop(f.input()), start = f.labels.length;
+  expect(first.phase).toBe("DONE");
+  const again = await runCompileLoop(f.input());
+  expect(again.phase).toBe("DONE"); expect(again.workers).toBe(first.workers);
+  expect(again.repairs).toBe(first.repairs); expect(again.failures).toEqual(first.failures);
+  expect(f.labels.slice(start)).toEqual(["inspect", "delivery"]);
+});
+
+it("a stale completed delivery remains verification-only even after an exact host resume", async () => {
+  const f = await fixture(), first = await runCompileLoop(f.input()), start = f.labels.length;
+  f.setVerification({ verified: false, reason: "Candidate inputs changed after certification" });
+  const stopped = await runCompileLoop(f.input());
+  expect(stopped.phase).toBe("BREAK"); expect(stopped.workers).toBe(first.workers);
+  f.setVerification({ verified: true, reason: "Original certified inputs restored" });
+  const resumed = await runCompileLoop({ ...f.input(), resumeStateHash: inspectCompileLoop(f.root, "source-a")!.stateHash,
+    resolution: "Restored the original certified inputs; reverify the retained delivery." });
+  expect(resumed.phase).toBe("DONE"); expect(resumed.workers).toBe(first.workers);
+  expect(f.labels.slice(start)).not.toContain("worker"); expect(f.labels.slice(start)).not.toContain("repair");
+});
+
+it("adopts a legacy DONE record by verifying its original result without reopening work", async () => {
+  const f = await fixture(), first = await runCompileLoop(f.input()), start = f.labels.length;
+  const { delivery: _delivery, ...legacy } = first;
+  await fs.writeFile(f.stateFile(), JSON.stringify(legacy));
+  const again = await runCompileLoop(f.input());
+  expect(again.phase).toBe("DONE"); expect(again.workers).toBe(first.workers);
+  expect(again.delivery).toMatchObject({ worker: first.workers, resultHash: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  expect(f.labels.slice(start)).toEqual(["inspect", "delivery"]);
+});
+
+it.each(["missing", "changed", "legacy-missing"])("a %s successful receipt cannot reopen compilation on a later resume", async kind => {
+  const f = await fixture(), first = await runCompileLoop(f.input()), start = f.labels.length;
+  const output = path.join(path.dirname(f.stateFile()), `worker-${first.workers}.json`);
+  if (kind === "legacy-missing") {
+    const { delivery: _delivery, ...legacy } = first;
+    await fs.writeFile(f.stateFile(), JSON.stringify(legacy));
+  }
+  if (kind === "changed") await fs.appendFile(output, "\n");
+  else await fs.rm(output);
+  const stopped = await runCompileLoop(f.input());
+  expect(stopped.phase).toBe("BREAK"); expect(stopped.reason).toContain("COMPILE_LOOP_DELIVERY_CHANGED");
+  const resumed = await runCompileLoop({ ...f.input(), resumeStateHash: inspectCompileLoop(f.root, "source-a")!.stateHash,
+    resolution: "Host inspected the missing or altered original receipt; no replacement is authorized." });
+  expect(resumed.phase).toBe("BREAK"); expect(resumed.workers).toBe(first.workers);
+  expect(f.labels.slice(start)).not.toContain("worker"); expect(f.labels.slice(start)).not.toContain("repair");
+});
+
+it.each(["missing-resolution", "wrong-hash", "policy", "in-flight"])("a rejected %s invocation preserves exact durable stop bytes", async kind => {
+  const f = await fixture();
+  const state = await runCompileLoop({ ...f.input(), signal: AbortSignal.abort(new Error("original cancellation")) });
+  const file = f.stateFile();
+  if (kind === "in-flight") await fs.writeFile(file, JSON.stringify({ ...state, phase: "WORKER", childPid: 12345 }));
+  const before = await fs.readFile(file, "utf8"), start = f.labels.length;
+  const input = { ...f.input(), ...(kind === "wrong-hash" ? { resumeStateHash: "f".repeat(64), resolution: "wrong retained hash" } : {}),
+    ...(kind === "policy" ? { engineerModel: "changed-model" } : {}) };
+  await expect(runCompileLoop(input)).rejects.toThrow(/COMPILE_LOOP_(RETAINED_STOP|POLICY_CHANGED|IN_FLIGHT)/);
+  expect(await fs.readFile(file, "utf8")).toBe(before); expect(f.labels).toHaveLength(start);
+});
+
+it("a registered engineer for one novel does not block another novel in the same workspace", async () => {
+  const f = await fixture(); f.blocked.add("source-a");
+  expect((await runCompileLoop(f.input("source-a"))).phase).toBe("DONE");
+  const start = f.labels.length, other = await runCompileLoop(f.input("source-b"));
+  expect(other.phase).toBe("DONE"); expect(other.repairs).toBe(0);
+  expect(f.labels.slice(start)).not.toContain("repair");
+  const registry = dedicatedRegistryPath(f.root, "source-a");
+  expect(registry.startsWith(compileLoopDirectory(f.root, "source-a") + path.sep)).toBe(true);
+  expect(JSON.parse(await fs.readFile(registry, "utf8")).sourceId).toBe("source-a");
+});
+
+it("retains the exact legacy engineer for its own source while isolating other sources", async () => {
+  const f = await fixture(), registry = path.join(f.root, "run-records/longzu-rebuild-loop/reviewer-session.json");
+  const createdAt = new Date(Date.now() - 3600_000).toISOString();
+  await fs.mkdir(path.dirname(registry), { recursive: true });
+  const retained = { version: 1, purpose: "nwh-rebuild-review", workspace: f.root, sourceId: "source-a",
+    model: "test-model", effort: "max", threadId: engineerId, createdAt, lastUsedAt: createdAt };
+  await fs.writeFile(registry, JSON.stringify(retained));
+  expect((await runCompileLoop(f.input("source-b"))).phase).toBe("DONE");
+  expect(JSON.parse(await fs.readFile(registry, "utf8"))).toEqual(retained);
+  f.blocked.add("source-a");
+  const state = await runCompileLoop(f.input("source-a"));
+  expect(state.phase).toBe("DONE"); expect(state.engineerSession).toEqual({ id: engineerId, createdAt: Date.parse(createdAt) });
+  expect(JSON.parse(await fs.readFile(registry, "utf8"))).toMatchObject({ threadId: engineerId, createdAt });
+});
+
+it.each(["true", "false", 1, { accepted: true }])("nonboolean verification %j never certifies delivery", async verified => {
+  const f = await fixture(); f.setVerification({ verified, reason: "Untrusted child result" });
+  expect((await runCompileLoop(f.input())).phase).toBe("BREAK");
+});
+
+it.each(["request.json", "policy.json"])("changed %s cannot replace the admitted worker authority or mutate the stop", async name => {
+  const f = await fixture();
+  await runCompileLoop({ ...f.input(), signal: AbortSignal.abort(new Error("original stop")) });
+  const file = f.stateFile(), before = await fs.readFile(file, "utf8"), start = f.labels.length;
+  const authority = path.join(path.dirname(file), name), changed = JSON.parse(await fs.readFile(authority, "utf8"));
+  changed.model = "substituted-model";
+  await fs.writeFile(authority, JSON.stringify(changed));
+  await expect(runCompileLoop({ ...f.input(), resumeStateHash: inspectCompileLoop(f.root, "source-a")!.stateHash,
+    resolution: "Inspect retained request" })).rejects.toThrow("COMPILE_LOOP_REQUEST_CHANGED");
+  expect(await fs.readFile(file, "utf8")).toBe(before); expect(f.labels).toHaveLength(start);
+});

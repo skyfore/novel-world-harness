@@ -22,8 +22,17 @@ files and cumulative domain charges remain binding. Engineering limits do not
 grant extra model calls, bytes, semantic attempts or writes. Prerequisite DONE
 still requires receipt verification and never means global certification.
 
-Both the full command and prerequisite supervisor use the same canonical
-`run-records/longzu-rebuild-loop/reviewer-session.json` and exclusive owner locks.
+Both the full command and prerequisite supervisor resolve the same registry for
+their exact workspace/source. New registries live at
+`$NWH_HOME/workspaces/v1/<workspace>/compile-loops/<source>/engineering-session/reviewer-session.json`
+with exclusive owner locks. A matching historical
+`run-records/longzu-rebuild-loop/reviewer-session.json` remains authoritative in
+place, with its original UUID and creation time; it cannot own another source.
+Resolution is read-only and never migrates or rotates a session. Two registries
+claiming the same source stop with `DEDICATED_REGISTRY_CONFLICT`: inspect both
+original records and their ownership before dispatch; do not choose, delete or
+replace one to obtain another attempt. Invalid registry data also requires host
+inspection, never a guessed source or replacement session.
 Codex agent tools use an explicit native permission profile with entire task trees,
 registry and owner locks read-only. Do not wrap the trusted Codex exec transport
 in an additional mount sandbox: its command service fails under that nesting.
@@ -66,6 +75,25 @@ After resolving that condition, copy `compilation[].supervision.stateHash` into
 `--loop-resume` and record the concrete resolution with `--loop-resolution`.
 This host-only, exact-state-bound resume preserves every consumed allowance;
 exhausted incidents remain exhausted. Never guess a hash or retry unchanged.
+Rejected admission (wrong policy/source/request, in-flight child, absent resolution
+or wrong state hash) never rewrites the saved phase, reason, timestamp or counters.
+Use `compile-novel status` again and copy `compilation[].supervision.stateHash`
+only after resolving the actual condition; the rejected invocation is not a new
+failure of the retained worker.
+
+A successful worker receipt enters a durable verification-only state. Reopening
+DONE rechecks that exact receipt, current certificate, active revision and branch
+binding without launching another compiler or engineer. Verification results must
+match the strict boolean/result schema; truthy values do not establish acceptance.
+Each verification writes a new audit result and preserves earlier results. A
+missing/changed receipt or stale certification keeps BREAK and the successful
+worker binding. An exact host resume may reverify after the concrete condition is
+resolved, but cannot reopen compilation, replace the receipt, or spend another
+worker. Older DONE records are adopted into this same verification-only path,
+including when their receipt is missing. Inspect the original result identified
+by `compilation[].supervision.directory`; never guess a replacement or retry
+unchanged. `COMPILE_LOOP_REQUEST_CHANGED` requires inspecting the original saved
+request/policy; repinning altered authority is not a recovery.
 
 If the host has implemented a concrete source fix after those engineering rounds
 are spent, bind the actual cumulative delta against `pending.baseline` using

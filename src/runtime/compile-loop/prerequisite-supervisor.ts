@@ -6,7 +6,7 @@ import { runLoopChild, type ChildOutcome } from "./process.js";
 import { captureWorkspace, changes, assertPatchScope, baselineContents, digest, fixedTests } from "./workspace.js";
 import { read, save, repairVerdict, reviewVerdict } from "./state.js";
 import { dedicatedSessionSchema, dedicatedSessionMode, dedicatedSessionArgs, type DedicatedSession } from "./dedicated-session.js";
-import { acceptDedicatedSession, captureRecordTree, fileHash, readOnlyNodeArgs } from "./dedicated-session.js";
+import { acceptDedicatedSession, captureRecordTree, dedicatedHistoryPaths, fileHash, readOnlyNodeArgs } from "./dedicated-session.js";
 import { verifyPrerequisiteHandoff } from "./prerequisite-handoff.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -71,19 +71,20 @@ export async function runPrerequisiteLoop(raw: PrerequisiteLoopSpec, options: {
     const recordsDirectory = path.join(root, "run-records"), recordsBefore = captureRecordTree(recordsDirectory), registryKey = path.relative(recordsDirectory, spec.registryFile);
     const identityTree = () => Object.fromEntries(Object.entries(captureRecordTree(handoffPaths.identity)).filter(([name]) => !name.startsWith("consumer-review/engineering/")));
     const identityBefore = identityTree();
-    if (recordsBefore[registryKey] !== registryHash) throw new Error("PREREQUISITE_REGISTRY_CHANGED: inspect the canonical dedicated UUID before dispatch.");
+    if ((fs.existsSync(spec.registryFile) ? fileHash(spec.registryFile) : undefined) !== registryHash) throw new Error("PREREQUISITE_REGISTRY_CHANGED: inspect the canonical dedicated UUID before dispatch.");
+    const historyPaths = dedicatedHistoryPaths(root, spec.registryFile);
     const outcome = await runner({ command: commandName, args, cwd: root, prefix, timeoutMs: Math.min(timeoutMs, spec.deadline - Date.now()),
       // inspect/verify already mount the entire filesystem read-only; do not
       // nest user namespaces. All other children get exact immutable bindings.
-      ...(commandName === "/usr/bin/bwrap" ? {} : { immutablePaths: [recordsDirectory, ...spec.ownershipLocks, ...Object.keys(spec.retainedFiles), ...Object.keys(sealed).map(f => path.join(directory, f))] }),
+      ...(commandName === "/usr/bin/bwrap" ? {} : { immutablePaths: [...historyPaths, ...spec.ownershipLocks, ...Object.keys(spec.retainedFiles), ...Object.keys(sealed).map(f => path.join(directory, f))] }),
       ...(commandName === "codex" ? { codexFilePolicy: label === "repair" ? "workspace-write" as const : "read-only" as const,
-        immutablePaths: [recordsDirectory, handoffPaths.identity, ...spec.ownershipLocks, ...Object.keys(spec.retainedFiles)] } : {}),
+        immutablePaths: [...historyPaths, handoffPaths.identity, ...spec.ownershipLocks, ...Object.keys(spec.retainedFiles)] } : {}),
       ...(readOnlyRootDirectory ? { readOnlyRootDirectory } : {}),
       signal: options.signal, stdin, onLine, onSpawn(pid) { state.childPid = pid; publish(state.phase, state.reason); sealed["state.json"] = captureWorkspace(directory)["state.json"]!; } });
     const current = captureWorkspace(directory);
     if (Object.keys(sealed).some(file => current[file] !== sealed[file])) throw new Error("PREREQUISITE_AUDIT_CHANGED: no dispatch after audit mutation.");
     const recordsAfter = captureRecordTree(recordsDirectory);
-    if (recordsAfter[registryKey] !== registryHash) throw new Error("PREREQUISITE_REGISTRY_CHANGED: engineering changed its registry.");
+    if ((fs.existsSync(spec.registryFile) ? fileHash(spec.registryFile) : undefined) !== registryHash) throw new Error("PREREQUISITE_REGISTRY_CHANGED: engineering changed its registry.");
     delete recordsBefore[registryKey]; delete recordsAfter[registryKey];
     if (changes(recordsBefore, recordsAfter).length) throw new Error("PREREQUISITE_RUN_HISTORY_CHANGED: engineering changed protected historical records.");
     if (label !== "worker" && changes(identityBefore, identityTree()).length) throw new Error("PREREQUISITE_IDENTITY_HISTORY_CHANGED: non-worker child added, removed or changed original task records.");

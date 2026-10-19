@@ -7,11 +7,12 @@ import { z } from "zod";
 import { compileLoopDirectory, loopStateSchema, read, save, repairVerdict, reviewVerdict, type CompileLoopState } from "./state.js";
 import { captureWorkspace, changes, assertPatchScope, baselineContents, digest, fixedTests, protectedPaths } from "./workspace.js";
 import { runLoopChild, type ChildOutcome } from "./process.js";
-import type { WorkerRequest, WorkerResult } from "./worker.js";
+import type { WorkerRequest } from "./worker.js";
+import { workerResultSchema, deliveryVerificationSchema } from "./delivery.js";
 import type { inspectNovelCompilation } from "../../commands/compile-novel.js";
 import { compilerFailureFingerprint } from "../codex-compile-loop.js";
 import { dedicatedSessionSchema, dedicatedSessionMode, dedicatedSessionArgs, acceptDedicatedSession,
-  dedicatedRegistryPath, captureRecordTree, fileHash, type DedicatedSession } from "./dedicated-session.js";
+  dedicatedRegistryPath, dedicatedHistoryPaths, captureRecordTree, fileHash, type DedicatedSession } from "./dedicated-session.js";
 
 type Snapshot = Awaited<ReturnType<typeof inspectNovelCompilation>> & { supervisionTrace?: { workId?: string; planHash?: string } | null };
 export const succeeded = (r: ChildOutcome) => r.code === 0 && !r.error && !r.signal && !r.timedOut && !r.cancelled;
@@ -29,8 +30,9 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
   catch { throw new Error(`COMPILE_LOOP_LOCK_PRESENT: inspect ${lock} on its owning host; do not delete it or start another supervisor.`); }
   const report = options.onProgress ?? console.log;
   let state: CompileLoopState | undefined;
+  let admitted = false;
   let hostPatchHash: string | undefined;
-  const registryFile = dedicatedRegistryPath(root), registryLock = path.join(path.dirname(registryFile), "supervisor.lock");
+  let registryFile = "", registryLock = "";
   let registryLocked = false, registryHash: string | undefined;
   let engineeringSession: DedicatedSession | null = null;
   const engineeringScope = { workspace: root, sourceId: request.sourceId, model: options.engineerModel, effort: "max" as const };
@@ -41,24 +43,38 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
   const nodeArgs = existsSync(sourceEntry) ? ["--import", "tsx", sourceEntry] : [fileURLToPath(new URL("./worker.js", import.meta.url))];
   const policy = { version: 1, request, engineerModel: options.engineerModel, effort: "max", sourceHash: options.sourceHash, limits, protectedPaths, fixedTests };
   try {
+    registryFile = dedicatedRegistryPath(root, request.sourceId);
+    registryLock = path.join(path.dirname(registryFile), "supervisor.lock");
     mkdirSync(path.dirname(registryFile), { recursive: true });
     writeFileSync(registryLock, JSON.stringify({ token, pid: process.pid, sourceId: request.sourceId }), { flag: "wx", mode: 0o600 }); registryLocked = true;
     if (existsSync(stateFile)) {
       state = loopStateSchema.parse(read(stateFile));
+      if (state.root !== root || state.sourceId !== request.sourceId || state.sourceHash !== options.sourceHash) throw new Error("COMPILE_LOOP_SCOPE_CHANGED: inspect the original source and workspace bindings; do not rewrite the retained state or retry under another source.");
       if (state.policyHash !== digest(policy)) throw new Error("COMPILE_LOOP_POLICY_CHANGED: inspect the saved policy and original source before revising it; no reset or unchanged retry.");
       if (state.childPid || !["READY", "BREAK", "DONE"].includes(state.phase)) throw new Error("COMPILE_LOOP_IN_FLIGHT: inspect the original child on its owning host; never redispatch uncertain work.");
+      if (!existsSync(requestFile) || !existsSync(path.join(directory, "policy.json"))
+        || digest(read(requestFile)) !== digest(request) || digest(read(path.join(directory, "policy.json"))) !== state.policyHash) {
+        throw new Error("COMPILE_LOOP_REQUEST_CHANGED: inspect the original request and policy files; preserve their bytes and do not dispatch or repin changed authority.");
+      }
+      if ((state.phase === "DONE" && state.workers < 1) || (state.delivery && state.delivery.worker !== state.workers)) throw new Error("COMPILE_LOOP_DELIVERY_SCOPE: inspect the original successful worker and retained counters; do not reset them or dispatch another worker.");
       if (state.phase === "BREAK") {
         if (!options.resolution?.trim() || options.resumeStateHash !== digest(read(stateFile))) throw new Error(`COMPILE_LOOP_RETAINED_STOP: ${state.reason}. Resolve its host condition, copy supervision.stateHash from compile-novel status, then supply --loop-resume with that exact hash and --loop-resolution. No counters or allowances are renewed.`);
         hostPatchHash = options.hostPatchHash;
-        if (hostPatchHash && (!/^[a-f0-9]{64}$/.test(hostPatchHash) || !state.pending)) throw new Error("COMPILE_LOOP_HOST_PATCH_SCOPE: an exact retained incident and actual patch fingerprint are required.");
+        if (hostPatchHash && (!/^[a-f0-9]{64}$/.test(hostPatchHash) || !state.pending || state.delivery)) throw new Error("COMPILE_LOOP_HOST_PATCH_SCOPE: an exact retained engineering incident and actual patch fingerprint are required; a successful worker is verification-only.");
         state.resolutions.push({ previousStateHash: options.resumeStateHash, reason: options.resolution + (hostPatchHash ? ` Host patch: ${hostPatchHash}.` : ""), at: new Date().toISOString() });
-        state.phase = "READY"; persist();
+        state.phase = "READY";
       } else if (options.hostPatchHash) throw new Error("COMPILE_LOOP_HOST_PATCH_SCOPE: a host patch can resolve only an exact retained BREAK.");
+      // Older DONE records lack a pinned receipt. Reserve verification before
+      // any admitted operation can fail, including loading the session registry.
+      const adoptDelivery = state.phase === "DONE" && !state.delivery;
+      if (adoptDelivery) state.delivery = { worker: state.workers, resultHash: null };
+      admitted = true;
+      if (options.resumeStateHash || adoptDelivery) persist();
     } else {
       if (options.hostPatchHash) throw new Error("COMPILE_LOOP_HOST_PATCH_SCOPE: no retained incident exists for this host patch.");
       state = { version: 1, root, sourceId: request.sourceId, sourceHash: options.sourceHash, policyHash: digest(policy),
         phase: "READY", workers: 0, repairs: 0, commands: 0, failures: {}, childPid: null, reason: "", updatedAt: "",
-        engineerSession: null, pending: null, legacy: null, verifiedPatches: [], resolutions: [] };
+        engineerSession: null, pending: null, legacy: null, verifiedPatches: [], delivery: null, resolutions: [] };
       if (options.legacyState) {
         if (!options.resolution?.trim()) throw new Error("COMPILE_LOOP_HISTORY_REVIEW_REQUIRED: supply the concrete reviewed migration in --loop-resolution; preserve the original record.");
         const file = path.resolve(options.legacyState), prior = read<Record<string, unknown>>(file);
@@ -69,7 +85,7 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
         save(path.join(directory, "legacy-supervisor.json"), { prior, migration: state.legacy,
           policyChange: "Explicit host migration to per-incident bounded repair. Original counters, deadline, causes and all domain stops remain recorded; no domain allowance is renewed." });
       }
-      save(path.join(directory, "policy.json"), policy); save(requestFile, request); persist();
+      save(path.join(directory, "policy.json"), policy); save(requestFile, request); admitted = true; persist();
     }
     if (existsSync(registryFile)) {
       engineeringSession = dedicatedSessionSchema.parse(read(registryFile)); dedicatedSessionMode(engineeringSession, engineeringScope, Date.now());
@@ -89,18 +105,22 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
       const readOnlyRootDirectory = ["types", "tests"].includes(label) ? prefix + ".sandbox" : undefined;
       if (readOnlyRootDirectory) mkdirSync(readOnlyRootDirectory);
       const sealed = captureWorkspace(directory);
+      // Registry changes are published only by the owning host's thread-start
+      // callback and checked independently against registryHash below.
+      delete sealed[path.relative(directory, registryFile)];
       const recordsDirectory = path.join(root, "run-records"), recordsBefore = captureRecordTree(recordsDirectory), registryKey = path.relative(recordsDirectory, registryFile);
-      if (recordsBefore[registryKey] !== registryHash) throw new Error("COMPILE_LOOP_REGISTRY_CHANGED: inspect the registered dedicated session before dispatch.");
+      if ((existsSync(registryFile) ? fileHash(registryFile) : undefined) !== registryHash) throw new Error("COMPILE_LOOP_REGISTRY_CHANGED: inspect the registered dedicated session before dispatch.");
+      const historyPaths = dedicatedHistoryPaths(root, registryFile);
       const outcome = await (options.runner ?? runLoopChild)({ command: executable, args, cwd: root, prefix, signal, timeoutMs, stdin, onLine,
-        immutablePaths: [recordsDirectory, lock, ...Object.keys(sealed).map(f => path.join(directory, f)), ...(state!.legacy ? [state!.legacy.file] : [])],
+        immutablePaths: [...historyPaths, lock, ...Object.keys(sealed).map(f => path.join(directory, f)), ...(state!.legacy ? [state!.legacy.file] : [])],
         ...(executable === "codex" ? { codexFilePolicy: label === "repair" ? "workspace-write" as const : "read-only" as const } : {}),
-        ...(executable === "codex" ? { immutablePaths: [recordsDirectory, directory, lock, ...(state!.legacy ? [state!.legacy.file] : [])] } : {}),
+        ...(executable === "codex" ? { immutablePaths: [...historyPaths, directory, lock, ...(state!.legacy ? [state!.legacy.file] : [])] } : {}),
         ...(readOnlyRootDirectory ? { readOnlyRootDirectory } : {}),
         onSpawn(pid) { state!.childPid = pid; persist(); sealed["state.json"] = captureWorkspace(directory)["state.json"]!; } });
       const after = captureWorkspace(directory);
       if (Object.keys(sealed).some(file => sealed[file] !== after[file])) throw new Error("COMPILE_LOOP_AUDIT_CHANGED: retain the original child and records; no redispatch.");
       const recordsAfter = captureRecordTree(recordsDirectory);
-      if (recordsAfter[registryKey] !== registryHash) throw new Error("COMPILE_LOOP_REGISTRY_CHANGED: engineering changed the canonical registry.");
+      if ((existsSync(registryFile) ? fileHash(registryFile) : undefined) !== registryHash) throw new Error("COMPILE_LOOP_REGISTRY_CHANGED: engineering changed the canonical registry.");
       delete recordsBefore[registryKey]; delete recordsAfter[registryKey];
       if (changes(recordsBefore, recordsAfter).length) throw new Error("COMPILE_LOOP_HISTORY_CHANGED: engineering changed protected run history.");
       state!.childPid = null; persist(); signal.throwIfAborted();
@@ -114,6 +134,29 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
       if (snapshot.compilerLock.present) throw new Error("COMPILE_LOOP_COMPILER_LOCK: inspect compiler-lock on its owning host; do not remove it or retry.");
       if (snapshot.sources.length !== 1 || source?.sourceId !== request.sourceId || source.sourceSha256 !== options.sourceHash || source.sourceIntegrity !== "verified") throw new Error("COMPILE_LOOP_SOURCE_CHANGED: original source is unverified; preserve scope and stop.");
       return { snapshot, file };
+    };
+    const readWorkerResult = (file: string) => {
+      const parsed = workerResultSchema.safeParse(read(file));
+      if (!parsed.success) throw new Error(`COMPILE_LOOP_RESULT_INVALID: inspect ${file}; a malformed worker result cannot authorize delivery or another worker. Do not retry unchanged.`);
+      return parsed.data;
+    };
+    const verifyDelivery = async () => {
+      const delivery = state!.delivery!;
+      const output = path.join(directory, `worker-${delivery.worker}.json`);
+      if (delivery.worker !== state!.workers || !existsSync(output)
+        || (delivery.resultHash !== null && delivery.resultHash !== fileHash(output))) {
+        throw new Error(`COMPILE_LOOP_DELIVERY_CHANGED: inspect the original worker receipt ${output}; preserve the completed worker and do not rerun compilation or replace its receipt.`);
+      }
+      if (readWorkerResult(output).status !== "succeeded") throw new Error("COMPILE_LOOP_DELIVERY_UNKNOWN: the retained worker did not deliver a successful result; inspect its original receipt, do not rerun compilation.");
+      delivery.resultHash ??= fileHash(output);
+      phase("VERIFY", "Revalidating the retained successful worker; no compilation allowance is reopened.");
+      const verificationFile = `${output}.delivery-${randomUUID()}.json`;
+      if (!succeeded(await command(process.execPath, [...nodeArgs, "verify", requestFile, verificationFile, output], "delivery", limits.checkMs))) throw new Error("COMPILE_LOOP_DELIVERY_UNKNOWN: verification process failed; inspect its saved log, do not restart the completed worker.");
+      const parsed = deliveryVerificationSchema.safeParse(read(verificationFile));
+      if (!parsed.success) throw new Error(`COMPILE_LOOP_DELIVERY_INVALID: inspect ${verificationFile}; require an exact boolean verdict and reason. Do not rerun the completed worker or guess acceptance.`);
+      if (!parsed.data.verified) throw new Error(`COMPILE_LOOP_DELIVERY_UNPROVEN: ${parsed.data.reason}`);
+      state!.pending = null; phase("DONE", "Full novel certification, activation and branch delivery independently verified.");
+      return state!;
     };
     const incident = (snapshot: Snapshot, file: string, reason: string) => {
       const latest = snapshot.compilation[0]?.run?.history.at(-1);
@@ -165,6 +208,7 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
     };
     report(`Compilation loop records: ${directory}`);
     let checked = await inspect();
+    if (state.delivery) return await verifyDelivery();
     if (!state.pending && checked.snapshot.compilation[0]?.run?.history.at(-1)?.status === "blocked") {
       state.pending = incident(checked.snapshot, checked.file, checked.snapshot.compilation[0]!.run!.history.at(-1)!.error!); persist();
     }
@@ -225,20 +269,17 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
       state.pending = incident(checked.snapshot, checked.file, "Worker dispatch retained; inspect its outcome before redispatch.");
       phase("WORKER", `Compilation attempt ${state.workers}; existing receipts and budgets retained.`);
       const outcome = await command(process.execPath, [...nodeArgs, "work", requestFile, output], "worker", limits.workerMs, undefined, report);
-      const result = existsSync(output) ? read<WorkerResult>(output) : undefined;
-      checked = await inspect();
+      const result = existsSync(output) ? readWorkerResult(output) : undefined;
       if (succeeded(outcome) && result?.status === "succeeded") {
-        const verificationFile = `${output}.delivery.json`;
-        if (!succeeded(await command(process.execPath, [...nodeArgs, "verify", requestFile, verificationFile, output], "delivery", limits.checkMs))) throw new Error("COMPILE_LOOP_DELIVERY_UNKNOWN: verification process failed.");
-        const verification = read<{ verified: boolean; reason: string }>(verificationFile);
-        if (!verification.verified) throw new Error(`COMPILE_LOOP_DELIVERY_UNPROVEN: ${verification.reason}`);
-        state.pending = null; phase("DONE", "Full novel certification, activation and branch delivery independently verified."); return state;
+        state.delivery = { worker: state.workers, resultHash: fileHash(output) }; persist();
       }
-      state.pending = incident(checked.snapshot, checked.file, result?.error ?? `Worker exited ${outcome.code} without a settled successful result; inspect ${output}.`);
+      checked = await inspect();
+      if (state.delivery) return await verifyDelivery();
+      state.pending = incident(checked.snapshot, checked.file, (result?.status === "failed" ? result.error : undefined) ?? `Worker exited ${outcome.code} without a settled successful result; inspect ${output}.`);
       phase("READY", "Worker stopped; passing its retained failure to automatic repair.");
     }
   } catch (error) {
-    if (!state) throw error;
+    if (!state || !admitted) throw error;
     phase("BREAK", String(error)); return state;
   } finally {
     if (registryLocked && read<{ token: string }>(registryLock).token === token) unlinkSync(registryLock);

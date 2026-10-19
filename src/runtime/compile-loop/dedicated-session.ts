@@ -2,6 +2,7 @@ import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { compileLoopDirectory } from "./state.js";
 
 /** Shared, durable engineering identity. Never substitute the originating chat. */
 export const dedicatedSessionSchema = z.object({
@@ -12,7 +13,31 @@ export const dedicatedSessionSchema = z.object({
 export type DedicatedSession = z.infer<typeof dedicatedSessionSchema>;
 export type EngineeringScope = Pick<DedicatedSession, "workspace" | "sourceId" | "model" | "effort">;
 export const DEDICATED_SESSION_TTL_MS = 72 * 60 * 60_000;
-export const dedicatedRegistryPath = (root: string) => path.join(root, "run-records/longzu-rebuild-loop/reviewer-session.json");
+/** New identities belong to the same workspace/source as their compilation.
+ * Retain a matching legacy registry in place: resolving a path never migrates,
+ * rotates, or replaces an already registered engineering session. */
+export function dedicatedRegistryPath(root: string, sourceId: string): string {
+  const scoped = path.join(compileLoopDirectory(root, sourceId), "engineering-session/reviewer-session.json");
+  const legacy = path.join(root, "run-records/longzu-rebuild-loop/reviewer-session.json");
+  if (fs.existsSync(legacy)) {
+    if (!fs.lstatSync(legacy).isFile()) throw new Error("DEDICATED_REGISTRY_INVALID: inspect the original registry on its owning host; do not replace it or dispatch another session.");
+    let previous: DedicatedSession;
+    try { previous = dedicatedSessionSchema.parse(JSON.parse(fs.readFileSync(legacy, "utf8"))); }
+    catch (error) { throw new Error(`DEDICATED_REGISTRY_INVALID: ${String(error)}. Inspect ${legacy} on its owning host; do not guess its source, replace it, or dispatch another session.`, { cause: error }); }
+    if (previous.workspace === path.resolve(root) && previous.sourceId === sourceId) {
+      if (fs.existsSync(scoped)) throw new Error("DEDICATED_REGISTRY_CONFLICT: both legacy and source-scoped registries claim this source; inspect their original UUIDs and history before dispatch, never guess or replace either registry.");
+      return legacy;
+    }
+  }
+  return scoped;
+}
+
+/** Protect the current registry directory (including absent future records) and
+ * any retained checkout history. Fresh workspaces need not contain run-records. */
+export function dedicatedHistoryPaths(root: string, registryFile: string): string[] {
+  const records = path.join(root, "run-records");
+  return [path.dirname(registryFile), ...(fs.existsSync(records) ? [records] : [])];
+}
 export const fileHash = (file: string) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 
 /** Unlike the source baseline, audit capture does not exclude run-records. */

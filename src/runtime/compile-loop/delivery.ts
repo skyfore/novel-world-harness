@@ -1,3 +1,15 @@
+import { z } from "zod";
+
+export const workerResultSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("succeeded"), delivery: z.object({
+    runId: z.string().min(1), candidateBundleHash: z.string().regex(/^[a-f0-9]{64}$/),
+    branchId: z.string().min(1), completed: z.literal(true),
+  }).strict() }).strict(),
+  z.object({ status: z.literal("failed"), error: z.string().optional() }).strict(),
+]);
+export const deliveryVerificationSchema = z.object({ verified: z.boolean(), reason: z.string().min(1) }).strict();
+export type WorkerResult = z.infer<typeof workerResultSchema>;
+
 export type NovelDelivery = { runId: string; candidateBundleHash?: string; branchId?: string; completed: boolean };
 export async function verifyNovelDelivery(root: string, sourceId: string, delivery: NovelDelivery) {
   const { NovelCompilationRunStore, NOVEL_COMPILATION_PHASES } = await import("../../workflow/novel-compilation.js");

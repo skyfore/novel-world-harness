@@ -93,6 +93,7 @@ async function fixture(failure?: Failure) {
   await write(workerRequestFile, request);
   await fs.writeFile(path.join(root, "src/example.ts"), "existing user source\n");
   const registryFile = paths.registry;
+  await fs.mkdir(path.dirname(registryFile), { recursive: true });
   await write(registryFile, { ...session, workspace: root });
   const retainedFiles: Record<string, string> = Object.fromEntries(Object.entries(captureRecordTree(paths.identity)).map(([f, h]) => [path.join(paths.identity, f), h]));
   for (const f of [parentStateFile, incidentFile, workerRequestFile, authorizationFile, auditBudgetFile, priorBudgetFile]) retainedFiles[f] = await sha(f);
@@ -106,6 +107,7 @@ async function fixture(failure?: Failure) {
     const label = path.basename(c.prefix).replace(/^\d+-/, ""); labels.push(label); args.push(c.args); c.onSpawn?.(1000);
     if (c.command !== "/usr/bin/bwrap") {
       expect(c.immutablePaths).toContain(path.join(root, "run-records"));
+      expect(c.immutablePaths).toContain(path.dirname(registryFile));
       expect(c.immutablePaths).toContain(spec.ownershipLocks[0]);
     } else expect(c.args).toContain("--unshare-net");
     if (c.command === "codex") {
@@ -228,7 +230,8 @@ it("the production compile-novel supervisor uses the same registered engineering
     if (label === "inspect") await fs.writeFile(c.args.at(-1)!, JSON.stringify({ compilerLock: { present: false },
       sources: [{ sourceId: f.spec.sourceId, sourceSha256: "b".repeat(64), sourceIntegrity: "verified" }],
       compilation: [{ run: { history: [{ phase: "roles", status: "blocked", error: "original source defect" }] } }] }));
-    else if (label === "worker") await fs.writeFile(c.args.at(-1)!, JSON.stringify({ status: "succeeded" }));
+    else if (label === "worker") await fs.writeFile(c.args.at(-1)!, JSON.stringify({ status: "succeeded", delivery: {
+      runId: "original-run", completed: true, candidateBundleHash: "b".repeat(64), branchId: "original-branch" } }));
     else if (label === "delivery") await fs.writeFile(c.args.at(-2)!, JSON.stringify({ verified: true, reason: "fixture delivery verified" }));
     return ok;
   };
@@ -273,7 +276,7 @@ it.skipIf(!process.env.NWH_TEST_READONLY_SANDBOX)("every real child preserves re
     const args = nestedCodex ? ["sandbox", "-C", f.spec.root, "-P", "nwh_guard_probe", "-c",
       'permissions.nwh_guard_probe.filesystem={":root"="read",":workspace_roots"="write",":slash_tmp"="write"}', "--", process.execPath, ...nodeArgs] : nodeArgs;
     const outcome = await realRunner({ command: nestedCodex ? "codex" : process.execPath, args,
-      immutablePaths: [path.join(f.spec.root, "run-records"), budget], cwd: f.spec.root,
+      immutablePaths: [path.join(f.spec.root, "run-records"), path.dirname(f.spec.registryFile), budget], cwd: f.spec.root,
       prefix: path.join(out, nestedCodex ? "codex" : "child"), timeoutMs: 30000, signal: new AbortController().signal });
     expect(outcome.code, await fs.readFile(path.join(out, nestedCodex ? "codex.stderr.log" : "child.stderr.log"), "utf8").catch(() => "")).toBe(0);
     expect(await Promise.all(targets.map(p => fs.readFile(p, "utf8")))).toEqual(before);
@@ -289,7 +292,7 @@ it.skipIf(!process.env.NWH_TEST_READONLY_SANDBOX)("native Codex command/exec can
   const budget = path.join(path.dirname(path.dirname(f.spec.directory)), "identity-consumers-0.budget.json");
   const targets = [f.spec.registryFile, lock, budget], before = await Promise.all(targets.map(p => fs.readFile(p, "utf8")));
   const identity = path.dirname(path.dirname(f.spec.directory)), newRecord = path.join(identity, "identity-consumers-0.record.json");
-  const invocation = codexGuardCommand("codex", ["app-server"], [path.join(f.spec.root, "run-records"), identity], "workspace-write");
+  const invocation = codexGuardCommand("codex", ["app-server"], [path.join(f.spec.root, "run-records"), path.dirname(f.spec.registryFile), identity], "workspace-write");
   const child = spawn(invocation.command, invocation.args, { cwd: f.spec.root, detached: true, stdio: ["pipe", "pipe", "pipe"] });
   let stderr = ""; child.stderr.on("data", chunk => { stderr += chunk; });
   const waiting = new Map<number, (value: any) => void>();

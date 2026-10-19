@@ -21,6 +21,9 @@ export const loopStateSchema = z.object({
     baseline: z.record(z.string(), z.string()), evidenceFile: z.string() }).nullable(),
   legacy: z.object({ file: z.string(), hash: z.string(), resolution: z.string() }).nullable(),
   verifiedPatches: z.array(z.string()),
+  // Once a successful worker returns, only delivery verification may continue.
+  // A null hash is used solely when adopting a pre-existing DONE record.
+  delivery: z.object({ worker: counter.positive(), resultHash: z.string().regex(/^[a-f0-9]{64}$/).nullable() }).strict().nullable().default(null),
   resolutions: z.array(z.object({ previousStateHash: z.string(), reason: z.string(), at: z.string() })).default([]),
 }).strict();
 export type CompileLoopState = z.infer<typeof loopStateSchema>;

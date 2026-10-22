@@ -18,18 +18,27 @@ export const DEDICATED_SESSION_TTL_MS = 72 * 60 * 60_000;
  * rotates, or replaces an already registered engineering session. */
 export function dedicatedRegistryPath(root: string, sourceId: string): string {
   const scoped = path.join(compileLoopDirectory(root, sourceId), "engineering-session/reviewer-session.json");
-  const legacy = path.join(root, "run-records/longzu-rebuild-loop/reviewer-session.json");
-  if (fs.existsSync(legacy)) {
+  const records = path.join(root, "run-records"), matching: string[] = [];
+  // Legacy directory labels are user data. Resolve ownership from each record,
+  // never from a particular novel's name or by choosing the first match.
+  if (fs.existsSync(records) && (!fs.lstatSync(records).isDirectory() || fs.lstatSync(records).isSymbolicLink()))
+    throw new Error("DEDICATED_REGISTRY_INVALID: inspect the original run-records directory on its owning host; do not replace it or dispatch another session.");
+  for (const entry of fs.existsSync(records) ? fs.readdirSync(records, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)) : []) {
+    if (entry.isSymbolicLink()) throw new Error("DEDICATED_REGISTRY_INVALID: inspect the linked historical directory on its owning host; do not follow it or dispatch another session.");
+    if (!entry.isDirectory()) continue;
+    const legacy = path.join(records, entry.name, "reviewer-session.json");
+    if (!fs.existsSync(legacy)) {
+      if (fs.lstatSync(legacy, { throwIfNoEntry: false })) throw new Error("DEDICATED_REGISTRY_INVALID: inspect the dangling registry link on its owning host; no replacement or dispatch.");
+      continue;
+    }
     if (!fs.lstatSync(legacy).isFile()) throw new Error("DEDICATED_REGISTRY_INVALID: inspect the original registry on its owning host; do not replace it or dispatch another session.");
     let previous: DedicatedSession;
     try { previous = dedicatedSessionSchema.parse(JSON.parse(fs.readFileSync(legacy, "utf8"))); }
     catch (error) { throw new Error(`DEDICATED_REGISTRY_INVALID: ${String(error)}. Inspect ${legacy} on its owning host; do not guess its source, replace it, or dispatch another session.`, { cause: error }); }
-    if (previous.workspace === path.resolve(root) && previous.sourceId === sourceId) {
-      if (fs.existsSync(scoped)) throw new Error("DEDICATED_REGISTRY_CONFLICT: both legacy and source-scoped registries claim this source; inspect their original UUIDs and history before dispatch, never guess or replace either registry.");
-      return legacy;
-    }
+    if (previous.workspace === path.resolve(root) && previous.sourceId === sourceId) matching.push(legacy);
   }
-  return scoped;
+  if (matching.length > 1 || (matching.length && fs.existsSync(scoped))) throw new Error("DEDICATED_REGISTRY_CONFLICT: multiple registries claim this source; inspect their original UUIDs and history before dispatch, never guess or replace any registry.");
+  return matching[0] ?? scoped;
 }
 
 /** Protect the current registry directory (including absent future records) and

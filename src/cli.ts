@@ -159,6 +159,18 @@ program.command("review-scenes").requiredOption("--spec <path>", "independent so
 const requirementsCommand = program.command("requirements").description("Inspect persistent capability definitions and evaluation history");
 requirementsCommand.command("inspect").requiredOption("--source <id>", "registered source ID")
   .action(async options => inspectRequirementsCommand(rootFor({}), options.source));
+requirementsCommand.command("inspect-identity-repairs").requiredOption("--source <id>", "registered source ID")
+  .option("--task <hash>", "exact tasks[].taskId from this source's identity inspection")
+  .option("--ref <ref>", "exact items[].ref or availableRefs[] from this task's inspection")
+  .option("--offset <number>", "exact nextOffset from the same task/ref page", Number, 0)
+  .option("--limit <number>", "page size from 1 to 48", Number, 24)
+  .description("Read retained identity findings, current baselines and typed dependencies without retrying or authorizing repairs")
+  .action(async options => {
+    const { inspectIdentityRepairHandoff } = await import("./compiler/identity-repair-handoff.js");
+    console.log(JSON.stringify(await inspectIdentityRepairHandoff(rootFor({}), options.source, {
+      taskId: options.task, ref: options.ref, offset: options.offset, limit: options.limit,
+    }), null, 2));
+  });
 requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", "registered source ID")
   .description("Read retained upstream repair plans and attempts without authorizing or retrying them")
   .action(async options => {

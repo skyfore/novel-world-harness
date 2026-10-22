@@ -131,8 +131,8 @@ it("a registered engineer for one novel does not block another novel in the same
   expect(JSON.parse(await fs.readFile(registry, "utf8")).sourceId).toBe("source-a");
 });
 
-it("retains the exact legacy engineer for its own source while isolating other sources", async () => {
-  const f = await fixture(), registry = path.join(f.root, "run-records/longzu-rebuild-loop/reviewer-session.json");
+it.each(["longzu-rebuild-loop", "another-novel-review"])("retains the exact legacy engineer from %s while isolating other sources", async label => {
+  const f = await fixture(), registry = path.join(f.root, "run-records", label, "reviewer-session.json");
   const createdAt = new Date(Date.now() - 3600_000).toISOString();
   await fs.mkdir(path.dirname(registry), { recursive: true });
   const retained = { version: 1, purpose: "nwh-rebuild-review", workspace: f.root, sourceId: "source-a",
@@ -144,6 +144,31 @@ it("retains the exact legacy engineer for its own source while isolating other s
   const state = await runCompileLoop(f.input("source-a"));
   expect(state.phase).toBe("DONE"); expect(state.engineerSession).toEqual({ id: engineerId, createdAt: Date.parse(createdAt) });
   expect(JSON.parse(await fs.readFile(registry, "utf8"))).toMatchObject({ threadId: engineerId, createdAt });
+});
+
+it("refuses ambiguous legacy ownership without replacing either registry or creating a new one", async () => {
+  const f = await fixture(), at = new Date().toISOString();
+  const files = ["first-attempt", "later-attempt"].map(label => path.join(f.root, "run-records", label, "reviewer-session.json"));
+  const retained = JSON.stringify({ version: 1, purpose: "nwh-rebuild-review", workspace: f.root, sourceId: "source-a",
+    model: "test-model", effort: "max", threadId: engineerId, createdAt: at, lastUsedAt: at });
+  for (const file of files) { await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, retained); }
+  expect(() => dedicatedRegistryPath(f.root, "source-a")).toThrow("DEDICATED_REGISTRY_CONFLICT");
+  for (const file of files) expect(await fs.readFile(file, "utf8")).toBe(retained);
+  await expect(fs.stat(path.join(compileLoopDirectory(f.root, "source-a"), "engineering-session"))).rejects.toThrow();
+  expect(dedicatedRegistryPath(f.root, "source-b")).toBe(path.join(compileLoopDirectory(f.root, "source-b"), "engineering-session/reviewer-session.json"));
+});
+
+it.each(["invalid", "symlink", "dangling"])("refuses a %s legacy registry without silently starting another session", async kind => {
+  const f = await fixture(), registry = path.join(f.root, "run-records/other-attempt/reviewer-session.json");
+  await fs.mkdir(path.dirname(registry), { recursive: true });
+  if (kind === "invalid") await fs.writeFile(registry, "{}");
+  else {
+    const target = path.join(f.root, "original-registry.json");
+    if (kind === "symlink") await fs.writeFile(target, "{}");
+    await fs.symlink(target, registry);
+  }
+  expect(() => dedicatedRegistryPath(f.root, "source-a")).toThrow("DEDICATED_REGISTRY_INVALID");
+  await expect(fs.stat(path.join(compileLoopDirectory(f.root, "source-a"), "engineering-session"))).rejects.toThrow();
 });
 
 it.each(["true", "false", 1, { accepted: true }])("nonboolean verification %j never certifies delivery", async verified => {

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
 import { identityRecoveryFixture } from "./helpers/identity-recovery-fixture.js";
-import { withIdentityRecoveryHost, assertIdentityRecoveryPermit, inheritedIdentityEngineering, identityRecoveryTests } from "../src/runtime/compile-loop/identity-recovery-host.js";
+import { withIdentityRecoveryHost, assertIdentityRecoveryPermit, inheritedIdentityEngineering, identityRecoveryTests, verifyIdentityRecoveryHostReceipt } from "../src/runtime/compile-loop/identity-recovery-host.js";
 import { runIdentityRequirements } from "../src/workflow/identity-requirements.js";
 import { identityConsumerContextRecovery } from "../src/workflow/identity-consumer-context-recovery.js";
 import { identityContextRecoveryDirectory } from "../src/compiler/identity-requirements.js";
@@ -20,6 +20,22 @@ async function consume(f: Awaited<ReturnType<typeof identityRecoveryFixture>>, r
   }, { signal: new AbortController().signal, runner });
   return identityConsumerContextRecovery(f.root, "verify", f.proof);
 }
+
+it("binds a completed host receipt to the original deadline even when its gate and state agree on a later one", async () => {
+  const f = await identityRecoveryFixture();
+  try {
+    await consume(f);
+    const directory = path.join(identityContextRecoveryDirectory(f.root, f.p.intent.sourceId, f.p.intent.taskId), "host");
+    const gate = JSON.parse(await fs.readFile(path.join(directory, "gate.json"), "utf8"));
+    const state = JSON.parse(await fs.readFile(path.join(directory, "state.json"), "utf8"));
+    gate.deadline += 3600_000; state.deadline = gate.deadline;
+    await fs.writeFile(path.join(directory, "gate.json"), JSON.stringify(gate));
+    await fs.writeFile(path.join(directory, "state.json"), JSON.stringify(state));
+    const records = await new RequirementLedger(f.root, f.p.intent.sourceId).identityRequirements(f.p.intent.taskId);
+    await expect(verifyIdentityRecoveryHostReceipt(f.root, f.proof, h(gate), records[2]!))
+      .rejects.toThrow("no completed repository recovery host");
+  } finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
+}, 30000);
 
 it("runs repository gates then the actual recovery worker and real verifier, charging the original five calls exactly once", async () => {
   const f = await identityRecoveryFixture(), before = captureRecordTree(f.paths.identity);

@@ -2,6 +2,35 @@
 
 ## Full-command engineering supervisor
 
+`requirements inspect-identity-repairs` is read-only recovery discovery for a
+retained identity consumer stop. First use the same `--source` without a task,
+copy `tasks[].taskId` into `--task`, then copy `items[].ref` or `availableRefs[]`
+into `--ref`. Copy the exact `nextOffset` (or `downstream.nextOffset` for detail)
+under the same source/task/ref; page size is 1..48. An ID/ref/cursor miss permits
+one corrected discovery-based retry, never guessing or unchanged loops. For an
+unknown source use `nwh status --json` and copy `sources[].sourceId` once.
+Downstream discovery carries dependency counts/hashes; copy
+`downstream.items[].dependencies.readRef` into the same source/task's `--ref`
+to read its complete payload and pointer uses. A compact discovery page is not
+evidence that those dependencies have been read or validated.
+
+An altered graph, payload, ledger prefix or current baseline is a host-state
+stop: preserve both versions and inspect the owning task; do not repin evidence,
+dispatch a repair or automatically retry. `unsupported-kind` and
+`unsupported-revision` require implementation and independent acceptance of the
+missing typed operation. A completed recorded shard or a supported disposition
+cannot renew a consumed phase, grant consumer writes, resume the parent or
+certify the world. The command reconstructs current inputs but does not rerun
+model/host acceptance; failed host receipts retain their original meaning.
+
+Retired incident recovery records retain their original `contextRecoveryAttempt`
+field and hashes for read-only ledger inspection. Execution and public authority
+verification stop on that marker or an unsupported proof format. Preserve the
+original receipts and charges; use `inspect-identity-repairs` for the same
+source/task, never remove the marker, rewrite a proof version or redispatch.
+The runtime does not import temporary producer scripts by hash, extend the
+original recovery deadline, or open another incident-specific execution window.
+
 Compiler hooks must not queue their originating user conversation. The dedicated
 engineering registry uses `purpose: nwh-rebuild-review`, exact workspace/source,
 model/effort, UUID, creation time and last-use time. Resume that exact UUID until
@@ -26,8 +55,10 @@ Both the full command and prerequisite supervisor resolve the same registry for
 their exact workspace/source. New registries live at
 `$NWH_HOME/workspaces/v1/<workspace>/compile-loops/<source>/engineering-session/reviewer-session.json`
 with exclusive owner locks. A matching historical
-`run-records/longzu-rebuild-loop/reviewer-session.json` remains authoritative in
+`run-records/<legacy-directory>/reviewer-session.json` remains authoritative in
 place, with its original UUID and creation time; it cannot own another source.
+Legacy directories are discovered locally; the exact workspace/source fields
+determine ownership. Two matching legacy registries also stop as a conflict.
 Resolution is read-only and never migrates or rotates a session. Two registries
 claiming the same source stop with `DEDICATED_REGISTRY_CONFLICT`: inspect both
 original records and their ownership before dispatch; do not choose, delete or
@@ -3333,3 +3364,9 @@ missing-condition report cannot satisfy it. See
 消费者工具仅发现当前冻结分片的 `items[].ref`。ID/ref 错误在相同 collection 下 `offset=0` 发现并复制精确字段，只允许一次更正。其余分片保持原清单和单独验收。定义及独立审查的负面门禁不变，恢复成功不授权上游写入、原审查 grant 续期、父编译恢复或认证。真实链路回归使用合成 provider 和既有历史 fixture，运行真实 Pi 工具、源文锚点、预算、trace、恢复检查、会话封存和台账验收；不替换核心验收器。包括 48 项超字节案例、536 项／12 原分片完整检查、5 次原计费继承和剩余额度耗尽、过期或失败的宿主门禁，以及会话／检查点篡改拒绝。
 
 `test/prerequisite-supervisor.test.ts` 中四项 OS 隔离测试由 `NWH_TEST_READONLY_SANDBOX=1` 显式开启，需要 Linux namespace、bubblewrap 和本地 Codex 可执行文件；它们只运行本地进程及 `command/exec`，不创建模型会话。补跑命令为 `NWH_TEST_READONLY_SANDBOX=1 pnpm exec vitest run test/prerequisite-supervisor.test.ts`。宿主外的真实 OS 测试与恢复宿主内部固定回归须分别报告：恢复宿主的全盘只读、能力移除策略会限制嵌套 namespace，并禁止 Codex 初始化其状态目录；不能将这些环境失败算作通过、关闭开关掩盖失败，或为嵌套测试放宽原证据写保护。外部补跑不替代恢复宿主的审查、预算和执行凭证门禁。
+
+### 身份消费者的固定 payloadHash 发现
+
+消费者审查的 `bindings[].payloadHash` 由宿主对完整 `JSON.parse(frozenScope.operations[].payloadJson)` 做 canonical hash；模型不能自行猜算，也不能用 `revisionHash` 或 operation ID 替代。`read_identity_dependencies` 在消费者阶段、`collection=dependencies` 的发现及完整读取结果中提供 `operationPayloadHashes[].slot` 和 `.payloadHash`。缺少值时用同一工具、同一 collection、`offset=0` 发现，按 slot 复制精确字段，最多一次实质更正；host/consumed 错误仍停止。独立定义阶段不暴露这些哈希或冻结操作，消费者读取仍限于原分片。
+
+这些字段是只读派生元数据，不改原 input、intent、冻结 payload 或历史哈希。完整证据预检与实际工具返回计入相同字段和字节。若会话已因未提交而封存失败，补齐字段不授权重新派发、复用旧源码审查 PASS 或刷新预算；保留实际失败和全部已付调用，按新的停止状态处理宿主审查。

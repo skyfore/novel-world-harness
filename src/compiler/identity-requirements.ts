@@ -16,9 +16,13 @@ export const IDENTITY_REQUIREMENT_LIMITS = Object.freeze({ maxModelCalls: 24, ma
 export const identityRequirementDirectory = (root: string, sourceId: string, taskId: string) => path.join(workspaceStateDir(root), "compile-loops", sourceId, "prerequisites", taskId, "identity-requirements");
 export const identityContextRecoveryDirectory = (root: string, sourceId: string, taskId: string) =>
   path.join(identityRequirementDirectory(root, sourceId, taskId), "consumer-review", "engineering", "host-recovery");
-export const identityRecordDirectory = (root: string, record: IdentityRecord) => record.contextRecoveryHash
-  ? identityContextRecoveryDirectory(root, record.intent.sourceId, record.intent.taskId)
-  : identityRequirementDirectory(root, record.intent.sourceId, record.intent.taskId);
+export function identityRecordDirectory(root: string, record: IdentityRecord) {
+  if (record.contextRecoveryAttempt !== undefined) throw prerequisiteStop(
+    `Historical recovery records are inspection-only; their execution adapter has been retired. Inspect requirements inspect-identity-repairs --source ${record.intent.sourceId} --task ${record.intent.taskId}. Preserve the original receipts and charges; do not remove the recovery marker, redispatch or renew authority`);
+  return record.contextRecoveryHash
+    ? identityContextRecoveryDirectory(root, record.intent.sourceId, record.intent.taskId)
+    : identityRequirementDirectory(root, record.intent.sourceId, record.intent.taskId);
+}
 export const identityRequirementId = (taskId: string, slot: number) => `ir-${taskId.slice(0, 32)}-${slot}`;
 export const identitySemanticHash = (raw: unknown) => { const { derivation: _, ...body } = identityResolutionSchema.parse(raw); return contentHash(body); };
 export const identityIntentSchema = z.object({
@@ -29,7 +33,7 @@ export const identityIntentSchema = z.object({
   consumerShards: z.array(z.object({ index: z.number().int().nonnegative(), refs: z.array(text).min(1).max(48) }).strict()).min(1).max(64),
   targets: z.array(z.object({ slot: z.number().int().positive(), requirementId: text, mentionId: text,
     mentionHash: hash, predecessor: z.object({ id: text, hash }).strict().nullable(), questionIds: z.array(hash).min(1),
-  }).strict()).length(3),
+  }).strict()).min(1).max(48),
   requirementPrefix: z.object({ length: z.number().int().positive(), head: hash }).strict(),
   upstreamPrefix: z.object({ length: z.number().int().positive(), head: hash }).strict(),
   // Actual old usage, including failed calls, pinned before any newly authorized work.
@@ -45,7 +49,7 @@ export const identityDefinitionSchema = z.object({ ...common, phase: z.literal("
     disposition: z.enum(["uncertainty-preservation", "evidence-gap", "unsupported-type"]),
     requiredStatus: z.enum(["unresolved", "ambiguous"]).nullable(),
     missingCondition: z.string().max(6000), evidence,
-  }).strict()).length(3),
+  }).strict()).min(1).max(48),
 }).strict();
 const judgment = z.object({ id: text, verdict: z.enum(["supported", "blocked"]), rationale: text, evidence }).strict();
 // A definition can preserve an unresolved original question while defining a
@@ -56,12 +60,12 @@ const definitionGap = z.object({ conditionHash: hash,
   rationale: text, evidence }).strict();
 const checkedDefinitionGap = definitionGap.extend({ verdict: z.enum(["supported", "blocked"]) }).strict();
 export const identityDefinitionCheckSchema = z.object({ ...common, phase: z.literal("identity-definition-check"), proposalHash: hash,
-  judgments: z.array(judgment).length(3) }).strict();
+  judgments: z.array(judgment).min(1).max(48) }).strict();
 export const identityConsumerSchema = z.object({ ...common, phase: z.literal("identity-consumers"), shard: z.number().int().nonnegative(), definitionHash: hash, inventoryHash: hash,
   bindings: z.array(z.object({ requirementId: text, slot: z.number().int().positive(), payloadHash: hash,
     dependencyRefs: z.array(text).min(1).max(128), verdict: z.enum(["supported", "blocked"]), rationale: text,
     missingCondition: z.string().max(6000), evidence,
-    definitionGap: definitionGap.nullable().optional() }).strict()).length(3),
+    definitionGap: definitionGap.nullable().optional() }).strict()).min(1).max(48),
   consumers: z.array(z.object({ ref: text, revisionHash: hash,
     disposition: z.enum(["unaffected", "preserve-blocked", "revalidate-required", "additional-repair-required", "unknown"]),
     rationale: text, requiredAction: text }).strict()).max(4096),
@@ -70,7 +74,7 @@ export const identityConsumerSchema = z.object({ ...common, phase: z.literal("id
   parentResumeAllowed: z.literal(false), renewConsumedGrant: z.literal(false), evidence,
 }).strict();
 export const identityConsumerCheckSchema = z.object({ ...common, phase: z.literal("identity-consumers-check"), shard: z.number().int().nonnegative(), proposalHash: hash, inventoryHash: hash,
-  judgments: z.array(judgment.extend({ definitionGap: checkedDefinitionGap.nullable().optional() }).strict()).length(3),
+  judgments: z.array(judgment.extend({ definitionGap: checkedDefinitionGap.nullable().optional() }).strict()).min(1).max(48),
   consumers: z.array(z.object({ ref: text, verdict: z.enum(["supported", "blocked"]), rationale: text }).strict()).max(4096),
   denominatorVerdict: z.enum(["supported", "blocked"]), denominatorRationale: text,
 }).strict();
@@ -82,6 +86,9 @@ export const identityRecordSchema = z.object({ intent: identityIntentSchema, sta
   predecessorRecordHash: hash.nullable(),
   contextRecoveryHash: hash.optional(),
   contextRecoveryGateHash: hash.optional(),
+  // Historical ledger compatibility only. No producer or execution path emits
+  // this retired marker; identityRecordDirectory rejects it before validation.
+  contextRecoveryAttempt: z.literal(2).optional(),
   sessionCheckpointHash: hash.optional(),
 }).strict();
 export type IdentityRecord = z.infer<typeof identityRecordSchema>;
@@ -129,6 +136,8 @@ export function validateIdentityHistory(records: IdentityRecord[]) {
   for (let i = 2; i < records.length; i += 2) {
     const c = records[i]?.output, check = records[i + 1]?.output;
     if (c?.phase === "identity-consumers" && (c.definitionHash !== contentHash(p) || c.inventoryHash !== records[0]!.intent.inventoryHash)) throw prerequisiteStop("Consumer binding changed independent definition or inventory");
+    if (c?.phase === "identity-consumers" && !sameIdentitySet(c.bindings.map(b => b.requirementId), records[0]!.intent.targets.map(t => t.requirementId)))
+      throw prerequisiteStop("Consumer binding omitted or repeated an exact requirement; inspect the frozen intent and original review, no authority or retry");
     if (c?.phase === "identity-consumers" && check?.phase === "identity-consumers-check" && (check.inventoryHash !== c.inventoryHash
       || !sameIdentitySet(check.consumers.map(c => c.ref), c.consumers.map(c => c.ref)))) throw prerequisiteStop("Independent consumer check omitted an affected consumer");
     if (c?.phase === "identity-consumers" && p?.phase === "identity-definition") {
@@ -150,6 +159,8 @@ export function validateIdentityOutput(intent: IdentityIntent, records: Identity
   if (contentHash(inventory) !== intent.inventoryHash || contentHash(semantic.map(contentHash)) !== contentHash(intent.semanticRecordHashes)) throw prerequisiteStop("Identity dependencies changed");
   const old = semantic[0]?.output;
   if (old?.phase !== "semantic-scope-plan") throw prerequisiteStop("Original frozen operation proposal missing");
+  if (!sameIdentitySet(intent.targets.map(t => t.slot), old.operations.map(o => o.slot)))
+    throw prerequisiteStop("Identity targets do not match the complete frozen operation scope; inspect the original plan, no partial scope or retry");
   for (const record of records) {
     const c = record.output;
     if (c.phase !== "identity-consumers") continue;

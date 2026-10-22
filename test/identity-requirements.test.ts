@@ -38,6 +38,24 @@ import { decodeJsonValues } from "../src/agent/lossless-json-context.js";
 import { identityFixture as fixture } from "./helpers/identity-fixture.js";
 const rechain = (records: IdentityRecord[]) => { for (let i = 1; i < records.length; i++) { records[i]!.predecessorRecordHash = h(records[i - 1]); if ("proposalHash" in records[i]!.output) (records[i]!.output as any).proposalHash = h(records[i - 1]!.output); } };
 
+it.each([1, 2, 5, 48])("derives %i identity targets from the exact operation scope while rejecting omissions", count => {
+  const f = fixture(count);
+  validateIdentityOutput(f.intent, f.records, f.inventory, f.semantic);
+  expect(identityRequirementsReady(f.records)).toBe(true);
+  const plan = buildIdentityRepairPlan(f.p, f.records);
+  expect(plan.identityRequirements!.recordHashes).toEqual(f.records.map(h));
+  expect(plan.allowedCreations.map(c => c.id)).toEqual(f.semantic[0]!.output.operations.map((o: { id: string }) => o.id));
+  const original = h(f.records);
+  const incomplete = structuredClone(f.records);
+  const consumer = incomplete[2]!.output;
+  if (consumer.phase !== "identity-consumers") throw Error("fixture");
+  consumer.bindings.pop(); rechain(incomplete);
+  expect(() => identityRequirementsReady(incomplete)).toThrow();
+  const partial = { ...f.intent, targets: f.intent.targets.slice(0, -1) };
+  expect(() => validateIdentityOutput(partial, [], f.inventory, f.semantic)).toThrow(/complete frozen operation scope/);
+  expect(h(f.records)).toBe(original);
+});
+
 function withDefinitionGaps(f = fixture(), classified = true) {
   const definition = f.records[0]!.output;
   if (definition.phase !== "identity-definition") throw Error("fixture");

@@ -14,6 +14,7 @@
     "test/identity-recovery-integrity.test.ts",
     "test/identity-recovery-host.test.ts",
     "test/identity-real-chain.test.ts",
+    "test/identity-repair-handoff.test.ts",
     "test/identity-session-persistence.test.ts",
     "test/lossless-json-context.test.ts",
     "test/manual/pi-upgrade-live.ts"

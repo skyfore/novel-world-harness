@@ -31,6 +31,8 @@ const fields: Record<UpstreamRepairKind, readonly string[]> = {
   "canonical-event": [],
   "event-participation": [],
 };
+/** Discovery only; field support does not grant an artifact revision. */
+export function upstreamRepairRevisionFields(kind: UpstreamRepairKind): readonly string[] { return [...fields[kind]]; }
 const refSchema = z.object({ kind: upstreamRepairKindSchema, id: idSchema }).strict();
 export const upstreamRepairReadableRefSchema = z.object({ kind: z.enum([...upstreamRepairKindSchema.options, "entity", "canonical-event", "proposition", "attribution", "claim", "event-participation", "event-relation", "scene-occurrence", "event-frame", "spatial-relation", "action-schema", "event-execution", "action-constraint", "norm-template", "process-template", "world-rule", "character-goal", "character-model", "possibility", "initial-world", "source-segment", "evidence-assertion", "structural-discourse", "semantic-effect", "utterance-expression", "perception-observation", "acquisition"]), id: idSchema }).strict();
 const key = (ref: { kind: string; id: string }) => `${ref.kind}:${ref.id}`;
@@ -57,7 +59,7 @@ const identitySchema = z.object({
   requirementSetHash: hash, requirementIds: z.array(text).min(1).max(128),
   proposalObligation: sourcePatternUpstreamAuthoritySchema.optional(),
   identityRequirements: z.object({ taskId: hash, intentHash: hash, recordHashes: z.array(hash).min(4).max(130),
-    semanticSlots: z.array(z.object({ id: idSchema, payloadHash: hash }).strict()).length(3) }).strict().optional(),
+    semanticSlots: z.array(z.object({ id: idSchema, payloadHash: hash }).strict()).min(1).max(48) }).strict().optional(),
   sourceRepresentation: representationAuthoritySchema.extend({
     semanticSlots: z.array(z.object({ id: idSchema, payloadHash: hash }).strict()).min(1).max(48),
   }).strict().optional(),
@@ -99,9 +101,9 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
   if (!plan.allowedWrites.length && !plan.allowedCreations.length) fail("Repair plan has no bounded mutation");
   if (plan.identityRequirements) {
     if (plan.sourceRepresentation || plan.proposalObligation || plan.allowedWrites.length || plan.semanticEventCreations?.length
-      || plan.allowedCreations.length !== 3 || plan.allowedCreations.some(c => c.kind !== "entity-resolution")
+      || plan.allowedCreations.length !== plan.identityRequirements.semanticSlots.length || plan.allowedCreations.some(c => c.kind !== "entity-resolution")
       || !unique(plan.identityRequirements.semanticSlots.map(s => s.id))
-      || contentHash(plan.allowedCreations.map(c => c.id).sort()) !== contentHash(plan.identityRequirements.semanticSlots.map(s => s.id).sort())) fail("Independent identity authority permits only its three exact reviewed resolution creations");
+      || contentHash(plan.allowedCreations.map(c => c.id).sort()) !== contentHash(plan.identityRequirements.semanticSlots.map(s => s.id).sort())) fail("Independent identity authority permits only its exact reviewed resolution creations");
   }
   if (plan.sourceRepresentation) {
     if (plan.proposalObligation || plan.allowedWrites.length || plan.resolutionAbsences?.length || plan.resolutionRevisions?.length || plan.semanticEventCreations?.length

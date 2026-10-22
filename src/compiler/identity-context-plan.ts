@@ -3,7 +3,7 @@ import { losslessJsonContext } from "../agent/lossless-json-context.js";
 import { contentHash } from "../world/canonical.js";
 import { identitySelectors, IDENTITY_REQUIREMENT_LIMITS, type IdentityRecord } from "./identity-requirements.js";
 import type { PreparedIdentityRequirements } from "./identity-requirement-service.js";
-import { identityStageCatalog, identityConsumerView, type identityStageInput } from "../workflow/identity-requirements.js";
+import { identityStageCatalog, identityConsumerView, identityDependencyResult, type identityStageInput } from "../workflow/identity-requirements.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
 import type { ModelRequestUsage } from "../runtime/model-request-budget.js";
 
@@ -47,8 +47,8 @@ export function identityContextPlan(p: PreparedIdentityRequirements, input: Retu
       if (!value) throw prerequisiteStop("Mandatory identity dependency is missing from its frozen catalog; no guessed ref or dispatch");
       return value;
     });
-    batches(selected, 32, items => Buffer.byteLength(JSON.stringify(items)), items => reads.push({ name: "read_identity_dependencies",
-      arguments: { collection, refs: items.map(c => c.ref), offset: 0 }, value: { items } }));
+    batches(selected, 32, items => Buffer.byteLength(JSON.stringify(identityDependencyResult(input, collection, { items }))), items => reads.push({ name: "read_identity_dependencies",
+      arguments: { collection, refs: items.map(c => c.ref), offset: 0 }, value: identityDependencyResult(input, collection, { items }) }));
   }
   const base = normalizeContext({ messages: [{ role: "system", content: system, toolsAdded: tools, timestamp: 0 },
     { role: "user", content: JSON.stringify(input), timestamp: 0 }] });

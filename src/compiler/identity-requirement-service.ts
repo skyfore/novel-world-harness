@@ -39,7 +39,7 @@ export async function prepareIdentityRequirements(root: string, input: RoleDepen
   const semantic = await ledger.roleSemanticScopes(review.taskId);
   validateSemanticScopeHistory(review, semantic);
   const plan = semantic[0]?.output, check = semantic[1]?.output;
-  if (plan?.phase !== "semantic-scope-plan" || check?.phase !== "semantic-scope-check" || plan.operations.length !== 3
+  if (plan?.phase !== "semantic-scope-plan" || check?.phase !== "semantic-scope-check" || !plan.operations.length
     || check.operationJudgments.some(j => j.verdict !== "supported") || check.judgments.some(j => j.verdict !== "supported") || check.consumerVerdict !== "supported") throw prerequisiteStop("Exact original operation scope is absent or independently rejected");
   validateSemanticScopePlan(plan, review, prepared.prerequisites, prepared.representations, catalog, prepared.discovery.findings.map(f => f.findingId));
   if (verifyOldTraces) for (const r of semantic) await verifySemanticScopeRecord(root, review, r);

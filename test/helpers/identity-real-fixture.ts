@@ -14,9 +14,10 @@ import { roleDependencyFixture } from "./role-dependency-fixture.js";
 import { semanticScopeSelectors } from "../../src/compiler/role-semantic-scope.js";
 import { mockPiProvider } from "./pi-provider.js";
 import { digest } from "../../src/runtime/compile-loop/workspace.js";
+import { decodeJsonValues, LOSSLESS_CONTEXT_PROTOCOL } from "../../src/agent/lossless-json-context.js";
 
 export async function realIdentityFixture(large = false, failFirstConsumer = false, consumerCount = 48) {
-  const controls = { failFirstConsumer, exhaustRecovery: false, submitWithReads: false };
+  const controls = { failFirstConsumer, exhaustRecovery: false, submitWithReads: false, discoverOperationHashes: false };
   let parent: any;
   const bytes = Buffer.from("Ada waits.\n" + (large ? Array.from({ length: 2800 }, (_, i) => `${i}:未核实的人物关系必须保留未知，不能推断同一身份。\n`).join("") : ""));
   const upstream = await roleDependencyFixture(failFirstConsumer ? (root, source) => {
@@ -120,9 +121,36 @@ export async function realIdentityFixture(large = false, failFirstConsumer = fal
         ...(index === 0 ? plan.readPlan.map((r: any, i: number) => fauxToolCall(r.name, r.arguments, { id: `old-${index}-${i}` }))
           : [fauxToolCall("read_identity_dependencies", { collection: "dependencies", offset: 0 }, { id: `repeat-${index}` })]),
       ], { stopReason: "toolUse" });
-      if (index > 1) throw new Error(`Unexpected additional provider call: ${JSON.stringify(_context.messages.slice(-3))}`);
+      const discover = ordinal === 2 && controls.discoverOperationHashes;
+      if (discover && index === 1) return fauxAssistantMessage([
+        fauxToolCall("read_identity_dependencies", { collection: "dependencies", offset: 0 }, { id: "discover-operation-hashes" }),
+      ], { stopReason: "toolUse" });
+      if (index > (discover ? 2 : 1)) throw new Error(`Unexpected additional provider call: ${JSON.stringify(_context.messages.slice(-3))}`);
+      const output = JSON.parse(JSON.stringify(outputs[ordinal]));
+      if (index > 0) {
+        const envelopes = _context.messages.flatMap(m => {
+          if (m.role !== "user" && m.role !== "toolResult") return [];
+          return (typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content)
+            .flatMap(b => b.type === "text" ? [JSON.parse(b.text)] : []);
+        });
+        const values: any[] = envelopes[0]?.$nwhContext === LOSSLESS_CONTEXT_PROTOCOL
+          ? decodeJsonValues(envelopes[0].dictionary, envelopes.map(e => e.value)) : envelopes;
+        if (output.phase.startsWith("identity-definition") && values.some(v => v.operationPayloadHashes))
+          throw new Error("Blind definition received frozen operation hashes");
+        if (output.phase === "identity-consumers") {
+          // Copy identifiers only from actual provider-visible tool results;
+          // an out-of-band fixture hash would mask a broken host contract.
+          const hashes = (discover ? values.slice(-1) : values.slice(1)).flatMap(v => v.operationPayloadHashes ?? []);
+          for (const binding of output.bindings) {
+            const matches = hashes.filter(v => v.slot === binding.slot);
+            if (!matches.length || matches.some(v => v.payloadHash !== matches[0].payloadHash))
+              throw new Error("Consumer cannot discover its exact operation payloadHash");
+            binding.payloadHash = matches[0].payloadHash;
+          }
+        }
+      }
       const calls = index === 0 ? plan.readPlan.map((r: any, i: number) => fauxToolCall(r.name, r.arguments, { id: `read-${ordinal}-${i}` }))
-        : [fauxToolCall("submit_identity_requirements", JSON.parse(JSON.stringify(outputs[ordinal])), { id: `submit-${ordinal}` })];
+        : [fauxToolCall("submit_identity_requirements", output, { id: `submit-${ordinal}` })];
       if (controls.submitWithReads && ordinal === 0 && index === 0)
         calls.push(fauxToolCall("submit_identity_requirements", JSON.parse(JSON.stringify(outputs[ordinal])), { id: "submit-without-seeing-results" }));
       return fauxAssistantMessage([{ ...fauxThinking("synthetic provider state"), thinkingSignature: `opaque-${ordinal}-${index}` }, ...calls], { stopReason: "toolUse" });

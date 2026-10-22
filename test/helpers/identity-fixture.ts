@@ -2,9 +2,9 @@ import { textAnchorForByteRange } from "../../src/compiler/text-anchors.js";
 import { contentHash as h } from "../../src/world/canonical.js";
 import { identityIntentSchema, identityRequirementId, identityStages, type IdentityRecord } from "../../src/compiler/identity-requirements.js";
 
-export function identityFixture() {
+export function identityFixture(targetCount = 3) {
   const taskId = h("original-prerequisite"), evidence = [{ segment_id: "seg", exact: "Ada waits." }], questionIds = [h("critical-1"), h("critical-2"), h("critical-3")];
-  const targets = [1, 2, 3].map(slot => ({ slot, requirementId: identityRequirementId(taskId, slot), mentionId: `mention-${slot}`, mentionHash: h(slot), predecessor: null, questionIds: [questionIds[0]!] }));
+  const targets = Array.from({ length: targetCount }, (_, index) => index + 1).map(slot => ({ slot, requirementId: identityRequirementId(taskId, slot), mentionId: `mention-${slot}`, mentionHash: h(slot), predecessor: null, questionIds: [questionIds[0]!] }));
   const operations = targets.map(t => {
     const payload = { version: 1, id: `rs-${taskId.slice(0, 32)}-${t.slot}`, sourceId: "src", mentionId: t.mentionId, status: "unresolved", candidates: [], rationale: "Independent source uncertainty", derivation: { runId: "old", worker: "old", ontologyVersion: "entity-resolution-v1" } };
     return { slot: t.slot, id: payload.id, kind: "entity-resolution", mode: "create", baseline: null, pointers: [], payloadJson: JSON.stringify(payload), readableRefs: [{ kind: "entity-mention", id: t.mentionId, revisionHash: t.mentionHash }], findingIds: [], questionIds: t.questionIds, rationale: "Frozen scope", evidence };

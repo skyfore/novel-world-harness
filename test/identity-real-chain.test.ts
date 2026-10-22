@@ -8,6 +8,28 @@ import { verifyIdentityRecord } from "../src/compiler/identity-requirement-trace
 import { decodeJsonValues, LOSSLESS_CONTEXT_PROTOCOL } from "../src/agent/lossless-json-context.js";
 import { realIdentityFixture as fixture } from "./helpers/identity-real-fixture.js";
 
+it("discovers canonical operation hashes through real tools without out-of-band IDs or changing the frozen input", async () => {
+  const f = await fixture(), frozen = h(f.p.semantic);
+  try {
+    f.controls.discoverOperationHashes = true;
+    // The provider must replace these using its received discovery response.
+    f.outputs[2].bindings.forEach((b: any) => { b.payloadHash = h("unavailable fixture hash"); });
+    await f.run();
+    const records = await new RequirementLedger(f.root, f.p.intent.sourceId).identityRequirements(f.p.intent.taskId);
+    const output = records[2]!.output;
+    expect(output.phase).toBe("identity-consumers");
+    if (output.phase !== "identity-consumers") throw Error("consumer fixture");
+    expect(output.bindings.map(b => ({ slot: b.slot, payloadHash: b.payloadHash })))
+      .toEqual(f.p.semantic[0].output.operations.map((op: any) => ({ slot: op.slot, payloadHash: h(JSON.parse(op.payloadJson)) })));
+    expect(h(f.p.semantic)).toBe(frozen); expect(f.transports[2]!.contexts).toHaveLength(3);
+    expect(identityRequirementsReady(records)).toBe(true);
+    const dir = identityRequirementDirectory(f.root, f.p.intent.sourceId, f.p.intent.taskId);
+    const input = JSON.parse(await fs.readFile(path.join(dir, "identity-consumers-0.input.json"), "utf8"));
+    expect(input.operationPayloadHashes).toBeUndefined(); expect(input.frozenScope).toEqual(f.p.semantic[0].output);
+    for (const [i, r] of records.entries()) await verifyIdentityRecord(f.root, r, records.slice(0, i));
+  } finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
+});
+
 it("executes real Pi tools, settles/seals sessions before actual ledger verification, and rejects transcript/checkpoint tampering everywhere", async () => {
   const f = await fixture();
   try {

@@ -47,7 +47,7 @@ Pi 读取不可变原文及当前来源注解，提出具体注解 payload 和�
 
 每个独立规格条件对应具体 operation slot 或显式缺项。操作必须使用既有类型、精确目标 ID、当前 baseline/revisionHash、注册字段 pointers、完整 payload、类型化依赖及证据；每个未定边界仍为 unresolved。独立会话重新读取完整原文与全部操作依赖。负面结果／gap 保留为 BREAK；supported 可以支持仍然缺失的条件。
 
-接续授权须逐项核对实际记录和 trace：提案／复核的 payload 与字段范围 → 当前类型化 requirement/dependency 入口 → `verifyUpstreamRepairPlan` → `UpstreamRepairLedger.register/authorize` → 窄 typed proposal → 实际 pending 图的独立验收 → 原 finish intent/receipt → convergence → 消费者重新验证。范围规划的 DONE 仅交宿主审查，不替代这条授权链，不使原三个问题解决，也不使主 loop READY。旧 grant 永远不可续发；任何当前入口不支持的范围都必须明确报告，不能用文本重叠、来源 supported 或无关旧计划补权。
+接续授权须逐项核对实际记录和 trace：提案／复核的 payload 与字段范围 → 当前类型化 requirement/dependency 入口 → `verifyUpstreamRepairPlan` → `UpstreamRepairLedger.register/authorize` → 窄 typed proposal → 实际 pending 图的独立验收 → 原 finish intent/receipt → convergence → 消费者重新验证。范围规划的 DONE 仅交宿主审查，不替代这条授权链，不使原问题解决，也不使主 loop READY。旧 grant 永远不可续发；任何当前入口不支持的范围都必须明确报告，不能用文本重叠、来源 supported 或无关旧计划补权。
 
 ## 四处创建范围错误的一次显式更正
 
@@ -59,13 +59,13 @@ Pi 读取不可变原文及当前来源注解，提出具体注解 payload 和�
 
 ## 独立身份要求与完整消费者审查
 
-`independent-identity-requirements/v1` 用于用户新授权的三个固定 `entity-resolution` 创建项。保持原 prerequisite taskId、pending denominator revision、原 question IDs、13 个缺项／14 个边界（以实际记录为准）以及所有旧 grant 不变。新要求只定义有来源支持的不确定性表示，不取代原 critical/blocked 问题。
+`independent-identity-requirements/v1` 用于用户新授权、由冻结范围提供的 `entity-resolution` 创建项（1～48 项）。保持原 prerequisite taskId、pending denominator revision、原 question IDs、实际记录的全部缺项和边界以及所有旧 grant 不变。新要求只定义有来源支持的不确定性表示，不取代原 critical/blocked 问题。
 
 先由新的 Pi 会话根据原文与实际提及／前驱定义要求，再由另一个会话独立复核；这两个会话不能读取待执行 payload 或消费者结论。宿主复用 `buildPreparedClosure` 建立传递消费者清单，加入全部旧角色条目和旧／新分母。调用前固定每片最多 48 项的完整分区；每片依赖绑定／影响提案和独立复核各用一个新会话。分区不得在失败后改名、删减或重复调度。每个固定会话最多 24 次请求，512000 字节／次与 12288000 累计字节；这些是新工作限制，不改写任何旧预算。每次计费同时记录全部旧实际调用／字节和本任务新增累计用量。
 
 消费者图仅把显式类型化引用当成依赖。来源页与旧条目属于复核覆盖范围，不能用于获得写权限。所有候选和判断字段保留；名单中机械的 unitIds／extractionRunIds 清单在模型视图中显示原始 hash 和数量，完整值仍冻结在宿主 inventory。每片完整读取自身消费者和必需原文，不能通过省略消费者通过审查。
 
-新记录进入原 RequirementLedger 的 `identity-requirements` 类型，invocation/input/proposal/record/trace/budget 与前缀均须验证。仅全部独立要求、精确依赖和所有消费者复核有效时才能产生 `upstream-plan.preview.json`。预览仍需现有 `verifyUpstreamRepairPlan`、`UpstreamRepairLedger.register/authorize`；允许的写入只有原三个精确决议 payload，宿主仅可加入执行 provenance。原已消费语义提案不得修订。新的来源身份断言、消费者写入、名单激活均不在此权限内。
+新记录进入原 RequirementLedger 的 `identity-requirements` 类型，invocation/input/proposal/record/trace/budget 与前缀均须验证。仅全部独立要求、精确依赖和所有消费者复核有效时才能产生 `upstream-plan.preview.json`。预览仍需现有 `verifyUpstreamRepairPlan`、`UpstreamRepairLedger.register/authorize`；允许的写入只有冻结范围的全部精确决议 payload，宿主仅可加入执行 provenance。原已消费语义提案不得修订。新的来源身份断言、消费者写入、名单激活均不在此权限内。
 
 上游 finish 必须验证独立 Pi 对实际 pending 决议图的验收记录、原 typed proposal 会话、计费和来源读取；无验收不能提交。新要求满足只证明对应不确定性表示，原问题、全局闭合与可执行认证继续单独判定。任何 gap、额外修复需求、负面复核或未知影响保留并停止放权。后台只回调完成、阻塞或异常退出，正常进度保持安静。
 
@@ -76,3 +76,11 @@ Pi 读取不可变原文及当前来源注解，提出具体注解 payload 和�
 每片 Pi 消费者提案必须针对原缺项的精确 `conditionHash` 填写绑定中的 `definitionGap`，明确为 `retained-boundary`、`repair-prerequisite` 或 `unknown`，附理由和原文证据。随后独立 Pi 会话在同一 requirement 的 judgment 中复核同一条件、同一分类。只有每片都支持 `retained-boundary`，当前 payload 的独立验收条件满足、绑定自身 `missingCondition` 为空，且完整消费者影响复核通过，才能构建原精确上游预览。缺分类的旧记录、真正的修复前提、未知、负面复核及额外修复需求均不能放权。原问题缺项、critical/blocked 和未定边界继续保留，来源证据不会因此升级为身份事实。
 
 对旧的“定义已有支持，但因非空缺项禁止消费者审查”停止，可在修复经审查测试后使用 `inspectIdentityConsumerContinuation` 检查原宿主、完整文件哈希、两份已登记记录、当前源与消费者清单以及全部未消费阶段。`continueConsumers` 仅继续原 intent 的固定消费者分片，不重跑或重登记定义，不修改原 taskId、失败、grants、分母、分片、每阶段预算或累计计费。单次续行凭证、零写入收据和状态写入 `consumer-review`；原 `state` 与 `host-recovery` 保持原样。任意分片复核不通过即停止；后续不得借此重启已消费阶段。该入口不恢复主编译器。
+
+### 消费者缺口的只读移交
+
+`nwh requirements inspect-identity-repairs --source <source-id>` 从现有 RequirementLedger 发现 `tasks[].taskId`。追加 `--task <task-id>` 可分页查看已登记消费者处置；复制 `items[].ref` 或 `availableRefs[]` 到 `--ref`，可读取该消费者的完整当前载荷、精确修订、依赖字段指针及类型化下游闭包。`baselineManifest` 保留闭包全部 ref/revisionHash，`downstream.nextOffset` 用于继续读取下游清单；清单保留依赖数量与 hash，复制 `downstream.items[].dependencies.readRef` 到相同 source/task 的 `--ref` 可读取完整指针，不将所有节点的依赖重复展开在一页中。来源复核条目和分母覆盖单独保留，不被当成类型化写权限。该入口不调用模型、不创建任务、不更改原记录或尝试次数。
+
+`compile-novel status` 和 `status --json` 的 `sources[].identityReviews` 分别报告已登记的分片审查、未审分片、待修复处置及整体修复支持。`recordedReviewComplete` 只表示提案和独立复核已在账本中，不表示缺口解决或宿主验收通过；状态快照不重新执行 trace／宿主验证。详细移交重新核对当前来源和冻结输入，仍不能替代执行授权。`supported` 可以支持“需要额外修复”；原 `blocked`、`missingCondition` 和独立定义中的保留边界分别呈现，不能按文字相似度互相覆盖。
+
+额外实体修复不能借原 resolution 创建槽位执行。移交中的 `capability.existingArtifactRevision=unsupported-kind/unsupported-revision` 表示当前上游协议缺少对应操作；必须先实现来源限定、精确基线绑定的类型化修复及独立验收，再提出具体语义方案。不得以闭包为删除清单，也不得自动合并、重绑、放行旧实体，或通过 `--rebuild` 清掉本次停止。未完成的能力继续作为原账本处置保留；移交结果不是新的权威账本。

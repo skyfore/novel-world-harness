@@ -19,7 +19,7 @@ const once = (file: string, value: unknown) => fs.writeFileSync(file, JSON.strin
 const success = (r: ChildOutcome) => r.code === 0 && !r.signal && !r.error && !r.cancelled && !r.timedOut;
 export const identityRecoveryTests = Object.freeze([...fixedTests, "test/prerequisite-supervisor.test.ts", "test/identity-requirements.test.ts",
   "test/identity-session-persistence.test.ts", "test/identity-recovery-host.test.ts", "test/identity-real-chain.test.ts", "test/lossless-json-context.test.ts",
-  "test/identity-recovery-integrity.test.ts", "test/identity-engineering-accounting.test.ts"]);
+  "test/identity-recovery-integrity.test.ts", "test/identity-engineering-accounting.test.ts", "test/identity-repair-handoff.test.ts"]);
 
 const permits = new WeakMap<object, { root: string; proofHash: string; gateHash: string; assert: () => Promise<void>; signal: AbortSignal; deadline: number }>();
 /** Not constructible by a CLI request or a caller-supplied no-op callback. */
@@ -174,6 +174,7 @@ export async function verifyIdentityRecoveryHostReceipt(root: string, proof: Ide
   const state = read<{ version: number; phase: string; childPid: number | null; workerDispatches: number; commands: number; engineeringTurns: number;
     updatedAt: string; proofHash: string; sourceHash: string; deadline: number; completionHash: string; budgetLineage: unknown }>(path.join(directory, "state.json"));
   const history = identityEngineeringHistory(proof, path.dirname(workerDirectory));
+  const originalDeadline = read<{ deadline: number }>(path.join(path.dirname(workerDirectory), "spec.json")).deadline;
   if (!expectedHash || gate.version !== 1 || state.version !== 1 || !Number.isSafeInteger(gate.deadline) || gate.deadline <= 0
     || contentHash(gate) !== expectedHash || gate.proofHash !== contentHash(proof)
     || contentHash(read(path.join(directory, "source.json"))) !== gate.sourceHash || state.phase !== "DONE" || state.childPid !== null
@@ -181,7 +182,7 @@ export async function verifyIdentityRecoveryHostReceipt(root: string, proof: Ide
     || contentHash(gate.inherited) !== contentHash(history.usage) || gate.commands !== history.usage.commands + 3
     || gate.engineeringTurns !== history.usage.engineeringTurns + 1 || state.engineeringTurns !== gate.engineeringTurns || state.engineeringTurns > 2
     || contentHash(state.budgetLineage) !== contentHash(identityEngineeringLineage(proof, history.head, history.usage, state))
-    || state.workerDispatches !== 1 || state.commands !== gate.commands + 1 || state.commands > 24
+    || state.workerDispatches !== 1 || state.commands !== gate.commands + 1 || state.commands > 24 || gate.deadline !== originalDeadline
     || !Number.isFinite(Date.parse(state.updatedAt)) || Date.parse(state.updatedAt) > gate.deadline)
     throw prerequisiteStop("Identity record has no completed repository recovery host; WORKER needs its live in-process permit for registration only, never public authority or retry");
   for (const [file, hash] of Object.entries(gate.receipts)) {

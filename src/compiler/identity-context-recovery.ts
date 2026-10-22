@@ -41,7 +41,9 @@ export type IdentityContextRecovery = z.infer<typeof identityContextRecoverySche
  * This never authorizes a semantic correction, another grant, or parent resume. */
 export async function inspectIdentityContextRecovery(root: string, p: PreparedIdentityRequirements,
   raw: IdentityContextRecovery, options: { consumed?: boolean; historyOnly?: boolean } = {}) {
-  const proof = identityContextRecoverySchema.parse(raw), intent = p.intent;
+  const parsed = identityContextRecoverySchema.safeParse(raw);
+  if (!parsed.success) throw prerequisiteStop("Unsupported recovery proof. Preserve the original authority, stop and charges; inspect requirements inspect-identity-repairs for the same source/task. An unsupported or retired recovery format is inspection-only, not a reason to rewrite its version, redispatch or renew a grant");
+  const proof = parsed.data, intent = p.intent;
   const directory = identityRequirementDirectory(root, intent.sourceId, intent.taskId);
   const engineering = path.join(directory, "consumer-review", "engineering");
   const recoveryDirectory = identityContextRecoveryDirectory(root, intent.sourceId, intent.taskId);

@@ -4,6 +4,10 @@ import path from "node:path";
 import { z } from "zod";
 import { defineTool, ModelRuntime, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { PiAgentSession, redactHostWorkspacePath } from "../agent/pi-session.js";
+import { losslessContextInstructions } from "../agent/lossless-json-context.js";
+import { verifyIdentitySessionEvidence, assertIdentitySubmissionTurn } from "../compiler/identity-session-integrity.js";
+import { assertIdentityRecoveryPermit, type IdentityRecoveryPermit } from "../runtime/compile-loop/identity-recovery-host.js";
+import { identityContextPlan } from "../compiler/identity-context-plan.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { ModelRequestBudget } from "../runtime/model-request-budget.js";
 import { RuntimeHooks, withRuntimeHooks } from "../runtime/hooks.js";
@@ -19,6 +23,7 @@ import { type RoleDependencyReviewInput } from "../compiler/role-dependency-revi
 import { prepareIdentityRequirements, type PreparedIdentityRequirements } from "../compiler/identity-requirement-service.js";
 import { inspectIdentityDefinitionRecovery, type IdentityDefinitionRecovery } from "../compiler/identity-definition-recovery.js";
 import { inspectIdentityConsumerContinuation, type IdentityConsumerContinuation } from "../compiler/identity-consumer-continuation.js";
+import { inspectIdentityContextRecovery, type IdentityContextRecovery } from "../compiler/identity-context-recovery.js";
 import { identityStages, IDENTITY_REQUIREMENT_LIMITS, identityRequirementDirectory, identityOutputSchema,
   identityDefinitionSchema, identityDefinitionCheckSchema, identityConsumerSchema, identityConsumerCheckSchema,
   identitySelectors, validateIdentityOutput, identityRequirementsReady, identityConsumersReviewable, identityConsumerShardReady, identityDefinitionGaps,
@@ -50,13 +55,43 @@ export function identityStageInput(p: PreparedIdentityRequirements, phase: Ident
     ...(proposal ? { proposal, proposalHash: contentHash(proposal) } : {}), limits: IDENTITY_REQUIREMENT_LIMITS };
 }
 
+/** Legacy v2 prompt reconstruction for retained artifacts. New invocations use
+ * full v3 inputs and lossless sharing across the complete request. Other shards keep their exact frozen
+ * hashes/counts; this session receives every ref assigned to its own shard.
+ * Repeated denominator arrays use explicit references to their identical value
+ * in this input, never a summary or a smaller semantic denominator. */
+export function identityPromptInput(input: ReturnType<typeof identityStageInput>) {
+  const value = structuredClone(input) as Record<string, any>;
+  if (value.intent.consumerShards) {
+    const shards = value.intent.consumerShards as IdentityIntent["consumerShards"];
+    delete value.intent.consumerShards;
+    value.intent.consumerShardDirectory = shards.map(s => ({ index: s.index, count: s.refs.length, refsHash: contentHash(s.refs) }));
+    value.intent.currentConsumerShard = shards.find(s => s.index === value.shard);
+  }
+  if (value.proposal?.phase === "identity-consumers") {
+    for (const field of ["candidateIds", "sourcePages", "originalQuestionIds"]) {
+      if (contentHash(value.proposal[field]) === contentHash(value.inventory[field]))
+        value.proposal[field] = { $inputRef: `/inventory/${field}` };
+    }
+  }
+  return { ...value, fullInputHash: contentHash(input), transportVersion: 2,
+    transportInstructions: "$inputRef means the exact identical array already supplied at that JSON pointer. Expand it when evaluating the proposal; no evidence or denominator is omitted. Other consumer shards have separate fixed sessions; read only this shard's supplied consumer refs." };
+}
+
 /** New, single-use read-only definition phases and frozen consumer shards under the original task. No old stage
  * dispatch, repair grant, world write, roster activation or compiler resume. */
 export async function runIdentityRequirements(options: { root: string; input: RoleDependencyReviewInput; authorizationRef: string;
   priorUsage: IdentityIntent["priorUsage"]; expectedIntentHash: string; assertOriginal: () => Promise<void>;
-  recoverDefinition?: IdentityDefinitionRecovery; continueConsumers?: IdentityConsumerContinuation }) {
-  const { root, input, assertOriginal } = options;
-  if (options.recoverDefinition && options.continueConsumers) throw prerequisiteStop("Choose only one exact identity continuation; consumed definition recovery cannot run again");
+  recoverDefinition?: IdentityDefinitionRecovery; continueConsumers?: IdentityConsumerContinuation;
+  recoverContext?: IdentityContextRecovery; recoveryPermit?: IdentityRecoveryPermit }) {
+  const { root, input } = options;
+  const recoveryAuthority = options.recoverContext ? await assertIdentityRecoveryPermit(options.recoveryPermit, root, options.recoverContext) : undefined;
+  const assertOriginal = async () => {
+    if (options.recoverContext) await assertIdentityRecoveryPermit(options.recoveryPermit, root, options.recoverContext);
+    await options.assertOriginal();
+  };
+  if ([options.recoverDefinition, options.continueConsumers, options.recoverContext].filter(Boolean).length > 1)
+    throw prerequisiteStop("Choose only one exact identity continuation; consumed recovery cannot run again");
   await assertOriginal();
   const prepared = await prepareIdentityRequirements(root, input, options.authorizationRef, options.priorUsage);
   if (contentHash(prepared.intent) !== options.expectedIntentHash) throw prerequisiteStop("Reviewed new identity intent changed before reservation");
@@ -65,17 +100,22 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
   const recovery = options.recoverDefinition, continuation = options.continueConsumers;
   if (recovery) await inspectIdentityDefinitionRecovery(root, prepared, recovery);
   if (continuation) await inspectIdentityConsumerContinuation(root, prepared, continuation);
-  const statusDirectory = continuation ? path.join(directory, "consumer-review") : recovery ? path.join(directory, "host-recovery") : directory;
+  const contextRecovery = options.recoverContext ? await inspectIdentityContextRecovery(root, prepared, options.recoverContext) : undefined;
+  const statusDirectory = contextRecovery?.directory ?? (continuation ? path.join(directory, "consumer-review") : recovery ? path.join(directory, "host-recovery") : directory);
+  const stageDirectory = contextRecovery?.directory ?? directory;
   await fs.mkdir(directory, { recursive: true });
   await fs.mkdir(statusDirectory, { recursive: true });
   try { await once(path.join(statusDirectory, "start.json"), { taskId, intentHash: contentHash(intent), pid: process.pid,
-    ...(recovery ? { recoveryHash: contentHash(recovery) } : {}), ...(continuation ? { continuationHash: contentHash(continuation) } : {}) }); }
+    ...(recovery ? { recoveryHash: contentHash(recovery) } : {}), ...(continuation ? { continuationHash: contentHash(continuation) } : {}),
+    ...(contextRecovery ? { contextRecoveryHash: contentHash(contextRecovery.proof) } : {}) }); }
   catch (e) { if ((e as NodeJS.ErrnoException).code === "EEXIST") throw prerequisiteStop("Identity requirement intent already reserved; inspect its original state and owning process, never redispatch"); throw e; }
   const state: Record<string, unknown> = { version: 1, root, sourceId: intent.sourceId, sourceHash: intent.sourceHash, taskId,
     parentStateHash: intent.parentStateHash, revisionHash: intent.revisionHash, scopeHash: contentHash(intent), intentHash: contentHash(intent),
     authorityGranted: false, parentCompileResumeAllowed: false, certificationGranted: false, oldModelCalls: intent.priorUsage.modelCalls,
     ...(recovery ? { recoveryHash: contentHash(recovery), originalStoppedStateHash: recovery.stoppedStateHash } : {}),
-    ...(continuation ? { continuationHash: contentHash(continuation), originalStoppedStateHash: continuation.stoppedStateHash } : {}) };
+    ...(continuation ? { continuationHash: contentHash(continuation), originalStoppedStateHash: continuation.stoppedStateHash } : {}),
+    ...(contextRecovery ? { contextRecoveryHash: contentHash(contextRecovery.proof), historicalFailure: contextRecovery.budget.state.failure,
+      inheritedUsage: contextRecovery.initial.usage, originalSessionRestored: false } : {}) };
   const publish = async (phase: string, patch: object = {}) => {
     Object.assign(state, patch, { phase, childPid: ["DONE", "BREAK"].includes(phase) ? null : process.pid, updatedAt: new Date().toISOString() });
     const file = path.join(statusDirectory, "state.json"), tmp = file + ".tmp";
@@ -87,7 +127,7 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
       await assertOriginal();
       const current = await prepareIdentityRequirements(root, input, options.authorizationRef, options.priorUsage, false);
       if (contentHash(current.intent) !== contentHash(intent)) throw prerequisiteStop("Identity scope changed while acquiring compiler ownership");
-      if (!recovery && !continuation) {
+      if (!recovery && !continuation && !contextRecovery) {
         await once(path.join(directory, "intent.json"), intent); await once(path.join(directory, "inventory.json"), inventory);
         const { bytes, ...context } = prepared;
         await once(path.join(directory, "context.json"), { ...context, sourceBytesBase64: Buffer.from(bytes).toString("base64") });
@@ -95,9 +135,9 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
       const runtime = await ModelRuntime.create({ authPath: getAgentDir() + "/auth.json", modelsPath: getAgentDir() + "/models.json", refreshOnCreate: false });
       const auth = await runtime.checkAuth("openai-codex");
       if (auth?.type !== "oauth" || !runtime.getProvider("openai-codex")?.auth?.oauth?.isSubscription || !runtime.getModel("openai-codex", "gpt-6.1-sol")) throw prerequisiteStop("Required Pi subscription unavailable; no fallback");
-      if (!recovery && !continuation) await once(path.join(directory, "provider.json"), { provider: "openai-codex", model: "gpt-6.1-sol", subscription: true, credentialType: "oauth" });
+      if (!recovery && !continuation && !contextRecovery) await once(path.join(directory, "provider.json"), { provider: "openai-codex", model: "gpt-6.1-sol", subscription: true, credentialType: "oauth" });
       const traces = new TraceStore(root), ledger = new RequirementLedger(root, intent.sourceId);
-      if ((await traces.peekRuns({ status: "running", limit: 100 })).length || (!continuation && (await ledger.identityRequirements(taskId)).length)) throw prerequisiteStop("Unsettled trace or already consumed identity phases");
+      if ((await traces.peekRuns({ status: "running", limit: 100 })).length || (!continuation && !contextRecovery && (await ledger.identityRequirements(taskId)).length)) throw prerequisiteStop("Unsettled trace or already consumed identity phases");
       const records: IdentityRecord[] = [], texts = new Map(manifest.segments.map(s => [s.id, Buffer.from(prepared.bytes).subarray(s.startByte, s.endByte).toString("utf8")]));
       let newCalls = 0, newBytes = 0;
       if (recovery) {
@@ -117,29 +157,79 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
           recordHashes: retained.records.map(contentHash), cumulative: retained.cumulative, remainingStages: retained.remainingStages,
           providerCalls: 0, worldWrites: 0, registrationWrites: 0, originalFailurePreserved: true });
       }
+      if (contextRecovery) {
+        const retained = await inspectIdentityContextRecovery(root, current, contextRecovery.proof, { consumed: true });
+        await once(path.join(statusDirectory, "authority.json"), retained.proof);
+        records.push(...retained.records);
+        for (const r of retained.records) {
+          const b = JSON.parse(await fs.readFile(path.join(directory, `${r.stage}.budget.json`), "utf8"));
+          newCalls += b.state.usage.modelCalls; newBytes += b.state.usage.totalPayloadBytes;
+        }
+        await once(path.join(statusDirectory, "continuation-receipt.json"), {
+          contextRecoveryHash: contentHash(retained.proof), originalInputHash: retained.originalInputHash,
+          inheritedUsage: retained.initial.usage, historicalFailure: retained.budget.state.failure,
+          originalSessionRestored: false, records: records.map(contentHash), parentCompileResumeAllowed: false,
+        });
+      }
       for (const { phase, stage, shard } of identityStages(intent).slice(records.length)) {
         await assertOriginal();
-        await once(path.join(directory, `${stage}.invocation.json`), { taskId, phase, stage, intentHash: contentHash(intent), pid: process.pid });
-        const modelInput = identityStageInput(prepared, phase, records, shard), prompt = JSON.stringify(modelInput);
+        const modelInput = identityStageInput(prepared, phase, records, shard);
+        const prompt = JSON.stringify(modelInput);
+        await once(path.join(stageDirectory, `${stage}.invocation.json`), { taskId, phase, stage, intentHash: contentHash(intent), pid: process.pid,
+          promptVersion: 3, promptHash: contentHash(prompt), ...(contextRecovery ? { contextRecoveryHash: contentHash(contextRecovery.proof) } : {}) });
         if (redactHostWorkspacePath(prompt, root) !== prompt) throw prerequisiteStop("Identity provider input contains a host workspace path");
-        await once(path.join(directory, `${stage}.input.json`), modelInput);
-        const budget = new ModelRequestBudget(IDENTITY_REQUIREMENT_LIMITS, { save: value => {
-          const file = path.join(directory, `${stage}.budget.json`), tmp = file + ".tmp";
+        await once(path.join(stageDirectory, `${stage}.input.json`), modelInput);
+        const inherited = contextRecovery && stage === "identity-consumers-0" ? contextRecovery.initial : undefined;
+        const budget = new ModelRequestBudget(IDENTITY_REQUIREMENT_LIMITS, { ...(inherited ? { initial: inherited } : {}), save: value => {
+          const file = path.join(stageDirectory, `${stage}.budget.json`), tmp = file + ".tmp";
           writeFileSync(tmp, JSON.stringify({ taskId, phase, stage, intentHash: contentHash(intent), originalBudgetHash: intent.originalBudgetHash,
             limits: IDENTITY_REQUIREMENT_LIMITS, state: value, priorUsage: intent.priorUsage,
+            ...(contextRecovery ? { contextRecoveryHash: contentHash(contextRecovery.proof) } : {}),
+            ...(inherited ? { inheritedUsage: inherited.usage, historicalFailure: contextRecovery!.budget.state.failure } : {}),
             cumulative: { modelCalls: intent.priorUsage.modelCalls + newCalls + value.usage.modelCalls,
               totalPayloadBytes: intent.priorUsage.totalPayloadBytes + newBytes + value.usage.totalPayloadBytes } }), { flag: "wx", mode: 0o600 }); renameSync(tmp, file);
         } });
+        const requestFile = path.join(stageDirectory, `${stage}.requests.jsonl`), messageFile = path.join(stageDirectory, `${stage}.messages.jsonl`);
+        try {
+          await fs.writeFile(requestFile, "", { flag: "wx", mode: 0o600 });
+          await fs.writeFile(messageFile, "", { flag: "wx", mode: 0o600 });
+        } catch (error) {
+          throw prerequisiteStop(`Identity evidence journals could not be reserved: ${String(error)}; retain the original files, no provider dispatch or retry`);
+        }
         const trace = await TraceRecorder.start(traces, { kind: "prepare", sourceId: intent.sourceId, operationId: `identity-requirements-${taskId}-${stage}` });
         const delivered = new Set<string>(), readRefs = new Set<string>(), consumerRefs = new Set<string>(), failures = new Map<string, string>();
-        let fatal: Error | undefined, session: PiAgentSession | undefined, record: IdentityRecord | undefined;
+        let fatal: Error | undefined, session: PiAgentSession | undefined, record: IdentityRecord | undefined, sealed = false, disposed = false;
+        let nextContextPlanHash: string | null = null;
+        let messageSequence = 0;
+        const observe = (phase: string, value: unknown) => fs.appendFile(requestFile, JSON.stringify({ phase, value }) + "\n");
+        const sealSession = async (complete: boolean) => {
+          budget.close();
+          if (session && !disposed) { await session.dispose(); disposed = true; }
+          if (!session?.sessionFile || sealed) {
+            if (complete && !sealed) throw prerequisiteStop("Identity session was not persisted; no ledger registration or retry");
+            return;
+          }
+          const bytes = await fs.readFile(session.sessionFile).catch((e: NodeJS.ErrnoException) => { if (e.code === "ENOENT") return null; throw e; });
+          const rawRequests = await fs.readFile(requestFile, "utf8"), rawMessages = await fs.readFile(messageFile, "utf8");
+          const checkpoint = { version: 2, status: complete ? "complete" : "failed", stage, traceRunId: trace.manifest.id,
+            inputHash: contentHash(modelInput), promptHash: contentHash(prompt), sessionId: session.id, sessionFile: session.sessionFile,
+            persisted: bytes !== null, transcriptHash: bytes ? contentHash(bytes.toString("utf8")) : null,
+            transcriptBytes: bytes?.length ?? 0, usage: budget.snapshot(), requestsHash: contentHash(rawRequests), messagesHash: contentHash(rawMessages),
+            contextPlanHash: contentHash(JSON.parse(await fs.readFile(path.join(stageDirectory, `${stage}.context-plan.json`), "utf8"))),
+            nextContextPlanHash,
+            ...(complete && bytes && record ? { transcript: verifyIdentitySessionEvidence(bytes.toString("utf8"), root, record, prompt, rawRequests, rawMessages).transcript } : {}) };
+          if (complete && (!bytes || !checkpoint.transcript)) throw prerequisiteStop("Identity session has no complete durable transcript");
+          await once(path.join(stageDirectory, `${stage}.session-checkpoint.json`), checkpoint);
+          sealed = true;
+          if (complete) record!.sessionCheckpointHash = contentHash(checkpoint);
+        };
         const guarded = async (name: string, raw: unknown, fn: () => Promise<ReturnType<typeof result> & { terminate?: boolean }>) => {
           if (fatal) throw fatal;
           if (failures.get(name) === contentHash(raw) || failures.has(name + ":spent")) throw (fatal = prerequisiteStop("Unchanged or consumed identity tool correction; stop"));
           try { return await fn(); } catch (e) {
             if (failures.has(name) || String(e).includes("ROLE_PREREQUISITE_HOST_REVIEW")) fatal = prerequisiteStop(String(e));
             if (failures.has(name)) failures.set(name + ":spent", contentHash(raw));
-            failures.set(name, contentHash(raw)); await once(path.join(directory, `${stage}.failure-${name}-${contentHash(raw)}.json`), { raw, error: String(e) }); throw e;
+            failures.set(name, contentHash(raw)); await once(path.join(stageDirectory, `${stage}.failure-${name}-${contentHash(raw)}.json`), { raw, error: String(e) }); throw e;
           }
         };
         const resolve = async (selector: z.infer<typeof modelTextSelectorSchema>) => {
@@ -163,12 +253,14 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
             if (a.offset > matched.length) throw new Error("Discover offset=0 and copy nextOffset; correct once.");
             return result({ segments: matched.slice(a.offset, a.offset + 12).map(s => ({ id: s.id, title: s.title, ordinal: s.ordinal })), total: matched.length, nextOffset: a.offset + 12 < matched.length ? a.offset + 12 : null });
           }); } }), defineTool({ name: "read_identity_dependencies", label: "Read exact identity dependencies or consumers", description:
-          "Read-only collection dependencies or consumers. offset returns items[].ref and nextOffset; copy refs for full payloads and revisionHash. Definitions cannot access consumers or frozen repair payloads. Read ALL supplied required refs and consumer inventory in each applicable session. One changed discovery correction; no grants from shared text. Host/consumed errors stop.", parameters: parameters(dependencyRequest),
+          "Read-only collection dependencies or consumers. offset returns items[].ref and nextOffset; copy refs for full payloads and revisionHash. Consumers are restricted to this exact frozen shard. Use the supplied required dependency refs and current consumer refs directly and batch reads; other shards have separate sessions. Definitions cannot access consumers or frozen repair payloads. Read ALL required refs in each applicable session. One changed discovery correction; host/consumed errors stop.", parameters: parameters(dependencyRequest),
           async execute(_id, raw) { return guarded("dependencies", raw, async () => {
             const a = dependencyRequest.parse(raw);
             if (defining && a.collection === "consumers") throw prerequisiteStop("Independent definition cannot inspect candidate outcomes or consumer proposals");
             if (a.refs && a.offset) throw new Error("Choose refs or discovery offset, then correct once.");
-            const values = a.collection === "dependencies" ? catalog : inventory.consumers.map(c => ({ ...c, payload: identityConsumerView(c.ref, c.payload) }));
+            const values = a.collection === "dependencies" ? catalog : inventory.consumers
+              .filter(c => intent.consumerShards[shard ?? -1]?.refs.includes(c.ref))
+              .map(c => ({ ...c, payload: identityConsumerView(c.ref, c.payload) }));
             if (a.refs) {
               const selected = a.refs.map(ref => { const c = values.find(c => c.ref === ref); if (!c) throw new Error("Discover read_identity_dependencies with the same collection and offset=0, copy items[].ref and correct once."); return c; });
               if (Buffer.byteLength(JSON.stringify(selected)) > 240000) throw new Error("Read fewer discovered refs, correcting once; full payload limit is 240000 bytes.");
@@ -177,7 +269,7 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
             if (a.offset > values.length) throw new Error("Discover offset=0 and copy nextOffset; correct once.");
             return result({ items: values.slice(a.offset, a.offset + 32).map(c => ({ ref: c.ref, revisionHash: c.revisionHash })), total: values.length, nextOffset: a.offset + 32 < values.length ? a.offset + 32 : null });
           }); } }), defineTool({ name: "submit_identity_requirements", label: "Retain independent identity requirement or consumer review", description:
-          "Single-use read-only submission. Definition covers all exact requirement IDs; consumer review covers every frozen operation and inventory ref, full candidate denominator and all original questions/pages. Preserve all original missing criteria and unresolved boundaries. For each input.definitionGaps entry copy requirementId and conditionHash into its binding/judgment definitionGap; independently classify retained-boundary, repair-prerequisite or unknown against the exact payload. Never erase missingCondition to pass. A supported gap is not authority. Correct malformed input once; explicit host, consumed-phase or budget stops forbid retry.",
+          "Single-use read-only submission. Batch reads first, receive their complete results, then submit as the sole tool call of a later response. A mixed read/submission batch is a host stop with no retry. Definition covers all exact requirement IDs; consumer review covers every frozen operation and inventory ref, full candidate denominator and all original questions/pages. Preserve all original missing criteria and unresolved boundaries. For each input.definitionGaps entry copy requirementId and conditionHash into its binding/judgment definitionGap; independently classify retained-boundary, repair-prerequisite or unknown against the exact payload. Never erase missingCondition to pass. A supported gap is not authority. Correct malformed input once; explicit host, consumed-phase or budget stops forbid retry.",
           parameters: parameters(phase === "identity-definition" ? identityDefinitionSchema : phase === "identity-definition-check" ? identityDefinitionCheckSchema : phase === "identity-consumers" ? identityConsumerSchema : identityConsumerCheckSchema),
           async execute(_id, raw) { return guarded("submission", raw, async () => {
             if (record) throw prerequisiteStop("Identity submission already consumed");
@@ -188,42 +280,81 @@ export async function runIdentityRequirements(options: { root: string; input: Ro
             if (phase.endsWith("-check") && identitySelectors(records.at(-1)!.output).some(e => !delivered.has(e.segment_id))) throw new Error("Independently read every original proposal evidence segment fully, then correct submission once.");
             const candidate: IdentityRecord = { intent, stage, phase, inputHash: contentHash(modelInput), output, evidence: await Promise.all(identitySelectors(output).map(resolve)),
               traceRunId: trace.manifest.id, sessionId: session!.id, provider: "openai-codex", model: "gpt-6.1-sol", subscription: true,
-              predecessorRecordHash: records.length ? contentHash(records.at(-1)) : null };
+              predecessorRecordHash: records.length ? contentHash(records.at(-1)) : null,
+              ...(contextRecovery ? { contextRecoveryHash: contentHash(contextRecovery.proof), contextRecoveryGateHash: recoveryAuthority!.gateHash } : {}) };
             validateIdentityOutput(intent, [...records, candidate], inventory, prepared.semantic);
-            await once(path.join(directory, `${stage}.proposal.json`), output); record = candidate;
+            if (!phase.endsWith("-check")) {
+              const checkPhase = phase === "identity-definition" ? "identity-definition-check" : "identity-consumers-check";
+              const nextInput = identityStageInput(prepared, checkPhase, [...records, candidate], shard);
+              const nextTools = tools.map(t => ({ name: t.name, description: t.description, parameters: t.name === "submit_identity_requirements"
+                ? parameters(checkPhase === "identity-definition-check" ? identityDefinitionCheckSchema : identityConsumerCheckSchema) : t.parameters }));
+              const plan = identityContextPlan(prepared, nextInput, [...records, candidate], losslessContextInstructions + "\n" + identityRequirementPrompt(checkPhase),
+                nextTools, { modelCalls: 0, payloads: 0, totalPayloadBytes: 0, largestRequestBytes: 0 });
+              await once(path.join(stageDirectory, `${stage}.next-context-plan.json`), plan);
+              nextContextPlanHash = contentHash(plan);
+              if (!plan.allowed) throw prerequisiteStop("This complete proposal and its required independent evidence exceed the original check budget; preserve the submission and admission receipt, no partial registration, evidence trimming or model retry");
+            }
+            await once(path.join(stageDirectory, `${stage}.proposal.json`), output); record = candidate;
             return { ...result({ retained: true, authorityGranted: false, originalQuestionsSettled: false }), terminate: true };
           }); } })];
         try {
+          const contextPlan = identityContextPlan(prepared, modelInput, records, losslessContextInstructions + "\n" + identityRequirementPrompt(phase),
+            tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })), budget.snapshot());
+          await once(path.join(stageDirectory, `${stage}.context-plan.json`), contextPlan);
+          if (!contextPlan.allowed) throw prerequisiteStop("Complete identity evidence and proposal cannot fit the remaining original budget; retain the admission receipt, no model dispatch, evidence trimming or retry");
           await publish("RUNNING", { stage, traceRunId: trace.manifest.id });
           const hooks = new RuntimeHooks(); hooks.subscribe(event => appendFileSync(path.join(statusDirectory, "hooks.jsonl"), JSON.stringify(event) + "\n", { mode: 0o600 }));
           await withCompilerSignals(signal => withRuntimeHooks(hooks, async () => {
-            session = await PiAgentSession.create({ workspace: await LocalFileWorkspace.create(root), model: "openai-codex/gpt-6.1-sol", piAgentDir: getAgentDir(), saveSession: false,
+            session = await PiAgentSession.create({ workspace: await LocalFileWorkspace.create(root), model: "openai-codex/gpt-6.1-sol", piAgentDir: getAgentDir(), saveSession: true,
+              runtimeDir: path.join(stageDirectory, "sessions", stage),
               includeProjectInstructions: false, includeLocalTools: false, includeNwhExtension: false, trackLastOpenedSession: false, autoCompaction: false,
-              interactionMode: "compiler", requestBudget: budget, additionalTools: tools, systemPromptOverride: identityRequirementPrompt(phase),
+              losslessJsonReadTools: ["read_identity_source", "read_identity_dependencies"],
+              onLosslessContext: value => observe("original-context", value),
+              onRequestObservation: ({ phase, value }) => observe(phase, value),
+              onEvent: event => {
+                if (event.type !== "message_end") return;
+                try { appendFileSync(messageFile, JSON.stringify({ sequence: ++messageSequence, message: event.message }) + "\n"); }
+                catch (error) { fatal ??= prerequisiteStop(`Identity live message evidence could not be persisted: ${String(error)}; retain the original journals, no retry`); }
+                if (event.message.role === "assistant") {
+                  try { assertIdentitySubmissionTurn(event.message); }
+                  catch (error) { fatal ??= error instanceof Error ? error : prerequisiteStop(String(error)); }
+                }
+                // Let Pi persist even a rejected response. guarded() and
+                // beforeModelRequest stop its tools and any subsequent paid call.
+              },
+              beforeModelRequest: async () => { if (fatal) throw fatal; await assertOriginal(); },
+              interactionMode: "compiler", requestBudget: budget, additionalTools: tools, systemPromptOverride: losslessContextInstructions + "\n" + identityRequirementPrompt(phase),
               trace: { parent: trace.rootContext, invocationName: phase, parts: [] } });
             if (session.model !== "openai-codex/gpt-6.1-sol" || [...prepared.prerequisites, ...prepared.representations, ...prepared.semantic, ...records].some(r => r.sessionId === session!.id)) throw prerequisiteStop("Identity phase reused a session or unexpected provider");
-            await trace.record("stage.started", { phase: "identity-requirements-session", sessionId: session.id, intentHash: contentHash(intent), inputHash: contentHash(modelInput), subscription: true });
-            const abort = () => { void session?.abort(); }; signal.addEventListener("abort", abort, { once: true });
-            try { signal.throwIfAborted(); await session.promptWithReport(prompt, { timeoutMs: 900000 }); } finally { signal.removeEventListener("abort", abort); }
+            await once(path.join(stageDirectory, `${stage}.session.json`), { sessionId: session.id, sessionFile: session.sessionFile,
+              model: session.model, inputHash: contentHash(modelInput), promptHash: contentHash(prompt), runtimeDir: path.join(stageDirectory, "sessions", stage) });
+            await trace.record("stage.started", { phase: "identity-requirements-session", promptVersion: 3, sessionId: session.id, intentHash: contentHash(intent), inputHash: contentHash(modelInput), subscription: true });
+            const boundedSignal = recoveryAuthority ? AbortSignal.any([signal, recoveryAuthority.signal]) : signal;
+            const abort = () => { void session?.abort(); }; boundedSignal.addEventListener("abort", abort, { once: true });
+            try { boundedSignal.throwIfAborted(); await session.promptWithReport(prompt, { timeoutMs: 900000 }); } finally { boundedSignal.removeEventListener("abort", abort); }
           }));
           if (fatal) throw fatal;
           if (!record) throw prerequisiteStop("Pi returned no identity requirement/review submission");
-          await assertOriginal(); await trace.finish("succeeded");
-          await once(path.join(directory, `${stage}.record.json`), record); await ledger.recordIdentityRequirements(record); records.push(record);
+          await assertOriginal();
+          await sealSession(true);
+          await trace.finish("succeeded");
+          await once(path.join(stageDirectory, `${stage}.record.json`), record); await ledger.recordIdentityRequirements(record, options.recoveryPermit); records.push(record);
           newCalls += budget.snapshot().modelCalls; newBytes += budget.snapshot().totalPayloadBytes;
           await publish("RUNNING", { stage, traceRunId: null, newModelCalls: newCalls, cumulativeModelCalls: intent.priorUsage.modelCalls + newCalls });
           if (phase === "identity-definition-check" && !identityConsumersReviewable(records)) throw prerequisiteStop("Independent definition is unsupported or independently rejected; no consumer dispatch and no definition retry");
           if (phase === "identity-consumers-check" && !identityConsumerShardReady(records, stage)) throw prerequisiteStop("Consumer shard retains a repair prerequisite, unclassified gap, negative review or additional repair; preserve records and stop without authority or retry");
         } catch (e) { if (!trace.manifest.endedAt) await trace.finish("failed").catch(() => {}); throw e; }
-        finally { budget.close(); await session?.dispose(); }
+        finally {
+          await sealSession(false);
+        }
       }
       await assertOriginal();
       const ready = identityRequirementsReady(records);
       if (ready) {
         const { buildIdentityRepairPlan } = await import("../compiler/identity-requirement-upstream.js");
-        await once(path.join(directory, "upstream-plan.preview.json"), buildIdentityRepairPlan(prepared, records));
+        await once(path.join(stageDirectory, "upstream-plan.preview.json"), buildIdentityRepairPlan(prepared, records));
       }
-      await once(path.join(directory, "authorization-review.json"), { intentHash: contentHash(intent), recordHashes: records.map(contentHash), ready,
+      await once(path.join(stageDirectory, "authorization-review.json"), { intentHash: contentHash(intent), recordHashes: records.map(contentHash), ready,
         authorityGranted: false, originalQuestionsSettled: false, parentCompileResumeAllowed: false,
         remainingGates: ["Reconstruct exact current upstream plan; verify/register/authorize using actual new records", "Pi typed proposals and independent acceptance of the actual pending graph", "Original finish receipt and convergence", "Consumer revalidation with original questions, plan and cumulative budgets; no reused grants"] });
       await publish(ready ? "DONE" : "BREAK", { stage: "host-identity-authorization-review", traceRunId: null,

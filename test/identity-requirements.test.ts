@@ -26,37 +26,16 @@ import { prerequisiteStop } from "../src/compiler/role-source-prerequisites.js";
 import { inspectIdentityConsumerContinuation, type IdentityConsumerContinuation } from "../src/compiler/identity-consumer-continuation.js";
 import { verifySemanticCorrectionJournal } from "../src/compiler/role-semantic-scope-correction.js";
 import * as anchors from "../src/compiler/text-anchors.js";
+import { inspectIdentityContextRecovery, type IdentityContextRecovery } from "../src/compiler/identity-context-recovery.js";
+import { identityContextRecoveryDirectory } from "../src/compiler/identity-requirements.js";
+import { identityPromptInput } from "../src/workflow/identity-requirements.js";
+import * as handoff from "../src/runtime/compile-loop/prerequisite-handoff.js";
+import { captureRecordTree } from "../src/runtime/compile-loop/dedicated-session.js";
+import { mockPiProvider } from "./helpers/pi-provider.js";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { decodeJsonValues } from "../src/agent/lossless-json-context.js";
 
-function fixture() {
-  const taskId = h("original-prerequisite"), evidence = [{ segment_id: "seg", exact: "Ada waits." }], questionIds = [h("critical-1"), h("critical-2"), h("critical-3")];
-  const targets = [1, 2, 3].map(slot => ({ slot, requirementId: identityRequirementId(taskId, slot), mentionId: `mention-${slot}`, mentionHash: h(slot), predecessor: null, questionIds: [questionIds[0]!] }));
-  const operations = targets.map(t => {
-    const payload = { version: 1, id: `rs-${taskId.slice(0, 32)}-${t.slot}`, sourceId: "src", mentionId: t.mentionId, status: "unresolved", candidates: [], rationale: "Independent source uncertainty", derivation: { runId: "old", worker: "old", ontologyVersion: "entity-resolution-v1" } };
-    return { slot: t.slot, id: payload.id, kind: "entity-resolution", mode: "create", baseline: null, pointers: [], payloadJson: JSON.stringify(payload), readableRefs: [{ kind: "entity-mention", id: t.mentionId, revisionHash: t.mentionHash }], findingIds: [], questionIds: t.questionIds, rationale: "Frozen scope", evidence };
-  });
-  const semantic: any[] = [{ output: { phase: "semantic-scope-plan", operations, questions: questionIds.map(questionId => ({ questionId, missingCondition: "Original critical evidence missing", boundaries: [{ status: "unresolved" }] })), consumer: { activationConditions: ["Original audit remains blocked"] } } }, { output: { phase: "semantic-scope-check" } }];
-  const inventory = { graphHash: h("graph"), roots: ["entity-resolution/old"], closureIssues: [], sourcePages: [0, 2], candidateIds: ["role-old", "role-new"], originalQuestionIds: questionIds,
-    consumers: ["event/consumer", "staged-role/role-old"].map(ref => ({ ref, revisionHash: h(ref), payload: { id: ref }, reason: "typed-consumer" as const, dependencies: [] })) };
-  const intent = identityIntentSchema.parse({ version: 1, policy: "independent-identity-requirements/v1", taskId, revisionHash: h("76-to-78"), sourceId: "src", sourceHash: h("source"), parentStateHash: h("BREAK"), originalPlanHash: h("original-plan"), originalBudgetHash: h("original-budget"), authorizationRef: "User authorized new independent identity requirements, not old retries",
-    semanticRecordHashes: semantic.map(h), retainedConditionsHash: h({ questions: semantic[0].output.questions, consumer: semantic[0].output.consumer }), catalogHash: h("catalog"), inventoryHash: h(inventory), requiredSourceSegmentIds: ["seg"], targets,
-    consumerShards: inventory.consumers.map((c, index) => ({ index, refs: [c.ref] })), requirementPrefix: { length: 3111, head: h("requirements") }, upstreamPrefix: { length: 125, head: h("upstream") }, priorUsage: { modelCalls: 143, totalPayloadBytes: 12000, budgetFilesHash: h("143 prior calls with correction inherited once") } });
-  const records: IdentityRecord[] = [];
-  const common = { intentHash: h(intent), retainedConditionsHash: intent.retainedConditionsHash };
-  for (const { stage, phase, shard } of identityStages(intent)) {
-    const reqs = targets.map(t => ({ id: t.requirementId, mentionId: t.mentionId, questionIds: t.questionIds, requirement: "Represent only source-supported uncertainty", acceptanceCriteria: ["No unsupported stable identity"], disposition: "uncertainty-preservation", requiredStatus: "unresolved", missingCondition: "", evidence }));
-    const judgments = reqs.map(r => ({ id: r.id, verdict: "supported", rationale: "Fresh independent evidence check", evidence }));
-    const consumers = inventory.consumers.filter(c => intent.consumerShards[shard ?? -1]?.refs.includes(c.ref));
-    const output: any = phase === "identity-definition" ? { ...common, phase, requirements: reqs }
-      : phase === "identity-definition-check" ? { ...common, phase, proposalHash: h(records.at(-1)!.output), judgments }
-        : phase === "identity-consumers" ? { ...common, phase, shard, definitionHash: h(records[0]!.output), inventoryHash: h(inventory), bindings: targets.map((t, i) => ({ requirementId: t.requirementId, slot: t.slot, payloadHash: h(JSON.parse(operations[i]!.payloadJson)), dependencyRefs: [`entity-mention:${t.mentionId}`], verdict: "supported", rationale: "Exact typed dependency", missingCondition: "", evidence })),
-          consumers: consumers.map(c => ({ ref: c.ref, revisionHash: c.revisionHash, disposition: "revalidate-required", rationale: "Transitive identity consumer", requiredAction: "Keep blocked pending independent revalidation" })), candidateIds: inventory.candidateIds, sourcePages: inventory.sourcePages, originalQuestionIds: questionIds, activationConditions: ["Keep original budget and unresolved questions"], parentResumeAllowed: false, renewConsumedGrant: false, evidence }
-          : { ...common, phase, shard, proposalHash: h(records.at(-1)!.output), inventoryHash: h(inventory), judgments, consumers: consumers.map(c => ({ ref: c.ref, verdict: "supported", rationale: "Independent consumer review" })), denominatorVerdict: "supported", denominatorRationale: "Entire frozen shard and denominator retained" };
-    records.push({ intent, phase, stage, output, inputHash: h(stage), evidence: [{ selector: evidence[0]!, anchor: textAnchorForByteRange("src", Buffer.from("Ada waits."), 0, 10) }], traceRunId: `run-${stage}`, sessionId: `session-${stage}`, provider: "openai-codex", model: "gpt-6.1-sol", subscription: true, predecessorRecordHash: records.length ? h(records.at(-1)) : null } as IdentityRecord);
-  }
-  const p: any = { intent, inventory, semantic, review: { upstream: { receiptFingerprint: h("source receipt") } }, manifest: { segments: [{ id: "seg" }] }, prerequisites: [{ output: { phase: "specification", requirements: [{ requirement: "Independent original source requirement" }] } }], representations: [{ output: { phase: "representation-plan", boundaries: [{ status: "unresolved" }] } }],
-    catalog: [...targets.map(t => ({ kind: "entity-mention", id: t.mentionId, revisionHash: t.mentionHash, payload: { id: t.mentionId } })), { kind: "canonical-event", id: "hidden-outcome", revisionHash: h("outcome"), payload: { text: "SECRET_CANDIDATE_OUTCOME" } }] };
-  return { p, records, intent, semantic, inventory };
-}
+import { identityFixture as fixture } from "./helpers/identity-fixture.js";
 const rechain = (records: IdentityRecord[]) => { for (let i = 1; i < records.length; i++) { records[i]!.predecessorRecordHash = h(records[i - 1]); if ("proposalHash" in records[i]!.output) (records[i]!.output as any).proposalHash = h(records[i - 1]!.output); } };
 
 function withDefinitionGaps(f = fixture(), classified = true) {
@@ -360,20 +339,27 @@ it.each([false, true])("continues only fixed consumer stages with inherited char
     vi.spyOn(RequirementLedger.prototype, "identityRequirements").mockImplementation(async () => registered);
     vi.spyOn(RequirementLedger.prototype, "recordIdentityRequirements").mockImplementation(async r => { registered.push(r); });
     vi.spyOn(anchors, "resolveTextSelectorAnchor").mockResolvedValue(f.records[0]!.evidence[0]!.anchor);
-    vi.spyOn(ModelRuntime, "create").mockResolvedValue({ checkAuth: async () => ({ type: "oauth" }), getProvider: () => ({ auth: { oauth: { isSubscription: true } } }), getModel: () => ({}) } as any);
+    vi.spyOn(ModelRuntime, "create").mockResolvedValueOnce({ checkAuth: async () => ({ type: "oauth" }), getProvider: () => ({ auth: { oauth: { isSubscription: true } } }), getModel: () => ({}) } as any);
+    const create = PiAgentSession.create.bind(PiAgentSession);
     vi.spyOn(PiAgentSession, "create").mockImplementation(async options => {
       const stage = identityStages(f.intent)[registered.length]!.stage; dispatched.push(stage);
-      return { id: `fresh-${stage}`, model: options.model, abort: async () => {}, dispose: async () => {}, async promptWithReport(raw: string) {
-        const input = JSON.parse(raw); expect(input.definitionGaps).toEqual(identityDefinitionGaps(f.records[0]!.output));
-        options.requestBudget!.beginCall({}); options.requestBudget!.admitPayload(input);
-        const call = (name: string, args: any) => options.additionalTools!.find(t => t.name === name)!.execute(name, args, undefined as any, undefined as any, undefined as any);
-        await call("read_identity_source", { segmentIds: ["seg"] });
-        await call("read_identity_dependencies", { collection: "dependencies", refs: input.requiredDependencyRefs });
-        await call("read_identity_dependencies", { collection: "consumers", refs: input.inventory.consumers.map((c: any) => c.ref) });
+      const session = await create({ ...options, model: undefined, piAgentDir: path.join(f.root, "pi") });
+      await mockPiProvider(session, { provider: "openai-codex", modelId: "gpt-6.1-sol", response: (context, index) => {
+        const user = context.messages.find(m => m.role === "user")!;
+        const raw = typeof user.content === "string" ? user.content : (user.content[0] as any).text;
+        const envelope = JSON.parse(raw), input: any = envelope.$nwhContext ? decodeJsonValues(envelope.dictionary, [envelope.value])[0] : envelope;
+        expect(input.definitionGaps).toEqual(identityDefinitionGaps(f.records[0]!.output));
+        if (index === 0) return fauxAssistantMessage([
+          fauxToolCall("read_identity_source", { segmentIds: ["seg"], offset: 0 }, { id: "source" }),
+          fauxToolCall("read_identity_dependencies", { collection: "dependencies", refs: input.requiredDependencyRefs, offset: 0 }, { id: "dependencies" }),
+          fauxToolCall("read_identity_dependencies", { collection: "consumers", refs: input.inventory.consumers.map((c: any) => c.ref), offset: 0 }, { id: "consumers" }),
+        ], { stopReason: "toolUse" });
+        if (index !== 1) throw new Error("Unexpected continuation test provider call");
         const output = structuredClone(f.records[registered.length]!.output) as any;
         if (input.proposalHash) { output.proposalHash = input.proposalHash; if (negative) output.judgments[0].definitionGap.verdict = "blocked"; }
-        await call("submit_identity_requirements", output);
-      } } as any;
+        return fauxAssistantMessage([fauxToolCall("submit_identity_requirements", JSON.parse(JSON.stringify(output)), { id: "submission" })], { stopReason: "toolUse" });
+      } });
+      return session;
     });
     const options = { root: f.root, input: {} as any, authorizationRef: f.intent.authorizationRef, priorUsage: f.intent.priorUsage,
       expectedIntentHash: h(f.intent), assertOriginal: async () => {}, continueConsumers: f.continuation };
@@ -381,7 +367,7 @@ it.each([false, true])("continues only fixed consumer stages with inherited char
     expect(dispatched).toEqual(identityStages(f.intent).slice(2, negative ? 4 : undefined).map(s => s.stage));
     expect(registered.slice(0, 2).map(h)).toEqual(f.continuation.recordHashes);
     const first = JSON.parse(await fs.readFile(path.join(f.dir, "identity-consumers-0.budget.json"), "utf8"));
-    expect(first.cumulative.modelCalls).toBe(150); expect(first.cumulative.totalPayloadBytes).toBe(f.intent.priorUsage.totalPayloadBytes + 11000 + first.state.usage.totalPayloadBytes);
+    expect(first.cumulative.modelCalls).toBe(151); expect(first.cumulative.totalPayloadBytes).toBe(f.intent.priorUsage.totalPayloadBytes + 11000 + first.state.usage.totalPayloadBytes);
     for (const [name, hash] of Object.entries(f.continuation.retainedFiles)) expect(createHash("sha256").update(await fs.readFile(path.join(f.dir, name))).digest("hex")).toBe(hash);
     const state = JSON.parse(await fs.readFile(path.join(f.dir, "consumer-review/state.json"), "utf8"));
     expect(state.phase).toBe(negative ? "BREAK" : "DONE"); expect(state.authorityGranted).toBe(false); expect(state.parentCompileResumeAllowed).toBe(false);
@@ -389,5 +375,106 @@ it.each([false, true])("continues only fixed consumer stages with inherited char
     expect(receipt.registrationWrites).toBe(0); expect(receipt.cumulative.modelCalls).toBe(149);
     const count = dispatched.length; await expect(runIdentityRequirements(options)).rejects.toThrow(); expect(dispatched).toHaveLength(count);
     if (negative) await expect(fs.stat(path.join(f.dir, "upstream-plan.preview.json"))).rejects.toThrow();
+  } finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
+});
+
+it("projects only mechanical duplication while retaining every current consumer, question and semantic judgment", () => {
+  const f = withDefinitionGaps(), input = identityStageInput(f.p, "identity-consumers-check", f.records.slice(0, 3), 0);
+  const copy = structuredClone(input), projected = identityPromptInput(input) as any;
+  expect(input).toEqual(copy);
+  expect(projected.intent.currentConsumerShard).toEqual(f.intent.consumerShards[0]);
+  expect(projected.intent.consumerShardDirectory).toEqual(f.intent.consumerShards.map(s => ({ index: s.index, count: s.refs.length, refsHash: h(s.refs) })));
+  expect(projected.inventory).toEqual(input.inventory);
+  expect(projected.frozenScope).toEqual(input.frozenScope);
+  expect(projected.definitionGaps).toEqual(input.definitionGaps);
+  for (const key of ["candidateIds", "sourcePages", "originalQuestionIds"]) {
+    expect(projected.proposal[key]).toEqual({ $inputRef: `/inventory/${key}` });
+    projected.proposal[key] = projected.inventory[key];
+  }
+  expect(projected.proposal).toEqual(input.proposal);
+  // A mismatched denominator must remain visible to the independent reviewer.
+  (copy.proposal as any).candidateIds = ["unexpected"];
+  expect((identityPromptInput(copy) as any).proposal.candidateIds).toEqual(["unexpected"]);
+});
+
+async function retainedContextFixture(localFailureUsage = 0) {
+  const f = await retainedConsumerFixture(), engineering = path.join(f.dir, "consumer-review/engineering");
+  await fs.mkdir(engineering, { recursive: true });
+  const traces = new TraceStore(f.root), trace = await TraceRecorder.start(traces, { kind: "prepare", sourceId: f.intent.sourceId,
+    operationId: `identity-requirements-${f.intent.taskId}-identity-consumers-0` });
+  const payloadRef = await trace.putBlob({ text: "original paid request" });
+  for (let i = 0; i < 5; i++) {
+    const links = { callId: `call-${i}` };
+    await trace.record("llm.request.started", { providerId: "openai-codex", modelId: "gpt-6.1-sol" }, trace.rootContext, links);
+    await trace.record("llm.request.payload", {}, trace.rootContext, { ...links, blobRef: payloadRef });
+    await trace.record("llm.response.completed", {}, trace.rootContext, links);
+  }
+  await trace.record("llm.response.failed", { providerId: "openai-codex", modelId: "gpt-6.1-sol",
+    errorMessage: "original byte failure", usage: { input: localFailureUsage, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: localFailureUsage, cost: 0 } },
+    trace.rootContext, { callId: "locally-refused-step" });
+  await trace.finish("failed");
+  const usage = { modelCalls: 5, payloads: 5, totalPayloadBytes: 5 * payloadRef.byteLength, largestRequestBytes: payloadRef.byteLength };
+  const oldBudget = { state: { usage, blocked: true, failure: { code: "request-size", message: "original byte failure" } } };
+  await fs.writeFile(path.join(f.dir, "identity-consumers-0.budget.json"), JSON.stringify(oldBudget));
+  await fs.writeFile(path.join(f.dir, "identity-consumers-0.input.json"), JSON.stringify(identityStageInput(f.p, "identity-consumers", f.records.slice(0, 2), 0)));
+  const requestFile = path.join(f.root, "request.json");
+  await fs.writeFile(requestFile, JSON.stringify({ failedTraceRunId: trace.manifest.id }));
+  const spec = { version: 1, root: f.root, sourceId: f.intent.sourceId, taskId: f.intent.taskId, directory: engineering,
+    registryFile: "/retained-registry", ownershipLocks: ["/retained-lock"], authorizationRef: "previous authorization",
+    incidentFile: "/retained-incident", incidentHash: h("incident"), authorizationFile: "/retained-authorization", authorizationHash: h("authorization"),
+    retainedFiles: {}, parentStateFile: "/retained-parent", parentStateHash: f.intent.parentStateHash,
+    inherited: { workers: 21, repairs: 20, commands: 83, failures: { original: 2 } }, engineerModel: "gpt-5.6-sol",
+    workerEntry: "src/workflow/identity-consumer-context-recovery.ts", workerRequestFile: requestFile, deadline: 1792570345309 };
+  const stopped = { phase: "BREAK", childPid: null, workerDispatches: 0, updatedAt: "2026-10-18T20:03:19.012Z" };
+  await fs.writeFile(path.join(engineering, "spec.json"), JSON.stringify(spec));
+  await fs.writeFile(path.join(engineering, "state.json"), JSON.stringify(stopped));
+  await fs.writeFile(path.join(engineering, "start.json"), JSON.stringify({ pid: 2147483647 }));
+  const proof: IdentityContextRecovery = { version: 1, policy: "identity-context-reconstruction/v1",
+    taskId: f.intent.taskId, sourceId: f.intent.sourceId, intentHash: h(f.intent), originalSpecHash: digest(spec),
+    engineeringStateHash: digest(stopped), failedTraceHash: h({ run: await traces.peekRun(trace.manifest.id), events: await traces.peekEvents(trace.manifest.id) }),
+    authorizationRef: "Later human authorization: persist sessions and recover with original remaining budget",
+    authorizedAt: "2026-10-20T10:00:00.000Z", mode: "reread-immutable-evidence-with-remaining-budget",
+    retainedEngineeringFiles: captureRecordTree(engineering) };
+  // The existing supervisor's exact-source/history/host/PID guards have their
+  // own real regression suite; this fixture exercises the new recovery layer.
+  vi.spyOn(handoff, "verifyPrerequisiteHandoff").mockReturnValue({} as any);
+  vi.spyOn(identityTrace, "verifyIdentityRecord").mockResolvedValue();
+  vi.spyOn(RequirementLedger.prototype, "identityRequirements").mockResolvedValue(f.records.slice(0, 2));
+  return { ...f, engineering, proof, oldBudget, traceId: trace.manifest.id, traces };
+}
+
+it("rejects missing authorization, changed lineage, consumed submission and a second context reconstruction", async () => {
+  const f = await retainedContextFixture();
+  try {
+    const inspected = await inspectIdentityContextRecovery(f.root, f.p, f.proof);
+    expect(inspected.initial.usage).toEqual(f.oldBudget.state.usage);
+    expect(inspected.initial.blocked).toBe(false);
+    await expect(inspectIdentityContextRecovery(f.root, f.p, { ...f.proof, authorizationRef: "" })).rejects.toThrow();
+    await expect(inspectIdentityContextRecovery(f.root, f.p, { ...f.proof, authorizedAt: "2026-10-17T00:00:00.000Z" })).rejects.toThrow("later explicit");
+    await expect(inspectIdentityContextRecovery(f.root, f.p, { ...f.proof, failedTraceHash: h("changed") })).rejects.toThrow("exact settled");
+    await fs.writeFile(path.join(f.dir, "identity-consumers-0.proposal.json"), "{}");
+    await expect(inspectIdentityContextRecovery(f.root, f.p, f.proof)).rejects.toThrow("consumed");
+    await fs.rm(path.join(f.dir, "identity-consumers-0.proposal.json"));
+    const directory = identityContextRecoveryDirectory(f.root, f.intent.sourceId, f.intent.taskId);
+    await fs.mkdir(directory); await fs.writeFile(path.join(directory, "start.json"), "{}");
+    await expect(inspectIdentityContextRecovery(f.root, f.p, f.proof)).rejects.toThrow("already consumed");
+    expect(JSON.parse(await fs.readFile(path.join(f.dir, "identity-consumers-0.budget.json"), "utf8"))).toEqual(f.oldBudget);
+  } finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
+});
+
+it("rejects a failed response with provider usage even when no request event was retained", async () => {
+  const f = await retainedContextFixture(1);
+  try { await expect(inspectIdentityContextRecovery(f.root, f.p, f.proof)).rejects.toThrow("Unsettled calls"); }
+  finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
+});
+
+it("does not allow a legacy proof and a no-op callback to bypass the repository recovery gate", async () => {
+  const f = await retainedContextFixture(), before = captureRecordTree(f.dir);
+  try {
+    const dispatch = vi.spyOn(PiAgentSession, "create");
+    await expect(runIdentityRequirements({ root: f.root, input: {} as any, authorizationRef: f.intent.authorizationRef,
+      priorUsage: f.intent.priorUsage, expectedIntentHash: h(f.intent), assertOriginal: async () => {}, recoverContext: f.proof }))
+      .rejects.toThrow("repository host gate");
+    expect(dispatch).not.toHaveBeenCalled(); expect(captureRecordTree(f.dir)).toEqual(before);
   } finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
 });

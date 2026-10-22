@@ -2,6 +2,7 @@ import { COMPILER_TOOL_NAMES } from "../compiler/proposal-tools.js";
 import { createNwhRequestPolicy } from "./pi-request-policy.js";
 import { currentPlayModelBudget } from "../runtime/play-model-budget.js";
 import { installModelRequestBudget, type ModelRequestBudget } from "./model-request-budget.js";
+import { installLosslessJsonContext } from "./lossless-json-context.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import { createPiHooksExtension } from "./pi-hooks.js";
 import fs from "node:fs/promises";
@@ -84,6 +85,10 @@ export type PiAgentSessionOptions = {
   autoCompaction?: boolean;
   onRequestObservation?: import("./request-observation.js").RequestObserver;
   requestBudget?: ModelRequestBudget | readonly ModelRequestBudget[];
+  /** Exact request-local sharing for JSON evidence; raw sessions remain intact. */
+  losslessJsonReadTools?: readonly string[];
+  onLosslessContext?: (context: import("@earendil-works/pi-ai").TranscriptContext) => Promise<void>;
+  beforeModelRequest?: () => Promise<void>;
 };
 
 export type PiInteractiveOptions = {
@@ -887,6 +892,19 @@ export class PiAgentSession {
       requestPolicy.install(created.session, this.runtime);
       if (this.requestBudgets.length || this.options.onRequestObservation) {
         installModelRequestBudget(created.session.agent, this.requestBudgets, this.options.onRequestObservation);
+      }
+      if (this.options.losslessJsonReadTools) {
+        installLosslessJsonContext(created.session.agent, this.options.losslessJsonReadTools, async (receipt, original) => {
+          await this.options.onLosslessContext?.(original);
+          await this.options.trace?.parent.recorder.record("context.assembled", { phase: "lossless-json-transport", ...receipt });
+        });
+      }
+      if (this.options.beforeModelRequest) {
+        const stream = created.session.agent.streamFunction;
+        created.session.agent.streamFunction = async (model, context, options) => {
+          await this.options.beforeModelRequest!();
+          return stream(model, context, options);
+        };
       }
       if (this.options.trackLastOpenedSession && created.session.sessionFile) {
         await writeLastOpenedSession(this.options.workspace.root, this.stateDir, created.session.sessionFile);

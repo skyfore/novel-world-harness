@@ -3317,3 +3317,19 @@ missing-condition report cannot satisfy it. See
 旧定义缺口门禁的宿主续行须调用 `inspectIdentityConsumerContinuation`，绑定已退出的原宿主进程、精确 BREAK、两份已登记成功记录、全部旧文件及当前 inventory。新 `consumer-review` 目录仅记录一次原未消费阶段的续行，不是新 task、预算或 grant；旧记录和字节保持不变。未通过独立定义、目录/来源漂移、进程仍存活、未结算 trace、任何消费者阶段已有 invocation 或 trace、预算不一致均停止，不允许再次恢复或重跑。分片复核为前提不足、未知、负面或额外修复时保留提案和独立结果，立即停止放权；不能靠删缺口、换 ID、换分片或续发 grant 继续。
 
 历史范围更正的只读校验允许精确绑定原语义前缀的同 task 身份记录追加；实际更正 dispatch 仍要求原空后缀，不会重新打开已消费更正。
+
+### 身份消费者会话持久化与显式有界重建
+
+身份阶段使用独立的 Pi 持久化目录。新阶段采用提示协议 v3，在台账登记前结束并封存完整会话、实时消息日志、原始请求日志和上下文准入收据，record 绑定 v2 检查点哈希。实时日志在 Pi 的 `message_end` 回调中、Pi 写会话文件之前逐条落盘，包含最终响应的 opaque provider 状态和终止工具回执。封存及公共 `verifyIdentityRecord` 均逐条比较实时消息与持久化消息，再把每次实际原始请求与对应响应之前的完整消息前缀比较；系统头只允许可信策略更新时间戳。提交必须发生在读取结果已进入后续请求之后。缺文件、截断、改写、封存前丢失、消息／请求／预算／trace 不一致均停止，不重新请求模型，不补造缺失日志。失败阶段仍封存现有原始文件和失败检查点，但不能取得成功封存或台账权限。完整 provider 会话与脱敏观测 trace 分开保存；不得从 trace 的占位符补造 provider 状态，也不得将重建称为原会话的无损恢复。
+
+`identity-context-reconstruction/v1` 仅在后续用户明确授权恢复后使用。仓库入口为 `node --import tsx src/workflow/identity-consumer-context-recovery.ts prepare|inspect|run|verify REQUEST_JSON OUTPUT_JSON`。`prepare` 接收 `sourceId/taskId/authorizationRef/engineeringHistory`，生成单独的 v2 proof；其余模式接收该 proof。旧 supervisor request 必须原样保留，不能覆盖或当作 proof 使用。`engineeringHistory` 必须列出原工程停止之后的全部尝试，逐项绑定目录完整文件哈希及 stateFile；显式空数组表示没有后续尝试。`local`／`cumulative` 只是与归档生产者核对的声明，不能决定计费。导入状态必须是无 worker 的已结算 BREAK，并保有生产者写入的 `budgetLineage`：固定 source/task/originalSpecHash、整个已保留前缀的 predecessorHash、继承计数和本地增量。宿主总是累加经过核验的本地增量，并核对归档计数是否符合其局部或累计格式；缺项、乱序、跨作用域、重复、改标签、修改累计数均拒绝。宿主每次计费时同步保存该链路；公共验收重新读取全部导入文件，不能仅信任 gate 中的历史快照。没有可验证链路的旧格式保留为未知计费停止，须检查原生产者及原收据；禁止改写旧文件补造链路、猜计数或省略尝试。原 task、实际全部分片、定义／独立检查、父 BREAK、工程历史、原 request-size 失败、逐次已结算的只读调用与全部累计计费保持。任何提交、未知写入、工具失败、未结算调用、来源漂移或仍存活的原进程均拒绝重建，不重试。
+
+`run` 在原 `consumer-review/engineering/host-recovery/host` 下创建唯一宿主声明，取得原 canonical locks，强制独立源码复核、类型检查和固定回归，并封存源码指纹、审查结果及全部命令收据。完成后才发出进程内单次执行凭证；直接调用 worker、伪造对象或传空回调不能绕过。`WORKER` 期间仅该有效凭证可以登记和核验中间记录，每次都检查原所有权、期限及门禁；公共验收和不持凭证的重复登记必须等待宿主最终完成。worker 返回后，宿主自行检查全部阶段、真实台账、会话和当前门禁，写入绑定 gate、全部记录哈希及 worker 状态的 `completion.json`，再以该收据哈希发布 DONE。回调返回成功、仅有 worker DONE、宿主 WORKER／BREAK、缺失或损坏的最终收据均没有公共权限；异常保留现场，不重发凭证。期限内完成的历史收据可在期限后验证，未完成的宿主不能用旧时间戳冒充完成。保留原截止时间以及工程最多 2 轮、24 命令的限制；过期、预算不足、审查／测试失败、源码／收据／所有权变化均停，不延长期限、不重新生成宿主声明。每次模型请求前再次检查门禁，截止信号中断在途请求。恢复重新读取同一阶段的完整证据，继承其原调用／载荷字节，上限不变；原阶段已支付 5/24 次时最多剩 19 次。后续只执行原来未消费的独立检查和分片；负面或耗尽时保留新会话和原失败，不换目录、分片、ID、预算或会话再次启动。
+
+每个阶段在首次付费调用前计算完整必读证据、实际待验收提案、系统提示和工具 schema 的准入下界；无法容纳则保存拒绝收据，零模型调用停止。实际每次请求仍按原 512000 字节、24 次、12288000 总载荷字节门禁计费。v3 在整个请求的 JSON 数据通道使用 `lossless-json-context/v1`：仅共享完全相同的值，字典与所有引用在同一请求内，保留全部分片 refs、原读取契约的消费者字段、来源及判定；不依赖摘要或外部缓存。既有 roster 机械来源清单的 hash/count 视图沿用原契约，原始完整清单仍在冻结 inventory 中，未新增字段省略。保留标签数组会转义并做逐值往返验证，assistant/tool-call/provider continuation 原样保留，原会话不改写。公共验收从封存的原始请求重新编码并逐条核对真实载荷及预算；脱敏 trace 的字节长度不是实际计费字节。任意额外推理或读取仍受实际请求门禁约束，不能把准入下界当成必定成功的承诺。
+
+提交定义／消费者提案前，宿主还计算该实际输出连同全部必读证据的独立复核准入。超过原限额时保存原提交和 `next-context-plan` 拒绝收据，不登记部分结果、不启动已知无法容纳的复核；明确 host-stop 后代码阻止下一次模型请求。成功检查点同时绑定这份后续准入收据。
+
+消费者工具仅发现当前冻结分片的 `items[].ref`。ID/ref 错误在相同 collection 下 `offset=0` 发现并复制精确字段，只允许一次更正。其余分片保持原清单和单独验收。定义及独立审查的负面门禁不变，恢复成功不授权上游写入、原审查 grant 续期、父编译恢复或认证。真实链路回归使用合成 provider 和既有历史 fixture，运行真实 Pi 工具、源文锚点、预算、trace、恢复检查、会话封存和台账验收；不替换核心验收器。包括 48 项超字节案例、536 项／12 原分片完整检查、5 次原计费继承和剩余额度耗尽、过期或失败的宿主门禁，以及会话／检查点篡改拒绝。
+
+`test/prerequisite-supervisor.test.ts` 中四项 OS 隔离测试由 `NWH_TEST_READONLY_SANDBOX=1` 显式开启，需要 Linux namespace、bubblewrap 和本地 Codex 可执行文件；它们只运行本地进程及 `command/exec`，不创建模型会话。补跑命令为 `NWH_TEST_READONLY_SANDBOX=1 pnpm exec vitest run test/prerequisite-supervisor.test.ts`。宿主外的真实 OS 测试与恢复宿主内部固定回归须分别报告：恢复宿主的全盘只读、能力移除策略会限制嵌套 namespace，并禁止 Codex 初始化其状态目录；不能将这些环境失败算作通过、关闭开关掩盖失败，或为嵌套测试放宽原证据写保护。外部补跑不替代恢复宿主的审查、预算和执行凭证门禁。

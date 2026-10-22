@@ -4,6 +4,7 @@ import { representationRecordSchema, validateRepresentationHistory, assertRepres
 import { roleDependencyReviewSchema, type RoleDependencyReview } from "./role-dependency-review.js";
 import { semanticScopeRecordSchema, validateSemanticScopeHistory, type SemanticScopeRecord } from "./role-semantic-scope.js";
 import { identityRecordSchema, validateIdentityHistory, type IdentityRecord } from "./identity-requirements.js";
+import type { IdentityRecoveryPermit } from "../runtime/compile-loop/identity-recovery-host.js";
 import { textAnchorForByteRange } from "./text-anchors.js";
 import { sourceAuditProofSchema, type SourceAuditProof } from "./role-source-audit-model.js";
 import { roleQuestionSchema, roleQuestionDispositionSchema, type RoleQuestion, type RoleQuestionDisposition, roleQuestions, roleEvidenceNeedSchema, type RoleEvidenceNeed } from "./role-review-verification.js";
@@ -275,13 +276,18 @@ export class RequirementLedger {
   async identityRequirements(taskId: string): Promise<IdentityRecord[]> {
     return (await this.history()).flatMap(r => r.payload.kind === "identity-requirements" && r.payload.record.intent.taskId === taskId ? [r.payload.record] : []);
   }
-  async recordIdentityRequirements(raw: IdentityRecord): Promise<void> {
+  async recordIdentityRequirements(raw: IdentityRecord, recoveryPermit?: IdentityRecoveryPermit): Promise<void> {
     const record = identityRecordSchema.parse(raw), previous = await this.identityRequirements(record.intent.taskId);
     const existing = previous.find(r => r.stage === record.stage);
-    if (existing) { if (contentHash(existing) !== contentHash(record)) throw prerequisiteStop("Identity phase already consumed"); return; }
+    if (existing) {
+      if (contentHash(existing) !== contentHash(record)) throw prerequisiteStop("Identity phase already consumed");
+      const { verifyIdentityRecord } = await import("./identity-requirement-trace.js");
+      await verifyIdentityRecord(this.root, record, previous.slice(0, previous.indexOf(existing)), undefined, recoveryPermit);
+      return;
+    }
     validateIdentityHistory([...previous, record]);
     const { verifyIdentityRecord } = await import("./identity-requirement-trace.js");
-    await verifyIdentityRecord(this.root, record, previous);
+    await verifyIdentityRecord(this.root, record, previous, undefined, recoveryPermit);
     await this.publish({ kind: "identity-requirements", record });
   }
   async recordRoleSemanticScope(raw: SemanticScopeRecord): Promise<void> {

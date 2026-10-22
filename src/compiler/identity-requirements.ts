@@ -14,6 +14,11 @@ export type IdentityRequirementPhase = typeof identityRequirementPhases[number];
 export const IDENTITY_CONSUMER_SHARD_SIZE = 48;
 export const IDENTITY_REQUIREMENT_LIMITS = Object.freeze({ maxModelCalls: 24, maxRequestBytes: 512_000, maxTotalPayloadBytes: 12_288_000 });
 export const identityRequirementDirectory = (root: string, sourceId: string, taskId: string) => path.join(workspaceStateDir(root), "compile-loops", sourceId, "prerequisites", taskId, "identity-requirements");
+export const identityContextRecoveryDirectory = (root: string, sourceId: string, taskId: string) =>
+  path.join(identityRequirementDirectory(root, sourceId, taskId), "consumer-review", "engineering", "host-recovery");
+export const identityRecordDirectory = (root: string, record: IdentityRecord) => record.contextRecoveryHash
+  ? identityContextRecoveryDirectory(root, record.intent.sourceId, record.intent.taskId)
+  : identityRequirementDirectory(root, record.intent.sourceId, record.intent.taskId);
 export const identityRequirementId = (taskId: string, slot: number) => `ir-${taskId.slice(0, 32)}-${slot}`;
 export const identitySemanticHash = (raw: unknown) => { const { derivation: _, ...body } = identityResolutionSchema.parse(raw); return contentHash(body); };
 export const identityIntentSchema = z.object({
@@ -75,6 +80,9 @@ export const identityRecordSchema = z.object({ intent: identityIntentSchema, sta
   output: identityOutputSchema, evidence: z.array(prerequisiteEvidenceSchema).min(1).max(256),
   traceRunId: text, sessionId: text, provider: z.literal("openai-codex"), model: z.literal("gpt-6.1-sol"), subscription: z.literal(true),
   predecessorRecordHash: hash.nullable(),
+  contextRecoveryHash: hash.optional(),
+  contextRecoveryGateHash: hash.optional(),
+  sessionCheckpointHash: hash.optional(),
 }).strict();
 export type IdentityRecord = z.infer<typeof identityRecordSchema>;
 export type IdentityInventory = {

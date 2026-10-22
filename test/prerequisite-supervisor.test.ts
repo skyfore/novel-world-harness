@@ -317,8 +317,12 @@ it.skipIf(!process.env.NWH_TEST_READONLY_SANDBOX)("native Codex command/exec can
     expect(await fs.readFile(editable, "utf8")).toBe("source edit allowed");
     await expect(fs.writeFile(lock, "second owner", { flag: "wx" })).rejects.toThrow("EEXIST");
   } finally {
-    const exited = new Promise<void>(resolve => child.once("exit", () => resolve()));
-    process.kill(-child.pid!, "SIGTERM"); await exited; lines.close();
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>(resolve => child.once("exit", () => resolve()));
+      try { process.kill(-child.pid!, "SIGTERM"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+      await exited;
+    }
+    lines.close();
   }
 }, 30000);
 

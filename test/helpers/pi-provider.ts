@@ -11,13 +11,16 @@ export function piRuntime(session: PiAgentSession): AgentSessionRuntime {
 export async function mockPiProvider(session: PiAgentSession, options: {
   response?: (context: TranscriptContext, index: number, signal?: AbortSignal) => Promise<AssistantMessage> | AssistantMessage;
   contextWindow?: number;
+  provider?: string;
+  modelId?: string;
 } = {}) {
   const host = piRuntime(session);
   const contexts: TranscriptContext[] = [];
   const payloads: unknown[] = [];
-  host.services.modelRuntime.registerProvider("nwh-test", {
+  const provider = options.provider ?? "nwh-test", modelId = options.modelId ?? "fixture";
+  host.services.modelRuntime.registerProvider(provider, {
     api: "nwh-test-api", apiKey: "test-only", baseUrl: "https://invalid.test",
-    models: [{ id: "fixture", name: "Fixture", reasoning: false, input: ["text"],
+    models: [{ id: modelId, name: "Fixture", reasoning: false, input: ["text"],
       contextWindow: options.contextWindow ?? 200_000, maxTokens: 1000,
       cost: { input: 10, output: 10, cacheRead: 0.1, cacheWrite: 10 },
       promptCache: { short: 30 } }],
@@ -53,8 +56,8 @@ export async function mockPiProvider(session: PiAgentSession, options: {
       return stream;
     },
   });
-  await host.services.modelRuntime.setRuntimeApiKey("nwh-test", "test-only");
-  await host.session.setModel(host.services.modelRuntime.getModel("nwh-test", "fixture")!);
+  await host.services.modelRuntime.setRuntimeApiKey(provider, "test-only");
+  await host.session.setModel(host.services.modelRuntime.getModel(provider, modelId)!);
   host.session.settingsManager.applyOverrides({ retry: { enabled: false }, compaction: { enabled: false } });
   return { host, contexts, payloads };
 }

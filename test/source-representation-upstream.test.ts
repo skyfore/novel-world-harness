@@ -11,6 +11,8 @@ import { runSourceRepresentationUpstream } from "../src/workflow/source-represen
 import { representationFixture, cleanupRepresentationFixtures } from "./helpers/source-representation.js";
 
 afterEach(cleanupRepresentationFixtures);
+// This runs prerequisite review, representation review, staging and acceptance
+// with durable traces and ledgers; allow bounded headroom on shared CI runners.
 it.each([false, true])("requires real isolated typed staging and acceptance before source-only finish (negative=%s)", async negative => {
   const f = await representationFixture(), plan = JSON.parse(await fs.readFile(path.join(f.directory, "upstream-plan.preview.json"), "utf8"));
   const before = await f.ledger.history(), sourceId = f.f.source.id;
@@ -76,4 +78,4 @@ it.each([false, true])("requires real isolated typed staging and acceptance befo
     await expect(verifySourceUpstreamAcceptance(f.root, plan)).rejects.toThrow(/retained request budget changed/);
     expect(contentHash((await store.list(sourceId))[0])).toBe(contentHash((await store.readProposal(sourceId, "accepted", upstream.attempts[0]!.started.proposalId)).payload));
   }
-});
+}, 20_000);

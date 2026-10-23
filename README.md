@@ -271,7 +271,19 @@ draft history, but re-reviews executable batches with same-slice prior evidence
 coverage. A represented source unit still requires executable review where the
 source supports actions, rules, or effects.
 
-`rebuild` and `compile-source` handle SIGINT/SIGTERM by cancelling the active
+For the complete novel lifecycle, use `nwh compile-novel [novel-path]` or
+`nwh compile-novel --source <id>`. It resumes by default; `--rebuild` starts a
+whole-source rebuild and resumes that same generation after interruption.
+The command covers source batches, opening, independent role review, repair,
+requirements, candidate archival, independent evaluation-plan review and live
+Pi experiments, certification, activation and playable branch delivery.
+Each phase is also a subcommand, such as `compile-novel roles`,
+`compile-novel evaluate`, or `compile-novel certify`.
+`compile-novel status --source <id>` is read-only. Unresolved semantic gaps,
+stale evidence and host-review stops remain blocking; archival alone never
+declares completion. See the [full command guide](docs/compile-novel.zh-CN.md).
+
+`compile-novel`, `rebuild` and `compile-source` handle SIGINT/SIGTERM by cancelling the active
 model call and releasing the workspace lock after cleanup. After an ungraceful
 host/process loss, inspect and recover the lock on its owning Linux host:
 

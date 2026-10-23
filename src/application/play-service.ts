@@ -1504,6 +1504,7 @@ function playWarnings(outcome: PlayTurnOutcome): string[] {
     outcome.npcResponseError,
     outcome.backgroundError,
     outcome.conversationError,
+    outcome.sessionError,
     outcome.auditError,
     outcome.repairHintError,
   ].filter((value): value is string => Boolean(value));

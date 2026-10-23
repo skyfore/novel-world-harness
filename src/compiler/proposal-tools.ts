@@ -861,6 +861,7 @@ const discourseObservationParameters = Type.Object({
     Type.Literal("dream"),
     Type.Literal("embedded-document"),
     Type.Literal("narrator-commentary"),
+    Type.Literal("unclassified"),
   ]),
   selectors: Type.Array(modelTextSelectorParameters, { minItems: 1, maxItems: 32 }),
   viewpoint_mention_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
@@ -2440,6 +2441,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Record quoted or represented speech without collapsing speaker mentions into canonical identity",
     promptGuidelines: [
       "Reference speaker/addressee mention IDs, not canonical character IDs.",
+      "When the active boundary or reconciliation prompt explicitly authorizes a source-supported correction to a committed quotation, use a new proposal_id and preserve its annotation_id. The accepted prior revision remains immutable history; replace_boundary_proposal is only for pending world proposals.",
       "Omit prefix/suffix when exact is unique. If disambiguation is needed, copy only immediate verbatim adjacent text or use the one-based occurrence in the complete segment.",
       "Use a cue selector when an attribution phrase sits outside the quoted span.",
       "Explain indirect and free-indirect readings; the source span alone may not determine their discourse mode.",
@@ -3589,7 +3591,7 @@ export function createCompilerProposalToolset(
         }
       }
       if (activeSourceId) {
-        for (const summary of await annotationStore.listBatchProposals(activeSourceId, compilerBatchId)) {
+        for (const summary of await annotationStore.listRecoverableBatchProposals(activeSourceId, compilerBatchId)) {
           if (successfulProposalIds.has(summary.id)) {
             throw new Error(`Compiler batch ${compilerBatchId} reuses proposal ID ${summary.id} across world and annotation stores.`);
           }

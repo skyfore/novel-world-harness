@@ -16,6 +16,7 @@ import { recoverUpstreamResolutionBaselines, assertUpstreamResolutionAbsences, u
 import type { SceneReviewCatalog } from "../eval/scene-capabilities.js";
 import { CompilerProposalObligations, sourcePatternObligationRequirementId } from "./proposal-obligations.js";
 import { readAccountingBatchSegments } from "./accounting-review.js";
+import { buildRepresentationRepairPlan, representationRecordsFromJournal } from "./source-representation-upstream.js";
 
 export function upstreamRepairHostError(reason: string): Error {
   return new Error(`UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: ${reason}. Preserve plan, receipts, budget and drafts. Stop this task and model retries; do not reset history, rotate namespaces, guess IDs or retry unchanged.`);
@@ -40,7 +41,25 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   if (crypto.createHash("sha256").update(bytes).digest("hex") !== plan.sourceScope.sourceSha256 || source.contentSha256 !== plan.sourceScope.sourceSha256) throw upstreamRepairHostError("Immutable source changed");
   const ledger = new RequirementLedger(root, sourceId);
   let requirementIds: string[];
-  if (plan.proposalObligation) {
+  let identityContext: Awaited<ReturnType<typeof import("./identity-requirement-upstream.js").readIdentityAuthority>> | undefined;
+  if (plan.identityRequirements) {
+    identityContext = await (await import("./identity-requirement-upstream.js")).readIdentityAuthority(root, plan);
+    requirementIds = identityContext.prepared.intent.targets.map(t => t.requirementId);
+  } else if (plan.sourceRepresentation) {
+    const { prerequisites, records } = representationRecordsFromJournal(await ledger.history(), plan.sourceRepresentation.taskId);
+    const annotations = await new SourceAnnotationStore(root).list(sourceId);
+    // Remove only exact receipt-backed outputs, never arbitrary newly visible observations.
+    const before = annotations.filter(a => !committedOutputs.has(`${a.annotationType}:${a.id}`));
+    const manifest = await new SegmentStore(root).readManifest(sourceId);
+    if (!manifest) throw upstreamRepairHostError("Representation source manifest is missing");
+    const expected = buildRepresentationRepairPlan(prerequisites, records, before, manifest.segments);
+    if (contentHash(expected) !== contentHash(plan)) throw upstreamRepairHostError("Representation repair escaped its independently reviewed exact scope");
+    const { verifyRepresentationTrace } = await import("./source-representation-trace.js");
+    const { verifyPrerequisiteTrace } = await import("./role-source-prerequisite-trace.js");
+    for (const r of prerequisites) await verifyPrerequisiteTrace(root, r);
+    for (const r of records) await verifyRepresentationTrace(root, r);
+    requirementIds = expected.requirementIds;
+  } else if (plan.proposalObligation) {
     new CompilerProposalObligations(root, plan.proposalObligation.sourceId, plan.proposalObligation.batchId)
       .verifySourcePatternUpstreamAuthority(plan.proposalObligation, {
         upstreamPlanHash: plan.planHash,
@@ -86,6 +105,19 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   const activeRevisions = new Map([...payloads].map(([key, value]) => [key, contentHash(value)]));
   // Retained predecessor payloads are readable audit evidence, never active decisions.
   recoverUpstreamResolutionBaselines(plan, payloads, committedOutputs, recoveryBaselines);
+  if (identityContext) {
+    const p = identityContext.prepared;
+    const currentCatalog = [...payloads].filter(([key]) => !key.startsWith("source-segment:") && !key.startsWith("structural-discourse:") && !committedOutputs.has(key))
+      .map(([key, payload]) => ({ kind: key.slice(0, key.indexOf(":")), id: key.slice(key.indexOf(":") + 1), payload, revisionHash: contentHash(payload) }))
+      .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
+    if (contentHash(currentCatalog) !== p.intent.catalogHash) throw upstreamRepairHostError("Identity consumer catalog changed outside exact receipt-backed outputs");
+    if (contentHash(await new RoleRosterStore(root).read(sourceId)) !== contentHash(p.review.priorRoster)
+      || contentHash(await new SourceStructureStore(root).read(sourceId)) !== p.review.priorPlan.structureHash) throw upstreamRepairHostError("Identity consumer roster or source structure changed");
+    const { RoleReviewWorkStore } = await import("./role-review-work.js");
+    const entries = new RoleReviewWorkStore(root, p.review.priorPlan).stagedEntries();
+    const expected = p.inventory.consumers.filter(c => c.ref.startsWith("staged-role/"));
+    if (entries.length !== expected.length || entries.some(e => expected.find(c => c.ref === `staged-role/${e.candidateId}`)?.revisionHash !== contentHash(e))) throw upstreamRepairHostError("Identity consumer entries changed after complete independent review");
+  }
   const baselineRevisions = new Map([...payloads].map(([key, value]) => [key, contentHash(value)]));
   for (const ref of plan.baselineRefs) if (baselineRevisions.get(`${ref.kind}:${ref.id}`) !== ref.revisionHash && (!committedOutputs.has(`${ref.kind}:${ref.id}`) || activeRevisions.get(`${ref.kind}:${ref.id}`) !== committedOutputs.get(`${ref.kind}:${ref.id}`))) throw upstreamRepairHostError(`Active dependency changed: ${ref.kind}:${ref.id}`);
   for (const ref of plan.readableRefs) if (!baselineRevisions.has(`${ref.kind}:${ref.id}`)) throw upstreamRepairHostError(`Readable dependency is missing: ${ref.kind}:${ref.id}`);

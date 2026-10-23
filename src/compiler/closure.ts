@@ -39,7 +39,11 @@ const referenceFields: Readonly<Record<string, ClosureKind>> = {
   mentionId: "annotation", mentionIds: "annotation", participantMentionIds: "annotation", speakerMentionIds: "annotation", addresseeMentionIds: "annotation", viewpointMentionIds: "annotation", eventMentionIds: "annotation", quotationIds: "annotation", basisMentionIds: "annotation", basisEventMentionIds: "annotation", executionId: "event-execution", discourseSegmentId: "discourse", discourseSegmentIds: "discourse", sceneId: "discourse",
 };
 
-export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph {
+/** Also accepts a read-only live inventory; building a graph never archives or activates it. */
+export type ClosureInput = Pick<PreparedNovelBundle, "source" | "canonical"> & {
+  compilerSnapshot: Pick<PreparedNovelBundle["compilerSnapshot"], "structure" | "annotations" | "entityResolutions" | "eventResolutions" | "evidenceBindings" | "roleRoster" | "requirementDefinitions" | "coreRoleRequirementDefinitions">;
+};
+export function buildPreparedClosure(bundle: ClosureInput): ClosureGraph {
   const nodes = new Map<string, Node>(), payloads = new Map<string, unknown>();
   const issues: ClosureGraph["issues"] = [];
   const add = (kind: ClosureKind, id: string, payload: unknown) => {

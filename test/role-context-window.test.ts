@@ -7,31 +7,29 @@ import {ModelRequestBudget,installModelRequestBudget} from '../src/agent/model-r
 import {contentHash} from '../src/world/canonical.js';
 const roots:string[]=[];
 afterEach(async()=>{await Promise.all(roots.splice(0).map(root=>fs.rm(root,{recursive:true,force:true})));});
-it('repackages before transport without clearing or consuming the persistent call allowance',()=>{
- const window=new RoleContextWindow(),paid=new ModelRequestBudget({maxModelCalls:2,maxRequestBytes:48000,maxTotalPayloadBytes:96000});
- paid.beginCall({});
+it('observes large contexts while transport and the cumulative call gate remain active',()=>{
+ const window=new RoleContextWindow(),paid=new ModelRequestBudget({maxModelCalls:2,maxRequestBytes:48000,maxTotalPayloadBytes:96000},undefined,{requestBytesMode:'observe'});
  const stream=vi.fn(),agent={streamFunction:stream,onPayload:undefined} as unknown as Parameters<typeof installModelRequestBudget>[0];
  installModelRequestBudget(agent,[window,paid]);
- expect(()=>agent.streamFunction({} as never,{messages:'x'.repeat(37000)} as never)).toThrow(RoleContextPressure);
- expect(stream).not.toHaveBeenCalled(); expect(paid.snapshot().modelCalls).toBe(1);expect(paid.isBlocked()).toBe(false);
- const replacement=new RoleContextWindow(),next={streamFunction:stream,onPayload:undefined} as unknown as Parameters<typeof installModelRequestBudget>[0];
- installModelRequestBudget(next,[replacement,paid]);next.streamFunction({} as never,{} as never);
- expect(paid.snapshot().modelCalls).toBe(2);
- expect(()=>next.streamFunction({} as never,{} as never)).toThrow('model-call limit');
+ agent.streamFunction({} as never,{messages:'x'.repeat(70000)} as never);
+ expect(stream).toHaveBeenCalledOnce();expect(window.pressure).toBeUndefined();expect(paid.snapshot().modelCalls).toBe(1);
+ agent.streamFunction({} as never,{} as never);
+ expect(()=>agent.streamFunction({} as never,{} as never)).toThrow('model-call limit');
 });
-it('checks provider transformations before payload admission',async()=>{
- const window=new RoleContextWindow(),paid=new ModelRequestBudget({maxModelCalls:2,maxRequestBytes:48000,maxTotalPayloadBytes:96000});
+it('observes transformed payloads and still enforces cumulative resource limits',async()=>{
+ const window=new RoleContextWindow(),paid=new ModelRequestBudget({maxModelCalls:2,maxRequestBytes:48000,maxTotalPayloadBytes:96000},undefined,{requestBytesMode:'observe'});
  const agent={streamFunction:vi.fn(),onPayload:async()=>({expanded:'x'.repeat(50000)})} as unknown as Parameters<typeof installModelRequestBudget>[0];
  installModelRequestBudget(agent,[window,paid]);
- await expect(agent.onPayload!({},{} as never)).rejects.toThrow(RoleContextPressure);
- expect(paid.snapshot().payloads).toBe(0);expect(paid.isBlocked()).toBe(false);
+ await expect(agent.onPayload!({},{} as never)).resolves.toBeDefined();
+ expect(paid.snapshot().payloads).toBe(1);expect(window.pressure).toBeUndefined();
+ await expect(agent.onPayload!({},{} as never)).rejects.toThrow('cumulative');
 });
 it('forecasts a large tool response without truncating it',()=>{
  const window=new RoleContextWindow();window.beginCall({content:'x'.repeat(20000)});
  const reply={content:'y'.repeat(13000)};window.observeResult({offset:5},reply);
  expect(window.pressure).toBeUndefined();expect(reply.content.length).toBe(13000);
  expect(window.metrics().forecastBytes).toBeGreaterThan(33000);
- expect(()=>window.beginCall({content:'x'.repeat(37000)})).toThrow(RoleContextPressure);
+ expect(()=>window.beginCall({content:'x'.repeat(37000)})).not.toThrow();
 });
 it('persists cursors but never original text or a false semantic summary',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'role-context-'));roots.push(root);
@@ -59,6 +57,18 @@ it('merges UTF-8 core, neighbor and paginated originals exactly once',async()=>{
  expect(result.packet.fragments.map(f=>f.text).join('')).toBe(original);
  expect(result.packet.ranges).toEqual([{start:0,end:bytes.length}]);
  expect(result.deliveredUnitIds).toEqual(['long']);
+});
+it('carries used context handoffs across a host-authorized review migration',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'role-context-migration-'));roots.push(root);
+ const plan=contentHash('successor'),packet=contentHash('packet');
+ const store=await RoleContextCheckpoint.open(root,plan,'work',packet,1);
+ expect(store.generation).toBe(1);
+ await store.record('read_role_work_evidence',{unitId:'unit'},{content:[{type:'text',text:JSON.stringify({units:[{unitId:'unit',text:'evidence'}]})}]});
+ await store.handoff(new RoleContextPressure(37000,'context'));
+ const restored=await RoleContextCheckpoint.open(root,plan,'work',packet,1);
+ expect(restored.generation).toBe(2);
+ await expect(restored.handoff(new RoleContextPressure(37000,'context'))).rejects.toThrow('allowance exhausted');
+ await expect(RoleContextCheckpoint.open(root,plan,'work',packet,0)).rejects.toThrow('allowance changed');
 });
 it('never promotes partial originals or discovery excerpts to complete evidence',async()=>{
  const {reassembleRoleContext}=await import('../src/compiler/role-review-context.js');

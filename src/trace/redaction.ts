@@ -26,19 +26,22 @@ function redactValue(value: unknown, seen: WeakSet<object>): unknown {
   if (typeof value !== "object" || value === null) return value;
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
-  if (Array.isArray(value)) return value.map((entry) => redactValue(entry, seen));
-  const record = value as Record<string, unknown>;
-  if (record.type === "thinking") {
-    const thinking = typeof record.thinking === "string" ? record.thinking : "";
-    return {
-      type: "thinking",
-      redacted: true,
-      charCount: thinking.length,
-      reasoningContentRecorded: false,
-    };
+  try {
+    if (Array.isArray(value)) return value.map((entry) => redactValue(entry, seen));
+    const record = value as Record<string, unknown>;
+    if (record.type === "thinking") {
+      const charCount = typeof record.thinking === "string" ? record.thinking.length
+        : record.redacted === true && record.reasoningContentRecorded === false && Number.isSafeInteger(record.charCount)
+          && (record.charCount as number) >= 0 ? record.charCount : 0;
+      return { type: "thinking", redacted: true, charCount, reasoningContentRecorded: false };
+    }
+    return Object.fromEntries(Object.entries(record).map(([key, entry]) => [
+      key,
+      SECRET_KEY.test(key) ? "[REDACTED]" : redactValue(entry, seen),
+    ]));
+  } finally {
+    // Shared references are ordinary repeated JSON values, not cycles. Keep
+    // observational redaction equivalent before/after JSON serialization.
+    seen.delete(value);
   }
-  return Object.fromEntries(Object.entries(record).map(([key, entry]) => [
-    key,
-    SECRET_KEY.test(key) ? "[REDACTED]" : redactValue(entry, seen),
-  ]));
 }

@@ -12,11 +12,28 @@ import { upstreamRepairHostError } from "./upstream-repair-preflight.js";
 import { verifyUpstreamRepairConvergence } from "./upstream-repair-convergence.js";
 import { upstreamRepairEvaluationSchema, UPSTREAM_REPAIR_EVALUATOR_VERSION } from "./upstream-repair-evaluation-model.js";
 import { sourcePatternObligationRequirementId } from "./proposal-obligations.js";
+import { representationRequirementResult } from "./source-representation-upstream.js";
+import { identityRequirementsReady, identitySemanticHash } from "./identity-requirements.js";
 
 type AssessmentInputs = Pick<NovelClosureAssessment, "subjectSnapshotHash" | "roster" | "playability" | "requirementResults" | "coreRoleResult">;
 
 /** Recompute against frozen independently reviewed definitions; never trust recorded success. */
 export function upstreamRepairRequirementResult(bundle: PreparedNovelBundle, assessment: AssessmentInputs, plan: UpstreamRepairPlan): RequirementResult {
+  if (plan.identityRequirements) {
+    const authority = plan.identityRequirements;
+    const records = (bundle.compilerSnapshot.requirementJournal ?? []).flatMap(r => r.payload.kind === "identity-requirements" && r.payload.record.intent.taskId === authority.taskId ? [r.payload.record] : []);
+    const definition = records[0]?.output;
+    if (!identityRequirementsReady(records) || definition?.phase !== "identity-definition" || contentHash(records.map(contentHash)) !== contentHash(authority.recordHashes)
+      || contentHash({ intentHash: contentHash(records[0]!.intent), definition }) !== plan.requirementSetHash
+      || contentHash(plan.requirementIds.slice().sort()) !== contentHash(definition.requirements.map(r => r.id).sort())) throw upstreamRepairHostError("Identity evaluation lost its independent requirement and complete consumer review");
+    return requirementResultSchema.parse({ setId: plan.batchId, revisionHash: plan.requirementSetHash, catalogHash: contentHash(bundle.compilerSnapshot.entityResolutions), evaluatorVersion: "independent-identity-uncertainty/v1",
+      requirements: definition.requirements.map(d => {
+        const active = bundle.compilerSnapshot.entityResolutions.find(r => r.mentionId === d.mentionId), expected = authority.semanticSlots.find(s => s.id === active?.id);
+        const ok = active && expected && identitySemanticHash(active) === expected.payloadHash && active.status === d.requiredStatus;
+        return { id: d.id, definitionHash: contentHash(d), state: ok ? "satisfied" : "blocked", blockedBy: ok ? [] : [d.mentionId], diagnostics: ok ? [] : ["EXACT_IDENTITY_UNCERTAINTY_POSTCONDITION_MISSING"] };
+      }) }); // Never changes the original critical/blocked questions or activates consumers.
+  }
+  if (plan.sourceRepresentation) return representationRequirementResult(bundle.compilerSnapshot.requirementJournal ?? [], bundle.compilerSnapshot.annotations, plan);
   if (plan.proposalObligation) return proposalObligationRequirementResult(bundle, plan);
   const scene = activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []).find(item => item.revisionHash === plan.requirementSetHash);
   const core = bundle.compilerSnapshot.coreRoleRequirementDefinitions?.at(-1);

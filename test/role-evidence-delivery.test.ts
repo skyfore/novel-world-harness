@@ -1,6 +1,17 @@
 import { it, expect } from 'vitest';
 import { RoleEvidenceDelivery } from '../src/compiler/role-evidence-delivery.js';
 import { roleSourceParts, assertSourcePartIntegration } from '../src/compiler/role-source-parts.js';
+import { roleAuditSourcePacket } from '../src/compiler/role-review-context.js';
+it('includes a trailing tab as boundary context and leaves large originals explicitly unread',()=>{
+  const bytes=Buffer.from('龙接上鼠标。\r\n\t'),units=[{id:'boundary',anchor:{startByte:0,endByte:bytes.length}}],core={start:0,end:bytes.length-1};
+  const packet=roleAuditSourcePacket(bytes,units,core);
+  expect(packet.core).toEqual(core);
+  expect(packet.fragments[0]).toMatchObject({continued:true,text:bytes.subarray(0,-1).toString()});
+  expect(packet.boundaryContext.evidence[0]?.text).toBe(bytes.toString());
+  const large=roleAuditSourcePacket(bytes,units,core,1);
+  expect(large.boundaryContext.evidence).toEqual([]);
+  expect(large.boundaryContext.manifest.requiredButMissing).toEqual(['boundary']);
+});
 it('returns only missing UTF-8 ranges and locates already delivered originals', () => {
   const bytes = Buffer.from('龙😀甲乙丙丁'), unit = { id: 'u', anchor: { startByte: 0, endByte: bytes.length } }, delivery = new RoleEvidenceDelivery(bytes, [unit]);
   delivery.seedSpan({ start: 0, end: Buffer.byteLength('龙😀') }, 'initial packet');

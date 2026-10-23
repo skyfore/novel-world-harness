@@ -380,6 +380,33 @@ export function buildNwhToolRecoveryAdvice(
   // can contain arbitrary novel wording, including "unknown" or "offset".
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
+  if (/role_prerequisite_host_review|upstream_repair_requires_host_review/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "No model-side retry. The host must verify the original intent, concrete repair, current authorization and checks before any legal continuation.",
+      steps: [
+        "Stop this model turn and preserve the original taskId, plan, exact failed input, trace, pending proposals, budgets and failure history.",
+        "Do not correct or resubmit this consumed stage, change namespaces, renew a grant, reset a budget, erase a missing condition or resume the parent compiler.",
+        "Report the exact host diagnostic. A read-only inspection or a supported finding is not repair authority or evidence that a critical question is resolved.",
+      ] };
+  }
+  if (/evaluation_review_host_required|evaluation_review_no_progress|evaluation_review_scope_changed|evaluation_source_index_stale/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "The host must inspect the original evaluation draft, source scope and retained failure counters before continuation.",
+      steps: ["Stop. Preserve the review ID, typed drafts, source offsets and traces. Do not repeat calls, rename item keys or rotate the plan to reset attempts; inspect compile-novel status and follow the concrete diagnostic."] };
+  }
+  if (lower.includes("evaluation_plan_already_frozen")) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+      retryCondition: "The single-use evaluation finish has succeeded; end this review.", steps: ["Use the returned planHash. Do not call the finish or proposal tools again."] };
+  }
+  if (["read_evaluation_input", "propose_evaluation_item", "finish_evaluation_plan"].includes(toolName)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected retry in the unchanged source/candidate scope; a repeated failure requires host review.",
+      steps: ["Read read_evaluation_input section=index and copy sections[] or itemSections[] exactly; read section=schema for the named item's fields.",
+        "Read section=draft before correcting the same stable item key. Copy candidateId/entityId/entryCutHash from section=roles and assertion/assertionHash from section=assertions; do not guess identifiers.",
+        "Copy nextOffset exactly when paging. For missing original text use find_source_evidence query=*, then read_source_evidence with the exact results[].ref until its final page.",
+        "Repair every named finish diagnostic; do not drop gold items, shrink the major-role denominator or mark applicable layers exempt to pass."],
+      suggestedCall: { tool: "read_evaluation_input", arguments: { section: "index" } } };
+  }
   if (lower.includes("role_review_work_host_required")) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
       retryCondition: "The owning host must inspect the unchanged role review work, plan and journal before continuation.",
@@ -533,7 +560,12 @@ export function buildNwhToolRecoveryAdvice(
         "Correct a failed unstaged proposal with its original proposal_id; use the normal successor protocol for a staged draft. Never erase conditions, guess a hash/ID or retry unchanged. Stop after one corrected attempt or if source support is absent."],
       suggestedCall: { tool: "find_compiler_artifacts", arguments: { kind: claim ? "claim" : "utterance-expression", query: "*", max_results: 20 } } };
   }
-  if (/(acquisition_expression_not_realized|expression_quotation_revision_mismatch|expression_group_scene_blocked)/u.test(lower)) {
+  const compilerCanReviseQuotation = toolName === "finish_compiler_batch"
+    && Boolean(scope?.activeToolNames.includes("propose_quotation"))
+    && Boolean(scope?.activeToolNames.includes("propose_utterance_expression"))
+    && Boolean(scope?.activeToolNames.includes("withdraw_compiler_proposal"));
+  if (/(acquisition_expression_not_realized|expression_quotation_revision_mismatch|expression_group_scene_blocked)/u.test(lower)
+    && !(compilerCanReviseQuotation && /expression_quotation_revision_mismatch/u.test(lower))) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
       retryCondition: "Stop until the host resolves the source revision, occurrence or scene boundary.",
       steps: ["Preserve drafts, frozen quotation/proposition revisions and the current branch head.",
@@ -542,17 +574,33 @@ export function buildNwhToolRecoveryAdvice(
   }
   if (/(?:^|\W)(?:expression_|attribution_expression_|acquisition_expression_)/u.test(lower)
     && !/(budget|circuit.breaker|consumed|outside.*scope)/u.test(lower)) {
-    const quotation = /expression_quotation_missing/u.test(lower);
+    const quotationTrace = /expression_(?:quotation_(?:missing|revision_mismatch)|speaker_trace_mismatch|addressee_trace_mismatch)/u.test(lower);
+    const failingExpressionProposalId = /^-\s+([A-Za-z0-9][A-Za-z0-9._-]*):\s+EXPRESSION_(?:QUOTATION_(?:MISSING|REVISION_MISMATCH)|SPEAKER_TRACE_MISMATCH|ADDRESSEE_TRACE_MISMATCH)\b/mu.exec(errorText)?.[1];
+    const quotationRepairUnavailable = scope !== undefined && !compilerCanReviseQuotation;
     const kind = /expression_event_missing/u.test(lower) ? "canonical-event" : /expression_entity_missing/u.test(lower) ? "entity" : /expression_proposition_/u.test(lower) ? "proposition" : "utterance-expression";
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: /_missing/u.test(lower) ? "lookup-miss" : "invalid-arguments", retryable: true,
       retryCondition: "At most one materially corrected retry after inspecting same-source evidence within existing authority.",
-      steps: [quotation
-        ? "Call same-source find_source_annotations with annotation_type quotation; copy results[].readArguments.ref into read_source_annotation.ref and payload.id into quotation.quotationId."
+      steps: [quotationTrace && failingExpressionProposalId
+        ? `Call same-source find_compiler_artifacts with kind utterance-expression, status pending and query ${failingExpressionProposalId}; copy results[].readArguments.ref into read_compiler_artifact.ref. Read payload.quotation.quotationId, then call find_source_annotations with annotation_type quotation and that exact ID; copy results[].readArguments.ref into read_source_annotation.ref. Inspect the quotation payload, semanticHash and exact anchor before changing either record.`
+        : quotationTrace
+          ? "Call same-source find_source_annotations with annotation_type quotation; copy results[].readArguments.ref into read_source_annotation.ref and the read payload.id only into quotation.quotationId. Inspect payload.speakerMentionId, payload.addresseeMentionIds, semanticHash and the exact anchor before changing the expression."
         : `Call same-source find_compiler_artifacts with kind ${kind}; copy results[].readArguments.ref into read_compiler_artifact.ref. Copy payload.id only for logical IDs; never substitute a proposal or read ref.`,
         "Use logical quotation/proposition IDs and exact fragment selectors. The host freezes revisions, anchors and nested proposition snapshots. Every semantic field needs this occurrence's own evidence; multiple anchors are conjunctive.",
+        ...(quotationTrace ? [
+          "If the expression is wrong, stage its same-logical-ID successor under a new proposal_id so it matches the current quotation, then withdraw only the defective current-batch expression.",
+          quotationRepairUnavailable
+            ? "This active scope does not expose the complete quotation-revision lifecycle. If the quotation or its mention/resolution authority is defective, preserve every draft and stop for host source review; do not retry finish unchanged."
+            : "If the active scope exposes propose_quotation and its complete citable evidence proves the committed quotation incomplete, stage the corrected source annotation under a new proposal_id while preserving annotation_id and every field not established defective. Use mention annotation IDs, not canonical entity IDs; verify them with same-source find_source_annotations and copy find_identity_resolutions results[].ref into read_identity_resolution.ref. Accepted prior annotation revisions remain immutable history; never withdraw them or pass them to replace_boundary_proposal.",
+          ...(compilerCanReviseQuotation ? [
+            "After the corrected quotation proposal succeeds, stage a successor for each defective current-batch expression under a new proposal_id while preserving payload.id so the host freezes the new quotation revision; then withdraw only the old expression proposal. Retry finish once after that material correction.",
+          ] : []),
+        ] : []),
         "Preserve the failed proposal_id if no draft was staged. Correct once; use the normal successor protocol for a staged draft. Never guess hashes/IDs, drop expression evidence, change acquisition mode or repeat unchanged.",
         "If source, annotation or identity authority is insufficient, stop for host review with drafts intact."],
-      suggestedCall: quotation ? { tool: "find_source_annotations", arguments: { annotation_type: "quotation", query: "*", max_results: 20 } }
+      suggestedCall: quotationTrace && failingExpressionProposalId && (!scope || scope.activeToolNames.includes("find_compiler_artifacts"))
+        ? { tool: "find_compiler_artifacts", arguments: { kind: "utterance-expression", query: failingExpressionProposalId, status: "pending", max_results: 20 } }
+        : quotationTrace && (!scope || scope.activeToolNames.includes("find_source_annotations"))
+        ? { tool: "find_source_annotations", arguments: { annotation_type: "quotation", query: "*", max_results: 20 } }
         : { tool: "find_compiler_artifacts", arguments: { kind, query: "*", max_results: 20 } } };
   }
 
@@ -630,13 +678,45 @@ export function buildNwhToolRecoveryAdvice(
       steps:['Copy evidence IDs from part.packet.fragments[].unitId in the assigned prompt. Retain boundary ambiguities in openQuestions. Use preview_role_source_part for exact byte counts and schema diagnostics before committing. The ordinary source-note limit is 8000 UTF-8 bytes; shorten wording without dropping responsibilities.',
         'Do not guess references, repeat unchanged input, change part IDs or restart with a fresh budget. Stop after a corrected failure or if required notes cannot fit. A part proposal is not parent source coverage.']};
   }
+  if (["preview_role_judgment_revision", "propose_role_judgment_revision"].includes(toolName)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected submission under the assigned revision, while original proposal, context and progress allowances remain available. Host, scope, single-use and budget stops forbid retry.",
+      steps: ["Copy revisionId and candidateId from the assigned packet. For original evidence call read_role_work_evidence with query, copy units[].unitId, and follow every nextOffset. Read predecessor support and counterevidence before preview_role_judgment_revision.",
+        "Preserve supported importance and all uncertainty. A valid preview is structural validation only; submit the changed entry for a separate independent audit. An insufficient or contradicted audit is a retained finding, not a failed tool call to retry.",
+        "Never overwrite the predecessor, repeat unchanged input, rotate revision/work IDs, renew a budget, or submit another successor after its independent audit fails. Stop after the one corrected submission fails."] };
+  }
   if (toolName === "propose_role_source_review" && lower.includes("8000 utf-8 bytes")) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
       retryCondition: "At most one materially corrected proposal in the same work while its durable correction and context budgets remain available; host stops take precedence.",
       steps: ["The complete JSON proposal must fit 8000 UTF-8 bytes, including keys, IDs and punctuation. Shorten wording and avoid copied source passages while preserving findings, evidence references and unresolved questions.",
         "Do not re-read source solely to fix output length. If required notes cannot fit, or context/attempt limits stop correction, preserve the exact failed input and stop for host task decomposition. Never clear the journal or rotate work IDs."] };
   }
-  if (["read_role_context_history", "request_role_work_evidence", "read_role_work_evidence", "read_role_work_neighbor", "read_role_review_notes", "read_role_review_atlas", "read_role_audit_inventory", "propose_role_claim_audit", "propose_role_source_review", "propose_role_review_audit"].includes(toolName)) {
+  if (["preview_role_source_audit_proposal", "preview_role_source_audit_verification", "propose_role_source_audit_repair", "propose_role_source_audit_repair_check"].includes(toolName)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected proposal in the original assigned revision; host, scope, single-use and exhausted-budget stops forbid retries.",
+      steps: ["Copy revisionId, proposalHash, expectedQuestions[].questionId and discoveries[].findingId from the assigned task; predecessorIssues indexes refer to predecessor.unresolved. Preserve every original responsibility and missing major character.",
+        "For an unknown evidence ID call read_role_work_evidence with query in this source, copy units[].unitId to unitId and follow nextOffset. For candidate IDs call read_role_audit_inventory and copy candidates[].id, then read the relevant complete entry. Never guess identifiers or retry unchanged.",
+        "Use this task's preview_role_source_audit_proposal or preview_role_source_audit_verification before the remaining proposal attempt. A preview is structural validation, not independent evidence. A settled insufficient or contradicted verdict is a retained finding; stop without replaying it or renaming the revision."] };
+  }
+  if (toolName === "preview_role_review_audit" || toolName === "propose_role_review_audit") {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected retry in this assigned work while its original context, proposal correction and no-progress allowances remain available; host stops take precedence.",
+      steps: [
+        "Correct all reported paths together against the assigned packet, preserving every expectedQuestions[].questionId and discoveries[].findingId plus its evidence and unresolved dependencies.",
+        "Only mapped discoveries may contain candidateIds. For blocked, missing-major or nonmajor, use candidateIds=[] and retain the relevant identities in rationale or unresolved; do not reread a nonexistent judgment to satisfy an invalid disposition.",
+        "For an unknown candidate ID, call read_role_audit_inventory with query or offset=0 and copy candidates[].id. For an unread existing entry, use that exact candidateId in read_role_audit_inventory. An inventory name without an entry is a missing judgment: preserve blocked or evidence-based missing-major instead of mapping or retrying the read.",
+        "For missing original evidence, use each exact unreadUnitIds value with read_role_work_evidence unitId and follow every nextOffset. For an unknown unit, search with read_role_work_evidence query in this source and copy units[].unitId. Do not reread evidence already fully delivered.",
+        "Use preview_role_review_audit to check the corrected draft before the remaining proposal attempt. A preview never commits or adds correction allowance. Stop on a repeated diagnostic, exhausted budget or host review; never guess IDs, restart, or rename the work.",
+      ] };
+  }
+  if (toolName === "propose_role_claim_audit") {
+    return {version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one materially corrected proposal in the same assigned audit. Contract revision authority does not renew proposal retries; host, scope, single-use and budget stops forbid retry.",
+      steps: ["Copy candidateId, claimRevision, atlasRevision and packetHash from the assigned task. Discover original evidence with read_role_work_evidence query; copy units[].unitId and follow nextOffset to read decisive passages completely.",
+        "Preserve all importance, identity and development checks. Supported measures evidence-faithful classification; an honest unknown boundary still blocks required development certification. A valid negative audit is a retained finding, never a tool failure to retry.",
+        "Correct invalid fields once without guessing or unchanged retries. A consumed contract audit cannot be replayed, renamed or used to grant another semantic correction; preserve all prior receipts and cumulative charges and stop."]};
+  }
+  if (["read_role_context_history", "request_role_work_evidence", "read_role_work_evidence", "read_role_work_neighbor", "read_role_review_notes", "read_role_review_atlas", "read_role_audit_inventory", "propose_role_source_review"].includes(toolName)) {
     return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
       retryCondition: "Only one materially corrected retry in this assigned work, if the durable allowance remains available; host and budget stops take precedence.",
       steps: ["For evidence, call read_role_work_evidence with query in this source, copy units[].unitId to unitId, and follow nextOffset for complete text. Source-work citations must come from the supplied packet fragments[].unitId.",

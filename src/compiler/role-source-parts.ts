@@ -27,8 +27,10 @@ export function assertSourcePartIntegration(parts: readonly RoleSourceWork[], pa
   const questions = parts.flatMap(p => p.openQuestions);
   // Slot count and exact order preserve the same question IDs on ledger replay.
   if (parent.openQuestions.length !== questions.length || questions.some((q, i) => parent.openQuestions[i] !== q)) throw Error('Keep every part open question verbatim and in order. These questions remain unresolved for the later source audit; do not silently resolve or drop them. Correct once under the same parent work.');
+  const missing: Array<{name:string; unitIds:string[]}> = [];
   for (const finding of parts.flatMap(p => p.findings)) {
     const refs = finding.unitIds.filter(id => coreIds.has(id));
-    if (refs.length && !parent.findings.some(f => f.name === finding.name && refs.every(id => f.unitIds.includes(id)))) throw Error('Every part finding about the assigned core must remain represented by name and original core references. Correct once; never drop a part responsibility.');
+    if (refs.length && !parent.findings.some(f => f.name === finding.name && refs.every(id => f.unitIds.includes(id)))) missing.push({name:finding.name,unitIds:refs});
   }
+  if (missing.length) throw Error(`Every part finding about the assigned core must remain represented by name and original core references. Missing bindings: ${JSON.stringify(missing)}. Copy the exact names and unitIds from these supplied partDrafts findings into the original parent proposal; preserve all questions and correct at most once. Do not guess, repeat unchanged, or retry after a host/context/budget stop.`);
 }

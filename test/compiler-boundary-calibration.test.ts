@@ -104,6 +104,10 @@ describe("compiler boundary calibration", () => {
     expect(calibration.segmentIds).toEqual([segments[0]!.id, segments[1]!.id]);
     expect(calibration.prompt).toContain("dedicated boundary-calibration pass");
     expect(calibration.prompt).toContain("replace_boundary_proposal");
+    expect(calibration.prompt).toContain("new proposal_id while preserving the same annotation_id or resolution_id");
+    expect(calibration.prompt).toContain("only for still-pending world proposals");
+    expect(calibration.prompt).toContain("Accepted prior revisions remain immutable history");
+    expect(calibration.prompt).toContain("successor revisions for current-batch world drafts that froze the old source revision");
     expect(calibration.prompt.match(/<source-segment id=/g)).toHaveLength(2);
 
     const retry = createCompilerProposalToolset(root);

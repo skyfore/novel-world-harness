@@ -201,6 +201,19 @@ export class CompilerFinishReceipts {
     await this.verify(receipt);
     await this.retainRequirementAttempts(receipt);
   }
+  /**
+   * Read-only checkpoint eligibility check. Absence, a prepared intent, or an
+   * older pipeline returns false so the owning source loop can recover or
+   * re-review that exact scope. Corrupt or dependency-invalid receipts still
+   * throw and must never be bypassed with a new model session.
+   */
+  async hasVerifiedCompletedReceipt(): Promise<boolean> {
+    const receipt = await this.read();
+    if (!receipt || receipt.state !== "completed"
+      || receipt.identity.pipelineVersion !== COMPILER_PIPELINE_VERSION) return false;
+    await this.verify(receipt);
+    return true;
+  }
   async retainRequirementAttempts(receipt: CompilerFinishReceipt) {
     if (!receipt.identity.requirementAttempts) return;
     try {

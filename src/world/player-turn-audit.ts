@@ -73,6 +73,7 @@ export type PlayerTurnAudit = {
   backgroundError?: string;
   /** Presentation-memory failure; committed world truth remains unaffected. */
   conversationError?: string;
+  sessionError?: string;
 };
 
 export type PlayerTurnAuditRecoveryLink = Pick<

@@ -9,7 +9,8 @@ import { idSchema, type Entity, type ValidationIssue } from "../world/model.js";
 import { worldStorageRoot } from "../world/paths.js";
 import type { SourceAnnotation } from "./annotations.js";
 import type { IdentityResolution } from "./entity-resolution.js";
-import { characterDimensionIdSchema } from "../world/character-ontology.js";
+import { roleRosterEntrySchema } from "./role-roster-entry.js";
+export { roleRosterEntrySchema, roleDevelopmentExpectationSchema, type RoleDevelopmentExpectation } from "./role-roster-entry.js";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const roleCandidateSchema = z.object({
@@ -18,26 +19,6 @@ export const roleCandidateSchema = z.object({
 }).strict();
 export type RoleCandidate = z.infer<typeof roleCandidateSchema>;
 
-/** Source reviewers record expectations before seeing compiled character models. */
-export const roleDevelopmentExpectationSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("stable"), rationale: z.string().trim().min(1).max(2000), basisUnitIds: z.array(idSchema).min(1) }).strict(),
-  z.object({ kind: z.literal("unknown"), rationale: z.string().trim().min(1).max(2000), basisUnitIds: z.array(idSchema).min(1) }).strict(),
-  z.object({ kind: z.literal("changes"), rationale: z.string().trim().min(1).max(2000), changes: z.array(z.object({
-    dimensionId: characterDimensionIdSchema,
-    direction: z.enum(["increase", "decrease"]),
-    rationale: z.string().trim().min(1).max(2000),
-    beforeUnitIds: z.array(idSchema).min(1), afterUnitIds: z.array(idSchema).min(1),
-  }).strict()).min(1).max(32) }).strict(),
-]);
-export type RoleDevelopmentExpectation = z.infer<typeof roleDevelopmentExpectationSchema>;
-
-export const roleRosterEntrySchema = z.object({
-  candidateId: idSchema,
-  importance: z.enum(["major", "supporting", "incidental"]),
-  rationale: z.string().trim().min(1).max(2000),
-  basisUnitIds: z.array(idSchema).min(1),
-  developmentExpectation: roleDevelopmentExpectationSchema.optional(),
-}).strict();
 export const roleRosterReviewSchema = z.object({
   version: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
   workEvidence: boundedRoleReviewEvidenceSchema.optional(),

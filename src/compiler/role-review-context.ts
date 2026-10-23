@@ -15,6 +15,17 @@ export function roleReviewSourcePacket(bytes: Buffer, units: readonly Unit[], sp
   if (cursor < span.end) fragments.push({ unitId: null, text: bytes.subarray(cursor, span.end).toString("utf8"), continued: false });
   return { core: span, fragments };
 }
+
+/** Preserve core ownership while delivering complete overlapping boundary units
+ * as context. Large units remain explicit paginated-read obligations. */
+export function roleAuditSourcePacket(bytes: Buffer, units: readonly Unit[], span: Span, maxBoundaryBytes = 12_000) {
+  const core = roleReviewSourcePacket(bytes, units, span);
+  const boundaryIds = core.fragments.filter(f => f.unitId && f.continued).map(f => f.unitId!);
+  return { ...core, boundaryContext: {
+    ...roleEvidencePacket(bytes, units, boundaryIds, [], maxBoundaryBytes), contextOnly: true,
+    guidance: "Complete boundary originals are context for this assigned core only. They never complete or expand a neighboring source work. Follow manifest.requiredButMissing with read_role_work_evidence and every nextOffset.",
+  } };
+}
 export function boundedRoleReviewSpans(bytes: Buffer, units: readonly Unit[]) {
   const split = (span: Span): Span[] => {
     if (Buffer.byteLength(JSON.stringify(roleReviewSourcePacket(bytes, units, span))) <= 16_000) return [span];

@@ -100,7 +100,7 @@ import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 3;
-export const COMPILER_PROMPT_VERSION = 44;
+export const COMPILER_PROMPT_VERSION = 50;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -513,6 +513,18 @@ export class PreparedNovelCache {
   /** Freeze reviewable compiler output while keeping public Play activation unchanged. */
   async archiveCandidate(source: SourceDocument, options: { lineage?: PreparedRevisionLineage } = {}): Promise<PreparedCacheResult> {
     return this.publish(source, { ...options, allowSemanticDebtForRollback: true });
+  }
+
+  /** Certify and freeze a candidate without changing the active revision. */
+  async certifyCandidate(source: SourceDocument, options: { lineage?: PreparedRevisionLineage } = {}): Promise<PreparedCacheResult> {
+    if (options.lineage && !await this.loadRevision(source, options.lineage.parentBundleHash, { allowIncompatible: true })) {
+      throw new Error(`Certification parent revision ${options.lineage.parentBundleHash} is missing.`);
+    }
+    const identity = await sourceIdentity(this.workspaceRoot, source);
+    const candidate = await this.buildBundle(source, identity, options);
+    const bundle = preparedNovelBundleSchema.parse({ ...candidate, readiness: await assessNovelClosure(this.workspaceRoot, candidate) });
+    assertPreparedReadiness(bundle);
+    return this.publishBundle(source, identity, bundle, false);
   }
 
   async publish(

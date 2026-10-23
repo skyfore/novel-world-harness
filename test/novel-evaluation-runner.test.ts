@@ -52,12 +52,17 @@ it("freezes complete scenario inputs and records blocked runs as not-run without
       rejectedProbes: [{ id: "unbound-damage", candidate: { title: "Invent damage", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.health", value: 100 }] } } }],
     }] }, bundle);
   expect((await plans.read(frozen.hash)).roles[0]!.maxTurns).toBe(1);
+  expect((await plans.findCurrent(bundle))?.hash).toBe(frozen.hash);
+  const { version: _version, sourceId: _source, sourceSha256: _sha, subjectSnapshotHash: _subject, rosterHash: _roster, frozenAt: _at, ...sameInput } = frozen.plan;
+  expect((await plans.freeze(sameInput, bundle)).hash).toBe(frozen.hash);
   expect(() => validateEvaluationPlan({ ...frozen.plan, roles: [] }, bundle)).toThrow("DENOMINATOR");
   const report = await evaluateNovelPlay({ root, planHash: frozen.hash });
   expect(report.runs).toHaveLength(3);
   expect(report.runs.every((run) => run.mode === "not-run" && run.invocationIds.length === 0 && run.status === "failed")).toBe(true);
   expect(report.issues.map((issue) => issue.code)).toContain("NOVEL_LIVE_RUN_FAILED");
   expect((await new NovelPlayQualityStore(root).read(frozen.plan.subjectSnapshotHash))?.runs).toHaveLength(3);
+  await expect(evaluateNovelPlay({ root, planHash: frozen.hash, resume: true })).rejects.toThrow("EVALUATION_RUN_HOST_REQUIRED");
+  expect((await new NovelPlayQualityStore(root).read(frozen.plan.subjectSnapshotHash))?.runs.map(run => run.id)).toEqual(report.runs.map(run => run.id));
   expect(await cache.loadActive(fixture.source)).toBeNull();
   await fs.chmod(path.join(plans.root, `${frozen.hash}.json`), 0o600);
   await fs.writeFile(path.join(plans.root, `${frozen.hash}.json`), JSON.stringify({ ...frozen.plan, criticalChecks: [{ ...frozen.plan.criticalChecks[0], expected: "tampered" }] }));

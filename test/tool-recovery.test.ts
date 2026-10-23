@@ -10,6 +10,53 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it.each(["submit_role_semantic_scope", "read_semantic_source", "read_semantic_dependencies", "submit_source_representation", "propose_entity_resolution"])("never turns an explicit prerequisite/upstream host stop into retry advice: %s", tool => {
+    for (const diagnostic of [
+      "ROLE_PREREQUISITE_HOST_REVIEW: Criterion lacks exact repair slots or its explicit missing condition.",
+      "Error: ROLE_PREREQUISITE_HOST_REVIEW: Error: ROLE_PREREQUISITE_HOST_REVIEW: Unknown dependency; requires current schema.",
+      "UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: Creation requires pointers=[]; source scope changed.",
+    ]) {
+      const advice = buildNwhToolRecoveryAdvice(tool, diagnostic);
+      expect(advice).toMatchObject({ category: "host-repair-required", retryable: false });
+      expect(advice.suggestedCall).toBeUndefined();
+      expect(advice.steps.join(" ")).toContain("Do not correct or resubmit this consumed stage");
+      const rendered = formatNwhToolError(tool, new Error(diagnostic));
+      expect(rendered).toContain(diagnostic);
+      expect(rendered).toContain('"retryable": false');
+    }
+  });
+  it.each(["preview_role_source_audit_proposal", "preview_role_source_audit_verification", "propose_role_source_audit_repair", "propose_role_source_audit_repair_check"])("keeps source repair recovery inside its revision: %s", tool => {
+    const advice = buildNwhToolRecoveryAdvice(tool, "Unknown original evidence unit");
+    expect(advice).toMatchObject({ category: "invalid-arguments", retryable: true });
+    for (const field of ["read_role_work_evidence", "units[].unitId", "read_role_audit_inventory", "candidates[].id", "expectedQuestions[].questionId", "predecessor.unresolved"]) {
+      expect(advice.steps.join(" ")).toContain(field);
+    }
+    expect(advice.retryCondition).toContain("one materially corrected");
+    for (const diagnostic of ["ROLE_REVIEW_WORK_HOST_REQUIRED: already settled", "ROLE_REVIEW_WORK_HOST_REQUIRED: scope changed", "Compiler proposal obligation requires host review: attempts exhausted", "tool-call safety fuse exhausted"]) {
+      expect(buildNwhToolRecoveryAdvice(tool, diagnostic).retryable).toBe(false);
+    }
+  });
+  it("keeps independent evaluation corrections in the same draft and honors host/single-use stops", () => {
+    const advice = buildNwhToolRecoveryAdvice("propose_evaluation_item", "Unknown evaluation section");
+    expect(advice).toMatchObject({ retryable: true, suggestedCall: { tool: "read_evaluation_input", arguments: { section: "index" } } });
+    expect(advice.steps.join(" ")).toContain("itemSections[]");
+    expect(advice.steps.join(" ")).toContain("entryCutHash");
+    expect(advice.retryCondition).toContain("one materially corrected retry");
+    for (const error of ["EVALUATION_REVIEW_HOST_REQUIRED", "EVALUATION_REVIEW_NO_PROGRESS", "EVALUATION_REVIEW_SCOPE_CHANGED", "EVALUATION_SOURCE_INDEX_STALE", "EVALUATION_PLAN_ALREADY_FROZEN"]) {
+      expect(buildNwhToolRecoveryAdvice("finish_evaluation_plan", error).retryable).toBe(false);
+    }
+  });
+  it.each(["preview_role_review_audit", "propose_role_review_audit"])("keeps audit schema recovery actionable without overriding host stops: %s", (tool) => {
+    const advice = buildNwhToolRecoveryAdvice(tool, "Validation failed: discoveryDispositions/0/candidateIds must NOT have more than 0 items");
+    expect(advice).toMatchObject({ category: "invalid-arguments", retryable: true });
+    expect(advice.steps.join(" ")).toContain("candidateIds=[]");
+    expect(advice.steps.join(" ")).toContain("candidates[].id");
+    expect(advice.steps.join(" ")).toContain("missing judgment");
+    expect(advice.steps.join(" ")).toContain("unreadUnitIds");
+    expect(advice.retryCondition).toContain("original context");
+    expect(buildNwhToolRecoveryAdvice(tool, "ROLE_REVIEW_WORK_HOST_REQUIRED: no-progress").retryable).toBe(false);
+    expect(buildNwhToolRecoveryAdvice(tool, "Compiler proposal obligation requires host review: original and corrected inputs failed.").retryable).toBe(false);
+  });
   it("keeps role-review ID recovery inside its dedicated tools and stops stale scopes", () => {
     const advice = buildNwhToolRecoveryAdvice("propose_role_roster_entry", "ROSTER_UNKNOWN_EVIDENCE_UNIT /entries/0/basisUnitIds/0: Unknown source unit guessed.\nRecovery SOP: some offset guidance");
     expect(advice).toMatchObject({ retryable: true, suggestedCall: { tool: "read_role_roster", arguments: { offset: 0 } } });
@@ -347,6 +394,47 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("defer_boundary_artifact");
     expect(advice.steps.join(" ")).toContain("replace_boundary_proposal");
     expect(advice.steps.join(" ")).toContain("one-sided scene/event");
+  });
+
+  it("repairs a boundary-scoped quotation trace through a same-ID source revision", () => {
+    const diagnostic = "Utterance expression trace is incomplete:\n- expression-draft: EXPRESSION_ADDRESSEE_TRACE_MISMATCH: Expression addressees must exactly match this quotation's resolved addressee mentions.";
+    const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", diagnostic, {
+      activeToolNames: [
+        "find_compiler_artifacts",
+        "read_compiler_artifact",
+        "find_source_annotations",
+        "read_source_annotation",
+        "find_identity_resolutions",
+        "read_identity_resolution",
+        "propose_quotation",
+        "propose_utterance_expression",
+        "withdraw_compiler_proposal",
+        "finish_compiler_batch",
+      ],
+    });
+
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_compiler_artifacts",
+        arguments: { kind: "utterance-expression", query: "expression-draft", status: "pending", max_results: 20 },
+      },
+    });
+    expect(advice.steps.join(" ")).toContain("results[].readArguments.ref");
+    expect(advice.steps.join(" ")).toContain("payload.quotation.quotationId");
+    expect(advice.steps.join(" ")).toContain("new proposal_id while preserving annotation_id");
+    expect(advice.steps.join(" ")).toContain("results[].ref into read_identity_resolution.ref");
+    expect(advice.steps.join(" ")).toContain("Accepted prior annotation revisions remain immutable history");
+    expect(advice.steps.join(" ")).toContain("never withdraw them or pass them to replace_boundary_proposal");
+    expect(advice.steps.join(" ")).toContain("preserving payload.id");
+    expect(advice.steps.join(" ")).toContain("Retry finish once");
+
+    const restricted = buildNwhToolRecoveryAdvice("finish_compiler_batch", diagnostic, {
+      activeToolNames: ["find_source_annotations", "read_source_annotation", "finish_compiler_batch"],
+    });
+    expect(restricted.steps.join(" ")).toContain("does not expose the complete quotation-revision lifecycle");
+    expect(restricted.steps.join(" ")).toContain("stop for host source review");
   });
 
   it("pairs source-accounting misses and finish gaps with bounded unit discovery", () => {

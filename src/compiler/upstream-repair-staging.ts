@@ -1,7 +1,8 @@
 import { contentHash } from "../world/canonical.js";
 import { canonicalEventSchema, eventParticipationSchema, evidenceRefSchema, textAnchorSchema } from "../world/model.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
-import { SourceAnnotationStore } from "./annotations.js";
+import { SourceAnnotationStore, annotationAnchors } from "./annotations.js";
+import { RequirementLedger } from "./requirement-ledger.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
 import { EventResolutionStore } from "./event-resolution.js";
 import { createCompilerProposalToolset } from "./proposal-tools.js";
@@ -249,8 +250,25 @@ export async function upstreamRepairSlotContext(root: string, sourceId: string, 
   const current = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(item => item.plan.planHash === planHash);
   if (!current || ![...current.plan.allowedWrites, ...current.plan.allowedCreations].some(item => item.kind === target.kind && item.id === target.id)) throw upstreamRepairHostError("Unknown authorized repair slot");
   const verified = await verifyUpstreamRepairPlan(root, current.plan), dependencies = await stagedDependencies(root, verified, target);
+  let reviewedSourceAnnotation;
+  if (current.plan.sourceRepresentation) {
+    const record = (await new RequirementLedger(root, sourceId).sourceRepresentations(current.plan.sourceRepresentation.taskId))[0]!;
+    if (record.output.phase !== "representation-plan") throw upstreamRepairHostError("Reviewed source representation proposal is missing");
+    const payload = record.output.annotations.find(a => a.payload.id === target.id)?.payload;
+    if (!payload || payload.annotationType !== target.kind) throw upstreamRepairHostError("Target is absent from the independently reviewed source annotation scope");
+    reviewedSourceAnnotation = { payload, selectors: annotationAnchors(payload).map(anchor => {
+      const segment = current.plan.citableEvidenceRefs.map(id => verified.payloads.get(`source-segment:${id}`) as SourceSegment)
+        .find(s => s.startByte <= anchor.startByte && s.endByte >= anchor.endByte)!;
+      const bytes = verified.bytes.subarray(segment.startByte, segment.endByte), exact = verified.bytes.subarray(anchor.startByte, anchor.endByte);
+      let at = bytes.indexOf(exact), occurrence = 1;
+      while (at >= 0 && at < anchor.startByte - segment.startByte) { at = bytes.indexOf(exact, at + 1); occurrence++; }
+      if (at !== anchor.startByte - segment.startByte) throw upstreamRepairHostError("Exact reviewed source selector cannot be reconstructed");
+      return { anchor, selector: { segment_id: segment.id, exact: exact.toString("utf8"), occurrence } };
+    }) };
+  }
   return {
     plan: current.plan, target,
+    ...(reviewedSourceAnnotation ? { reviewedSourceAnnotation } : {}),
     reviewedOccurrences: (current.plan.semanticEventCreations ?? []).map(item => ({
       ...item,
       triggerExact: verified.bytes.subarray(item.triggerAnchor.startByte, item.triggerAnchor.endByte).toString("utf8"),

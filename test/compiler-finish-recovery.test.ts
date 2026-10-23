@@ -19,6 +19,7 @@ import { prepareNextSourceLoopTurn } from "../src/compiler/source-loop.js";
 import { withWorkspaceOperationLock } from "../src/util/workspace-lock.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { contentHash } from "../src/world/canonical.js";
+import { removeNovelAnalysis } from "../src/world/removal.js";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -40,6 +41,35 @@ async function fixture(stage = "executable") {
   const receipts = new CompilerFinishReceipts(root, source.id, batch.id);
   return { root, source, batch, toolset, call, input, receipts };
 }
+
+it("retires finish receipts before analysis removal and permits a new verified compilation", async () => {
+  const f = await fixture("observation");
+  await f.call("finish_compiler_batch", f.input);
+  const original = await f.receipts.read();
+  await new CompilerBatchStore(f.root).markComplete(f.source.id, f.batch.id);
+  const archive = vi.spyOn(CompilerFinishReceipts, "archiveSource").mockRejectedValueOnce(new Error("archive unavailable"));
+  await expect(removeNovelAnalysis(f.root, f.source)).rejects.toThrow("archive unavailable");
+  expect(await f.receipts.hasVerifiedCompletedReceipt()).toBe(true);
+  expect(await new SourceAnnotationStore(f.root).list(f.source.id)).toHaveLength(1);
+  archive.mockRestore();
+  await removeNovelAnalysis(f.root, f.source);
+  await removeNovelAnalysis(f.root, f.source); // An interrupted/repeated reset does not lose history.
+  expect(await f.receipts.read()).toBeUndefined();
+  expect(await CompilerFinishReceipts.listRetained(f.root, f.source.id)).toEqual([{ receipt: original, archived: true }]);
+  const runner = vi.fn(async (batch: typeof f.batch) => {
+    const tools = createCompilerProposalToolset(f.root);
+    await tools.beginBatch(batch.segmentIds, batch.id, f.source.id);
+    await tools.tools.find(t => t.name === "propose_entity_mention")!.execute("new-mention", {
+      proposal_id: "new-mention", annotation_id: "new-annotation", selector: { segment_id: batch.segmentIds[0], exact: "Hero" },
+      surface: "Hero", form: "proper", kind_candidates: ["character"], confidence: 1,
+    }, undefined, undefined, {} as never);
+    await tools.tools.find(t => t.name === "finish_compiler_batch")!.execute("finish", f.input, undefined, undefined, {} as never);
+  });
+  await expect(runCompilerBatches({ workspaceRoot: f.root, source: f.source, batchIds: [f.batch.id], maxBatches: 1,
+    requireFinishReceipt: true, runner })).resolves.toMatchObject({ completed: 1, remaining: 0 });
+  expect(runner).toHaveBeenCalledOnce();
+  expect(await f.receipts.hasVerifiedCompletedReceipt()).toBe(true);
+});
 
 it.each(["annotation", "acceptance", "review", "completion"])("recovers a crash after %s without a model session or duplicate acceptance", async (point) => {
   const f = await fixture(point === "annotation" ? "observation" : "executable");
@@ -78,6 +108,104 @@ it("does not checkpoint a model completion claim without a durable receipt", asy
   const f = await fixture();
   await expect(runCompilerBatches({ workspaceRoot: f.root, source: f.source, batchIds: [f.batch.id], maxBatches: 1, requireFinishReceipt: true, runner: async () => {} })).rejects.toThrow("checkpoint requires");
   expect((await new CompilerBatchStore(f.root).read(f.source.id)).completedBatchIds).toEqual([]);
+});
+
+it("re-reviews a marker-only batch in its exact retained scope and creates a verified finish receipt", async () => {
+  const f = await fixture("observation");
+  const annotations = new SourceAnnotationStore(f.root);
+  await annotations.commitProposals(f.source.id, ["mention-proposal"]);
+  const acceptedBefore = await annotations.readProposal(f.source.id, "accepted", "mention-proposal");
+  await new CompilerBatchStore(f.root).markComplete(f.source.id, f.batch.id);
+  expect(await f.receipts.read()).toBeUndefined();
+
+  const runner = vi.fn(async (batch: typeof f.batch) => {
+    expect(batch.id).toBe(f.batch.id);
+    expect(batch.prompt).toContain("evidence-based re-review of the exact current-plan scope");
+    expect(batch.prompt).toContain("mention-proposal");
+    expect(batch.prompt).toContain('"proposalStatus":"accepted"');
+    const toolset = createCompilerProposalToolset(f.root);
+    await toolset.beginBatch(batch.segmentIds, batch.id, f.source.id);
+    const finish = toolset.tools.find((tool) => tool.name === "finish_compiler_batch")!;
+    await finish.execute("finish-marker-only-batch", f.input, undefined, undefined, {} as never);
+  });
+
+  await expect(runCompilerBatches({
+    workspaceRoot: f.root,
+    source: f.source,
+    batchIds: [f.batch.id],
+    maxBatches: 1,
+    requireFinishReceipt: true,
+    runner,
+  })).resolves.toEqual({ total: 1, completed: 1, skipped: 0, remaining: 0 });
+
+  expect(runner).toHaveBeenCalledOnce();
+  expect(await annotations.readProposal(f.source.id, "accepted", "mention-proposal")).toEqual(acceptedBefore);
+  expect((await new CompilerBatchStore(f.root).read(f.source.id)).completedBatchIds).toEqual([f.batch.id]);
+  expect(await f.receipts.hasVerifiedCompletedReceipt()).toBe(true);
+  expect((await f.receipts.read())?.identity.dependencies).toContainEqual(expect.objectContaining({
+    store: "annotation",
+    proposalId: "mention-proposal",
+  }));
+});
+
+it("does not reactivate a superseded accepted annotation while re-reviewing a marker-only batch", async () => {
+  const f = await fixture("observation");
+  const annotations = new SourceAnnotationStore(f.root);
+  await annotations.commitProposals(f.source.id, ["mention-proposal"]);
+  const original = await annotations.readProposal(f.source.id, "accepted", "mention-proposal");
+  const replacement = {
+    ...original,
+    id: "mention-host-revision",
+    payload: {
+      ...original.payload,
+      confidence: 0.9,
+      derivation: {
+        ...original.payload.derivation,
+        runId: "host-annotation-revision",
+        compilerBatchId: "host-annotation-revision",
+      },
+    },
+    generatedBy: {
+      ...original.generatedBy,
+      compilerBatchId: "host-annotation-revision",
+    },
+    createdAt: new Date(Date.now() + 1_000).toISOString(),
+  };
+  await annotations.stage(f.source.id, replacement);
+  await annotations.commitProposals(f.source.id, [replacement.id]);
+  const currentBefore = await annotations.read(f.source.id, original.payload.id);
+  await new CompilerBatchStore(f.root).markComplete(f.source.id, f.batch.id);
+
+  const runner = vi.fn(async (batch: typeof f.batch) => {
+    const activeBlock = batch.prompt.match(/<current-batch-active-proposals>(.*?)<\/current-batch-active-proposals>/su);
+    expect(activeBlock).not.toBeNull();
+    expect(JSON.parse(activeBlock![1]!)).toEqual([]);
+    expect(batch.prompt).toContain("Superseded accepted envelopes remain immutable history");
+    const toolset = createCompilerProposalToolset(f.root);
+    await toolset.beginBatch(batch.segmentIds, batch.id, f.source.id);
+    const finish = toolset.tools.find((tool) => tool.name === "finish_compiler_batch")!;
+    await finish.execute("finish-with-current-replacement", {
+      ...f.input,
+      outcome: "no-artifacts",
+      summary: "Re-reviewed the exact source scope; its retained observation has a later current revision.",
+    }, undefined, undefined, {} as never);
+  });
+
+  await expect(runCompilerBatches({
+    workspaceRoot: f.root,
+    source: f.source,
+    batchIds: [f.batch.id],
+    maxBatches: 1,
+    requireFinishReceipt: true,
+    runner,
+  })).resolves.toEqual({ total: 1, completed: 1, skipped: 0, remaining: 0 });
+
+  expect(runner).toHaveBeenCalledOnce();
+  expect(await annotations.read(f.source.id, original.payload.id)).toEqual(currentBefore);
+  expect((await f.receipts.read())?.identity.dependencies).not.toContainEqual(expect.objectContaining({
+    store: "annotation",
+    proposalId: original.id,
+  }));
 });
 
 it("recovers a completed finish after checkpoint failure, preserving its original identity", async () => {

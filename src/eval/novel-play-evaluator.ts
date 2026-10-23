@@ -59,7 +59,10 @@ export function pointerValue(value: unknown, pointer: string): unknown {
 /** Only the real Pi adapters execute here. No injected deterministic reasoner can acquire a pi-live label. */
 export async function evaluateNovelPlay(options: {
   root: string; planHash: string; model?: string; profile?: LlmProfile; signal?: AbortSignal; onStatus?: (message: string) => void;
+  /** Reuse completed experiments for this exact plan; preserve failed/uncertain experiments for review. */
+  resume?: boolean;
 }): Promise<NovelPlayQuality> {
+  options.signal?.throwIfAborted();
   const plan = await new NovelEvaluationPlanStore(options.root).read(options.planHash);
   const source = await (await WorkspaceStore.create(options.root)).getSource(plan.sourceId);
   if (!source) throw new Error("EVALUATION_SOURCE_MISSING: the frozen source is not registered");
@@ -92,9 +95,34 @@ export async function evaluateNovelPlay(options: {
     }),
     runs: [], issues: [...validateFrozenAccounting(bundle), ...entries.issues, ...entries.roles.flatMap((role) => role.issues), ...preflight],
   };
+  const expected = { sourceSha256: plan.sourceSha256, subjectSnapshotHash: plan.subjectSnapshotHash, roster,
+    sourceBytes: bundle.compilerSnapshot.structure.sourceBytes, sourceUnits: bundle.compilerSnapshot.structure.baseUnitIds.length,
+    engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION };
+  const qualityStore = new NovelPlayQualityStore(options.root);
+  if (options.resume) {
+    const saved = await qualityStore.read(plan.subjectSnapshotHash);
+    if (saved?.gold.hash === options.planHash && saved.validatorFingerprint === NOVEL_VALIDATOR_FINGERPRINT
+      && saved.engineVersion === WORLD_ENGINE_VERSION && saved.schemaVersion === WORLD_SCHEMA_VERSION) {
+      if (!validateNovelPlayQuality(saved, expected).length) return saved;
+      const interrupted = saved.runs.filter(run => !["completed", "terminated"].includes(run.status));
+      if (interrupted.length) throw new Error(`EVALUATION_RUN_HOST_REQUIRED: retained failed/uncertain runs ${interrupted.map(run => run.id).join(", ")}. Inspect the saved evaluation report and original trace/branch before recovery; do not retry unchanged, rotate the plan or discard committed evaluation history.`);
+      report.runs = structuredClone(saved.runs);
+      report.startedAt = saved.startedAt;
+    }
+    // Deterministic entry, gold and support failures require compiler/spec repair;
+    // do not spend live model calls on a candidate that already fails those gates.
+    const preflightIssues = validateNovelPlayQuality(report, expected).filter(issue => issue.code !== "NOVEL_MAJOR_RUNS_MISSING");
+    if (preflightIssues.length) {
+      report.issues = [...new Map(preflightIssues.map(issue => [canonicalJson(issue), issue])).values()];
+      await qualityStore.write(report);
+      return report;
+    }
+  }
   // Every run has its own root, branch, conversation, trace and fresh Pi sessions.
-  for (const scenario of plan.roles) for (let repetition = 1; repetition <= 3; repetition += 1) {
+  const resumedCounts = new Map(plan.roles.map(role => [role.candidateId, report.runs.filter(run => run.candidateId === role.candidateId).length]));
+  experiments: for (const scenario of plan.roles) for (let repetition = 1; repetition <= 3; repetition += 1) {
     options.signal?.throwIfAborted();
+    if (repetition <= (resumedCounts.get(scenario.candidateId) ?? 0)) continue;
     const id = `novel-eval-${crypto.randomUUID()}`;
     const root = path.join(worldStorageRoot(options.root), "compiler", "evaluation-workspaces", id);
     await fs.mkdir(root, { recursive: true });
@@ -105,6 +133,9 @@ export async function evaluateNovelPlay(options: {
       knowledgeViolations: 0, causalViolations: 0, illegalEffectsAccepted: 0, noOps: 0, rejectedProposals: 0, modelFailures: 0,
     };
     report.runs.push(run);
+    // Persist before the first model call. A killed process must not silently
+    // replace a possibly committed experiment with a fresh UUID on resume.
+    if (options.resume) await qualityStore.write(report);
     let failure: string | undefined;
     try {
       const context = await new WorldContextStore(root).capturePrepared(plan.sourceId, plan.subjectSnapshotHash, bundle.canonical);
@@ -185,6 +216,8 @@ export async function evaluateNovelPlay(options: {
     // Checkpoint failed as well as successful runs. A partial report cannot pass the release gate.
     report.completedAt = new Date().toISOString();
     await new NovelPlayQualityStore(options.root).write(novelPlayQualitySchema.parse(report));
+    options.signal?.throwIfAborted();
+    if (options.resume && failure) break experiments;
   }
   validateEvaluationPlan(plan, await new PreparedNovelCache(options.root).candidateSnapshot(source));
   report.issues.push(...validateNovelPlayQuality(report, { sourceSha256: plan.sourceSha256, subjectSnapshotHash: plan.subjectSnapshotHash, roster,

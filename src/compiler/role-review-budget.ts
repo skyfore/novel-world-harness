@@ -6,8 +6,17 @@ import { worldStorageRoot } from "../world/paths.js";
 import { ModelRequestBudget, type ModelRequestLimits, type ModelRequestUsage } from "../runtime/model-request-budget.js";
 import { RoleReviewWorkStore, roleWorkStop } from "./role-review-work.js";
 import { TraceStore } from "../trace/store.js";
+import type { RoleWorkAllowance } from "./role-work-allowance.js";
+import { readRoleClaimContinuation } from "./role-claim-continuation.js";
+import { readAutomaticRoleCorrectionContinuation, readAutomaticRoleProgressContinuation } from "./role-automatic-resume.js";
+import { readRoleAuditHostRepair } from "./role-audit-host-repair.js";
+import { readRoleAuditNarrowRepair } from "./role-audit-narrow-repair.js";
+import { readRoleProviderResumption, settledProviderResumption } from "./role-provider-resumption.js";
 const counter = z.number().int().nonnegative();
-const stateSchema = z.object({ usage: z.object({ modelCalls: counter, payloads: counter, totalPayloadBytes: counter, largestRequestBytes: counter }).strict(), blocked: z.boolean(), failure: z.object({ code: z.string(), message: z.string() }).strict().optional() }).strict();
+const stateSchema = z.object({ usage: z.object({ modelCalls: counter, payloads: counter, totalPayloadBytes: counter, largestRequestBytes: counter }).strict(), blocked: z.boolean(), failure: z.object({ code: z.string(), message: z.string() }).strict().optional(),
+  progress: z.object({lastProgressCall:counter,milestones:z.array(z.string().min(1))}).strict().optional() }).strict()
+  .refine(state=>!state.progress||(state.progress.lastProgressCall<=state.usage.modelCalls
+    &&new Set(state.progress.milestones).size===state.progress.milestones.length),"Invalid retained progress state");
 const grantSchema = z.object({ version: z.literal(1), planHash: z.string(), workId: z.string(), priorBudgetHash: z.string(), failedRunId: z.string(), failureTraceHash: z.string(), implementationRef: z.string().min(1), at: z.string(), reason: z.literal("request-size"), initial: stateSchema }).strict();
 function budgetPath(root: string, planHash: string, workId: string) { return path.join(worldStorageRoot(root), "compiler", "role-review-work", "budgets", planHash, `${contentHash(workId)}.json`); }
 function readBudget(file: string, planHash: string, workId: string, limits?: ModelRequestLimits) {
@@ -16,9 +25,113 @@ function readBudget(file: string, planHash: string, workId: string, limits?: Mod
   if (record.planHash !== planHash || record.workId !== workId || (limits && contentHash(record.limits) !== contentHash(limits)) || record.hash !== contentHash({ planHash, workId, limits: record.limits, state })) throw roleWorkStop("budget scope or integrity changed");
   return { ...record, state } as { hash: string; limits: ModelRequestLimits; state: z.infer<typeof stateSchema> };
 }
+
+/** Read-only preflight; never initializes usage or grants another allowance. */
+export function inspectRoleReviewBudget(root: string, planHash: string, workId: string) {
+  const base = budgetPath(root, planHash, workId);
+  if (fs.existsSync(`${base}.context-recovery.json`)) throw roleWorkStop("part revalidation does not support context-recovered budgets");
+  return readBudget(base, planHash, workId);
+}
+/** Host inspection of the existing size-recovery lineage. This never creates a
+ * continuation, clears a stop, or changes the remaining fixed call allowance. */
+export function inspectRetainedRoleReviewBudget(root: string, planHash: string, workId: string) {
+  const base = budgetPath(root, planHash, workId), original = readBudget(base, planHash, workId);
+  const files: Record<string, string> = { [base]: contentHash(fs.readFileSync(base, "utf8")) };
+  if (readRoleProviderResumption(root, planHash, workId)) {
+    const resumed = settledProviderResumption(root, planHash, workId)!;
+    if (resumed.authority.budget.hash !== original.hash || contentHash(resumed.authority.budget.state) !== contentHash(original.state)) {
+      throw roleWorkStop("provider resumption predecessor budget changed");
+    }
+    for (const suffix of ["", ".started.json", ".availability.json", ".usage.json", ".result.json"]) {
+      const file = resumed.file + suffix;
+      files[file] = contentHash(fs.readFileSync(file, "utf8"));
+    }
+    if (resumed.checkpointFile) files[resumed.checkpointFile] = contentHash(fs.readFileSync(resumed.checkpointFile, "utf8"));
+    const state = stateSchema.parse({ ...original.state, usage: resumed.usage.usage });
+    return { ...original, state, hash: contentHash({ prior: original.hash, authority: resumed.authorityHash, state }), file: base, files };
+  }
+  const automatic = readAutomaticRoleProgressContinuation(root, planHash, workId);
+  if (automatic) {
+    if (automatic.authority.budget.hash !== original.hash || !original.state.blocked
+      || original.state.failure?.code !== "no-progress") throw roleWorkStop("automatic audit continuation predecessor budget changed");
+    for (const suffix of ["", ".usage.json", ".result.json"]) {
+      const file = automatic.file + suffix;
+      if (!fs.existsSync(file)) throw roleWorkStop("automatic audit continuation lineage is unfinished; inspect its grant, do not reset usage");
+      files[file] = contentHash(fs.readFileSync(file, "utf8"));
+    }
+    const result = JSON.parse(fs.readFileSync(`${automatic.file}.result.json`, "utf8"));
+    if (result.status !== "succeeded" || result.authorityHash !== automatic.authorityHash
+      || contentHash(result.usage) !== contentHash(automatic.usage)) throw roleWorkStop("automatic audit continuation result changed or failed");
+    const state = stateSchema.parse({ ...original.state, usage: automatic.usage.usage });
+    return { ...original, state, hash: contentHash({ prior: original.hash, authority: automatic.authorityHash, state }), file: base, files };
+  }
+  const correction = readAutomaticRoleCorrectionContinuation(root, planHash, workId);
+  if (correction) {
+    if (correction.authority.budget.hash !== original.hash || original.state.blocked || original.state.failure
+      || contentHash(correction.authority.budget.state) !== contentHash(original.state)) {
+      throw roleWorkStop("automatic audit correction predecessor budget changed");
+    }
+    for (const suffix of ["", ".usage.json", ".result.json"]) {
+      const file = correction.file + suffix;
+      if (!fs.existsSync(file)) throw roleWorkStop("automatic audit correction lineage is unfinished; inspect its grant, do not reset usage");
+      files[file] = contentHash(fs.readFileSync(file, "utf8"));
+    }
+    const result = JSON.parse(fs.readFileSync(`${correction.file}.result.json`, "utf8"));
+    const hostRepair = readRoleAuditHostRepair(correction);
+    const narrowRepair = readRoleAuditNarrowRepair(correction);
+    if (hostRepair && narrowRepair) throw roleWorkStop("automatic audit correction has conflicting host repair lineages");
+    const repaired = hostRepair ?? narrowRepair;
+    if (repaired) {
+      for (const suffix of ["", ".usage.json", ".started.json", ".result.json"]) {
+        const file = repaired.file + suffix;
+        if (!fs.existsSync(file)) throw roleWorkStop("host audit repair lineage is unfinished; do not reset usage");
+        files[file] = contentHash(fs.readFileSync(file, "utf8"));
+      }
+      const settled = JSON.parse(fs.readFileSync(`${repaired.file}.result.json`, "utf8"));
+      if (result.status !== "failed" || result.authorityHash !== correction.authorityHash
+        || contentHash(result.usage) !== contentHash(correction.usage) || settled.status !== "succeeded"
+        || settled.authorityHash !== repaired.authorityHash || contentHash(settled.usage) !== contentHash(repaired.usage)
+        || repaired.usage.blocked || repaired.usage.failure) throw roleWorkStop("host audit repair has no settled successful cumulative usage");
+      const state = stateSchema.parse({ ...original.state, usage: repaired.usage.usage });
+      return { ...original, state, hash: contentHash({ prior: original.hash, authority: repaired.authorityHash, state }), file: base, files };
+    }
+    if (result.status !== "succeeded" || result.authorityHash !== correction.authorityHash
+      || contentHash(result.usage) !== contentHash(correction.usage)) throw roleWorkStop("automatic audit correction result changed or failed");
+    const state = stateSchema.parse({ ...original.state, usage: correction.usage.usage });
+    return { ...original, state, hash: contentHash({ prior: original.hash, authority: correction.authorityHash, state }), file: base, files };
+  }
+  const continuation = readRoleClaimContinuation(root, planHash, workId);
+  if (continuation) {
+    if (continuation.authority.budget.hash !== original.hash || !original.state.blocked) throw roleWorkStop("claim continuation predecessor budget changed");
+    // Later revisions must account for every new charge AND the original stop.
+    // The finite host grant cannot silently become a fresh rolling allowance.
+    const suffixes = ['', '.usage.json', '.result.json'];
+    if (fs.existsSync(continuation.file + '.start-recovery.json')) suffixes.push('.start-recovery.json', '.start-recovery.result.json');
+    for (const suffix of suffixes) {
+      const file = continuation.file + suffix;
+      if (!fs.existsSync(file)) throw roleWorkStop("claim continuation lineage is unfinished; inspect the original grant, do not restart or discard charges");
+      files[file] = contentHash(fs.readFileSync(file, "utf8"));
+    }
+    const state = stateSchema.parse({ ...original.state, usage: continuation.usage.usage });
+    return { ...original, state, hash: contentHash({ prior: original.hash, authority: continuation.authorityHash, state }), file: base, files };
+  }
+  const grantFile = `${base}.context-recovery.json`;
+  if (!fs.existsSync(grantFile)) return { ...original, file: base, files };
+  const record = JSON.parse(fs.readFileSync(grantFile, "utf8")), grant = grantSchema.parse(record.grant);
+  if (record.hash !== contentHash(grant) || grant.priorBudgetHash !== original.hash || grant.planHash !== planHash
+    || grant.workId !== workId || !original.state.blocked || grant.initial.blocked
+    || contentHash(grant.initial.usage) !== contentHash(original.state.usage)) throw roleWorkStop("invalid context recovery lineage");
+  const file = `${base}.after-context-recovery.json`, retained = readBudget(file, planHash, workId, original.limits);
+  if ((Object.keys(original.state.usage) as Array<keyof ModelRequestUsage>).some(k => retained.state.usage[k] < original.state.usage[k])) {
+    throw roleWorkStop("context recovery usage regressed");
+  }
+  files[grantFile] = contentHash(fs.readFileSync(grantFile, "utf8"));
+  files[file] = contentHash(fs.readFileSync(file, "utf8"));
+  return { ...retained, file, files };
+}
 /** Charged before transport. Recovery uses an immutable grant + separate usage
  * continuation; the original blocked budget is never overwritten or cleared. */
-export function roleReviewBudget(root: string, planHash: string, workId: string, limits: ModelRequestLimits, requireExisting = false) {
+export function roleReviewBudget(root: string, planHash: string, workId: string, limits: ModelRequestLimits, requireExisting = false, modelCallsMode: "enforce" | "progress" = "enforce", inherited?: RoleWorkAllowance["budget"]) {
   const base = budgetPath(root, planHash, workId);
   fs.mkdirSync(path.dirname(base), { recursive: true, mode: 0o700 });
   let file = base, initial: z.infer<typeof stateSchema> | undefined;
@@ -34,6 +147,12 @@ export function roleReviewBudget(root: string, planHash: string, workId: string,
       if ((Object.keys(grant.initial.usage) as Array<keyof ModelRequestUsage>).some(k => initial!.usage[k] < grant.initial.usage[k])) throw roleWorkStop("context recovery usage regressed");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; initial = grant.initial; }
   }
+  if (inherited) {
+    if (contentHash(inherited.limits) !== contentHash(limits)) throw roleWorkStop("migrated budget limits changed; retain the original limits and stop for host review");
+    if (initial && ((Object.keys(inherited.state.usage) as Array<keyof ModelRequestUsage>).some(key => initial!.usage[key] < inherited.state.usage[key])
+      || (inherited.state.blocked && !initial.blocked))) throw roleWorkStop("migrated budget regressed or cleared a retained stop");
+    initial ??= stateSchema.parse(structuredClone(inherited.state));
+  }
   if (!initial && requireExisting) throw roleWorkStop("prior work has no retained usage record; recover original usage from trace, never assume zero usage");
   const save = (state: z.infer<typeof stateSchema>) => {
     const record = { planHash, workId, limits, state }, temporary = `${file}.pending`;
@@ -42,7 +161,13 @@ export function roleReviewBudget(root: string, planHash: string, workId: string,
   };
   initial ??= { usage: { modelCalls: 0, payloads: 0, totalPayloadBytes: 0, largestRequestBytes: 0 }, blocked: false };
   if (!fs.existsSync(file)) save(initial);
-  return new ModelRequestBudget(limits, { initial, save });
+  // Production review uses a rolling stall window; legacy host recovery can
+  // still explicitly enforce its retained fixed allowance. Neither resets usage.
+  return new ModelRequestBudget(limits, { initial, save }, { modelCallsMode, requestBytesMode: "observe", totalBytesMode: "observe" });
+}
+
+export function remainingRoleProgressCalls(budget: {limits:ModelRequestLimits;state:z.infer<typeof stateSchema>}) {
+  return Math.max(0,budget.limits.maxModelCalls-(budget.state.usage.modelCalls-(budget.state.progress?.lastProgressCall??0)));
 }
 
 /** Host-only under the compiler lock. A trace-proven request-size stop can be

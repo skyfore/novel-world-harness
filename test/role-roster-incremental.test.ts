@@ -136,6 +136,7 @@ it("the workflow resumes successful drafts in their original scope and starts th
   await first.call("propose_role_roster_entry", { subjectHash: roster.subjectHash, entry: entry(roster.candidates[0].id, page.units[0].unitId) });
   const batches: string[] = [];
   await reviewNovelRoles({ root: f.root, configPath: path.join(f.root, "novel.config.yaml"), sourceId: f.fixture.source.id }, async options => {
+    expect(options.automaticRecovery).toBe(true);
     batches.push(options.compilerBatchId!);
     const session = await f.open(options.compilerBatchId);
     await session.read("read_roster_source_page", { page: 0 });

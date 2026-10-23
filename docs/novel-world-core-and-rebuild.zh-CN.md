@@ -2,6 +2,8 @@
 
 所有小说的执行、修复和验收遵循[小说编译流程与完整性验收规范](novel-compilation-protocol.zh-CN.md)。该规范定义阶段交接、缺口归属和完成声明；下文描述实现路径，不能把候选归档或批次完成等同于完整认证。
 
+当前统一入口是 [`nwh compile-novel`](compile-novel.zh-CN.md)：默认续编，`--rebuild` 全量重编，所有交付阶段均有独立子命令。以下保留早期核心编译与候选重建的实现说明。
+
 日期：2026-09-05。对应分支 `design/novel-to-play-closure-20260905`，关联 [PR #3](https://github.com/skyfore/novel-world-harness/pull/3)。
 
 本轮优先交付核心解析、可执行世界结构及可恢复重建。代码提供完整的来源到候选世界路径；“候选完成”与“整本主要人物已获认证”是不同状态。当前没有真实整本 Pi 认证结果。

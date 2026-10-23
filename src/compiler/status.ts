@@ -1,4 +1,5 @@
 import { RoleReviewWorkStore } from "./role-review-work.js";
+import { sourceAuditAuthorities, sourceAuditRepairState } from "./role-source-audit-repair.js";
 import { contentHash } from "../world/canonical.js";
 import { isDeepStrictEqual } from "node:util";
 import { ProposalStore } from "../world/canonical-model.js";
@@ -14,6 +15,8 @@ import { SegmentStore, SEGMENTER_VERSION, segmentSource } from "./segments.js";
 import { currentCompilerFingerprint, PreparedNovelCache } from "./prepared-cache.js";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
+import { RequirementLedger } from "./requirement-ledger.js";
+import { identityReviewStatuses } from "./identity-repair-handoff.js";
 
 /** This path uses only peeks: no model sessions, locks, migration, assessment writes or checkpoint repair. */
 export async function inspectCompilerStatus(root: string, sourceId?: string) {
@@ -66,19 +69,36 @@ async function inspectSource(root: string, source: SourceDocument) {
   });
   const proposals = new ProposalStore(root);
   const inventory = await Promise.all((["pending", "accepted", "rejected"] as const).map(async (status) => [status, (await proposals.list(status, source.id)).length] as const));
-  let roleReviewWork: Array<{ batchId: string; sourceWorks: number; reviewedSources: number; auditedSources: number; stagedCandidates: number; blockedAudits: number; openQuestions: number; verifiedClaims: number; pendingClaimVerifications: number; verificationVersion: number }> = [];
+  let roleReviewWork: Array<{ batchId: string; planHash: string; sourceWorks: number; reviewedSources: number; auditedSources: number; stagedCandidates: number; blockedAudits: number; openQuestions: number; verifiedClaims: number; pendingClaimVerifications: number; unauditedClaims: number; claimFindings: Array<{candidateId: string; workId: string; verdict: string; claimRevision: string; receiptHash: string}>; auditContractRevisions: Array<{candidateId: string; revisionId: string; predecessorReceiptHash: string; inheritedAttempts: number; inheritedSessions: number; inheritedCalls: number; auditVerdict: string | null}>; sourceAuditRepairs: Array<{page: number; revisionId: string; predecessorWorkId: string; proposed: boolean; verificationVerdict: string | null}>; judgmentRevisions: Array<{candidateId: string; revisionId: string; proposed: boolean; auditVerdict: string | null}>; verificationVersion: number; staleSourceAudits: number; staleClaimAudits: number }> = [];
   try {
     roleReviewWork = (await RoleReviewWorkStore.plans(root, source.id)).map(plan => {
       const store = new RoleReviewWorkStore(root, plan);
-      return { batchId: plan.batchId, sourceWorks: plan.spans.length,
+      const freshness = store.reviewFreshness();
+      const audits = new Map(freshness.sourceAudits.filter(a => a.current).map(a => [a.page, a.audit]));
+      const supported = new Set(freshness.claimAudits.filter(a => a.current && a.audit.verdict === "supported").map(a => a.candidateId));
+      const currentClaims = freshness.claimAudits.filter(a => a.current);
+      return { batchId: plan.batchId, planHash: store.planHash, sourceWorks: plan.spans.length,
         reviewedSources: plan.spans.filter((_, index) => store.read("source", index)).length,
         verificationVersion: 2,
-        verifiedClaims: store.claimAudits().filter(a => a.verdict === "supported").length,
-        pendingClaimVerifications: store.stagedEntries().filter(e => store.claimAudit(e.candidateId)?.verdict !== "supported").length,
-        openQuestions: plan.spans.flatMap((_, page) => store.questions(page).filter(q => !store.read("audit", page)?.questionDispositions?.some(d => d.questionId === q.questionId && d.status === "resolved"))).length,
-        auditedSources: plan.spans.filter((_, index) => { const a = store.read("audit", index); return a?.unresolved.length === 0 && a.questionDispositions?.every(q => q.status === "resolved") && a.discoveryDispositions?.every(d => d.disposition !== "blocked"); }).length,
-        blockedAudits: plan.spans.filter((_, index) => (() => {const a = store.read("audit", index); return Boolean(a?.unresolved.length || a?.questionDispositions?.some(q => q.status === "blocked") || a?.discoveryDispositions?.some(d => d.disposition === "blocked"));})()).length,
-        stagedCandidates: store.journal.latestAttempts("propose_role_roster_entry").filter(a => a.status === "succeeded").length };
+        verifiedClaims: supported.size,
+        sourceAuditRepairs: sourceAuditAuthorities(store).map(a => {
+          const state = sourceAuditRepairState(store, a);
+          return { page: a.page, revisionId: a.revisionId, predecessorWorkId: a.predecessorWorkId,
+            proposed: Boolean(state.proposal), verificationVerdict: state.verification?.verdict ?? null };
+        }),
+        pendingClaimVerifications: store.stagedEntries().filter(e => !supported.has(e.candidateId)).length,
+        unauditedClaims: store.stagedEntries().filter(e => !currentClaims.some(a => a.candidateId === e.candidateId)).length,
+        claimFindings: currentClaims.filter(a => a.audit.verdict !== "supported").map(a => ({ candidateId: a.candidateId, workId: a.workId, verdict: a.audit.verdict, claimRevision: a.audit.claimRevision, receiptHash: a.receiptHash })),
+        auditContractRevisions: store.auditContractAuthorities().map(a => ({candidateId: a.entry.candidateId, revisionId: a.revisionId, predecessorReceiptHash: a.predecessorReceiptHash, inheritedAttempts: a.allowance.attempts, inheritedSessions: a.allowance.contextSessions ?? 0, inheritedCalls: a.allowance.budget!.state.usage.modelCalls, auditVerdict: store.claimAudit(a.entry.candidateId)?.verdict ?? null})),
+        judgmentRevisions: store.judgmentAuthorities().map(a => ({ candidateId: a.predecessor.candidateId, revisionId: a.revisionId,
+          proposed: store.judgmentRevisions().some(r => r.authority.revisionId === a.revisionId),
+          auditVerdict: store.judgmentRevisions().some(r => r.authority.revisionId === a.revisionId) ? store.claimAudit(a.predecessor.candidateId)?.verdict ?? null : null })),
+        staleSourceAudits: freshness.sourceAudits.filter(a => !a.current).length,
+        staleClaimAudits: freshness.claimAudits.filter(a => !a.current).length,
+        openQuestions: plan.spans.flatMap((_, page) => store.questions(page).filter(q => !audits.get(page)?.questionDispositions?.some(d => d.questionId === q.questionId && d.status === "resolved"))).length,
+        auditedSources: [...audits.values()].filter(a => a.unresolved.length === 0 && a.questionDispositions?.every(q => q.status === "resolved") && a.discoveryDispositions?.every(d => d.disposition !== "blocked")).length,
+        blockedAudits: [...audits.values()].filter(a => a.unresolved.length || a.questionDispositions?.some(q => q.status === "blocked") || a.discoveryDispositions?.some(d => d.disposition === "blocked")).length,
+        stagedCandidates: store.stagedEntries().length };
     });
   } catch (error) { diagnostics.push(`Role review work inspection failed: ${String(error)}`); }
   const latestRun = runs[0];
@@ -111,7 +131,15 @@ async function inspectSource(root: string, source: SourceDocument) {
         recoveryRequired: receipt.state !== "completed" || (planned.has(receipt.identity.batchId) && !completed.has(receipt.identity.batchId)),
     }));
   } catch (error) { finishInspection = "unknown"; diagnostics.push(`Finish receipt inspection: ${String(error)}`); }
+  let identityReviews: ReturnType<typeof identityReviewStatuses> = [];
+  let identityReviewInspection: "recorded" | "unknown" = "recorded";
+  try {
+    const history = await new RequirementLedger(root, source.id).history();
+    identityReviews = identityReviewStatuses(history);
+  }
+  catch (error) { identityReviewInspection = "unknown"; diagnostics.push(`Identity review inspection: ${String(error)}`); }
   return {
+    identityReviews: { inspection: identityReviewInspection, tasks: identityReviews },
     roleReviewWork, sourceId: source.id, sourcePath: source.sourcePath, sourceSha256: source.contentSha256, bytes: source.bytes, sourceIntegrity,
     persistedPipelineVersion: persisted?.pipelineVersion ?? null, effectivePipelineVersion: progress.pipelineVersion,
     checkpointUpdatedAt: persisted?.updatedAt ?? null,

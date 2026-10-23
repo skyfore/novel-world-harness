@@ -59,7 +59,11 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
     if (!snapshot) {
       snapshot = await loadCurrentRoleRoster(root, current.sourceId);
       const plan = (await RoleReviewWorkStore.plans(root, current.sourceId)).find(plan => plan.batchId === current.batchId);
-      if (plan) { workStore = new RoleReviewWorkStore(root, plan); workStore.assertScope(snapshot.roster, contentHash(snapshot.structure), snapshot.structure.sourceBytes); }
+      if (plan) {
+        const { assertRoleWorkPlanAuthority } = await import("./role-work-migration.js");
+        await assertRoleWorkPlanAuthority(root, plan);
+        workStore = new RoleReviewWorkStore(root, plan); workStore.assertScope(snapshot.roster, contentHash(snapshot.structure), snapshot.structure.sourceBytes);
+      }
       const bytes = await readSourceMaterial(root, snapshot.source);
       const units = baseStructuralUnits(snapshot.structure).sort((a, b) => a.anchor.startByte - b.anchor.startByte);
       evidenceUnits = units.map(unit => ({ unitId: unit.id, text: bytes.subarray(unit.anchor.startByte, unit.anchor.endByte).toString("utf8") }));
@@ -89,6 +93,7 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
     return new CompilerProposalObligations(root, current.sourceId, current.batchId);
   };
   const stagedEntries = (roster: RoleRoster) => {
+    if (workStore?.plan.migration) return workStore.stagedEntries().map(entry => roleRosterEntryInputSchema.shape.entry.parse(entry)).sort((a, b) => a.candidateId.localeCompare(b.candidateId));
     const entries = journal().latestAttempts("propose_role_roster_entry").flatMap(latest => {
       const attempt = journal().history(latest.tool, latest.proposalId).findLast(item => item.status === "succeeded");
       if (!attempt) return [];
@@ -99,7 +104,9 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       }
       return [input.entry];
     });
-    return entries.sort((a, b) => a.candidateId.localeCompare(b.candidateId));
+    const revisions = workStore?.judgmentRevisions() ?? [];
+    return entries.map(entry => roleRosterEntryInputSchema.shape.entry.parse(revisions.find(r => r.entry.candidateId === entry.candidateId)?.entry ?? entry))
+      .sort((a, b) => a.candidateId.localeCompare(b.candidateId));
   };
   const makeReview = (roster: RoleRoster, input: RoleRosterReviewInput): RoleRosterReview => ({
     version: 2, ...(roster.reviewRevisionId ? { reviewRevisionId: roster.reviewRevisionId } : {}),
@@ -178,18 +185,34 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       const issues = validateRosterReview(roster, review, { partial: input.partial });
       const included = new Set(entries.map(entry => entry.candidateId));
       const unresolved = journal().unresolved().map(attempt => ({ tool: attempt.tool, proposalId: attempt.proposalId, status: attempt.status, diagnostic: attempt.diagnostic }));
-      if (workStore?.auditComplete()) await workStore.assertQuestionLedger();
       const requiresHostReview = journal().requiringHostReview().length > 0;
       const missing = roster.candidates.filter(candidate => !included.has(candidate.id)).map(candidate => candidate.id);
-      const nextAction = requiresHostReview ? "host_review_required" : unresolved.length ? "needs_correction" : unreadPages().length ? "needs_source_work"
-        : missing.length ? "needs_candidate_work" : workStore && !workStore.auditComplete() ? "needs_global_audit" : issues.length ? "needs_correction" : "ready_to_assemble";
+      const unreadSourcePages = unreadPages();
+      // A partial draft is upstream of global audit. Retained receipts may be
+      // stale after source/candidate work; inspect them without accepting them
+      // as current or letting the strict assembly gate block local preflight.
+      const freshness = workStore?.reviewFreshness();
+      const auditStatus = freshness ? {
+        currentSourceAudits: freshness.sourceAudits.filter(a => a.current).length,
+        staleSourceAudits: freshness.sourceAudits.filter(a => !a.current).length,
+        currentClaimAudits: freshness.claimAudits.filter(a => a.current).length,
+        staleClaimAudits: freshness.claimAudits.filter(a => !a.current).length,
+      } : undefined;
+      const auditReady = !workStore || (!input.partial && missing.length === 0 && unreadSourcePages.length === 0
+        && !auditStatus?.staleSourceAudits && !auditStatus?.staleClaimAudits && workStore.auditComplete());
+      if (workStore && auditReady) await workStore.assertQuestionLedger();
+      const nextAction = requiresHostReview ? "host_review_required" : unresolved.length ? "needs_correction" : unreadSourcePages.length ? "needs_source_work"
+        : missing.length ? "needs_candidate_work" : !auditReady ? "needs_global_audit" : issues.length ? "needs_correction" : "ready_to_assemble";
       const result = { nextAction, guidance: nextAction === "needs_candidate_work"
         ? "Missing candidates are pending work, not a terminal error. Read the next candidate's exact evidence, preview entries=[one entry] with partial=true, then propose_role_roster_entry. Preserve existing drafts."
-        : nextAction === "host_review_required" ? "Stop; do not retry or rotate IDs." : "Complete the indicated work in the original review scope.", structuralValid: issues.length === 0, complete: !input.partial && issues.length === 0 && unreadPages().length === 0 && unresolved.length === 0 && (!workStore || workStore.auditComplete()),
+        : nextAction === "host_review_required" ? "Stop; do not retry or rotate IDs."
+        : nextAction === "needs_global_audit" ? "Do not assemble yet. The host must inspect reviewFreshness() in the original plan and arrange missing or stale audit work in a supported scope. Preserve historical receipts; do not overwrite them or retry assembly unchanged."
+        : "Complete the indicated work in the original review scope.", structuralValid: issues.length === 0, complete: !input.partial && issues.length === 0 && unreadSourcePages.length === 0 && unresolved.length === 0 && auditReady,
         unresolvedObligations: unresolved, requiresHostReview,
+        ...(auditStatus ? { auditStatus } : {}),
         semanticSupport: "not-verified", issues, totalCandidates: roster.candidates.length,
-        missingCandidateIds: roster.candidates.filter(candidate => !included.has(candidate.id)).map(candidate => candidate.id),
-        stagedCandidateIds: stagedEntries(roster).map(entry => entry.candidateId), unreadSourcePages: unreadPages(),
+        missingCandidateIds: missing,
+        stagedCandidateIds: stagedEntries(roster).map(entry => entry.candidateId), unreadSourcePages,
         recovery: requiresHostReview ? "Stop model submissions. Preserve the original source, batch, candidate IDs and failed inputs for host review; do not retry, rotate IDs or finish with no-artifacts." : recovery };
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
     },
@@ -200,6 +223,13 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
     async execute(_id, raw, signal) {
       signal?.throwIfAborted(); const { roster } = await load(); assertMutable();
       const input = roleRosterEntryInputSchema.parse(raw);
+      workStore?.refreshJudgmentRevisions();
+      if (workStore?.judgmentAuthorities().some(a => a.predecessor.candidateId === input.entry.candidateId) || workStore?.auditContractAuthorities().some(a => a.entry.candidateId === input.entry.candidateId)) {
+        throw roleWorkStop("this judgment has an immutable semantic revision lineage; resume its assigned revision and independent audit, never overwrite the predecessor");
+      }
+      if (workStore?.plan.migration?.entries.some(entry => entry.candidateId === input.entry.candidateId)) {
+        throw roleWorkStop("this migrated judgment is a frozen proposal awaiting independent audit; preserve its original correction history and do not resubmit it in the successor scope");
+      }
       if (input.reviewRevisionId !== roster.reviewRevisionId) throw new Error("Role entry review revision is stale. Stop and preserve this batch for host review; do not retry with another revision.");
       if (unreadPages().length) throw new Error(`Unread source pages: ${unreadPages().join(", ")}. Read these with read_roster_source_page, then make at most one corrected retry. Never mark unreviewed text complete.`);
       const issues = validateRosterReview(roster, makeReview(roster, { subjectHash: input.subjectHash, entries: [input.entry], missingMajorCharacters: [] }), { partial: true });
@@ -235,6 +265,9 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
       if (workStore) {
         review.version = 4;
         review.workEvidence = { version: 2, plan: workStore.plan, claimAudits: workStore.claimAudits(),
+          ...(workStore.auditContractProofs().length ? { auditContractRevisions: workStore.auditContractProofs() } : {}),
+          ...(workStore.judgmentRevisions().length ? { judgmentRevisions: workStore.judgmentRevisions() } : {}),
+          ...(sourceAuditProofs(workStore).length ? { sourceAuditRevisions: sourceAuditProofs(workStore) } : {}),
           sourceWork: workStore.plan.spans.map((_, page) => workStore!.read("source", page)!),
           auditWork: workStore.plan.spans.map((_, page) => workStore!.read("audit", page)!),
           entriesHash: contentHash([...review.entries].sort((a,b) => a.candidateId.localeCompare(b.candidateId))) };
@@ -291,3 +324,4 @@ const roleRosterSubmissionSchema = z.object({
 }).strict().superRefine((input, context) => {
   if (Boolean(input.entries) === Boolean(input.staged)) context.addIssue({ code: "custom", path: ["entries"], message: "Provide either complete entries or staged=true, never both. Preview the full roster before submission." });
 });
+import { sourceAuditProofs } from "./role-source-audit-repair.js";

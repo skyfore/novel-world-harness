@@ -1,7 +1,7 @@
 import { withPlayModelBudget } from "../runtime/play-model-budget.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "./player-action.js";
-import { buildActorScopedActionContext, PlayerTurnService } from "./player-action.js";
+import { buildActorScopedActionContext, playerTurnInputSchema, PlayerTurnService } from "./player-action.js";
 import { AUTONOMOUS_BACKGROUND_KINDS, type Entity } from "./model.js";
 import { PlaySessionStore, type ActivePlaySession } from "./play-session.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
@@ -34,6 +34,7 @@ import type {
 import type { CanonicalRecoveryTrace, WorldMoveTrace } from "./runtime.js";
 import type { RuntimeContextConsultationObserver, RuntimeContextResolver } from "./runtime-context.js";
 import { RuntimeCompilerRepairHintStore } from "../compiler/runtime-repair-hints.js";
+import { PlayMoveStore } from "./play-move.js";
 import type { ActorReasoner } from "./model-actor-policy.js";
 
 export type PlayableCharacter = {
@@ -120,6 +121,8 @@ export type PlayTurnOutcome = {
   npcResponseError?: string;
   backgroundError?: string;
   conversationError?: string;
+  sessionError?: string;
+  replayed?: boolean;
   playerMessage?: PlayConversationMessage;
   auditId?: string;
   auditError?: string;
@@ -329,15 +332,45 @@ export async function performPlayTurn(options: PerformPlayTurnOptions): Promise<
     degraded: undefined as boolean | undefined,
   };
   return withPlayModelBudget(() => currentRuntimeHooks().run("play.turn", "performPlayTurn", metadata, async () => {
-    const outcome = await performPlayTurnInternal(options);
+    const move = options.playerMoveId ? new PlayMoveStore({ ...options, playerMoveId: options.playerMoveId }) : undefined;
+    const saved = await move?.lookup();
+    let outcome: PlayTurnOutcome;
+    if (saved) {
+      outcome = await replayPlayMove(options, move!, saved);
+    } else {
+      try {
+        outcome = await performPlayTurnInternal(options, move);
+        if (move && !outcome.replayed) await move.complete(outcome);
+      } catch (error) {
+        if (move?.admitted) throw move.recoveryRequired(`The admitted move stopped: ${String(error)}`);
+        throw error;
+      }
+    }
     metadata.accepted = outcome.result.accepted;
     metadata.degraded = Boolean(outcome.backgroundError || outcome.worldResponseError || outcome.canonicalRecoveryError
-      || outcome.npcResponseError || outcome.conversationError || outcome.auditError || outcome.repairHintError);
+      || outcome.npcResponseError || outcome.conversationError || outcome.sessionError || outcome.auditError || outcome.repairHintError);
     return outcome;
   }));
 }
 
-async function performPlayTurnInternal(options: PerformPlayTurnOptions): Promise<PlayTurnOutcome> {
+async function replayPlayMove(options: PerformPlayTurnOptions, move: PlayMoveStore, saved: PlayTurnOutcome): Promise<PlayTurnOutcome> {
+  const { engine } = await openWorkspaceWorld(options.root);
+  const branch = await engine.branches.read(options.branchId), currentHead = branch.headCommitId;
+  let cursor: string | undefined = currentHead;
+  while (cursor && cursor !== saved.finalHead) cursor = (await engine.objects.getCommit(cursor)).parentCommitId;
+  if (!cursor) throw move.recoveryRequired("The original result is no longer in this branch's committed history");
+  const outcome = { ...saved, replayed: true };
+  // Repair only the derived session pointer, never replay world effects or
+  // roll a newer pointer back to a historical move.
+  if (outcome.sessionError && currentHead === outcome.finalHead) {
+    const sessionError = await persistPlaySession(options, outcome.finalHead, options.sourceId ?? branch.sourceId);
+    delete outcome.sessionError;
+    if (sessionError) outcome.sessionError = sessionError;
+  }
+  return outcome;
+}
+
+async function performPlayTurnInternal(options: PerformPlayTurnOptions, move?: PlayMoveStore): Promise<PlayTurnOutcome> {
   const startedAt = new Date();
   const advanceBackground = options.advanceBackground ?? 0;
   const advanceActors = options.advanceActors ?? 1;
@@ -395,6 +428,15 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions): Promise
   if (options.affordanceId && !affordance) {
     throw new Error(`Player affordance '${options.affordanceId}' is stale or no longer executable at the current branch head.`);
   }
+  const input = playerTurnInputSchema.parse({
+    branchId: options.branchId,
+    ...(sourceId ? { sourceId } : {}),
+    ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+    actorId: options.actorId,
+    utterance: options.utterance,
+  });
+  const saved = await move?.begin();
+  if (saved) return replayPlayMove(options, move!, saved);
   const turns = new PlayerTurnService(
     engine,
     affordance ? () => structuredClone(affordance.candidate) : options.translator,
@@ -405,13 +447,8 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions): Promise
     options.contextResolver,
     options.contextObserver,
   );
-  const result = await turns.turn({
-    branchId: options.branchId,
-    ...(sourceId ? { sourceId } : {}),
-    ...(options.conversationId ? { conversationId: options.conversationId } : {}),
-    actorId: options.actorId,
-    utterance: options.utterance,
-  }, {
+  const result = await turns.turn(input, {
+    expectedHead: previousHead,
     ...(options.intent ?? affordance?.intent ? { intent: options.intent ?? affordance!.intent } : {}),
     ...(affordance
       ? {
@@ -625,14 +662,7 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions): Promise
     }
   }
   const finalState = await engine.projector.project(finalHead);
-  await sessionStore.write({
-    ...(options.sessionId ? { id: options.sessionId } : {}),
-    branchId: options.branchId,
-    ...(sourceId ? { sourceId } : {}),
-    actorId: options.actorId,
-    lastCommitId: finalHead,
-    ...(options.conversationId ? { conversationId: options.conversationId } : {}),
-  });
+  const sessionError = await persistPlaySession(options, finalHead, sourceId);
   const finishedAt = new Date();
   let auditId: string | undefined;
   let auditError: string | undefined;
@@ -680,6 +710,7 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions): Promise
       ...(runtimeMoveTrace ? { runtimeMoveTrace: structuredClone(runtimeMoveTrace) } : {}),
       ...(backgroundError ? { backgroundError } : {}),
       ...(conversationError ? { conversationError } : {}),
+      ...(sessionError ? { sessionError } : {}),
     });
     auditId = audit.id;
   } catch (error) {
@@ -704,12 +735,26 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions): Promise
     reactionEvents,
     ...(backgroundError ? { backgroundError } : {}),
     ...(conversationError ? { conversationError } : {}),
+    ...(sessionError ? { sessionError } : {}),
     ...(playerMessage ? { playerMessage } : {}),
     ...(auditId ? { auditId } : {}),
     ...(auditError ? { auditError } : {}),
     repairHintIds,
     ...(repairHintError ? { repairHintError } : {}),
   };
+}
+
+async function persistPlaySession(options: PerformPlayTurnOptions, finalHead: string, sourceId?: string): Promise<string | undefined> {
+  try {
+    await new PlaySessionStore(options.root).write({
+      ...(options.sessionId ? { id: options.sessionId } : {}), branchId: options.branchId,
+      ...(sourceId ? { sourceId } : {}), actorId: options.actorId, lastCommitId: finalHead,
+      ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+    });
+    return undefined;
+  } catch (error) {
+    return `Play session could not be persisted: ${error instanceof Error ? error.message : String(error)}. World history remains at the committed head; restore storage and resume the session, do not repeat the action.`;
+  }
 }
 
 export function resolveCharacter(

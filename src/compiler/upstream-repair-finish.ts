@@ -53,6 +53,8 @@ export async function prepareUpstreamRepairFinish(root: string, sourceId: string
   const input = compilerFinishInputSchema.parse(raw), ledger = new UpstreamRepairLedger(root, sourceId);
   const state = await ledger.inspect(), current = state.plans.find(item => item.plan.planHash === planHash);
   if (!current || !["staging", "finish-frozen"].includes(current.state)) throw upstreamRepairHostError("Upstream finish requires an active fully staged plan");
+  if (current.plan.identityRequirements) await (await import("./identity-requirement-acceptance.js")).verifyIdentityUpstreamAcceptance(root, current.plan);
+  if (current.plan.sourceRepresentation) await (await import("./source-representation-acceptance.js")).verifySourceUpstreamAcceptance(root, current.plan);
   if (current.finishIntent && contentHash(current.finishIntent.input) !== contentHash(input)) throw upstreamRepairHostError("Original frozen finish input changed");
   if (!current.finishIntent) await ledger.recordFinishReview(planHash, input);
   const verified = await verifyUpstreamRepairPlan(root, current.plan);
@@ -79,6 +81,8 @@ export async function verifyUpstreamRepairFinish(root: string, sourceId: string,
   const current = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(item => item.plan.planHash === planHash);
   if (!current?.finishIntent || !["finish-frozen", "finished", "converged", "evaluated"].includes(current.state)) throw upstreamRepairHostError("Original active frozen finish intent is missing");
   const { plan, finishIntent: intent } = current;
+  if (plan.identityRequirements) await (await import("./identity-requirement-acceptance.js")).verifyIdentityUpstreamAcceptance(root, plan);
+  if (plan.sourceRepresentation) await (await import("./source-representation-acceptance.js")).verifySourceUpstreamAcceptance(root, plan);
   if (expectedBatchId && plan.batchId !== expectedBatchId) throw upstreamRepairHostError("Finish receipt batch differs from retained authorization");
   if (expectedIntent && contentHash(intent) !== contentHash(expectedIntent)) throw upstreamRepairHostError("Finish receipt differs from retained authorization");
   await assertUpstreamRepairFinishInventory(root, plan, intent.proposals, intent);

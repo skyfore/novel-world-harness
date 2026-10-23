@@ -52,6 +52,7 @@ nwh compile-novel --source a28585b1cf867f3e3a16 --rebuild --loop-new-run <comple
 | `roles` | 独立全文角色复核，登记主要角色能力要求 |
 | `repair` | 恢复已授权的上游修复，执行图关系和世界语义修复 |
 | `requirements` | 重验已登记要求、关键延后项及全局闭合条件 |
+| `closure` | 在编译锁内重新校验当前计划的原始 finish 回执、执行义务、来源记账、身份／角色交接和全局编译维度；保存逐维度结果 |
 | `archive` | 归档不可变候选；不改变 active 指针，不授予认证 |
 | `evaluation-plan` | 生成／复用／导入并冻结独立 gold、字段支持复核和逐主要角色场景规格 |
 | `evaluate` | 执行独立真实 Pi 实验，复用相同候选和规格下已完成的实验 |
@@ -59,6 +60,7 @@ nwh compile-novel --source a28585b1cf867f3e3a16 --rebuild --loop-new-run <comple
 | `activate` | 验证候选仍对应当前编译输入，再切换 active 指针 |
 | `branch` | 创建或复用固定到当前认证版本的可玩分支 |
 | `status` | 只读快照；不调用模型、不迁移、不重验、不激活 |
+| `plan` | 只读生成全部后续阶段、依赖任务、原始引用和恢复条件；不新增授权、不启动监督器 |
 
 例如修正角色复核后继续后续流程：
 
@@ -68,6 +70,33 @@ nwh compile-novel --source <source-id>
 ```
 
 默认续编会重新核对每个阶段的当前证据：复用批次检查点、原 finish 回执、已完成角色审阅、同候选的冻结评估规格及有效实验结果。历史调度记录中的 `completed` 不能替代当前版本的认证。
+
+### 批次完成后的统一交接
+
+```sh
+nwh compile-novel plan --source <source-id>
+nwh compile-novel closure --source <source-id>
+```
+
+`plan` 的 `sources[].handoff.tasks` 保留全部阶段和已发现的身份消费者、来源审计、上游修复任务。每项包含稳定 `id`、`dependsOn`、原始 `refs`、结构化 `command` 和 `resumeCondition`。`recorded` 只表示历史调度回执；`available` 表示存在原有阶段入口，实际执行仍需通过该入口的当前权限与依赖验证。`inspect-only` 不可作为模型续跑或写入授权。尚未完成语义诊断的范围仍由对应阶段负责，计划不宣称已发现原文中的全部遗漏。
+
+已收敛的上游修复交给 `requirements` 重验，不再重新 staging。已授权且保留原 finish 审阅的修复继续使用 `recover`。负面的来源审计修复、未完成的身份消费者审查和无法读取的依赖记录，会在 `roles` 的新模型调用前停止，并给出原任务入口。未审分片、额外修复和重验需求不会因一个独立审查返回 supported 而消失。该交接不创建新的身份续跑许可；缺证据、缺受支持的消费者修复类型或已耗尽的授权仍保留明确阻塞。
+
+迁移已退休的角色计划保留在历史中，`roleReviewWork[].current` 区分当前分母；不会将两代审查数量相加。`status` 的 `compilation[].handoff` 使用同一交接实现。
+
+完整 CLI 和 TUI 交付链在 `requirements` 后、`archive` 前执行 `closure`。这个阶段调用现有审计与要求账本，验证当前计划每个原 finish 回执，并分别检查来源、批次、执行义务、角色来源审查、上游交接、结构、证据、记账、决议、语义和已登记要求。`unknown` 不算通过，关键延后保留全部单元引用。结果保存在原编译运行的 `closure` 字段，失败也落盘；它是带来源／编译指纹／审计哈希的调度快照，不另建语义真值账本。修订后必须重新运行，不能凭旧快照跳过检查。
+
+该闭合检查不代替后续独立支持规格、真实 Pi 实验和认证。`archive` 单阶段命令仍可保存未认证候选，active 指针保持原状；完整交付须继续通过评估、认证和激活。
+
+### 短 demo 与回归
+
+```sh
+pnpm demo:compilation-completion
+```
+
+这个可重复的确定性 demo 使用临时小说和隔离工作区，不调用付费模型。它验证：检查点 100%／零执行义务仍不能跳过真实回执与缺口；闭合失败持久保存；状态与计划读取不写状态；未认证候选可归档但不激活；部分身份分母、退休角色计划和已消费的负面审计被正确交接；已收敛修复转入重验。demo 同时是普通测试集的一部分。它证明流程行为，不证明《龙族》语义内容已补齐或真实多轮体验已通过。
+
+### 角色审计恢复
 
 角色复核阶段现在由同一命令调度有界修复，无需临时脚本逐页接力：先完成来源记录、候选判定及其独立核验，再收齐来源审查中的全部问题。未受支持的候选判定复用既有单次修订机制；来源审查中的遗留问题各允许一次修复提案和一次独立验证。修复可检索同一小说的非相邻章节，但不能删除原问题、遗漏角色要求或覆盖原审查结果。修复与验证共享继承的累计用量，独立验证通过后写入要求账本和最终审阅证据；仍缺证据或验证为否时保留阻塞。
 
@@ -99,4 +128,4 @@ nwh compile-novel evaluate --source <source-id> --plan-hash <frozen-plan-hash>
 
 旧的 `compile-source`、`prepare-all`、`rebuild`、`reparse`、`repair-existing`、`requirements` 和 `prepared-cache` 入口保留兼容。其中 `prepare-all --candidate-only` 仍只负责候选准备；完整交付请使用 `compile-novel`。
 
-Pi TUI 的 `/prepare-all` 在候选准备后复用 `compile-novel` 的角色复核、修复、要求闭合、归档、独立评估规格、评估、认证和激活阶段。通过这些门禁后才询问是否创建可玩分支；任何门禁失败均保留诊断，不声明准备完成。
+Pi TUI 的 `/prepare-all` 在候选准备后复用 `compile-novel` 的角色复核、修复、要求重验、全局闭合、归档、独立评估规格、评估、认证和激活阶段。通过这些门禁后才询问是否创建可玩分支；任何门禁失败均保留诊断，不声明准备完成。

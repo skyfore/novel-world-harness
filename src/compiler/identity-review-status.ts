@@ -40,7 +40,7 @@ export function identityReviewStatus(records: IdentityRecord[]) {
   });
   return {
     taskId: intent.taskId, intentHash: contentHash(intent), sourceId: intent.sourceId,
-    inventoryHash: intent.inventoryHash, revisionHash: intent.revisionHash,
+    inventoryHash: intent.inventoryHash, revisionHash: intent.revisionHash, originalPlanHash: intent.originalPlanHash,
     totalShards: shards.length, recordedReviewedShards: shards.filter(s => s.recordedReviewComplete).length,
     totalConsumers: shards.reduce((n, s) => n + s.totalConsumers, 0),
     recordedReviewedConsumers: shards.filter(s => s.recordedReviewComplete).reduce((n, s) => n + s.totalConsumers, 0),

@@ -9,11 +9,14 @@ nwh compile-novel fixtures/corpus/longzu_1.txt
 # 已登记小说：默认续编
 nwh compile-novel --source a28585b1cf867f3e3a16
 
-# 全量重编。若该次重编已中断，则继续同一次重编。
+# 首次监督任务即为全量重编；中断后保留同一次任务的恢复边界。
 nwh compile-novel --source a28585b1cf867f3e3a16 --rebuild
 
 # 只读查看各阶段、历史回执、实际缺口和独立评估状态
 nwh compile-novel status --source a28585b1cf867f3e3a16
+
+# 已有监督任务 DONE 后明确发起下一次重编：复制 status 返回的 supervision.stateHash
+nwh compile-novel --source a28585b1cf867f3e3a16 --rebuild --loop-new-run <completed-state-hash>
 ```
 
 各入口支持 `--root`、`--config`、`--source` 和 `--model`。全流程自动执行常规步骤，无需逐阶段确认；模型提案仍必须经过原有验证和提交屏障。`--branch` 可指定交付分支，已有分支固定的历史版本不能被覆盖。
@@ -23,6 +26,8 @@ nwh compile-novel status --source a28585b1cf867f3e3a16
 监督状态和每次子进程日志保存在 `$NWH_HOME/workspaces/v1/<workspace>/compile-loops/<source>/`，`status` 的 `compilation[].supervision` 显示编译、修复、验证、停止或完成及诊断位置。工程修复保留已有工作区改动，不自动提交。每个确定性故障身份最多两个工程回合；通过预检不代表语义闭合，外层循环也不能清除领域预算或伪造提交。认证、激活及分支绑定仍由独立新进程核验。
 
 工程会话按工作区和来源隔离，新注册表存于该来源目录的 `engineering-session/`；匹配来源的旧注册表原地沿用，不重建 UUID 或续期。重复调用已完成的监督任务只复核原成功回执、当前认证及分支绑定，不重新启动编译。复核失败会保留停止状态和原成功 worker；解决具体条件后只能续做复核。拒绝恢复请求时，原停止原因、时间戳和 `stateHash` 保持不变。
+
+下一次完整重编必须显式使用 `--rebuild --loop-new-run <completed-state-hash>`。该哈希绑定唯一新代次：重复使用时继续或复核同一代次，不再新增任务。新代次保存在 `generations/<hash>/`，旧状态和全部回执保留，`supervision.directory` 指向当前代次。只有当前 `DONE` 可授权下一代；`BREAK`、在途子进程、过期哈希须先处理原停止条件，不能通过此参数补充领域额度。新代次的 READY 记录先落盘，再切换当前指针，最后启动 worker；指针写入失败可用同一哈希继续原待发布代次。
 
 `--no-loop` 显式执行一次编译，供调试或已有外部监督器使用；单阶段命令和 `status` 保持原语义。迁移旧本地监督器可指定 `--loop-history <state.json> --loop-resolution <具体宿主审阅结论>`：仅接受同来源、同工作区且已停止的记录，保留旧计数、截止时间和失败历史；新的逐故障策略不重开任何领域尝试。原监督器需保持停止。外部授权、架构变更、未知写入、取消、工程模型不可用、复核拒绝或同故障重复无进展会保留明确停止状态，不通过换 ID、换模型或重开会话绕过。
 
@@ -93,3 +98,5 @@ nwh compile-novel evaluate --source <source-id> --plan-hash <frozen-plan-hash>
 只有最后的认证、激活和分支交付全部通过，才输出 `Novel compilation complete`。出现阻塞会以非零状态退出；72/72 批次、零执行义务或候选归档均不能触发该完成声明。
 
 旧的 `compile-source`、`prepare-all`、`rebuild`、`reparse`、`repair-existing`、`requirements` 和 `prepared-cache` 入口保留兼容。其中 `prepare-all --candidate-only` 仍只负责候选准备；完整交付请使用 `compile-novel`。
+
+Pi TUI 的 `/prepare-all` 在候选准备后复用 `compile-novel` 的角色复核、修复、要求闭合、归档、独立评估规格、评估、认证和激活阶段。通过这些门禁后才询问是否创建可玩分支；任何门禁失败均保留诊断，不声明准备完成。

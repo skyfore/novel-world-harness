@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { CompilerBatchStore } from "../compiler/batches.js";
+import { CompilerFinishReceipts } from "../compiler/finish-receipts.js";
 import { BoundaryCalibrationStore } from "../compiler/boundary-calibration.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { SegmentStore } from "../compiler/segments.js";
@@ -94,6 +95,9 @@ export async function removeNovelAnalysis(
     ? await resolveNovelSource(workspace, sourceInput)
     : sourceInput;
   const sourceId = source.id;
+  // Retire finish authority before removing any of its dependencies. A failed
+  // archive leaves the analysis intact; an interrupted reset can be repeated.
+  await CompilerFinishReceipts.archiveSource(root, sourceId, "Explicit novel analysis removal");
   const canonical = new CanonicalModelStore(root);
   const actors = new ActorModelStore(root);
   const possibilities = new PossibilityTemplateStore(root);

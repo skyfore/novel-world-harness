@@ -78,9 +78,9 @@ export async function acceptAllValidProposalsCommand(root: string): Promise<void
 }
 
 export async function rejectProposalCommand(root: string, id: string): Promise<void> {
-  await new ProposalStore(root).reject(id, [{
+  await withWorkspaceOperationLock(root, "compiler", () => new ProposalStore(root).reject(id, [{
     code: "MANUAL_PROPOSAL_REJECTION",
     message: "Proposal was explicitly rejected through the proposal CLI.",
-  }]);
+  }]));
   stdout.write(`Rejected proposal ${id}.\n`);
 }

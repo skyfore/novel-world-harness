@@ -31,6 +31,7 @@ import { InitialWorldStore } from "../src/world/initial.js";
 import { canonicalJson, contentHash } from "../src/world/canonical.js";
 import { WorkspaceOperationLock } from "../src/util/workspace-lock.js";
 import { PossibilityTemplateStore } from "../src/world/possibility-model.js";
+import { certifyPreparedNovel } from "../src/commands/compile-novel.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -2427,7 +2428,7 @@ describe("NWH TUI extension", () => {
     expect(notifications.join("\n")).toContain("No playable instances exist");
   });
 
-  it("offers /prepare-all and completes validated preparation inside the TUI", async () => {
+  it.each([true, false])("/prepare-all creates a branch only after shared delivery certification (passed=%s)", async certified => {
     const { commands, root, sentHiddenMessages } = await fixture();
     const evidence = await createEvidenceFixture(root, "Hero waits at the opening.\n", "ready-novel.txt");
     const batches = await prepareCompilerBatches(root, evidence.source);
@@ -2450,8 +2451,19 @@ describe("NWH TUI extension", () => {
     const notifications: string[] = [];
     const questions: string[] = [];
 
+    if (!certified) vi.mocked(certifyPreparedNovel).mockRejectedValueOnce(new Error("Independent evaluation failed"));
+
     await commands.get("prepare-all")?.handler(evidence.source.id, preparationContext(notifications, questions));
 
+    expect(certifyPreparedNovel).toHaveBeenCalledWith(expect.objectContaining({ root, sourceId: evidence.source.id }));
+    if (!certified) {
+      expect(notifications).toContainEqual(expect.stringContaining("Independent evaluation failed"));
+      expect(notifications.some(message => message.includes("Preparation complete"))).toBe(false);
+      expect(questions).not.toContain("Create playable branch?");
+      expect(await new BranchStore(root).listIds()).toEqual([]);
+      expect((await WorkspaceOperationLock.inspect(root)).owner).toBeUndefined();
+      return;
+    }
     expect(questions).toEqual(["Accept validated proposals?", "Create playable branch?"]);
     expect(notifications).toContainEqual(expect.stringContaining("Preparation complete"));
     expect(sentHiddenMessages).toEqual([]);

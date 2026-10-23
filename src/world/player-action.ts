@@ -826,6 +826,7 @@ export type PlayerProgressPreview = {
 };
 
 export type PlayerTurnAuthority = Readonly<{
+  expectedHead?: CommitId;
   intent?: "act" | SafePlayerIntent;
   affordanceId?: string;
   progress?: NarrativeProgress;
@@ -1560,6 +1561,7 @@ export class PlayerTurnService {
   async turn(inputValue: PlayerTurnInput, authority: PlayerTurnAuthority = {}): Promise<PlayerTurnResult> {
     const input = playerTurnInputSchema.parse(inputValue);
     const previousHead = await this.engine.branches.readHead(input.branchId);
+    if (authority.expectedHead && authority.expectedHead !== previousHead) throw new Error("Player turn head changed after admission; inspect the branch before another action.");
     const [contextBefore, storyTime, worldContext, worldState, conversation] = await Promise.all([
       buildActorScopedActionContext(this.engine, input.actorId, previousHead, input.utterance, input.sourceId),
       latestCommittedStoryTime(this.engine, previousHead),

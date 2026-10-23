@@ -60,7 +60,8 @@ export async function prepareCoreRoleDependencyReview(root: string, input: RoleD
     new RoleRosterStore(root).read(sourceId), new SourceStructureStore(root).read(sourceId), new SourceAnnotationStore(root).list(sourceId),
     new EntityResolutionStore(root).list(sourceId), new EventResolutionStore(root).list(sourceId), new CanonicalModelStore(root).listEntities(),
   ]);
-  const priorPlan = (await RoleReviewWorkStore.plans(root, sourceId)).find(p => contentHash(p) === scope.planHash);
+  const sourcePlans = await RoleReviewWorkStore.plans(root, sourceId);
+  const priorPlan = sourcePlans.find(p => contentHash(p) === scope.planHash);
   if (!priorPlan || !saved || !structure || structure.sourceSha256 !== scope.sourceHash || contentHash(structure) !== priorPlan.structureHash) throw prerequisiteStop("Original role plan, roster or structure changed");
   const work = new RoleReviewWorkStore(root, priorPlan), authority = sourceAuditAuthorities(work, scope.questions[0]!.page).find(a => a.revisionId === scope.auditRevisionId);
   if (!authority) throw prerequisiteStop("Original consumed audit authority is missing");
@@ -111,8 +112,11 @@ export async function prepareCoreRoleDependencyReview(root: string, input: RoleD
   }
   // Includes all inherited plans, failed invocations, semantic grants and budgets,
   // rather than only the ordinary source/candidate allowance keys.
-  await capture(path.join(storage, "compiler", "role-review-work"));
-  await capture(path.join(storage, "compiler", "proposal-obligations", createHash("sha256").update(JSON.stringify([sourceId, priorPlan.batchId])).digest("hex")));
+  await capture(path.join(storage, "compiler", "role-review-work", "v1", contentHash(sourceId)));
+  for (const plan of sourcePlans) {
+    await capture(path.join(storage, "compiler", "role-review-work", "budgets", contentHash(plan)));
+    await capture(path.join(storage, "compiler", "proposal-obligations", createHash("sha256").update(JSON.stringify([sourceId, plan.batchId])).digest("hex")));
+  }
   const prefix = existing?.requirementPrefix ?? { length: history.length, head: history.at(-1)!.hash };
   if (history[prefix.length - 1]?.hash !== prefix.head) throw prerequisiteStop("Original requirement prefix changed");
   const convergence = upstream.records.findLast(r => r.payload.kind === "converged" && r.payload.planHash === input.upstreamPlanHash);

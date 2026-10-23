@@ -24,4 +24,30 @@ export async function verifyPrerequisiteTrace(root: string, record: Prerequisite
   }
   const start = events.find(e => e.type === "tool.call.started" && e.toolCallId === submissions[0]!.toolCallId);
   if (!start?.blobRef || contentHash(prerequisiteOutputSchema.parse(await store.peekBlob(start.blobRef))) !== contentHash(record.output)) throw prerequisiteStop("Stored proposal is not the actual Pi tool submission");
+  const request = requests.findLast(e => e.seq < start.seq);
+  const source = new Set<string>(), findings = new Set<string>(), candidates = new Set<string>();
+  let discovered = false;
+  // Sibling tool calls in one assistant response cannot read each other's
+  // results. Public verification enforces the same boundary as the live tools.
+  for (const end of events.filter(e => e.type === "tool.call.completed" && request && e.seq < request.seq)) {
+    const begin = events.find(e => e.type === "tool.call.started" && e.toolCallId === end.toolCallId);
+    if (!begin?.blobRef) continue;
+    const args = await store.peekBlob(begin.blobRef) as { segmentId?: string; findingId?: string; candidateId?: string };
+    if (end.data?.toolName === "read_prerequisite_source" && args.segmentId) source.add(args.segmentId);
+    if (end.data?.toolName === "discover_prerequisite_dependencies") {
+      discovered = true;
+      if (args.findingId) findings.add(args.findingId);
+      if (args.candidateId) candidates.add(args.candidateId);
+    }
+  }
+  if (record.evidence.some(e => !source.has(e.selector.segment_id))) throw prerequisiteStop("Prerequisite source was not delivered to a model request before submission");
+  if (record.phase.startsWith("binding")) {
+    const { RequirementLedger } = await import("./requirement-ledger.js");
+    const binding = record.phase === "binding" ? record.output
+      : (await new RequirementLedger(root, record.scope.sourceId).sourcePrerequisites(record.taskId)).find(r => r.phase === "binding")?.output;
+    if (!discovered || binding?.phase !== "binding"
+      || binding.bindings.some(b => b.findingIds.some(id => !findings.has(id)) || b.candidateIds.some(id => !candidates.has(id)))) {
+      throw prerequisiteStop("Prerequisite dependencies were not delivered to a model request before submission");
+    }
+  }
 }

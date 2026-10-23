@@ -25,11 +25,20 @@ export const loopStateSchema = z.object({
   // A null hash is used solely when adopting a pre-existing DONE record.
   delivery: z.object({ worker: counter.positive(), resultHash: z.string().regex(/^[a-f0-9]{64}$/).nullable() }).strict().nullable().default(null),
   resolutions: z.array(z.object({ previousStateHash: z.string(), reason: z.string(), at: z.string() })).default([]),
+  previousGeneration: z.object({ directory: z.string(), stateHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
 }).strict();
 export type CompileLoopState = z.infer<typeof loopStateSchema>;
 export function compileLoopDirectory(root: string, sourceId: string) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sourceId)) throw new Error("Invalid source ID; copy sources[].sourceId from compile-novel status once; never guess.");
   return path.join(workspaceStateDir(root), "compile-loops", sourceId);
+}
+export function activeCompileLoopDirectory(root: string, sourceId: string) {
+  const base = compileLoopDirectory(root, sourceId), pointer = path.join(base, "current-generation.json");
+  if (!existsSync(pointer)) return base;
+  const current = z.object({ version: z.literal(1), generation: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(read(pointer));
+  const directory = path.join(base, "generations", current.generation);
+  if (!existsSync(path.join(directory, "state.json"))) throw new Error("COMPILE_LOOP_GENERATION_MISSING: inspect the retained current-generation pointer and state; do not reset it or launch another worker.");
+  return directory;
 }
 export function save(file: string, value: unknown) {
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -39,7 +48,7 @@ export function save(file: string, value: unknown) {
 export function read<T = unknown>(file: string): T { return JSON.parse(readFileSync(file, "utf8")) as T; }
 /** Status never creates directories, changes ownership or resumes a stopped child. */
 export function inspectCompileLoop(root: string, sourceId: string) {
-  const directory = compileLoopDirectory(root, sourceId), file = path.join(directory, "state.json");
+  const directory = activeCompileLoopDirectory(root, sourceId), file = path.join(directory, "state.json");
   if (!existsSync(file)) return null;
   const state = loopStateSchema.parse(read(file));
   return { directory, phase: state.phase, reason: state.reason, updatedAt: state.updatedAt,

@@ -1,17 +1,18 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { compileLoopDirectory, read } from "./state.js";
+import { compileLoopDirectory, activeCompileLoopDirectory, read } from "./state.js";
 import { digest } from "./workspace.js";
 import { dedicatedRegistryPath, captureRecordTree, fileHash } from "./dedicated-session.js";
 import { contentHash } from "../../world/canonical.js";
 import type { PrerequisiteLoopSpec } from "./prerequisite-supervisor.js";
 
 export function prerequisiteHandoffPaths(root: string, sourceId: string, taskId: string) {
-  const parent = compileLoopDirectory(root, sourceId), identity = path.join(parent, "prerequisites", taskId, "identity-requirements");
+  const base = compileLoopDirectory(root, sourceId), parent = activeCompileLoopDirectory(root, sourceId);
+  const identity = path.join(base, "prerequisites", taskId, "identity-requirements");
   const registry = dedicatedRegistryPath(root, sourceId);
   return { parent, identity, directory: path.join(identity, "consumer-review/engineering"), registry,
-    locks: [path.join(path.dirname(parent), "supervisor.lock"), path.join(path.dirname(registry), "supervisor.lock")] };
+    locks: [path.join(path.dirname(base), "supervisor.lock"), path.join(path.dirname(registry), "supervisor.lock")] };
 }
 
 /** Structural host authority only. Semantic/domain eligibility is independently

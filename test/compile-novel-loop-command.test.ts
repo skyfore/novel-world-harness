@@ -19,6 +19,19 @@ it("the ordinary full command enters supervision with the exact registered immut
     engineerModel: "gpt-5.6-sol", request: expect.objectContaining({ sourceId: source.id, model: "openai-codex/gpt-6.1-sol" }) }));
   expect(direct).not.toHaveBeenCalled();
 });
+it("forwards an explicit rebuild token and rejects incompatible stage invocations", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-loop-command-")); roots.push(root);
+  const { source } = await createEvidenceFixture(root, "Ada waits.");
+  const run = vi.spyOn(supervisor, "runCompileLoop").mockResolvedValue({ phase: "DONE" } as never);
+  const options = { root, sourceId: source.id, rebuild: true, loopNewRun: "a".repeat(64) };
+  await compileNovelWithLoop(options);
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({ newRunFromStateHash: options.loopNewRun,
+    request: expect.objectContaining({ sourceId: source.id, rebuild: true }) }));
+  for (const change of [{ phase: "roles" as const }, { rebuild: false }, { loop: false }]) {
+    await expect(compileNovelWithLoop({ ...options, ...change })).rejects.toThrow("--loop-new-run requires");
+  }
+  expect(run).toHaveBeenCalledOnce();
+});
 it.each([{ phase: "status" as const }, { phase: "roles" as const }, { loop: false }])("%j keeps explicit single-invocation semantics", async selection => {
   const run = vi.spyOn(supervisor, "runCompileLoop").mockRejectedValue(new Error("must not start supervision"));
   const direct = vi.spyOn(compiler, "compileNovelCommand").mockResolvedValue(undefined);

@@ -19,6 +19,7 @@ import { prepareNextSourceLoopTurn } from "../src/compiler/source-loop.js";
 import { withWorkspaceOperationLock } from "../src/util/workspace-lock.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { contentHash } from "../src/world/canonical.js";
+import { removeNovelAnalysis } from "../src/world/removal.js";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -40,6 +41,35 @@ async function fixture(stage = "executable") {
   const receipts = new CompilerFinishReceipts(root, source.id, batch.id);
   return { root, source, batch, toolset, call, input, receipts };
 }
+
+it("retires finish receipts before analysis removal and permits a new verified compilation", async () => {
+  const f = await fixture("observation");
+  await f.call("finish_compiler_batch", f.input);
+  const original = await f.receipts.read();
+  await new CompilerBatchStore(f.root).markComplete(f.source.id, f.batch.id);
+  const archive = vi.spyOn(CompilerFinishReceipts, "archiveSource").mockRejectedValueOnce(new Error("archive unavailable"));
+  await expect(removeNovelAnalysis(f.root, f.source)).rejects.toThrow("archive unavailable");
+  expect(await f.receipts.hasVerifiedCompletedReceipt()).toBe(true);
+  expect(await new SourceAnnotationStore(f.root).list(f.source.id)).toHaveLength(1);
+  archive.mockRestore();
+  await removeNovelAnalysis(f.root, f.source);
+  await removeNovelAnalysis(f.root, f.source); // An interrupted/repeated reset does not lose history.
+  expect(await f.receipts.read()).toBeUndefined();
+  expect(await CompilerFinishReceipts.listRetained(f.root, f.source.id)).toEqual([{ receipt: original, archived: true }]);
+  const runner = vi.fn(async (batch: typeof f.batch) => {
+    const tools = createCompilerProposalToolset(f.root);
+    await tools.beginBatch(batch.segmentIds, batch.id, f.source.id);
+    await tools.tools.find(t => t.name === "propose_entity_mention")!.execute("new-mention", {
+      proposal_id: "new-mention", annotation_id: "new-annotation", selector: { segment_id: batch.segmentIds[0], exact: "Hero" },
+      surface: "Hero", form: "proper", kind_candidates: ["character"], confidence: 1,
+    }, undefined, undefined, {} as never);
+    await tools.tools.find(t => t.name === "finish_compiler_batch")!.execute("finish", f.input, undefined, undefined, {} as never);
+  });
+  await expect(runCompilerBatches({ workspaceRoot: f.root, source: f.source, batchIds: [f.batch.id], maxBatches: 1,
+    requireFinishReceipt: true, runner })).resolves.toMatchObject({ completed: 1, remaining: 0 });
+  expect(runner).toHaveBeenCalledOnce();
+  expect(await f.receipts.hasVerifiedCompletedReceipt()).toBe(true);
+});
 
 it.each(["annotation", "acceptance", "review", "completion"])("recovers a crash after %s without a model session or duplicate acceptance", async (point) => {
   const f = await fixture(point === "annotation" ? "observation" : "executable");

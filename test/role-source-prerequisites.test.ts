@@ -72,7 +72,7 @@ it("supported missing-condition mapping remains host review, never repair author
   expect(() => validatePrerequisiteHistory([{ ...first, evidence: [] }])).toThrow();
 });
 
-async function persistedFixture() {
+async function persistedFixture(deliverReads = true) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prerequisite-")); roots.push(root);
   const fixture = await createEvidenceFixture(root, selector.exact), ledger = new RequirementLedger(root, fixture.source.id);
   const bound = { ...scope, sourceId: fixture.source.id, sourceHash: fixture.source.contentSha256 };
@@ -87,6 +87,13 @@ async function persistedFixture() {
   await trace.record("stage.started", { phase: "source-prerequisite-session", sessionId: r.sessionId, scopeHash: h(bound), inputHash: r.inputHash, subscription: true });
   await trace.record("llm.request.started", { providerId: "openai-codex", modelId: "gpt-6.1-sol" }, undefined, { callId: "request" });
   await trace.record("llm.response.completed", {}, undefined, { callId: "request" });
+  const readRef = await trace.putBlob({ segmentId: fixture.segmentId });
+  await trace.record("tool.call.started", { toolName: "read_prerequisite_source" }, undefined, { toolCallId: "read", blobRef: readRef });
+  await trace.record("tool.call.completed", { toolName: "read_prerequisite_source" }, undefined, { toolCallId: "read" });
+  if (deliverReads) {
+    await trace.record("llm.request.started", { providerId: "openai-codex", modelId: "gpt-6.1-sol" }, undefined, { callId: "submission-request" });
+    await trace.record("llm.response.completed", {}, undefined, { callId: "submission-request" });
+  }
   const blobRef = await trace.putBlob(output);
   await trace.record("tool.call.started", { toolName: "submit_source_prerequisite" }, undefined, { toolCallId: "submit", blobRef });
   await trace.record("tool.call.completed", { toolName: "submit_source_prerequisite" }, undefined, { toolCallId: "submit" });
@@ -110,4 +117,12 @@ it("rejects forged model output or missing owning-host lock before publication",
   if (forged.output.phase === "specification") forged.output.requirements[0]!.requirement = "Fabricated requirement";
   await expect(withWorkspaceOperationLock(f.root, "compiler", () => f.ledger.recordSourcePrerequisite(forged, f.bytes))).rejects.toThrow(/actual Pi tool submission/);
   expect(await f.ledger.sourcePrerequisites(f.r.taskId)).toEqual([]);
+});
+
+it("rejects a historical submission whose sibling reads never reached the provider", async () => {
+  const f = await persistedFixture(false);
+  const before = await f.ledger.history();
+  await expect(withWorkspaceOperationLock(f.root, "compiler", () => f.ledger.recordSourcePrerequisite(f.r, f.bytes)))
+    .rejects.toThrow("not delivered to a model request");
+  expect(await f.ledger.history()).toEqual(before);
 });

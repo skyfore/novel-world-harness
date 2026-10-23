@@ -13,6 +13,13 @@ import { NovelEvaluationPlanStore } from "../src/eval/novel-evaluation-plan.js";
 import { deriveCharacterEntrySeed } from "../src/world/entry-context.js";
 import { preparedSubjectHash } from "../src/compiler/certification.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { certifyPreparedNovel } from "../src/commands/compile-novel.js";
+import { withWorkspaceOperationLock } from "../src/util/workspace-lock.js";
+import { NovelCompilationRunStore } from "../src/workflow/novel-compilation.js";
+import * as roleReview from "../src/workflow/role-review.js";
+import * as preparation from "../src/commands/prepare-all.js";
+import * as evaluation from "../src/eval/novel-play-evaluator.js";
+import { NovelPlayQualityStore } from "../src/eval/novel-play-quality.js";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -76,6 +83,26 @@ it("independent review requires source coverage before freezing, binds real trac
   expect(create).toHaveBeenCalledOnce();
   // A frozen specification with empty semantic gold is not a certificate.
   await expect(cache.certifyCandidate(fixture.source)).rejects.toThrow();
+  expect(await cache.loadActive(fixture.source)).toBeNull();
+
+  // The TUI tail uses the actual archived candidate, frozen plan, evaluator and
+  // certification gate. Only the already completed compilation/roster work is stubbed.
+  vi.spyOn(roleReview, "reviewNovelRoles").mockResolvedValue(undefined);
+  vi.spyOn(preparation, "prepareAllCommand").mockResolvedValue({} as never);
+  const options = { root, sourceId: fixture.source.id, onProgress() {} };
+  await expect(certifyPreparedNovel(options)).rejects.toThrow("owning compiler lock");
+  await expect(withWorkspaceOperationLock(root, "compiler", () => certifyPreparedNovel(options))).rejects.toThrow("NOVEL_EVALUATION_FAILED");
+  const run = (await new NovelCompilationRunStore(root).read(fixture.source.id))!;
+  expect(run.history.map(item => item.phase)).toEqual(["roles", "repair", "requirements", "archive", "evaluation-plan", "evaluate"]);
+  expect(run.history.at(-1)?.status).toBe("blocked");
+  expect(create).toHaveBeenCalledOnce();
+  expect(await cache.loadActive(fixture.source)).toBeNull();
+  // Even an adapter claiming success cannot bypass the persisted quality and
+  // real certificate checks on the next stage.
+  const quality = (await new NovelPlayQualityStore(root).read(preparedSubjectHash(bundle)))!;
+  vi.spyOn(evaluation, "evaluateNovelPlay").mockResolvedValue({ ...quality, issues: [] });
+  await expect(withWorkspaceOperationLock(root, "compiler", () => certifyPreparedNovel(options))).rejects.toThrow("[certify]");
+  expect((await new NovelCompilationRunStore(root).read(fixture.source.id))!.history.at(-1)).toMatchObject({ phase: "certify", status: "blocked" });
   expect(await cache.loadActive(fixture.source)).toBeNull();
 });
 

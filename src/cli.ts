@@ -102,6 +102,7 @@ novelOptions(compileNovel).option("--rebuild", "recompile all source batches; an
   .option("--engineer-model <model>", "Codex model for repair and independent review (default: gpt-5.6-sol)")
   .option("--loop-history <path>", "adopt a settled legacy supervisor record without resetting its counters")
   .option("--loop-resume <hash>", "resume a resolved host stop using the exact supervision.stateHash; counters remain charged")
+  .option("--loop-new-run <hash>", "start one new rebuild from an exact completed supervision.stateHash; repeating this token resumes that generation")
   .option("--loop-host-patch <hash>", "independently verify an exact host source repair without renewing exhausted engineering rounds")
   .option("--loop-resolution <text>", "concrete host review authorizing migration of the legacy supervisor");
 const runCompileNovel = async (command: Command, novel?: string, phase?: NovelCompilationPhase | "status", batchStage?: "structure" | "observation" | "semantic" | "executable" | "boundary") => {
@@ -114,7 +115,7 @@ const runCompileNovel = async (command: Command, novel?: string, phase?: NovelCo
     rebuild: Boolean(options.rebuild), phase, batchStage, evaluationPlanFile: options.evaluationPlan,
     evaluationPlanHash: options.planHash, upstreamRepairPlan: options.upstreamPlan,
     upstreamRepairFinishFile: options.upstreamFinish, signal, loop: options.loop,
-    engineerModel: options.engineerModel, loopHistory: options.loopHistory, loopResolution: options.loopResolution, loopResume: options.loopResume, loopHostPatch: options.loopHostPatch,
+    engineerModel: options.engineerModel, loopHistory: options.loopHistory, loopResolution: options.loopResolution, loopResume: options.loopResume, loopHostPatch: options.loopHostPatch, loopNewRun: options.loopNewRun,
   }));
 };
 compileNovel.action(async (novel, _options, command) => runCompileNovel(command, novel));

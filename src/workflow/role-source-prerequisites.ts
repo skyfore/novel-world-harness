@@ -22,12 +22,22 @@ import { loadCompilerArtifactRecords } from "../compiler/artifact-retrieval.js";
 import { EntityResolutionStore } from "../compiler/entity-resolution.js";
 import { EventResolutionStore } from "../compiler/event-resolution.js";
 import { RequirementLedger } from "../compiler/requirement-ledger.js";
+import { verifyPrerequisiteTrace } from "../compiler/role-source-prerequisite-trace.js";
 import { discoverUpstreamRepairDiagnostics } from "../compiler/upstream-repair-discovery.js";
 import { prerequisiteScopeSchema, prerequisiteTaskId, prerequisitePhases, prerequisiteNextStep, prerequisiteStop,
-  prerequisiteSpecificationSchema, prerequisiteBindingSchema, prerequisiteCheckSchema, prerequisiteSelectors, checkPrerequisiteOutput,
+  prerequisiteSpecificationSchema, prerequisiteBindingSchema, prerequisiteCheckSchema, prerequisiteRecordSchema, prerequisiteSelectors, checkPrerequisiteOutput,
   type PrerequisiteScope, type PrerequisiteRecord, type PrerequisiteOutput } from "../compiler/role-source-prerequisites.js";
 
 const once = (file: string, value: unknown) => fs.writeFile(file, JSON.stringify(value, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+async function readOptional(file: string): Promise<unknown | undefined> {
+  try { return JSON.parse(await fs.readFile(file, "utf8")); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+}
+async function retain(file: string, value: unknown) {
+  const previous = await readOptional(file);
+  if (previous === undefined) await once(file, value);
+  else if (contentHash(previous) !== contentHash(value)) throw prerequisiteStop(`Retained ${path.basename(file)} changed; inspect the original task before recovery`);
+}
 const parameters = (schema: z.ZodType) => { const { $schema: _, ...result } = z.toJSONSchema(schema); return result; };
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 export const PREREQUISITE_LIMITS = Object.freeze({ maxModelCalls: 24, maxRequestBytes: 512_000, maxTotalPayloadBytes: 12_288_000 });
@@ -46,9 +56,6 @@ export async function runRoleSourcePrerequisites(options: {
   const taskId = prerequisiteTaskId(scope), scopeHash = contentHash(scope);
   if (path.resolve(directory) !== rolePrerequisiteDirectory(root, scope)) throw prerequisiteStop("Prerequisite task cannot move to a new attempt directory");
   await assertOriginal();
-  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  await once(path.join(directory, "start.json"), { taskId, scopeHash, pid: process.pid, at: new Date().toISOString(),
-    maxInvocations: 1, phases: prerequisitePhases, limitsPerPhase: PREREQUISITE_LIMITS });
   const publish = async (phase: string, extra: Record<string, unknown> = {}) => {
     const state = { version: 1, root, sourceId: scope.sourceId, sourceHash: scope.sourceHash, taskId,
       policyHash: scopeHash, parentStateHash: scope.parentStateHash, phase, childPid: null,
@@ -56,35 +63,49 @@ export async function runRoleSourcePrerequisites(options: {
     const temporary = path.join(directory, `state.${process.pid}.tmp`);
     await once(temporary, state); await fs.rename(temporary, path.join(directory, "state.json"));
   };
-  await publish("RUNNING", { reason: "Source prerequisite work only; parent compilation remains BREAK." });
-  try {
-    await withWorkspaceOperationLock(root, "compiler", async () => {
+  return withWorkspaceOperationLock(root, "compiler", async () => {
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    try {
       await assertOriginal();
-      await once(path.join(directory, "scope.json"), scope);
+      await retain(path.join(directory, "scope.json"), scope);
       const source = await WorkspaceStore.openReadOnly(root).getSource(scope.sourceId);
       if (!source || source.contentSha256 !== scope.sourceHash) throw prerequisiteStop("Immutable source registration changed");
       const bytes = await readSourceMaterial(root, source), manifest = await new SegmentStore(root).readManifest(scope.sourceId);
       if (!manifest || contentHash(manifest) !== contentHash(await segmentSource(root, source))) throw prerequisiteStop("Original segment layout is missing or stale");
       const texts = new Map(manifest.segments.map(s => [s.id, Buffer.from(bytes).subarray(s.startByte, s.endByte).toString("utf8")]));
-      const ledger = new RequirementLedger(root, scope.sourceId), records = await ledger.sourcePrerequisites(taskId);
-      if (records.length) throw prerequisiteStop("Original prerequisite task already has stage history; no redispatch");
-      const runtime = await ModelRuntime.create({ authPath: getAgentDir() + "/auth.json", modelsPath: getAgentDir() + "/models.json", refreshOnCreate: false });
-      const auth = await runtime.checkAuth("openai-codex");
-      if (auth?.type !== "oauth" || !runtime.getProvider("openai-codex")?.auth?.oauth?.isSubscription
-        || !runtime.getModel("openai-codex", "gpt-6.1-sol")) throw prerequisiteStop("Required Pi subscription provider unavailable; no fallback");
-      await once(path.join(directory, "provider.json"), { provider: "openai-codex", model: "gpt-6.1-sol", subscription: true, credentialType: "oauth" });
+      const ledger = new RequirementLedger(root, scope.sourceId), published = await ledger.sourcePrerequisites(taskId);
+      const records: PrerequisiteRecord[] = [];
       const traces = new TraceStore(root);
-      if ((await traces.peekRuns({ status: "running", limit: 100 })).length) throw prerequisiteStop("Another model trace is unsettled");
+      let providerReady = false;
+      const admitProvider = async () => {
+        if (providerReady) return;
+        const runtime = await ModelRuntime.create({ authPath: getAgentDir() + "/auth.json", modelsPath: getAgentDir() + "/models.json", refreshOnCreate: false });
+        const auth = await runtime.checkAuth("openai-codex");
+        if (auth?.type !== "oauth" || !runtime.getProvider("openai-codex")?.auth?.oauth?.isSubscription
+          || !runtime.getModel("openai-codex", "gpt-6.1-sol")) throw prerequisiteStop("Required Pi subscription provider unavailable; restore provider access before retrying the unstarted phase; no fallback");
+        if ((await traces.peekRuns({ status: "running", limit: 100 })).length) throw prerequisiteStop("Another model trace is unsettled");
+        await retain(path.join(directory, "provider.json"), { provider: "openai-codex", model: "gpt-6.1-sol", subscription: true, credentialType: "oauth" });
+        providerReady = true;
+      };
+      const startIdentity = { taskId, scopeHash, maxInvocations: 1, phases: prerequisitePhases, limitsPerPhase: PREREQUISITE_LIMITS };
+      const started = await readOptional(path.join(directory, "start.json"));
+      if (started === undefined) {
+        if (published.length) throw prerequisiteStop("Original prerequisite start marker is missing");
+        await admitProvider();
+        await once(path.join(directory, "start.json"), { ...startIdentity, pid: process.pid, at: new Date().toISOString() });
+      } else {
+        const { pid: _pid, at: _at, ...identity } = started as Record<string, unknown>;
+        if (contentHash(identity) !== contentHash(startIdentity)) throw prerequisiteStop("Original prerequisite invocation changed");
+      }
       // Discovery is available only after independent source specification acceptance.
       let discovery: Awaited<ReturnType<typeof discoverUpstreamRepairDiagnostics>> | undefined;
       for (const phase of prerequisitePhases) {
         if (prerequisiteNextStep(records) !== phase) break;
         await assertOriginal();
-        await once(path.join(directory, `${phase}.invocation.json`), { taskId, phase, scopeHash, pid: process.pid });
         const mapping = phase.startsWith("binding");
         if (mapping && !discovery) {
           discovery = await discoverUpstreamRepairDiagnostics(root, scope.sourceId);
-          await once(path.join(directory, "discovery.json"), discovery);
+          await retain(path.join(directory, "discovery.json"), discovery);
         }
         const input = { scope, taskId, scopeHash, phase,
           ...(phase === "specification" ? {} : { specification: records[0]!.output, specificationHash: contentHash(records[0]!.output) }),
@@ -95,7 +116,23 @@ export async function runRoleSourcePrerequisites(options: {
         };
         const prompt = JSON.stringify(input);
         if (redactHostWorkspacePath(prompt, root) !== prompt) throw prerequisiteStop("Model input contains a host workspace path; do not redact evidence or bypass policy");
-        await once(path.join(directory, `${phase}.input.json`), input);
+        const saved = await readOptional(path.join(directory, `${phase}.record.json`));
+        const prior = published.find(r => r.phase === phase);
+        if (saved !== undefined) {
+          const record = prerequisiteRecordSchema.parse(saved);
+          if (record.inputHash !== contentHash(input) || contentHash(record.scope) !== scopeHash || record.phase !== phase
+            || (prior && contentHash(prior) !== contentHash(record))) throw prerequisiteStop("Retained prerequisite result differs from its original input or ledger");
+          await verifyPrerequisiteTrace(root, record);
+          if (!prior) await ledger.recordSourcePrerequisite(record, bytes);
+          records.push(record);
+          continue;
+        }
+        if (prior || await readOptional(path.join(directory, `${phase}.invocation.json`)) !== undefined) {
+          throw prerequisiteStop(`Phase ${phase} was consumed without a recoverable completed record; inspect its original trace and failure, never redispatch`);
+        }
+        await admitProvider();
+        await retain(path.join(directory, `${phase}.input.json`), input);
+        await once(path.join(directory, `${phase}.invocation.json`), { taskId, phase, scopeHash, pid: process.pid });
         const budget = new ModelRequestBudget(PREREQUISITE_LIMITS, { save: state => {
           const file = path.join(directory, `${phase}.budget.json`), temp = file + ".tmp";
           writeFileSync(temp, JSON.stringify({ taskId, phase, limits: PREREQUISITE_LIMITS, state, originalBudgetHash: scope.originalBudgetHash }), { flag: "wx", mode: 0o600 });
@@ -104,6 +141,8 @@ export async function runRoleSourcePrerequisites(options: {
         let session: PiAgentSession | undefined, output: PrerequisiteOutput | undefined, recordEvidence: PrerequisiteRecord["evidence"] = [];
         const trace = await TraceRecorder.start(traces, { kind: "prepare", sourceId: scope.sourceId, operationId: `prerequisite-${taskId}-${phase}` });
         const delivered = new Set<string>(), readFindings = new Set<string>(), readCandidates = new Set<string>();
+        const pendingSource = new Set<string>(), pendingFindings = new Set<string>(), pendingCandidates = new Set<string>();
+        let pendingDiscovery = false;
         let dependencyDiscoveryRead = false;
         const failedInputs = new Map<string, string>();
         let fatalError: Error | undefined;
@@ -123,7 +162,7 @@ export async function runRoleSourcePrerequisites(options: {
           }
         };
         const tools = [defineTool({ name: "read_prerequisite_source", label: "Read immutable prerequisite source",
-          description: "Same-source lexical discovery and full segment reads. query/offset returns segments[].id and nextOffset; copy id into segmentId. Search snippets are not evidence. No selector guesses. Correct an ID/cursor miss once from discovery; never retry unchanged. Read every cited segment in this fresh session before submitting.",
+          description: "Same-source lexical discovery and full segment reads. query/offset returns segments[].id and nextOffset; copy id into segmentId. Search snippets are not evidence. No selector guesses. Correct an ID/cursor miss once from discovery; never retry unchanged. Read every cited segment in this fresh session, receive the results, then submit in a later model response; sibling reads and submission do not count.",
           parameters: parameters(sourceRequest), async execute(_id, raw) { return guarded("source", raw, async () => {
             const args = sourceRequest.parse(raw);
             if (args.segmentId) {
@@ -131,7 +170,7 @@ export async function runRoleSourcePrerequisites(options: {
               if (!segment || args.query || args.offset) throw new Error("Use read_prerequisite_source query/offset=0, copy segments[].id into segmentId, and correct once; do not guess.");
               const text = texts.get(segment.id)!;
               if (Buffer.byteLength(text) > 160_000) throw prerequisiteStop("Original segment exceeds bounded delivery; host pagination required");
-              delivered.add(segment.id);
+              pendingSource.add(segment.id);
               return result({ segmentId: segment.id, text, complete: true });
             }
             const matched = manifest.segments.filter(s => !args.query || texts.get(s.id)!.includes(args.query));
@@ -158,13 +197,13 @@ export async function runRoleSourcePrerequisites(options: {
               if (args.findingId || args.candidateId || args.annotationId) {
                 const found = args.findingId ? findings.find(f => f.findingId === args.findingId) : args.candidateId ? candidates.find(c => c.id === args.candidateId) : annotationRecords.find(a => a.annotationId === args.annotationId);
                 if (!found || args.offset) throw new Error("Call discover_prerequisite_dependencies query/offset=0; copy findingId, id or annotationId exactly and correct once. Do not guess.");
-                if (args.findingId) readFindings.add(args.findingId); else if (args.candidateId) readCandidates.add(args.candidateId);
-                dependencyDiscoveryRead = true;
+                if (args.findingId) pendingFindings.add(args.findingId); else if (args.candidateId) pendingCandidates.add(args.candidateId);
+                pendingDiscovery = true;
                 return result(found);
               }
               const all = [...findings, ...candidates, ...annotationRecords].filter(item => !args.query || JSON.stringify(item).includes(args.query));
               if (args.offset > all.length) throw new Error("Use discover_prerequisite_dependencies offset=0 and its nextOffset for one corrected retry.");
-              dependencyDiscoveryRead = true;
+              pendingDiscovery = true;
               return result({ items: all.slice(args.offset, args.offset + 12).map(item => "findingId" in item
                 ? { findingId: item.findingId, diagnostic: item.diagnostic, sourceSegmentIds: item.sourceSegmentIds }
                 : "annotationId" in item ? { annotationId: item.annotationId, annotationType: item.annotation.annotationType }
@@ -177,20 +216,21 @@ export async function runRoleSourcePrerequisites(options: {
           description: "Single accepted submission for this phase. Copy scopeHash, original questionIds and predecessor hashes from the task. Retain every critical question. Cite exact text selectors after complete source reads. For shape/ref errors consult read_prerequisite_source or discover_prerequisite_dependencies, copy exact returned fields, and correct once; unchanged/second failures or consumed submission stop. This never closes a question, grants repair, resumes compilation or certifies a world.",
           parameters: parameters(schema), async execute(_id, raw) { return guarded("submission", raw, async () => {
             if (output) throw prerequisiteStop("Submission already consumed");
-            if (mapping && !dependencyDiscoveryRead) throw new Error("Discover actual dependencies first with discover_prerequisite_dependencies query/offset=0; absence cannot be inferred from the prompt. Correct once.");
+            if (mapping && !dependencyDiscoveryRead) throw new Error("Discover actual dependencies first with discover_prerequisite_dependencies query/offset=0; receive the results before submitting in a later model response. Absence cannot be inferred from the prompt or sibling reads. Correct once.");
             const proposed = checkPrerequisiteOutput(raw, scope, phase, records, discovery);
             const selectors = prerequisiteSelectors(proposed), receipts: PrerequisiteRecord["evidence"] = [];
             for (const selector of selectors) {
               const segment = manifest.segments.find(s => s.id === selector.segment_id);
-              if (!segment || !delivered.has(segment.id)) throw new Error("Unread source selector: use read_prerequisite_source, copy segments[].id, read the complete segment, then correct once. Search snippets do not count.");
+              if (!segment || !delivered.has(segment.id)) throw new Error("Unread source selector: use read_prerequisite_source, copy segments[].id, read the complete segment, then submit in a later model response after receiving that result. Correct once; search snippets and reads in the same response do not count.");
               receipts.push({ selector, anchor: await resolveTextSelectorAnchor(root, segment, selector) });
             }
             const bound = proposed.phase === "binding" ? proposed : phase === "binding-check" ? records.at(-1)!.output : undefined;
-            if (bound?.phase === "binding" && bound.bindings.some(b => b.findingIds.some(id => !readFindings.has(id)) || b.candidateIds.some(id => !readCandidates.has(id)))) throw new Error("Unread typed dependency: copy each bound findingId/candidateId into discover_prerequisite_dependencies, read full payload, and correct once.");
+            if (bound?.phase === "binding" && bound.bindings.some(b => b.findingIds.some(id => !readFindings.has(id)) || b.candidateIds.some(id => !readCandidates.has(id)))) throw new Error("Unread typed dependency: copy each bound findingId/candidateId into discover_prerequisite_dependencies, read full payload, receive the results, and correct once in a later model response; sibling reads do not count.");
             await once(path.join(directory, `${phase}.proposal.json`), proposed);
             output = proposed; recordEvidence = receipts;
             return { ...result({ retained: true, questionsSettled: false, authorizationGranted: false }), terminate: true };
           }); } }));
+        let traceSucceeded = false;
         try {
           await publish("RUNNING", { stage: phase, traceRunId: trace.manifest.id, reason: "Pi prerequisite proposal/review; parent compiler remains BREAK." });
           const hooks = new RuntimeHooks();
@@ -200,6 +240,16 @@ export async function runRoleSourcePrerequisites(options: {
               piAgentDir: getAgentDir(), saveSession: false, includeProjectInstructions: false, includeLocalTools: false,
               includeNwhExtension: false, trackLastOpenedSession: false, autoCompaction: false, interactionMode: "compiler",
               requestBudget: budget, additionalTools: tools,
+              beforeModelRequest: async () => {
+                if (fatalError) throw fatalError;
+                // A tool's completion alone does not mean the provider saw its
+                // result. Only the next request admits it as submission evidence.
+                for (const id of pendingSource) delivered.add(id);
+                for (const id of pendingFindings) readFindings.add(id);
+                for (const id of pendingCandidates) readCandidates.add(id);
+                dependencyDiscoveryRead ||= pendingDiscovery;
+                pendingSource.clear(); pendingFindings.clear(); pendingCandidates.clear(); pendingDiscovery = false;
+              },
               systemPromptOverride: prerequisitePrompt(phase), trace: { parent: trace.rootContext, invocationName: phase, parts: [] } });
             if (session.model !== "openai-codex/gpt-6.1-sol") throw prerequisiteStop("Unexpected resolved model");
             await trace.record("stage.started", { phase: "source-prerequisite-session", sessionId: session.id, scopeHash,
@@ -214,13 +264,14 @@ export async function runRoleSourcePrerequisites(options: {
           await assertOriginal();
           if (discovery && contentHash(await discoverUpstreamRepairDiagnostics(root, scope.sourceId)) !== contentHash(discovery)) throw prerequisiteStop("Typed dependencies changed during review");
           await trace.finish("succeeded");
+          traceSucceeded = true;
           const record: PrerequisiteRecord = { taskId, scope, phase, inputHash: contentHash(input), output, evidence: recordEvidence,
             traceRunId: trace.manifest.id, sessionId: session.id, provider: "openai-codex", model: "gpt-6.1-sol", subscription: true,
             predecessorRecordHash: records.length ? contentHash(records.at(-1)) : null };
           await once(path.join(directory, `${phase}.record.json`), record);
           await ledger.recordSourcePrerequisite(record, bytes);
           records.push(record);
-        } catch (error) { await trace.finish("failed").catch(() => {}); throw error; }
+        } catch (error) { if (!traceSucceeded) await trace.finish("failed").catch(() => {}); throw error; }
         finally { budget.close(); await session?.dispose(); }
       }
       await assertOriginal();
@@ -228,8 +279,8 @@ export async function runRoleSourcePrerequisites(options: {
       await publish(next === "host-authorization-review" ? "DONE" : "BREAK", { stage: next, records: records.map(r => ({ phase: r.phase, hash: contentHash(r), traceRunId: r.traceRunId })),
         reason: next === "host-authorization-review" ? "Independent source specifications and dependency reviews retained. Host must verify exact repair scopes and authority; parent remains BREAK, unclosed and uncertified."
           : "Independent prerequisite review retained a block. Preserve all original critical questions and every new attempt; no retry or parent resume." });
-    });
-  } catch (error) { await publish("BREAK", { reason: String(error) }); throw error; }
+    } catch (error) { await publish("BREAK", { reason: String(error) }); throw error; }
+  });
 }
 
 export function prerequisitePrompt(phase: string) {

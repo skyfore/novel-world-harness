@@ -20,7 +20,7 @@ import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import { NovelEvaluationPlanStore, validateEvaluationPlan } from "../eval/novel-evaluation-plan.js";
 import { evaluateNovelPlay } from "../eval/novel-play-evaluator.js";
 import { NovelPlayQualityStore } from "../eval/novel-play-quality.js";
-import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { withWorkspaceOperationLock, WorkspaceOperationLock } from "../util/workspace-lock.js";
 import { resolveNovelSource } from "../world/play-experience.js";
 import { resolvePreparationBranchId } from "../workflow/prepare.js";
 import { reviewNovelRoles } from "../workflow/role-review.js";
@@ -62,7 +62,24 @@ export async function compileNovelCommand(options: CompileNovelOptions): Promise
   if (options.rebuild && options.phase) throw new Error("--rebuild belongs to the full compile-novel command; individual stages preserve existing progress.");
   if (options.evaluationPlanFile && options.evaluationPlanHash) throw new Error("Choose --evaluation-plan or --plan-hash, not both.");
   if (options.upstreamRepairFinishFile && !options.upstreamRepairPlan) throw new Error("--upstream-finish requires the exact --upstream-plan; correct the host selection before retrying.");
-  return withWorkspaceOperationLock(root, "compiler", async () => {
+  return withWorkspaceOperationLock(root, "compiler", () => compileNovelLocked({ ...options, root }));
+}
+
+/** TUI compilation already owns the lock and source batches. Reuse the CLI's
+ * exact delivery stages, including independent evaluation and certification.
+ */
+export async function certifyPreparedNovel(options: Pick<CompileNovelOptions, "root" | "sourceId" | "configPath" | "model" | "cacheRoot" | "onProgress" | "signal">): Promise<NovelCompilationRun> {
+  const root = path.resolve(options.root);
+  if ((await WorkspaceOperationLock.inspect(root)).owner?.pid !== process.pid) throw new Error("Prepared delivery requires the owning compiler lock; stop and inspect the active preparation before retrying.");
+  let run: NovelCompilationRun | undefined;
+  for (const phase of ["roles", "repair", "requirements", "archive", "evaluation-plan", "evaluate", "certify", "activate"] as const) {
+    run = await compileNovelLocked({ ...options, root, phase });
+  }
+  return run!;
+}
+
+async function compileNovelLocked(options: CompileNovelOptions): Promise<NovelCompilationRun> {
+    const root = options.root;
     options.signal?.throwIfAborted();
     const configPath = options.configPath ?? path.join(root, "novel-harness.yaml");
     const config = await loadOptionalConfig(configPath);
@@ -261,7 +278,6 @@ export async function compileNovelCommand(options: CompileNovelOptions): Promise
     report(completed.completed ? `Novel compilation complete: source=${source.id}, certifiedRevision=${run.bundleHash}, branch=${run.branchId}.`
       : `Stage ${options.phase} completed. This is not a full-novel completion certificate.`);
     return completed;
-  });
 }
 
 async function assertRebuildSafe(root: string, sourceId: string) {

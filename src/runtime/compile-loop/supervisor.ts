@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { compileLoopDirectory, loopStateSchema, read, save, repairVerdict, reviewVerdict, type CompileLoopState } from "./state.js";
+import { compileLoopDirectory, activeCompileLoopDirectory, loopStateSchema, read, save, repairVerdict, reviewVerdict, type CompileLoopState } from "./state.js";
 import { captureWorkspace, changes, assertPatchScope, baselineContents, digest, fixedTests, protectedPaths } from "./workspace.js";
 import { runLoopChild, type ChildOutcome } from "./process.js";
 import type { WorkerRequest } from "./worker.js";
@@ -18,18 +18,28 @@ type Snapshot = Awaited<ReturnType<typeof inspectNovelCompilation>> & { supervis
 export const succeeded = (r: ChildOutcome) => r.code === 0 && !r.error && !r.signal && !r.timedOut && !r.cancelled;
 const limits = { repairsPerIncident: 2, workerMs: 12 * 60 * 60_000, engineeringMs: 90 * 60_000, checkMs: 5 * 60_000 };
 export type CompileLoopOptions = { request: WorkerRequest; sourceHash: string; engineerModel: string; signal: AbortSignal;
-  legacyState?: string; resolution?: string; resumeStateHash?: string; hostPatchHash?: string; onProgress?: (message: string) => void; runner?: typeof runLoopChild };
+  legacyState?: string; resolution?: string; resumeStateHash?: string; hostPatchHash?: string; newRunFromStateHash?: string; onProgress?: (message: string) => void; runner?: typeof runLoopChild };
+
+/** Resolve code and the TS loader from the installed harness, never novel files. */
+export function compileLoopWorkerArgs(): string[] {
+  return import.meta.url.endsWith(".ts")
+    ? ["--import", fileURLToPath(import.meta.resolve("tsx")), fileURLToPath(new URL("./worker.ts", import.meta.url))]
+    : [fileURLToPath(new URL("./worker.js", import.meta.url))];
+}
 
 /** One persistent owner. Failures become retained engineering incidents before any new compiler dispatch. */
 export async function runCompileLoop(options: CompileLoopOptions): Promise<CompileLoopState> {
-  const { request, signal } = options, root = path.resolve(request.root), directory = compileLoopDirectory(root, request.sourceId);
-  if (directory === root || directory.startsWith(root + path.sep)) throw new Error("COMPILE_LOOP_AUDIT_SCOPE: NWH_HOME must keep supervisor records outside the editable checkout.");
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const lock = path.join(path.dirname(directory), "supervisor.lock"), token = randomUUID(), stateFile = path.join(directory, "state.json");
+  const { request, signal } = options, root = path.resolve(request.root), base = compileLoopDirectory(root, request.sourceId);
+  if (base === root || base.startsWith(root + path.sep)) throw new Error("COMPILE_LOOP_AUDIT_SCOPE: NWH_HOME must keep supervisor records outside the editable checkout.");
+  mkdirSync(base, { recursive: true, mode: 0o700 });
+  const lock = path.join(path.dirname(base), "supervisor.lock"), token = randomUUID();
   try { writeFileSync(lock, JSON.stringify({ token, pid: process.pid, host: hostname(), at: new Date().toISOString() }), { flag: "wx", mode: 0o600 }); }
   catch { throw new Error(`COMPILE_LOOP_LOCK_PRESENT: inspect ${lock} on its owning host; do not delete it or start another supervisor.`); }
   const report = options.onProgress ?? console.log;
   let state: CompileLoopState | undefined;
+  let directory = base, stateFile = path.join(base, "state.json"), requestFile = path.join(base, "request.json");
+  let previousGeneration: CompileLoopState["previousGeneration"];
+  let activateGeneration = false;
   let admitted = false;
   let hostPatchHash: string | undefined;
   let registryFile = "", registryLock = "";
@@ -38,11 +48,30 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
   const engineeringScope = { workspace: root, sourceId: request.sourceId, model: options.engineerModel, effort: "max" as const };
   const persist = () => { state!.updatedAt = new Date().toISOString(); save(stateFile, state); };
   const phase = (value: CompileLoopState["phase"], reason: string) => { state!.phase = value; state!.reason = reason; persist(); report(`Compilation loop: ${value}: ${reason}`); };
-  const requestFile = path.join(directory, "request.json");
-  const sourceEntry = path.join(root, "src/runtime/compile-loop/worker.ts");
-  const nodeArgs = existsSync(sourceEntry) ? ["--import", "tsx", sourceEntry] : [fileURLToPath(new URL("./worker.js", import.meta.url))];
+  const nodeArgs = compileLoopWorkerArgs();
   const policy = { version: 1, request, engineerModel: options.engineerModel, effort: "max", sourceHash: options.sourceHash, limits, protectedPaths, fixedTests };
   try {
+    directory = activeCompileLoopDirectory(root, request.sourceId);
+    if (options.newRunFromStateHash !== undefined) {
+      const key = options.newRunFromStateHash;
+      if (!request.rebuild || !/^[a-f0-9]{64}$/.test(key) || options.legacyState || options.hostPatchHash || options.resumeStateHash) throw new Error("COMPILE_LOOP_NEW_RUN_SCOPE: use --rebuild with --loop-new-run copied from a completed supervision.stateHash; do not combine new work with stop recovery.");
+      const next = path.join(base, "generations", key);
+      if (directory !== next) {
+        const previousFile = path.join(directory, "state.json");
+        const prior = existsSync(previousFile) ? loopStateSchema.parse(read(previousFile)) : undefined;
+        if (!prior || prior.phase !== "DONE" || prior.childPid || prior.root !== root || prior.sourceId !== request.sourceId
+          || prior.sourceHash !== options.sourceHash || digest(read(previousFile)) !== key) throw new Error("COMPILE_LOOP_NEW_RUN_STALE: only the exact completed generation can authorize a new rebuild. Inspect compile-novel status and copy supervision.stateHash; BREAK and in-flight work must retain their original recovery.");
+        previousGeneration = { directory, stateHash: key };
+        if (existsSync(path.join(next, "state.json"))) {
+          const staged = loopStateSchema.parse(read(path.join(next, "state.json")));
+          if (staged.workers || staged.phase !== "READY" || !staged.previousGeneration || digest(staged.previousGeneration) !== digest(previousGeneration)) throw new Error("COMPILE_LOOP_GENERATION_CONFLICT: inspect the original staged generation; do not repoint or redispatch it.");
+        }
+        directory = next;
+        mkdirSync(directory, { recursive: true, mode: 0o700 });
+        activateGeneration = true;
+      }
+    }
+    stateFile = path.join(directory, "state.json"); requestFile = path.join(directory, "request.json");
     registryFile = dedicatedRegistryPath(root, request.sourceId);
     registryLock = path.join(path.dirname(registryFile), "supervisor.lock");
     mkdirSync(path.dirname(registryFile), { recursive: true });
@@ -50,7 +79,9 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
     if (existsSync(stateFile)) {
       state = loopStateSchema.parse(read(stateFile));
       if (state.root !== root || state.sourceId !== request.sourceId || state.sourceHash !== options.sourceHash) throw new Error("COMPILE_LOOP_SCOPE_CHANGED: inspect the original source and workspace bindings; do not rewrite the retained state or retry under another source.");
-      if (state.policyHash !== digest(policy)) throw new Error("COMPILE_LOOP_POLICY_CHANGED: inspect the saved policy and original source before revising it; no reset or unchanged retry.");
+      if (state.policyHash !== digest(policy)) throw new Error(state.phase === "DONE" && request.rebuild
+        ? "COMPILE_LOOP_NEW_RUN_REQUIRED: a new rebuild must bind the completed supervision.stateHash with --loop-new-run; the original delivery and policy remain unchanged."
+        : "COMPILE_LOOP_POLICY_CHANGED: inspect the saved policy and original source before revising it; no reset or unchanged retry.");
       if (state.childPid || !["READY", "BREAK", "DONE"].includes(state.phase)) throw new Error("COMPILE_LOOP_IN_FLIGHT: inspect the original child on its owning host; never redispatch uncertain work.");
       if (!existsSync(requestFile) || !existsSync(path.join(directory, "policy.json"))
         || digest(read(requestFile)) !== digest(request) || digest(read(path.join(directory, "policy.json"))) !== state.policyHash) {
@@ -74,7 +105,8 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
       if (options.hostPatchHash) throw new Error("COMPILE_LOOP_HOST_PATCH_SCOPE: no retained incident exists for this host patch.");
       state = { version: 1, root, sourceId: request.sourceId, sourceHash: options.sourceHash, policyHash: digest(policy),
         phase: "READY", workers: 0, repairs: 0, commands: 0, failures: {}, childPid: null, reason: "", updatedAt: "",
-        engineerSession: null, pending: null, legacy: null, verifiedPatches: [], delivery: null, resolutions: [] };
+        engineerSession: null, pending: null, legacy: null, verifiedPatches: [], delivery: null, resolutions: [],
+        ...(previousGeneration ? { previousGeneration } : {}) };
       if (options.legacyState) {
         if (!options.resolution?.trim()) throw new Error("COMPILE_LOOP_HISTORY_REVIEW_REQUIRED: supply the concrete reviewed migration in --loop-resolution; preserve the original record.");
         const file = path.resolve(options.legacyState), prior = read<Record<string, unknown>>(file);
@@ -86,6 +118,18 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
           policyChange: "Explicit host migration to per-incident bounded repair. Original counters, deadline, causes and all domain stops remain recorded; no domain allowance is renewed." });
       }
       save(path.join(directory, "policy.json"), policy); save(requestFile, request); admitted = true; persist();
+    }
+    if (activateGeneration) {
+      // The complete READY generation is durable before the atomic pointer swap;
+      // no child may start while status still points at its predecessor.
+      admitted = false;
+      save(path.join(base, "current-generation.json"), { version: 1, generation: options.newRunFromStateHash });
+      admitted = true;
+    }
+    if (state.previousGeneration) {
+      const prior = state.previousGeneration;
+      if ((prior.directory !== base && (path.dirname(prior.directory) !== path.join(base, "generations") || !/^[a-f0-9]{64}$/.test(path.basename(prior.directory))))
+        || digest(read(path.join(prior.directory, "state.json"))) !== prior.stateHash) throw new Error("COMPILE_LOOP_GENERATION_HISTORY_CHANGED: original generation binding changed; inspect its retained state before recovery, never replace it.");
     }
     if (existsSync(registryFile)) {
       engineeringSession = dedicatedSessionSchema.parse(read(registryFile)); dedicatedSessionMode(engineeringSession, engineeringScope, Date.now());
@@ -105,6 +149,13 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
       const readOnlyRootDirectory = ["types", "tests"].includes(label) ? prefix + ".sandbox" : undefined;
       if (readOnlyRootDirectory) mkdirSync(readOnlyRootDirectory);
       const sealed = captureWorkspace(directory);
+      const capturePriorGenerations = () => {
+        if (directory === base) return {};
+        const snapshot = captureRecordTree(base), current = path.relative(base, directory) + path.sep;
+        const registry = path.relative(base, path.dirname(registryFile)) + path.sep;
+        return Object.fromEntries(Object.entries(snapshot).filter(([file]) => !file.startsWith(current) && !file.startsWith(registry)));
+      };
+      const priorGenerations = capturePriorGenerations();
       // Registry changes are published only by the owning host's thread-start
       // callback and checked independently against registryHash below.
       delete sealed[path.relative(directory, registryFile)];
@@ -112,12 +163,13 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
       if ((existsSync(registryFile) ? fileHash(registryFile) : undefined) !== registryHash) throw new Error("COMPILE_LOOP_REGISTRY_CHANGED: inspect the registered dedicated session before dispatch.");
       const historyPaths = dedicatedHistoryPaths(root, registryFile);
       const outcome = await (options.runner ?? runLoopChild)({ command: executable, args, cwd: root, prefix, signal, timeoutMs, stdin, onLine,
-        immutablePaths: [...historyPaths, lock, ...Object.keys(sealed).map(f => path.join(directory, f)), ...(state!.legacy ? [state!.legacy.file] : [])],
+        immutablePaths: [...historyPaths, lock, ...Object.keys(sealed).map(f => path.join(directory, f)), ...Object.keys(priorGenerations).map(f => path.join(base, f)), ...(state!.legacy ? [state!.legacy.file] : [])],
         ...(executable === "codex" ? { codexFilePolicy: label === "repair" ? "workspace-write" as const : "read-only" as const } : {}),
-        ...(executable === "codex" ? { immutablePaths: [...historyPaths, directory, lock, ...(state!.legacy ? [state!.legacy.file] : [])] } : {}),
+        ...(executable === "codex" ? { immutablePaths: [...historyPaths, base, lock, ...(state!.legacy ? [state!.legacy.file] : [])] } : {}),
         ...(readOnlyRootDirectory ? { readOnlyRootDirectory } : {}),
         onSpawn(pid) { state!.childPid = pid; persist(); sealed["state.json"] = captureWorkspace(directory)["state.json"]!; } });
       const after = captureWorkspace(directory);
+      if (changes(priorGenerations, capturePriorGenerations()).length) throw new Error("COMPILE_LOOP_GENERATION_HISTORY_CHANGED: preserve the original completed generations; no redispatch.");
       if (Object.keys(sealed).some(file => sealed[file] !== after[file])) throw new Error("COMPILE_LOOP_AUDIT_CHANGED: retain the original child and records; no redispatch.");
       const recordsAfter = captureRecordTree(recordsDirectory);
       if ((existsSync(registryFile) ? fileHash(registryFile) : undefined) !== registryHash) throw new Error("COMPILE_LOOP_REGISTRY_CHANGED: engineering changed the canonical registry.");
@@ -218,7 +270,7 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
         const pending = state.pending, count = state.failures[pending.key] ?? 0;
         const hostRepair = Boolean(hostPatchHash);
         if (!hostRepair && count >= limits.repairsPerIncident) throw new Error(`COMPILE_LOOP_NO_PROGRESS: ${count} engineering rounds for the same incident exhausted; inspect ${pending.evidenceFile} and preserve its counters.`);
-        if (!existsSync(sourceEntry) || !existsSync(path.join(root, "node_modules/typescript/bin/tsc"))) throw new Error("COMPILE_LOOP_REPAIR_CHECKOUT_REQUIRED: repair requires this compiler's source checkout and installed verification tools; retain the incident.");
+        if (!existsSync(path.join(root, "src/runtime/compile-loop/worker.ts")) || !existsSync(path.join(root, "node_modules/typescript/bin/tsc"))) throw new Error("COMPILE_LOOP_REPAIR_CHECKOUT_REQUIRED: repair requires this compiler's source checkout and installed verification tools; retain the incident.");
         if (!hostRepair) {
           state.failures[pending.key] = count + 1; state.repairs++;
           phase("REPAIR", `Diagnosing retained failure; round ${count + 1}/${limits.repairsPerIncident}.`);

@@ -208,6 +208,7 @@ async function runAndPrintTurn(
   if (outcome.canonicalRecoveryError) stdout.write(`Canonical scaffold recovery stopped: ${outcome.canonicalRecoveryError}\n`);
   if (outcome.npcResponseError) stdout.write(`NPC response stopped (not treated as in-world silence): ${outcome.npcResponseError}\n`);
   if (outcome.conversationError) stdout.write(`Conversation memory could not be persisted: ${outcome.conversationError}\n`);
+  if (outcome.sessionError) stdout.write(`${outcome.sessionError}\n`);
   if (outcome.repairHintError) stdout.write(`Runtime compiler repair hint could not be persisted: ${outcome.repairHintError}\n`);
   return result;
 }

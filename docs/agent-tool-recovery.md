@@ -1,5 +1,27 @@
 # Agent tool failure recovery
 
+## Player move transport recovery
+
+A `playerMoveId` identifies one exact request on one branch. The host validates
+preconditions before publishing an exclusive immutable intent under
+`world/play/moves/<branch>/<move-hash>/`. A completed receipt can return the
+original outcome without another model request, world commit or conversation
+append. `PLAY_MOVE_ID_CONFLICT` means the same ID was supplied with different
+input: inspect the original request, never relabel it to force another action.
+
+Session persistence is derived metadata. Its failure is returned as `sessionError`
+alongside the actual committed result. Repeating the exact completed move may
+repair that session pointer only while the branch remains at the recorded final
+head; replay never rewinds a newer session or branch. Receipts do not authorize
+world truth, which remains the committed branch history.
+
+`PLAY_MOVE_RECOVERY_REQUIRED` means execution may still be running, stopped after
+admission without a completed receipt, or retained data is inconsistent. Preserve
+the named receipt directory, original trace and branch history, and inspect their
+actual state. Do not automatically repeat the action, change its ID, delete the
+intent or infer rollback from a transport error. A missing completion requires
+host reconciliation; it is not permission to rerun Pi or world mutations.
+
 ## Full-command engineering supervisor
 
 `requirements inspect-identity-repairs` is read-only recovery discovery for a
@@ -125,6 +147,18 @@ including when their receipt is missing. Inspect the original result identified
 by `compilation[].supervision.directory`; never guess a replacement or retry
 unchanged. `COMPILE_LOOP_REQUEST_CHANGED` requires inspecting the original saved
 request/policy; repinning altered authority is not a recovery.
+
+For an explicitly requested rebuild after DONE, copy the completed
+`compilation[].supervision.stateHash` into `--rebuild --loop-new-run <hash>`.
+The hash identifies one new generation. Reusing it resumes or reverifies that
+same generation; it never resets attempts. The supervisor saves the new READY
+state before atomically switching its current-generation pointer and before any
+child dispatch. A failed pointer publication can resume that exact staged
+generation. All predecessor states, policies and receipts remain retained;
+`supervision.directory` identifies the current one. A BREAK, active child, stale
+hash or changed predecessor is not eligible for new-run admission. Resolve the
+original stop instead; do not combine new-run with resume, migration or host-patch
+authority. Source-bound domain budgets and certification gates remain in force.
 
 If the host has implemented a concrete source fix after those engineering rounds
 are spent, bind the actual cumulative delta against `pending.baseline` using
@@ -3282,7 +3316,9 @@ for refusal, uncertain delivery, crash, acknowledgment and Unix transport tests.
 `role-source-prerequisites/v1` uses new user-authorized prerequisite work, never
 a renewed audit or routing grant. `read_prerequisite_source` discovers exact
 `segments[].id`; copy it into `segmentId` and read the complete segment before
-citing it. Follow `nextOffset`, never guessed offsets. For one ID/selector miss,
+citing it. The full read must reach a subsequent model request before submission;
+read and submit calls in the same assistant response are not evidence delivery.
+Follow `nextOffset`, never guessed offsets. For one ID/selector miss,
 rediscover in this same source and make at most one changed correction.
 
 Only after a fresh independent specification check may
@@ -3291,7 +3327,8 @@ annotations and resolutions. Copy `findingId`, `id` or `annotationId` from its
 directory into the corresponding full-read selector. Read every selected typed
 finding/candidate. Missing representations or evidence stay explicit; source
 overlap is not a dependency proof. The independent mapping reviewer repeats
-the evidence and dependency reads in a fresh session.
+the evidence and dependency reads in a fresh session. Dependency discovery and
+full payloads also must reach a subsequent request before a binding is submitted.
 
 `submit_source_prerequisite` retains one typed output per original phase. Copy
 the task's exact scope, question and predecessor hashes. Preserve every critical
@@ -3300,6 +3337,17 @@ uncertain publication or budget failure stops the task. Never rename a task,
 reuse a review session, renew grants or reset old budgets. The host checks Pi
 trace provenance and immutable source anchors before appending review evidence
 to the existing requirement ledger. No question disposition changes.
+
+The compiler lock, immutable source and provider admission are checked before
+consuming the first phase. A preflight refusal permits retry only after its
+actual host condition is resolved. If a completed phase has its original record
+and successful trace but ledger publication failed, the host verifies the exact
+input, scope, output, fresh-read boundary and predecessor, then publishes only
+that missing ledger entry. Already published entries are not appended again.
+This replay does not call Pi or renew a session; only originally unconsumed later
+phases may dispatch. Missing or inconsistent completion after an invocation was
+consumed requires host review, never redispatch or a replacement task. A failed
+ledger write does not rewrite a successful model trace as a model failure.
 
 `DONE` means host authorization review is possible, not that any upstream write
 is allowed. The existing upstream plan preflight remains mandatory. An accepted

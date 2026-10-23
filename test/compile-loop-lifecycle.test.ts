@@ -1,14 +1,18 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { afterEach, expect, it, vi } from "vitest";
-import { runCompileLoop } from "../src/runtime/compile-loop/supervisor.js";
-import { compileLoopDirectory, inspectCompileLoop } from "../src/runtime/compile-loop/state.js";
+import { runCompileLoop, compileLoopWorkerArgs } from "../src/runtime/compile-loop/supervisor.js";
+import { compileLoopDirectory, activeCompileLoopDirectory, inspectCompileLoop } from "../src/runtime/compile-loop/state.js";
+import * as loopState from "../src/runtime/compile-loop/state.js";
 import type { runLoopChild } from "../src/runtime/compile-loop/process.js";
 import { dedicatedRegistryPath } from "../src/runtime/compile-loop/dedicated-session.js";
+import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const directories: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await Promise.all(directories.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
 });
@@ -68,6 +72,80 @@ it("revalidates a completed delivery without reopening compilation or spending a
   expect(again.repairs).toBe(first.repairs); expect(again.failures).toEqual(first.failures);
   expect(f.labels.slice(start)).toEqual(["inspect", "delivery"]);
 });
+
+it("starts one explicit rebuild generation and replays its token without overwriting previous history", async () => {
+  const f = await fixture(), initial = f.input();
+  await runCompileLoop(initial);
+  const originalFile = f.stateFile(), original = await fs.readFile(originalFile, "utf8");
+  const key = inspectCompileLoop(f.root, "source-a")!.stateHash;
+  const request = { ...initial.request, rebuild: true };
+  await expect(runCompileLoop({ ...initial, request })).rejects.toThrow("COMPILE_LOOP_NEW_RUN_REQUIRED");
+  const options = { ...initial, request, newRunFromStateHash: key };
+  const rebuilt = await runCompileLoop(options);
+  expect(rebuilt.phase).toBe("DONE");
+  expect(rebuilt.previousGeneration).toEqual({ directory: path.dirname(originalFile), stateHash: key });
+  expect(activeCompileLoopDirectory(f.root, "source-a")).toBe(path.join(path.dirname(originalFile), "generations", key));
+  expect(await fs.readFile(originalFile, "utf8")).toBe(original);
+  const start = f.labels.length;
+  await runCompileLoop(options);
+  expect(f.labels.slice(start)).toEqual(["inspect", "delivery"]);
+  expect(await fs.readFile(originalFile, "utf8")).toBe(original);
+  const secondKey = inspectCompileLoop(f.root, "source-a")!.stateHash;
+  const second = await runCompileLoop({ ...options, newRunFromStateHash: secondKey });
+  expect(second.phase).toBe("DONE");
+  expect(second.previousGeneration?.stateHash).toBe(secondKey);
+  const saved = await fs.readFile(path.join(activeCompileLoopDirectory(f.root, "source-a"), "state.json"), "utf8");
+  await expect(runCompileLoop(options)).rejects.toThrow("COMPILE_LOOP_NEW_RUN_STALE");
+  expect(await fs.readFile(path.join(activeCompileLoopDirectory(f.root, "source-a"), "state.json"), "utf8")).toBe(saved);
+});
+
+it("does not turn a retained BREAK into a new rebuild allowance", async () => {
+  const f = await fixture(), input = f.input();
+  const stopped = await runCompileLoop({ ...input, signal: AbortSignal.abort(new Error("original cancellation")) });
+  expect(stopped.phase).toBe("BREAK");
+  const before = await fs.readFile(f.stateFile(), "utf8"), start = f.labels.length;
+  await expect(runCompileLoop({ ...input, request: { ...input.request, rebuild: true },
+    newRunFromStateHash: inspectCompileLoop(f.root, "source-a")!.stateHash })).rejects.toThrow("COMPILE_LOOP_NEW_RUN_STALE");
+  expect(await fs.readFile(f.stateFile(), "utf8")).toBe(before);
+  expect(f.labels).toHaveLength(start);
+});
+
+it("recovers a staged rebuild after pointer publication fails without consuming a worker", async () => {
+  const f = await fixture(), initial = f.input();
+  await runCompileLoop(initial);
+  const original = await fs.readFile(f.stateFile(), "utf8"), start = f.labels.length;
+  const key = inspectCompileLoop(f.root, "source-a")!.stateHash;
+  const options = { ...initial, request: { ...initial.request, rebuild: true }, newRunFromStateHash: key };
+  const save = loopState.save;
+  const injected = vi.spyOn(loopState, "save").mockImplementation((file, value) => {
+    if (path.basename(file) === "current-generation.json") throw new Error("Injected generation pointer failure");
+    save(file, value);
+  });
+  await expect(runCompileLoop(options)).rejects.toThrow("Injected generation pointer failure");
+  expect(f.labels).toHaveLength(start);
+  expect(await fs.readFile(f.stateFile(), "utf8")).toBe(original);
+  expect(inspectCompileLoop(f.root, "source-a")?.stateHash).toBe(key);
+  const staged = path.join(path.dirname(f.stateFile()), "generations", key, "state.json");
+  expect(JSON.parse(await fs.readFile(staged, "utf8"))).toMatchObject({ phase: "READY", workers: 0 });
+  injected.mockRestore();
+  expect((await runCompileLoop(options)).phase).toBe("DONE");
+  expect(f.labels.slice(start).filter(label => label === "worker")).toHaveLength(1);
+  expect(await fs.readFile(f.stateFile(), "utf8")).toBe(original);
+});
+
+it("runs the actual TypeScript worker from an external novel workspace without local tooling", async () => {
+  const f = await fixture();
+  await fs.rm(path.join(f.root, "src"), { recursive: true });
+  await fs.rm(path.join(f.root, "node_modules"), { recursive: true });
+  const { source } = await createEvidenceFixture(f.root, "Ada waits.");
+  const request = path.join(f.root, "request.json"), output = path.join(f.root, "inspection.json");
+  await fs.writeFile(request, JSON.stringify({ root: f.root, sourceId: source.id }));
+  const child = spawnSync(process.execPath, [...compileLoopWorkerArgs(), "inspect", request, output], {
+    cwd: f.root, encoding: "utf8", timeout: 30_000, env: process.env,
+  });
+  expect(child.status, child.stderr).toBe(0);
+  expect(JSON.parse(await fs.readFile(output, "utf8")).sources[0].sourceId).toBe(source.id);
+}, 35_000);
 
 it("a stale completed delivery remains verification-only even after an exact host resume", async () => {
   const f = await fixture(), first = await runCompileLoop(f.input()), start = f.labels.length;

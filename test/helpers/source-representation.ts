@@ -46,6 +46,9 @@ export async function representationFixture(options: { negative?: boolean; gap?:
       if (!input.phase.startsWith("representation")) {
         await invoke("read_prerequisite_source", { segmentId: f.segmentId });
         if (input.phase.startsWith("binding")) await invoke("discover_prerequisite_dependencies", { query: "Ada" });
+        await opts.beforeModelRequest?.();
+        await trace.record("llm.request.started", { providerId: "openai-codex", modelId: "gpt-6.1-sol" }, undefined, { callId: "submission-request" });
+        await trace.record("llm.response.completed", {}, undefined, { callId: "submission-request" });
         const output = input.phase === "specification" ? { ...base, requirements: original.questions.map(item => ({ ...q(item.questionId), kind: "identity", requirement: "Preserve unknown attribution", acceptanceCriteria: ["Do not guess"], evidenceBoundaries: ["Unknown remains"] })) }
           : input.phase === "binding" ? { ...base, specificationHash: input.specificationHash, discoveryHash: input.discoveryHash, bindings: original.questions.map(item => ({ ...q(item.questionId), route: "missing-source-representation", findingIds: [], candidateIds: [], rationale: "Absent source frame", missingCondition: "Unknown voice observation" })) }
           : { ...base, proposalHash: input.proposalHash, judgments: original.questions.map(item => ({ ...q(item.questionId), verdict: "supported", rationale: "Independent source check" })) };

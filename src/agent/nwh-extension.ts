@@ -3,7 +3,7 @@ import { withPlayModelBudget } from "../runtime/play-model-budget.js";
 import { currentRuntimeHooks, hookError } from "../runtime/hooks.js";
 import { withCommandHooks } from "./pi-hooks.js";
 import { INITIAL_WORLD_INPUT_GUIDANCE } from "../compiler/initial-world-preflight.js";
-import { reviewNovelRoles } from "../workflow/role-review.js";
+import { certifyPreparedNovel } from "../commands/compile-novel.js";
 import { CompilerFinishReceipts, finishHostError } from "../compiler/finish-receipts.js";
 import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
 import { recoverCompilerFinish } from "../compiler/finish-recovery.js";
@@ -1310,6 +1310,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (outcome.auditError) ctx.ui.notify(`Player-turn audit could not be persisted: ${outcome.auditError}`, "warning");
         if (outcome.repairHintError) ctx.ui.notify(`Runtime compiler repair hint could not be persisted: ${outcome.repairHintError}`, "warning");
         if (outcome.conversationError) ctx.ui.notify(`Conversation memory could not be persisted: ${outcome.conversationError}`, "warning");
+        if (outcome.sessionError) ctx.ui.notify(outcome.sessionError, "warning");
         if (!outcome.result.accepted) {
           const issueCode = outcome.result.issues[0]?.code ?? "UNKNOWN";
           showPlayMessage(outcome.result.stage === "adjudication"
@@ -1762,11 +1763,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return;
       }
       if (inspection.stage === "create-branch") {
-        prepareAllHostActivity?.update("Publishing the prepared revision");
-        await reviewNovelRoles({ root: workspace.root, sourceId: inspection.source!.id, configPath: path.join(workspace.root, "novel-harness.yaml"), allowMissingConfig: true, ...(ctx.model ? { model: modelLabel(ctx.model) } : {}), onStatus: (message) => prepareAllHostActivity?.update(message) });
-        const cached = await preparedCache.publish(inspection.source!);
+        prepareAllHostActivity?.update("Evaluating and certifying the prepared revision");
+        const certified = await certifyPreparedNovel({ root: workspace.root, sourceId: state.sourceId,
+          cacheRoot: options.preparedCacheRoot, ...(ctx.model ? { model: modelLabel(ctx.model) } : {}),
+          onProgress: message => prepareAllHostActivity?.update(message) });
         state.preparedCacheVerified = true;
-        ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
+        ctx.ui.notify(`Certified and activated prepared revision ${certified.bundleHash}.`, "info");
         const decision = await choose(ctx, "Create playable branch?", [
           { value: "create", label: "Create branch", description: `Commit genesis for branch '${state.branchId}'.`, recommended: true },
           { value: "pause", label: "Pause", description: "Keep canonical preparation complete without creating a branch." },
@@ -1817,9 +1819,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (inspection.stage === "ready") {
         prepareAllHostActivity?.update("Verifying the playable revision");
         if (!state.preparedCacheVerified) {
-          await reviewNovelRoles({ root: workspace.root, sourceId: inspection.source!.id, configPath: path.join(workspace.root, "novel-harness.yaml"), allowMissingConfig: true, ...(ctx.model ? { model: modelLabel(ctx.model) } : {}), onStatus: (message) => prepareAllHostActivity?.update(message) });
-        const cached = await preparedCache.publish(inspection.source!);
-          ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
+          const certified = await certifyPreparedNovel({ root: workspace.root, sourceId: state.sourceId,
+            cacheRoot: options.preparedCacheRoot, ...(ctx.model ? { model: modelLabel(ctx.model) } : {}),
+            onProgress: message => prepareAllHostActivity?.update(message) });
+          ctx.ui.notify(`Certified and activated prepared revision ${certified.bundleHash}.`, "info");
         }
         await stopPrepareAll(ctx, `Preparation complete. Run /play to choose a character on '${state.branchId}'.`, "info");
         return;

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, vi } from "vitest";
 import * as certification from "../../src/compiler/certification.js";
 import * as roleReview from "../../src/workflow/role-review.js";
+import * as novelCompilation from "../../src/commands/compile-novel.js";
 import { PreparedNovelCache } from "../../src/compiler/prepared-cache.js";
 import * as playRoles from "../../src/world/play-roles.js";
 import { deriveCharacterEntryOptions, deriveCharacterEntrySeed } from "../../src/world/entry-context.js";
@@ -21,6 +22,15 @@ export function useOfflinePreparationBoundary(): void {
     const review = vi.spyOn(roleReview, "reviewNovelRoles").mockImplementation(async () => undefined);
     const inspection = vi.spyOn(PreparedNovelCache.prototype, "inspectCandidate").mockImplementation(async () => ({ bundle: null, assessment: { fullNovelReady: true, playability: null, issues: [] } }) as never);
     restore.push(() => review.mockRestore(), () => inspection.mockRestore());
+    // Old TUI component fixtures isolate the shared delivery workflow too.
+    // Its actual evaluation/certification gates have dedicated regressions.
+    const delivery = vi.spyOn(novelCompilation, "certifyPreparedNovel").mockImplementation(async options => {
+      const { WorkspaceStore } = await import("../../src/storage/workspace-store.js");
+      const source = (await WorkspaceStore.openReadOnly(options.root).getSource(options.sourceId!))!;
+      const published = await new PreparedNovelCache(options.root, options.cacheRoot).publish(source);
+      return { bundleHash: published.bundleHash } as Awaited<ReturnType<typeof novelCompilation.certifyPreparedNovel>>;
+    });
+    restore.push(() => delivery.mockRestore());
     const assertion = vi.spyOn(certification, "assertPreparedReadiness").mockImplementation(() => undefined);
     const assessment = vi.spyOn(certification, "assessNovelClosure").mockImplementation(async () => null as never);
     restore.push(() => assertion.mockRestore(), () => assessment.mockRestore());

@@ -52,6 +52,9 @@ it.each([false, true])("runs isolated source-first stages, retaining blocks with
       }
       await invoke("read_prerequisite_source", { segmentId: fixture.segmentId });
       if (input.phase.startsWith("binding")) await invoke("discover_prerequisite_dependencies", { query: "Ada" });
+      await options.beforeModelRequest?.();
+      await trace.record("llm.request.started", { providerId: "openai-codex", modelId: "gpt-6.1-sol" }, undefined, { callId: "submission-request" });
+      await trace.record("llm.response.completed", {}, undefined, { callId: "submission-request" });
       const base = { phase: input.phase, scopeHash: input.scopeHash };
       const evidence = [{ segment_id: fixture.segmentId, exact: "Ada waits." }];
       const q = (questionId: string) => ({ questionId, impact: "critical", evidence });
@@ -75,7 +78,8 @@ it.each([false, true])("runs isolated source-first stages, retaining blocks with
   expect(records).toHaveLength(sessions);
   expect(new Set(records.map(r => r.sessionId)).size).toBe(sessions);
   expect((await ledger.history()).slice(0, originalHistory.length)).toEqual(originalHistory);
-  await expect(runRoleSourcePrerequisites({ root, directory, scope, assertOriginal: guard })).rejects.toThrow(/EEXIST/);
+  await runRoleSourcePrerequisites({ root, directory, scope, assertOriginal: guard });
+  expect(await ledger.sourcePrerequisites(prerequisiteTaskId(scope))).toEqual(records);
   await expect(runRoleSourcePrerequisites({ root, directory: path.join(root, "another"), scope, assertOriginal: guard })).rejects.toThrow(/attempt directory/);
   expect(sessions).toBe(negative ? 2 : 4);
 });

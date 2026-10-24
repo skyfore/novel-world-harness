@@ -32,7 +32,7 @@ it("forwards an explicit rebuild token and rejects incompatible stage invocation
   }
   expect(run).toHaveBeenCalledOnce();
 });
-it.each([{ phase: "status" as const }, { phase: "roles" as const }, { loop: false }])("%j keeps explicit single-invocation semantics", async selection => {
+it.each([{ phase: "status" as const }, { phase: "plan" as const }, { phase: "closure" as const }, { phase: "roles" as const }, { loop: false }])("%j keeps explicit single-invocation semantics", async selection => {
   const run = vi.spyOn(supervisor, "runCompileLoop").mockRejectedValue(new Error("must not start supervision"));
   const direct = vi.spyOn(compiler, "compileNovelCommand").mockResolvedValue(undefined);
   await compileNovelWithLoop({ root: "/unused", sourceId: "source-1", ...selection });

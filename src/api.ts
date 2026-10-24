@@ -114,6 +114,8 @@ export { rebuildCommand } from "./commands/rebuild.js";
 export { compileNovelCommand, inspectNovelCompilation, type CompileNovelOptions } from "./commands/compile-novel.js";
 export { compileNovelWithLoop, type SupervisedCompileOptions } from "./commands/compile-novel-loop.js";
 export { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
+export { inspectCompilationHandoff } from "./compiler/compilation-handoff.js";
+export { checkCompilationClosure, type CompilationClosure } from "./compiler/compilation-closure.js";
 export { repairExistingCommand, type RepairExistingCommandOptions, type RepairExistingCommandResult } from "./commands/repair-existing.js";
 export { eventExecutionSchema, applyEventExecutions, validateEventExecutions, type EventExecution } from "./world/event-execution.js";
 export { buildPreparedClosure, affectedClosureNodes, staleClosureNodes, closureGraphSchema, type ClosureGraph, type ClosureKind } from "./compiler/closure.js";

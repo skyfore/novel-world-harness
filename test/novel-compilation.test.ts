@@ -23,7 +23,7 @@ it("runs certification and activation before declaring full completion, and reva
   expect(saved.id).toBe(run.id);
 });
 
-it.each(["repair", "evaluation-plan", "evaluate", "certify"] as const)("retains the exact failure and stops before publication at %s", async failing => {
+it.each(["repair", "closure", "evaluation-plan", "evaluate", "certify"] as const)("retains the exact failure and stops before publication at %s", async failing => {
   const run = newNovelCompilationRun(source), stages: string[] = [], snapshots: unknown[] = [];
   await expect(runNovelCompilation({ run, save: async value => { snapshots.push(structuredClone(value)); },
     execute: async phase => { stages.push(phase); if (phase === failing) throw new Error("Original host-review stop: requirement q-17"); },

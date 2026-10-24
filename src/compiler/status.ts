@@ -1,5 +1,6 @@
 import { RoleReviewWorkStore } from "./role-review-work.js";
 import { sourceAuditAuthorities, sourceAuditRepairState } from "./role-source-audit-repair.js";
+import { sourceAuditBlocked } from "./role-source-audit-model.js";
 import { contentHash } from "../world/canonical.js";
 import { isDeepStrictEqual } from "node:util";
 import { ProposalStore } from "../world/canonical-model.js";
@@ -23,7 +24,7 @@ export async function inspectCompilerStatus(root: string, sourceId?: string) {
   const workspace = WorkspaceStore.openReadOnly(root);
   const registered = await workspace.listSources();
   const sources = registered.filter((source) => !sourceId || source.id === sourceId);
-  if (sourceId && !sources.length) throw new Error(`Unknown source ${sourceId}; inspect registered sources first.`);
+  if (sourceId && !sources.length) throw new Error(`Unknown source ${sourceId}; run nwh status --json, copy sources[].sourceId into --source and correct once. Do not guess or retry unchanged.`);
   const lock = await WorkspaceOperationLock.inspect(root);
   return { version: 1, capturedAt: new Date().toISOString(), workspace: workspace.root, stateDirectory: workspace.stateDir,
     compilerFingerprint: currentCompilerFingerprint(),
@@ -69,22 +70,25 @@ async function inspectSource(root: string, source: SourceDocument) {
   });
   const proposals = new ProposalStore(root);
   const inventory = await Promise.all((["pending", "accepted", "rejected"] as const).map(async (status) => [status, (await proposals.list(status, source.id)).length] as const));
-  let roleReviewWork: Array<{ batchId: string; planHash: string; sourceWorks: number; reviewedSources: number; auditedSources: number; stagedCandidates: number; blockedAudits: number; openQuestions: number; verifiedClaims: number; pendingClaimVerifications: number; unauditedClaims: number; claimFindings: Array<{candidateId: string; workId: string; verdict: string; claimRevision: string; receiptHash: string}>; auditContractRevisions: Array<{candidateId: string; revisionId: string; predecessorReceiptHash: string; inheritedAttempts: number; inheritedSessions: number; inheritedCalls: number; auditVerdict: string | null}>; sourceAuditRepairs: Array<{page: number; revisionId: string; predecessorWorkId: string; proposed: boolean; verificationVerdict: string | null}>; judgmentRevisions: Array<{candidateId: string; revisionId: string; proposed: boolean; auditVerdict: string | null}>; verificationVersion: number; staleSourceAudits: number; staleClaimAudits: number }> = [];
+  let roleReviewWork: Array<{ batchId: string; planHash: string; current: boolean; sourceWorks: number; reviewedSources: number; auditedSources: number; stagedCandidates: number; blockedAudits: number; openQuestions: number; verifiedClaims: number; pendingClaimVerifications: number; unauditedClaims: number; claimFindings: Array<{candidateId: string; workId: string; verdict: string; claimRevision: string; receiptHash: string}>; auditContractRevisions: Array<{candidateId: string; revisionId: string; predecessorReceiptHash: string; inheritedAttempts: number; inheritedSessions: number; inheritedCalls: number; auditVerdict: string | null}>; sourceAuditRepairs: Array<{page: number; revisionId: string; predecessorWorkId: string; proposed: boolean; blockedProposal: boolean; verificationVerdict: string | null}>; judgmentRevisions: Array<{candidateId: string; revisionId: string; proposed: boolean; auditVerdict: string | null}>; verificationVersion: number; staleSourceAudits: number; staleClaimAudits: number }> = [];
+  let roleReviewInspection: "recorded" | "unknown" = "recorded";
   try {
+    const revisions = await new RequirementLedger(root, source.id).roleReviewRevisions();
+    const retired = new Set(revisions.flatMap(r => r.workMigration ? [r.workMigration.priorPlan.batchId] : []));
     roleReviewWork = (await RoleReviewWorkStore.plans(root, source.id)).map(plan => {
       const store = new RoleReviewWorkStore(root, plan);
       const freshness = store.reviewFreshness();
       const audits = new Map(freshness.sourceAudits.filter(a => a.current).map(a => [a.page, a.audit]));
       const supported = new Set(freshness.claimAudits.filter(a => a.current && a.audit.verdict === "supported").map(a => a.candidateId));
       const currentClaims = freshness.claimAudits.filter(a => a.current);
-      return { batchId: plan.batchId, planHash: store.planHash, sourceWorks: plan.spans.length,
+      return { batchId: plan.batchId, planHash: store.planHash, current: !retired.has(plan.batchId), sourceWorks: plan.spans.length,
         reviewedSources: plan.spans.filter((_, index) => store.read("source", index)).length,
         verificationVersion: 2,
         verifiedClaims: supported.size,
         sourceAuditRepairs: sourceAuditAuthorities(store).map(a => {
           const state = sourceAuditRepairState(store, a);
           return { page: a.page, revisionId: a.revisionId, predecessorWorkId: a.predecessorWorkId,
-            proposed: Boolean(state.proposal), verificationVerdict: state.verification?.verdict ?? null };
+            proposed: Boolean(state.proposal), blockedProposal: Boolean(state.proposal && sourceAuditBlocked(state.proposal)), verificationVerdict: state.verification?.verdict ?? null };
         }),
         pendingClaimVerifications: store.stagedEntries().filter(e => !supported.has(e.candidateId)).length,
         unauditedClaims: store.stagedEntries().filter(e => !currentClaims.some(a => a.candidateId === e.candidateId)).length,
@@ -100,7 +104,7 @@ async function inspectSource(root: string, source: SourceDocument) {
         blockedAudits: [...audits.values()].filter(a => a.unresolved.length || a.questionDispositions?.some(q => q.status === "blocked") || a.discoveryDispositions?.some(d => d.disposition === "blocked")).length,
         stagedCandidates: store.stagedEntries().length };
     });
-  } catch (error) { diagnostics.push(`Role review work inspection failed: ${String(error)}`); }
+  } catch (error) { roleReviewInspection = "unknown"; diagnostics.push(`Role review work inspection failed: ${String(error)}`); }
   const latestRun = runs[0];
   const events = latestRun ? await new TraceStore(root).peekEvents(latestRun.id) : [];
   const failedTool = events.findLast(event => event.type === "tool.call.failed");
@@ -140,7 +144,7 @@ async function inspectSource(root: string, source: SourceDocument) {
   catch (error) { identityReviewInspection = "unknown"; diagnostics.push(`Identity review inspection: ${String(error)}`); }
   return {
     identityReviews: { inspection: identityReviewInspection, tasks: identityReviews },
-    roleReviewWork, sourceId: source.id, sourcePath: source.sourcePath, sourceSha256: source.contentSha256, bytes: source.bytes, sourceIntegrity,
+    roleReviewWork, roleReviewInspection, sourceId: source.id, sourcePath: source.sourcePath, sourceSha256: source.contentSha256, bytes: source.bytes, sourceIntegrity,
     persistedPipelineVersion: persisted?.pipelineVersion ?? null, effectivePipelineVersion: progress.pipelineVersion,
     checkpointUpdatedAt: persisted?.updatedAt ?? null,
     checkpointReadStable: contentHash(persisted) === contentHash(finalProgress),

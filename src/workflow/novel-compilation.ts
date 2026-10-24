@@ -3,9 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { worldStorageRoot } from "../world/paths.js";
+import { compilationClosureSchema } from "../compiler/compilation-closure.js";
 
 export const NOVEL_COMPILATION_PHASES = [
-  "source", "recover", "batches", "converge", "opening", "roles", "repair", "requirements",
+  "source", "recover", "batches", "converge", "opening", "roles", "repair", "requirements", "closure",
   "archive", "evaluation-plan", "evaluate", "certify", "activate", "branch",
 ] as const;
 export type NovelCompilationPhase = typeof NOVEL_COMPILATION_PHASES[number];
@@ -22,6 +23,7 @@ const runSchema = z.object({
   rebuildBatchIds: z.array(z.string()).optional(),
   subjectHash: digest.optional(), planHash: digest.optional(), bundleHash: digest.optional(),
   activatedBundleHash: digest.optional(),
+  closure: compilationClosureSchema.optional(),
   branchId: safeId.optional(), completed: z.boolean(),
   history: z.array(receiptSchema),
 }).strict();
@@ -90,8 +92,8 @@ export async function runNovelCompilation(input: {
       receipt.finishedAt = new Date().toISOString();
       await input.save(run);
       throw new Error(`NOVEL_COMPILATION_BLOCKED [${phase}]: ${receipt.error}\n`
-        + `Progress retained. Inspect nwh compile-novel status --source ${run.sourceId}; `
-        + `repair this stage with nwh compile-novel ${phase} --source ${run.sourceId}, then resume nwh compile-novel --source ${run.sourceId}. `
+        + `Progress retained. Inspect nwh compile-novel plan --source ${run.sourceId}; `
+        + `satisfy the exact task dependencies and resume conditions before continuing phase ${phase}, then resume nwh compile-novel --source ${run.sourceId}. `
         + "Host-review, scope, single-use and circuit-breaker stops require their stated recovery first; do not retry unchanged or use --rebuild to reset attempts.", { cause: error });
     }
   }

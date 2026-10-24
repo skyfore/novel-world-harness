@@ -9,6 +9,8 @@ import { CompilerProposalObligations } from "../compiler/proposal-obligations.js
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { preparedSubjectHash, assertPreparedReadiness } from "../compiler/certification.js";
 import { inspectCompilerStatus } from "../compiler/status.js";
+import { inspectCompilationHandoff } from "../compiler/compilation-handoff.js";
+import { checkCompilationClosure, assertCompilationClosure } from "../compiler/compilation-closure.js";
 import { RepairRunStore } from "../compiler/repair-run.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
@@ -34,7 +36,7 @@ import { invalidatePreparationArtifacts } from "./reparse.js";
 
 export type CompileNovelOptions = Pick<PrepareAllCommandOptions, "root" | "configPath" | "novelPath" | "sourceId" | "branchId" | "model" | "signal" | "cacheRoot" | "onProgress" | "upstreamRepairPlan" | "upstreamRepairFinishFile"> & {
   rebuild?: boolean;
-  phase?: NovelCompilationPhase | "status";
+  phase?: NovelCompilationPhase | "status" | "plan";
   evaluationPlanFile?: string;
   evaluationPlanHash?: string;
   batchStage?: "structure" | "observation" | "semantic" | "executable" | "boundary";
@@ -46,7 +48,11 @@ export async function inspectNovelCompilation(root: string, sourceId?: string) {
   const status = await inspectCompilerStatus(root, sourceId), runs = new NovelCompilationRunStore(root);
   return { ...status, compilation: await Promise.all(status.sources.map(async source => {
     const run = await runs.read(source.sourceId);
+    let handoff;
+    try { handoff = await inspectCompilationHandoff(root, source.sourceId, source, run); }
+    catch (error) { handoff = { authority: "diagnostic-only", inspection: "unknown", error: String(error) }; }
     return { sourceId: source.sourceId, run, supervision: inspectCompileLoop(root, source.sourceId),
+      handoff,
       evaluationReview: run?.subjectHash ? await inspectEvaluationReview(root, run.subjectHash) : null,
       evaluation: run?.subjectHash ? await new NovelPlayQualityStore(root).read(run.subjectHash) : null };
   })), interpretation: `${status.interpretation} Orchestration receipts are historical scheduling records, not current certification.` };
@@ -54,9 +60,11 @@ export async function inspectNovelCompilation(root: string, sourceId?: string) {
 
 export async function compileNovelCommand(options: CompileNovelOptions): Promise<NovelCompilationRun | undefined> {
   const root = path.resolve(options.root);
-  if (options.phase === "status") {
+  if (options.phase === "status" || options.phase === "plan") {
     if (options.novelPath || options.rebuild) throw new Error("Status is read-only; omit the novel path and --rebuild.");
-    console.log(JSON.stringify(await inspectNovelCompilation(root, options.sourceId), null, 2));
+    const status = await inspectNovelCompilation(root, options.sourceId);
+    console.log(JSON.stringify(options.phase === "plan" ? { capturedAt: status.capturedAt, workspace: status.workspace,
+      sources: status.compilation.map(c => ({ sourceId: c.sourceId, handoff: c.handoff, supervision: c.supervision })) } : status, null, 2));
     return;
   }
   if (options.rebuild && options.phase) throw new Error("--rebuild belongs to the full compile-novel command; individual stages preserve existing progress.");
@@ -72,7 +80,7 @@ export async function certifyPreparedNovel(options: Pick<CompileNovelOptions, "r
   const root = path.resolve(options.root);
   if ((await WorkspaceOperationLock.inspect(root)).owner?.pid !== process.pid) throw new Error("Prepared delivery requires the owning compiler lock; stop and inspect the active preparation before retrying.");
   let run: NovelCompilationRun | undefined;
-  for (const phase of ["roles", "repair", "requirements", "archive", "evaluation-plan", "evaluate", "certify", "activate"] as const) {
+  for (const phase of ["roles", "repair", "requirements", "closure", "archive", "evaluation-plan", "evaluate", "certify", "activate"] as const) {
     run = await compileNovelLocked({ ...options, root, phase });
   }
   return run!;
@@ -203,6 +211,12 @@ async function compileNovelLocked(options: CompileNovelOptions): Promise<NovelCo
           break;
         case "roles":
           await reviewNovelRoles({ ...common, sourceId: source.id, allowMissingConfig: true });
+          break;
+        case "closure":
+          run.closure = await checkCompilationClosure(root, source.id);
+          await store.write(run);
+          assertCompilationClosure(run.closure);
+          report("Global compilation closure checked; independent executable certification remains required.");
           break;
         case "archive": {
           const archived = await cache.archiveCandidate(source, lineage);

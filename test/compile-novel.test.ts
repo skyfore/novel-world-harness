@@ -175,7 +175,7 @@ it("exposes full-run options and individual stage subcommands in the CLI", async
   const stdout = await fs.readFile(path.join(root, "help.txt"), "utf8");
   expect(stdout).toContain("--rebuild");
   expect(stdout).toContain("resume by default");
-  for (const stage of ["source", "batches", "observation", "semantic", "executable", "boundary", "roles", "repair", "evaluation-plan", "evaluate", "certify", "activate", "branch", "status"]) expect(stdout).toContain(stage);
+  for (const stage of ["source", "batches", "observation", "semantic", "executable", "boundary", "roles", "repair", "closure", "evaluation-plan", "evaluate", "certify", "activate", "branch", "status", "plan"]) expect(stdout).toContain(stage);
 });
 
 it.each(["global", "group", "stage"])("honors a %s --root when dispatching the read-only status subcommand", async placement => {

@@ -18,6 +18,8 @@ import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { settleUpstreamRepairRequirements } from "../src/compiler/upstream-repair-evaluation.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { checkCompilationClosure } from "../src/compiler/compilation-closure.js";
+import { withWorkspaceOperationLock } from "../src/util/workspace-lock.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -101,6 +103,22 @@ it.each(scenes.flatMap(scene => [true, false].map(complete => ({ ...scene, compl
   expect(evaluation.issues).toEqual([]);
   expect(evaluation.results[0]!.result.requirements.every(item => item.state === "satisfied")).toBe(true);
   expect((await ledger.inspect()).plans[0]!.state).toBe("evaluated");
+  const checkClosure = () => withWorkspaceOperationLock(root, "compiler", () => checkCompilationClosure(root, sourceId));
+  expect((await checkClosure()).gates.find(g => g.dimension === "upstream-handoff")!.state).toBe("passed");
+  await new InitialWorldStore(root).put({ version: 1, evidence: source.evidence(scene.text),
+    participantPresence: [{ entityId: "reader", mode: "physical" }], delta: { version: 1,
+      operations: [{ op: "set", entityId: "reader", field: "character.alive", value: true }] } });
+  const changed = (await checkClosure()).gates.find(g => g.dimension === "upstream-handoff")!;
+  expect(changed.state).toBe("blocked");
+  expect(changed.reasons.join("\n")).toContain("UPSTREAM_REPAIR_EVALUATION_STALE");
+  await new InitialWorldStore(root).put({ version: 1, evidence: source.evidence(scene.reader),
+    participantPresence: [{ entityId: "reader", mode: "physical" }], delta: { version: 1,
+      operations: [{ op: "set", entityId: "reader", field: "character.alive", value: false }] } });
+  const unfreezable = (await checkClosure()).gates.find(g => g.dimension === "upstream-handoff")!;
+  expect(unfreezable.state).toBe("blocked");
+  expect(unfreezable.reasons.join("\n")).toContain("UPSTREAM_REPAIR_EVALUATION_UNVERIFIED");
+  // Closure cannot renew or replace the old evaluation while checking it.
+  expect((await ledger.inspect()).plans[0]!.evaluation!.result).toEqual(evaluation.results[0]);
 });
 
 const spokenScenes = [

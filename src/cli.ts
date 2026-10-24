@@ -105,7 +105,7 @@ novelOptions(compileNovel).option("--rebuild", "recompile all source batches; an
   .option("--loop-new-run <hash>", "start one new rebuild from an exact completed supervision.stateHash; repeating this token resumes that generation")
   .option("--loop-host-patch <hash>", "independently verify an exact host source repair without renewing exhausted engineering rounds")
   .option("--loop-resolution <text>", "concrete host review authorizing migration of the legacy supervisor");
-const runCompileNovel = async (command: Command, novel?: string, phase?: NovelCompilationPhase | "status", batchStage?: "structure" | "observation" | "semantic" | "executable" | "boundary") => {
+const runCompileNovel = async (command: Command, novel?: string, phase?: NovelCompilationPhase | "status" | "plan", batchStage?: "structure" | "observation" | "semantic" | "executable" | "boundary") => {
   // Commander optsWithGlobals lets the root's default cwd overwrite --root
   // on a subcommand. Explicit options nearer the selected action win here.
   const options = { ...program.opts(), ...compileNovel.opts(), ...command.opts() };
@@ -128,6 +128,7 @@ const phaseDescriptions: Record<NovelCompilationPhase, string> = {
   roles: "Complete independent source character reviews and register core-role requirements",
   repair: "Resume authorized upstream repairs and reconcile world/graph gaps",
   requirements: "Re-evaluate all registered requirements and global closure gates",
+  closure: "Reverify current finish receipts, source accounting, identity/role handoffs and global compilation dimensions",
   archive: "Archive an immutable candidate without activation or a completeness claim",
   "evaluation-plan": "Generate/reuse or import and freeze independent gold, support reviews and scenarios",
   evaluate: "Run/resume independent live Pi experiments against the frozen candidate",
@@ -147,6 +148,8 @@ for (const stage of ["structure", "observation", "semantic", "executable", "boun
 }
 novelOptions(compileNovel.command("status").description("Read current source/phase/obligation/candidate status without models, migration or certification"))
   .action(async (_options, child) => runCompileNovel(child, undefined, "status"));
+novelOptions(compileNovel.command("plan").description("Discover the complete remaining phase/dependency handoff and exact recovery conditions without writes or model calls"))
+  .action(async (_options, child) => runCompileNovel(child, undefined, "plan"));
 
 const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and run bounded host-reviewed corrections");
 program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")

@@ -6,7 +6,7 @@ import { PiAgentSession } from "../src/agent/pi-session.js";
 import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 import { compileNovelCommand, inspectNovelCompilation } from "../src/commands/compile-novel.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
-import { compilationHandoff } from "../src/compiler/compilation-handoff.js";
+import { compilationHandoff, inspectCompilationHandoff } from "../src/compiler/compilation-handoff.js";
 import { compilationClosureReport, assertCompilationClosure } from "../src/compiler/compilation-closure.js";
 import { identityReviewStatus } from "../src/compiler/identity-review-status.js";
 import { inspectCompilerStatus } from "../src/compiler/status.js";
@@ -76,7 +76,7 @@ it("handoff preserves a partial consumer denominator and blocks the exact consum
   source.roleReviewWork = [roleWork(contentHash("retired"), false), roleWork(intent.originalPlanHash)];
   source.identityReviews.tasks = [identityReviewStatus(records.slice(0, 4))];
   const original = contentHash({ source, records });
-  const plan = compilationHandoff(source, null, emptyUpstream);
+  const plan = compilationHandoff(root, source, null, emptyUpstream);
   expect(plan.currentRolePlanHashes).toEqual([intent.originalPlanHash]);
   expect(plan.retiredRolePlanHashes).toEqual([contentHash("retired")]);
   expect(plan.tasks.filter(t => t.kind === "identity-consumers")).toHaveLength(1);
@@ -87,7 +87,7 @@ it("handoff preserves a partial consumer denominator and blocks the exact consum
   expect(plan.tasks.find(t => t.kind === "source-audit")!.resumeCondition).toContain("single-use");
   expect(contentHash({ source, records })).toBe(original);
   source.roleReviewWork[1]!.current = false;
-  expect(compilationHandoff(source, null, emptyUpstream).tasks.filter(t => t.kind === "identity-consumers")).toEqual([]);
+  expect(compilationHandoff(root, source, null, emptyUpstream).tasks.filter(t => t.kind === "identity-consumers")).toEqual([]);
 });
 
 it("100% accounting and zero execution obligations cannot close missing resolutions, deferrals or unknown dimensions", async () => {
@@ -117,7 +117,7 @@ it("an unavailable identity/role inspection remains a host prerequisite instead 
   const source = (await inspectCompilerStatus(root, document.id)).sources[0]!;
   source.roleReviewInspection = "unknown";
   source.diagnostics.push("Original role journal unreadable");
-  const plan = compilationHandoff(source, null, emptyUpstream);
+  const plan = compilationHandoff(root, source, null, emptyUpstream);
   expect(plan.blockers).toContain("inspection:role-dependencies");
   expect(plan.tasks.find(t => t.id === "phase:roles")!.state).toBe("blocked");
 });
@@ -137,9 +137,58 @@ it("a converged repair is routed to the existing requirement revalidation phase,
   const { root, source: document } = await fixture();
   const source = (await inspectCompilerStatus(root, document.id)).sources[0]!;
   const upstream = { ...emptyUpstream, plans: [{ state: "converged", plan: { planHash: contentHash("plan"), requirementIds: ["requirement"] } }] };
-  const plan = compilationHandoff(source, null, upstream as never);
+  const plan = compilationHandoff(root, source, null, upstream as never);
   expect(plan.tasks.find(t => t.kind === "upstream-repair")).toMatchObject({ state: "pending", execution: "existing-phase",
-    command: { args: ["compile-novel", "requirements", "--source", document.id] }, dependsOn: ["phase:repair"] });
+    command: { args: ["--root", root, "compile-novel", "requirements", "--source", document.id] }, dependsOn: ["phase:repair"] });
   expect(plan.tasks.find(t => t.id === "phase:recover")!.dependsOn).toEqual(["phase:source"]);
   expect(plan.blockers).toEqual([]);
+});
+
+it.each(["blocked", "unknown", "unmapped", "stale"])("an evaluated repair with a %s requirement remains discoverable and blocks closure", async state => {
+  const { root, source: document } = await fixture();
+  const status = await inspectCompilerStatus(root, document.id), source = status.sources[0]!;
+  const planHash = contentHash("evaluated-plan");
+  const upstream = { ...emptyUpstream, plans: [{ state: "evaluated", plan: { planHash, requirementIds: ["required-consumer"] },
+    evaluation: { ref: contentHash("evaluation"), result: { result: { requirements: [{ id: "required-consumer", state,
+      diagnostics: ["Consumer still lacks its source-backed identity"], blockedBy: ["consumer"] }] } } } }] };
+  const plan = compilationHandoff(root, source, null, upstream as never);
+  expect(plan.blockers).toContain(`upstream:${planHash}`);
+  expect(plan.tasks.find(t => t.id === `upstream:${planHash}`)).toMatchObject({ execution: "inspect-only",
+    refs: expect.arrayContaining([planHash, "required-consumer"]), reason: expect.stringContaining(state) });
+  const report = compilationClosureReport({ source, fingerprint: status.compilerFingerprint,
+    audit: await auditCompiler(root, { sourceId: document.id }), unverifiedBatchIds: [], receiptErrors: [],
+    requirementIssues: [], requirementHead: null, roleIssues: [], blockedUnitIds: [],
+    handoffBlockers: plan.tasks.filter(t => t.kind !== "phase").map(t => t.id) });
+  expect(report.gates.find(g => g.dimension === "upstream-handoff")).toMatchObject({ state: "blocked", refs: [`upstream:${planHash}`] });
+});
+
+it("every discovered command retains the inspected workspace when the caller uses --root", async () => {
+  const { root, source } = await fixture();
+  const before = await snapshot(workspaceStateDir(root));
+  const plan = await inspectCompilationHandoff(root, source.id);
+  for (const task of plan.tasks) {
+    const index = task.command.args.indexOf("--root");
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(task.command.args[index + 1]).toBe(root);
+  }
+  expect(await snapshot(workspaceStateDir(root))).toEqual(before);
+});
+
+it("a successor removes only its inherited requirement from an older evaluation's active denominator", async () => {
+  const { root, source: document } = await fixture();
+  const source = (await inspectCompilerStatus(root, document.id)).sources[0]!;
+  const previousHash = contentHash("previous"), successorHash = contentHash("successor");
+  const requirements = [{ id: "inherited", state: "blocked", diagnostics: [] },
+    { id: "retained", state: "satisfied", diagnostics: [] }];
+  const upstream = { ...emptyUpstream, plans: [
+    { state: "evaluated", plan: { planHash: previousHash, requirementIds: ["inherited", "retained"] },
+      evaluation: { result: { result: { requirements } } } },
+    { state: "converged", plan: { planHash: successorHash, requirementIds: ["inherited"] } },
+  ] };
+  expect(compilationHandoff(root, source, null, upstream as never).tasks.filter(t => t.kind === "upstream-repair").map(t => t.id))
+    .toEqual([`upstream:${successorHash}`]);
+  requirements[1]!.state = "unknown";
+  const retained = compilationHandoff(root, source, null, upstream as never).tasks.find(t => t.id === `upstream:${previousHash}`)!;
+  expect(retained.state).toBe("blocked");
+  expect(retained.refs).toEqual([previousHash, "retained"]);
 });

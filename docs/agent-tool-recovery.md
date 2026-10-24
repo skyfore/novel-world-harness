@@ -3426,3 +3426,5 @@ missing-condition report cannot satisfy it. See
 `COMPILATION_PREREQUISITES_BLOCKED` 保留原始角色／身份停止条件。身份任务仍使用 `requirements inspect-identity-repairs` 的同 source/task：复制 `items[].ref`（或 `availableRefs[]`）到 `--ref`，至多一次实质纠正。只读检查不能重开已消费阶段。额外消费者修复需要原有窄类型、独立要求、准确计划与验收；证据不足、类型不支持或原授权耗尽时停止对应工作，不续 grant、不轮换任务 ID、不恢复父编译。
 
 `COMPILATION_CLOSURE_BLOCKED` 的完整检查保存在原运行 `closure.gates`，计划入口也返回这份历史快照。按每项 `owner`、`refs` 与诊断处理原 requirement／repair scope，然后重新执行 `compile-novel closure`。旧快照、检查点计数、零 proposal obligations 或归档成功都不能替代新检查。闭合阶段本身不调用模型；不得把这个阶段的重新检查解释为重试原模型失败的许可。锁不归当前进程时使用正式阶段入口并先检查 `compiler-lock inspect`；不得并发执行或删锁绕过。
+
+交接命令中的绝对 `--root` 与 `--source` 必须一起保留，不能因当前目录不同而切换原任务范围。已评估上游计划的负面结果仍需检查同 source 的 `requirements inspect-upstream`，读取 `plans[].evaluation.result.result.requirements`；`UPSTREAM_REPAIR_EVALUATION_STALE` 或 `UPSTREAM_REPAIR_EVALUATION_UNVERIFIED` 要求先解决具体输入／存储条件，再通过原 `requirements` 阶段重验。发现结果不能授权重新 staging 已消费计划，闭合检查也不会刷新其评估或预算。

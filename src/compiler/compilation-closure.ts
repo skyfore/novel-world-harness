@@ -13,6 +13,10 @@ import { roleReviewFinishIssues } from "./role-review-finish.js";
 import { captureReconciliationObligations, reconciliationObligationIssues } from "./reconciliation-review-ledger.js";
 import { coreRoleDefinitions, coreRoleDefinitionBindingIssues } from "./core-role-requirement-records.js";
 import { baseStructuralUnits } from "./structure.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
+import { PreparedNovelCache } from "./prepared-cache.js";
+import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
+import { upstreamRepairEvaluationIssues } from "./upstream-repair-evaluation.js";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const dimensions = ["source", "batch-execution", "execution-obligations", "role-source-review", "upstream-handoff",
@@ -46,7 +50,7 @@ export function compilationClosureReport(input: {
   unverifiedBatchIds: string[]; receiptErrors: string[];
   requirementIssues: string[]; requirementHead: string | null;
   roleIssues: string[];
-  blockedUnitIds: string[]; handoffBlockers: string[];
+  blockedUnitIds: string[]; handoffBlockers: string[]; upstreamIssues?: string[];
 }): CompilationClosure {
   const { source, audit } = input;
   const gates: CompilationClosure["gates"] = [];
@@ -67,7 +71,8 @@ export function compilationClosureReport(input: {
     || w.openQuestions || w.blockedAudits || w.pendingClaimVerifications || w.unauditedClaims || w.staleSourceAudits || w.staleClaimAudits);
   gate("role-source-review", source.roleReviewInspection === "unknown" ? "unknown" : outstanding.length || input.roleIssues.length ? "blocked" : "passed", "roles",
     outstanding.map(w => w.planHash), [...input.roleIssues, ...outstanding.map(w => `${w.planHash}: ${w.auditedSources}/${w.sourceWorks} source audits closed; ${w.openQuestions} open questions.`)]);
-  gate("upstream-handoff", source.identityReviews.inspection === "unknown" ? "unknown" : input.handoffBlockers.length ? "blocked" : "passed", "repair", input.handoffBlockers);
+  gate("upstream-handoff", source.identityReviews.inspection === "unknown" ? "unknown"
+    : input.handoffBlockers.length || input.upstreamIssues?.length ? "blocked" : "passed", "repair", input.handoffBlockers, input.upstreamIssues);
   for (const dimension of ["structural", "evidence", "accounting", "resolution", "semantic"] as const) {
     const state = audit.readiness[dimension];
     gate(dimension, state === "ready" ? "passed" : state === "not-ready" ? "blocked" : "unknown", "repair",
@@ -114,11 +119,26 @@ export async function checkCompilationClosure(root: string, sourceId: string): P
   }
   const { inspectCompilationHandoff } = await import("./compilation-handoff.js");
   const handoff = await inspectCompilationHandoff(root, sourceId, source);
+  const upstreamIssues: string[] = [];
+  const upstream = await new UpstreamRepairLedger(root, sourceId).inspect();
+  if (upstream.plans.some((repair, index) => repair.state === "evaluated" && repair.plan.requirementIds.some(id =>
+    !upstream.plans.slice(index + 1).some(next => next.plan.requirementIds.includes(id))))) {
+    // An evaluated journal state is historical, even when every recorded result
+    // passed. Reuse the current candidate verifier without renewing its receipt.
+    try {
+      const document = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
+      if (!document) throw new Error("The registered upstream source is missing");
+      const { bundle, assessment } = await new PreparedNovelCache(root).inspectCandidate(document);
+      upstreamIssues.push(...upstreamRepairEvaluationIssues(bundle, assessment));
+    } catch (error) {
+      upstreamIssues.push(`UPSTREAM_REPAIR_EVALUATION_UNVERIFIED: ${String(error)}`);
+    }
+  }
   return compilationClosureReport({ source, fingerprint: status.compilerFingerprint, audit, unverifiedBatchIds, receiptErrors,
     requirementIssues: [...requirements.issues, ...reconciliationObligationIssues(obligations, sourceId, source.sourceSha256)],
     requirementHead: history.at(-1)?.hash ?? null, roleIssues,
     blockedUnitIds: accounting?.records.filter(r => isBlockingSourceAccountingStatus(r.status)).map(r => r.unitId) ?? [],
-    handoffBlockers: handoff.tasks.filter(t => t.kind !== "phase").map(t => t.id) });
+    handoffBlockers: handoff.tasks.filter(t => t.kind !== "phase").map(t => t.id), upstreamIssues });
 }
 
 export function assertCompilationClosure(report: CompilationClosure) {

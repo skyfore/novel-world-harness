@@ -181,6 +181,48 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
   });
+requirementsCommand.command("review-identity-repair").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "exact tasks[].taskId from inspect-identity-repairs")
+  .requiredOption("--ref <ref>", "exact additional-repair items[].ref from that task")
+  .requiredOption("--authorization-ref <ref>", "user authorization for this same original finding")
+  .description("Run single-use Pi repair planning and independent check against retained requirements; no world writes or parent resume")
+  .action(async options => {
+    const { runIdentityConsumerRepair } = await import("./workflow/identity-consumer-repair.js");
+    console.log(JSON.stringify(await runIdentityConsumerRepair({ root: rootFor({}), sourceId: options.source, taskId: options.task,
+      ref: options.ref, authorizationRef: options.authorizationRef }), null, 2));
+  });
+requirementsCommand.command("execute-identity-repair").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "exact original identity task")
+  .requiredOption("--ref <ref>", "exact independently checked additional-repair ref")
+  .requiredOption("--authorization-ref <ref>", "retained user authorization for this finding")
+  .option("--revalidation-id <hash>", "exact independently supported consumerRevalidation.reviews[].id for its joint typed repair")
+  .option("--correct-failed-attempt <hash>", "exact lastFailure.attemptRef for one settled initial-world field-evidence correction; preserves original slot and failures")
+  .option("--correction-authorization-ref <ref>", "explicit authorization for one additional bounded Pi correction allowance, never a reset of the original budget")
+  .option("--inspect", "read-only typed plan, retained budget and dependency preflight; no invocation or state writes")
+  .description("Continue the same finding through bounded Pi typed staging, independent acceptance and original finish/convergence; preserve failures and budgets")
+  .action(async options => {
+    const { runIdentityConsumerUpstream } = await import("./workflow/identity-consumer-upstream.js");
+    console.log(JSON.stringify(await runIdentityConsumerUpstream({ root: rootFor({}), sourceId: options.source, taskId: options.task,
+      ref: options.ref, authorizationRef: options.authorizationRef, revalidationId: options.revalidationId,
+      correctFailedAttempt: options.correctFailedAttempt, correctionAuthorizationRef: options.correctionAuthorizationRef, inspect: options.inspect }), null, 2));
+  });
+requirementsCommand.command("revalidate-identity-consumer").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")
+  .requiredOption("--ref <ref>", "exact original availableRefs[] consumer")
+  .requiredOption("--authorization-ref <ref>", "existing user authorization to continue the same repair")
+  .option("--compiler-correction <policy>", "single retained-budget continuation for source-local-referent/v1")
+  .option("--resume-unsubmitted <mode>", "inspect or run the sole audited continuation; retain failed sessions and subtract their original stage usage")
+  .option("--continuation-budget <path>", "explicit later authorization JSON for one bounded call amendment before the original continuation starts")
+  .option("--recover-submitted-ref", "validate the exact saved Pi proposal rejected only for a discovered entity:id spelling; no proposal replay")
+  .description("Independently revalidate one original consumer after the exact completed identity repair; retain old reviews, budgets and questions")
+  .action(async options => {
+    const { runIdentityConsumerRevalidation } = await import("./workflow/identity-consumer-revalidation.js");
+    console.log(JSON.stringify(await runIdentityConsumerRevalidation({ root: rootFor({}), sourceId: options.source,
+      taskId: options.task, ref: options.ref, authorizationRef: options.authorizationRef, compilerCorrection: options.compilerCorrection,
+      resumeUnsubmitted: options.resumeUnsubmitted,
+      recoverSubmittedRef: options.recoverSubmittedRef,
+      budgetAmendment: options.continuationBudget ? JSON.parse(await fs.readFile(options.continuationBudget, "utf8")) : undefined }), null, 2));
+  });
 requirementsCommand.command("plan-bound-upstream-repair").requiredOption("--request <path>", "current binding snapshot and selected findings JSON")
   .description("Derive original scene requirement IDs and freeze every supported dependency path before host authorization")
   .action(async options => {
@@ -283,7 +325,9 @@ requirementsCommand.command("evaluate-upstream").requiredOption("--source <id>",
   .action(async options => {
     const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
     const { settleUpstreamRepairRequirements } = await import("./compiler/upstream-repair-evaluation.js");
-    const result = await withWorkspaceOperationLock(rootFor({}), "compiler", () => settleUpstreamRepairRequirements(rootFor({}), options.source));
+    const { withIdentityAuthorityVerification } = await import("./compiler/identity-requirement-upstream.js");
+    const result = await withWorkspaceOperationLock(rootFor({}), "compiler", () =>
+      withIdentityAuthorityVerification(() => settleUpstreamRepairRequirements(rootFor({}), options.source)));
     console.log(JSON.stringify(result, null, 2));
     if (result.issues.length) process.exitCode = 2;
   });

@@ -11,6 +11,7 @@ import type {
 } from "./model.js";
 import { compareStoryTime } from "./time.js";
 import { RELATIONSHIP_TYPE_IDS } from "./relationship-ontology.js";
+import { identityConsumptionIssues } from "./identity-consumption.js";
 
 export class StateSchemaRegistry {
   private readonly specs = new Map<string, StateFieldSpec>();
@@ -35,6 +36,8 @@ export class StateSchemaRegistry {
   }
 
   validateOperation(operation: StateOperation, entities: ReadonlyMap<EntityId, Entity>): void {
+    const identityIssues = identityConsumptionIssues(operation, entities, this.specs);
+    if (identityIssues.length) throw new Error(identityIssues.map(i => `${i.code}: ${i.message} at ${i.path}`).join("; "));
     if (operation.op === "activate-rule" || operation.op === "deactivate-rule") return;
     const entity = entities.get(operation.entityId);
     if (!entity) throw new Error(`Unknown entity: ${operation.entityId}`);

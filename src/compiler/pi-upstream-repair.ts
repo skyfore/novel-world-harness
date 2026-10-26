@@ -1,7 +1,7 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { PiAgentSession, type PiAgentSessionOptions } from "../agent/pi-session.js";
-import { withNwhToolRecovery } from "../agent/tool-recovery.js";
+import { actionableToolError, readNwhToolRecovery, withNwhToolRecovery, NWH_TOOL_RECOVERY_MARKER } from "../agent/tool-recovery.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { contentHash } from "../world/canonical.js";
 import { createCompilerProposalToolset } from "./proposal-tools.js";
@@ -19,11 +19,11 @@ export async function runUpstreamRepairModelSlot(root: string, sourceId: string,
   options.signal?.throwIfAborted();
   const ledger = new UpstreamRepairLedger(root, sourceId), state = await ledger.inspect();
   const context = await upstreamRepairSlotContext(root, sourceId, planHash, target);
-  if (context.plan.sourceRepresentation && (options.model !== "openai-codex/gpt-6.1-sol" || !options.requestBudget)) throw upstreamRepairHostError("Source representation staging requires the pinned Pi subscription model and a retained request budget");
+  if ((context.plan.sourceRepresentation || context.plan.identityRequirements) && (options.model !== "openai-codex/gpt-6.1-sol" || !options.requestBudget)) throw upstreamRepairHostError("Reviewed upstream staging requires the pinned Pi subscription model and a retained request budget");
   const prior = state.attempts.findLast(item => item.started.artifactKind === target.kind && item.started.artifactId === target.id && state.plans.find(plan => plan.plan.planHash === item.started.planHash)!.plan.requirementIds.some(id => context.plan.requirementIds.includes(id)));
   const proposalId = prior?.failed ? prior.started.proposalId : `upstream-${contentHash({ planHash, target }).slice(0, 48)}`;
   const original = createCompilerProposalToolset(root).tools.find(tool => tool.name === `propose_${target.kind.replaceAll("-", "_")}`)!;
-  const prompt = JSON.stringify({ task: "Repair the exact host slot, then stop after successful staging. If reviewedSourceAnnotation is present, its payload is the independently reviewed exact source-only content: translate it into the original tool argument schema without changing any semantic field, optional reference, array order or uncertainty. Use its anchor/selector pairs exactly; host derivation is supplied separately. This does not answer the original critical/blocked role questions. For semantic event mentions, copy reviewedOccurrences.triggerExact, extentExact and ALL participant mention IDs literally; these fields are frozen host decisions. Never paraphrase, shorten or normalize whitespace in an exact selector. For event/effect/participation assertions, cite only inside extentExact. An event participant need not be its initiator: assign roles from evidence, not the slot order. Canonical events explicitly project one presence mode for every character participant and none for artifacts or other non-characters. Event-participation presence must exactly match that staged event projection for characters and must be omitted for non-characters.", proposalId, originalArgumentSchema: original.parameters, context });
+  const prompt = JSON.stringify({ task: "Repair the exact host slot, then stop after successful staging. If reviewedSourceAnnotation is present, its payload is the independently reviewed exact source-only content: translate it into the original tool argument schema without changing any semantic field, optional reference, array order or uncertainty. Use its anchor/selector pairs exactly; host derivation is supplied separately. This does not answer the original critical/blocked role questions. For semantic event mentions, copy reviewedOccurrences.triggerExact, extentExact and ALL participant mention IDs literally; these fields are frozen host decisions. Never paraphrase, shorten or normalize whitespace in an exact selector. For event/effect/participation assertions, cite only inside extentExact. An event participant need not be its initiator: assign roles from evidence, not the slot order. Canonical events explicitly project one presence mode for every character participant and none for artifacts or other non-characters. Event-participation presence must exactly match that staged event projection for characters and must be omitted for non-characters.", proposalId, originalArgumentSchema: original.parameters, originalToolGuidelines: original.promptGuidelines ?? [], context });
   if (prompt.length > 240_000) throw upstreamRepairHostError("Frozen repair context exceeds the bounded model input; host must narrow the original plan before invocation");
   const timeoutMs = options.timeoutMs ?? 120_000;
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 600_000) throw upstreamRepairHostError("Invalid bounded model timeout");
@@ -45,12 +45,25 @@ export async function runUpstreamRepairModelSlot(root: string, sourceId: string,
       return { proposal_json: value && Object.keys(value).length === 1 && typeof value.proposal_json === "string" ? value.proposal_json : JSON.stringify(raw ?? null) };
     },
     async execute(_id, input) {
+      if (failure) throw failure;
       if (staged) throw upstreamRepairHostError("This model slot already staged successfully; stop instead of submitting another proposal");
       let raw: unknown;
       try { raw = JSON.parse(input.proposal_json); } catch { raw = input.proposal_json; }
       try { staged = await stageUpstreamRepair(root, sourceId, planHash, target, raw, { proposalId, modelSessionRef: sessionRef }); }
-      catch (error) { throw new Error(`${String(error)} Recovery in this isolated scope: read_upstream_repair_context returns readable[].id, stagedDependencies[].payload.id and evidence[].segmentId. Copy the exact returned field for one materially corrected retry only; host-review/budget/scope failures stop immediately. Do not use unavailable lookup tools or rotate identities.`, { cause: error }); }
-      return { content: [{ type: "text" as const, text: "Authorized pending proposal staged. Stop this model turn; only the host may continue the repair protocol." }], details: { proposalId, attemptRef: staged.attemptRef }, terminate: true };
+      catch (error) {
+        let actionable = actionableToolError(original.name, error);
+        let advice = readNwhToolRecovery({ content: [{ type: "text", text: actionable.message }] }, original.name);
+        if (advice?.retryable && (await ledger.inspect()).plans.find(p => p.plan.planHash === planHash)?.state === "needs-host-review") {
+          actionable = actionableToolError(original.name, upstreamRepairHostError(`${actionable.message.split(NWH_TOOL_RECOVERY_MARKER, 1)[0]!.trim()} The original repair ledger has stopped; no further model request.`));
+          advice = readNwhToolRecovery({ content: [{ type: "text", text: actionable.message }] }, original.name);
+        }
+        // Keep the host's tagged recovery last and intact. Appending prose after
+        // it caused an outer wrapper to discard an exhausted retry allowance.
+        const scoped = new Error(`Isolated scope: read_upstream_repair_context returns readable[].id, stagedDependencies[].payload.id and evidence[].segmentId. Copy the exact returned field for one materially corrected retry only when the host recovery below permits it. Host/budget/scope stops forbid retry. Do not use unavailable tools or rotate identities.\n${actionable.message}`, { cause: actionable });
+        if (advice && !advice.retryable) failure ??= scoped;
+        throw scoped;
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify({ staged: true, proposalId, attemptRef: staged.attemptRef, worldTruthWritten: false, instruction: "Stop; only the host may continue the repair protocol." }) }], details: { proposalId, attemptRef: staged.attemptRef }, terminate: true };
     },
   }))];
   try {
@@ -60,7 +73,7 @@ export async function runUpstreamRepairModelSlot(root: string, sourceId: string,
       ...(options.onTool ? { onTool: options.onTool } : {}), ...(options.onToolResult ? { onToolResult: options.onToolResult } : {}),
       ...(options.onEvent ? { onEvent: options.onEvent } : {}), ...(options.onRetry ? { onRetry: options.onRetry } : {}), ...(options.trace ? { trace: options.trace } : {}),
       ...(options.requestBudget ? { requestBudget: options.requestBudget } : {}),
-      ...(context.plan.sourceRepresentation ? { autoCompaction: false } : {}),
+      ...((context.plan.sourceRepresentation || context.plan.identityRequirements) ? { autoCompaction: false } : {}),
       saveSession: false, includeProjectInstructions: false, includeLocalTools: false, includeNwhExtension: false, trackLastOpenedSession: false,
       interactionMode: "compiler", systemPromptOverride: systemPrompt, additionalTools: tools });
     options.signal?.addEventListener("abort", abort, { once: true });

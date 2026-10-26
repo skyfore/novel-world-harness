@@ -10,6 +10,7 @@ import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.j
 import { expressionActionConditionsSatisfied, validateGoalExpressions, validateGoalExpressionEvidence } from "../world/conditional-expression.js";
 import { emptyKnowledgeState } from "../world/knowledge.js";
 import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { validateSourceLocalIdentityEvidence } from "../world/identity-consumption.js";
 import { validateSemanticEffect } from "../world/semantic-effect.js";
 import { selectOpeningDriverActor } from "./opening-driver.js";
 import { ActorModelStore, actorActionHasMaterialEffect, characterGoalHasDevelopmentBoundary, characterGoalSchema, characterModelSchema, evaluateCharacterGoal } from "../world/actors.js";
@@ -694,7 +695,8 @@ export async function auditCompiler(
       invalidAssertions += entryIssues.length;
       evidenceErrors.push(...entryIssues.map(issue => ({ artifact: artifact.name, code: issue.code, message: issue.message })));
       if (artifact.kind === "entity") {
-        const issues = validateAgencyProfileEvidence(artifact.payload as import("../world/model.js").Entity, []);
+        const issues = [...validateAgencyProfileEvidence(artifact.payload as import("../world/model.js").Entity, []),
+          ...validateSourceLocalIdentityEvidence(artifact.payload as import("../world/model.js").Entity, [])];
         invalidAssertions += issues.length;
         evidenceErrors.push(...issues.map(issue => ({ artifact: artifact.name, code: issue.code, message: issue.message })));
       }
@@ -759,6 +761,7 @@ export async function auditCompiler(
       ...(artifact.kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "entity" ? validateAgencyProfileEvidence(artifact.payload as import("../world/model.js").Entity, binding.assertions) : []),
+      ...(artifact.kind === "entity" ? validateSourceLocalIdentityEvidence(artifact.payload as import("../world/model.js").Entity, binding.assertions) : []),
       ...validateEvidenceAssertionTargets(artifact.kind, artifact.id, artifact.payload, binding.assertions),
       ...(artifact.kind === "character-model"
         ? validateCharacterOntologyEvidenceAssertions(
@@ -1256,7 +1259,7 @@ export async function auditCompiler(
               && openingEvidence.span.startLine <= goalEvidence.span.endLine
               && openingEvidence.span.endLine >= goalEvidence.span.startLine)));
         if (!phaseSupported) return false;
-        return evaluateCharacterGoal(goal, {
+        return evaluateCharacterGoal(goal, { entities: entityCatalog,
           state: openingState!,
           knownClaimIds: knownClaimsByActor.get(goal.actorId) ?? new Set(),
           realizedCanonicalEventIds,

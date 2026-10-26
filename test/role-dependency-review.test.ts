@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { PiAgentSession } from "../src/agent/pi-session.js";
 import { contentHash as h } from "../src/world/canonical.js";
-import { roleDependencyReviewSchema, freezeRoleDependencyReview, assertAdditiveRoleInventory } from "../src/compiler/role-dependency-review.js";
+import { roleDependencyReviewSchema, freezeRoleDependencyReview, assertAdditiveRoleInventory, retainRoleDependencyFiles } from "../src/compiler/role-dependency-review.js";
 import * as service from "../src/compiler/role-dependency-review-service.js";
 import { RequirementLedger, requirementJournalSchema } from "../src/compiler/requirement-ledger.js";
 import { RoleRosterStore } from "../src/compiler/role-roster.js";
@@ -17,12 +17,49 @@ import { verifySemanticScopeRecord } from "../src/compiler/role-semantic-scope-t
 import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
 import { TraceStore } from "../src/trace/store.js";
 import { roleDependencyFixture } from "./helpers/role-dependency-fixture.js";
+import { captureRoleDependencyHistory } from "../src/compiler/role-dependency-history.js";
+import { worldStorageRoot } from "../src/world/paths.js";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 async function fixture(parentStateHash = h("BREAK")) {
   const result = await roleDependencyFixture(parentStateHash); roots.push(result.root); return result;
 }
+
+it("retains the original history hash across traversal orders while rejecting any file inventory change", () => {
+  const original = ["budgets/old.json", "work/plan.json", "attempts/failure.json"].map(path => ({ path, hash: h(path) }));
+  const current = original.slice().reverse(), before = h(current);
+  expect(retainRoleDependencyFiles(current, original)).toEqual(original);
+  expect(h(current)).toBe(before);
+  for (const changed of [current.slice(1), [...current, { path: "new-grant.json", hash: h("grant") }],
+    [...current.slice(1), current[1]!], current.map((f, i) => i ? f : { ...f, hash: h("changed failure") })]) {
+    expect(() => retainRoleDependencyFiles(changed, original)).toThrow(/file inventory changed/);
+  }
+});
+
+it("reads the exact legacy whole-history layout without dropping archived failures or rebinding new source-local records", async () => {
+  const f = await fixture(), sid = f.scope.sourceId, plan = f.review.priorPlan, storage = worldStorageRoot(f.root);
+  const journal = createHash("sha256").update(JSON.stringify([sid, plan.batchId])).digest("hex");
+  const paths = [`compiler/role-review-work/v1/${h(sid)}/plan.json`,
+    `compiler/role-review-work/budgets/${h(plan)}/spent.json`,
+    `compiler/role-review-work/context/${h(plan)}/failed.json`,
+    `compiler/proposal-obligations/${journal}/attempt.json`];
+  const put = async (name: string, body: string) => { const file = path.join(storage, name); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, body); };
+  for (const name of paths) await put(name, name);
+  const old = { ...f.review, retainedFiles: paths.slice().reverse().map(name => ({ path: name, hash: createHash("sha256").update(name).digest("hex") })) };
+  const oldHash = h(old);
+  expect(await captureRoleDependencyHistory(f.root, sid, [plan], old)).toEqual(old.retainedFiles);
+  const current = await captureRoleDependencyHistory(f.root, sid, [plan]);
+  expect(current).toHaveLength(3);
+  expect(current.some(file => file.path.includes("/context/"))).toBe(false);
+  await put(paths[2]!, "modified failure");
+  await expect(captureRoleDependencyHistory(f.root, sid, [plan], old)).rejects.toThrow(/file inventory changed/);
+  await put(paths[2]!, paths[2]!);
+  await put("compiler/role-review-work/context/extra.json", "new attempt");
+  await expect(captureRoleDependencyHistory(f.root, sid, [plan], old)).rejects.toThrow(/file inventory changed/);
+  expect(await captureRoleDependencyHistory(f.root, sid, [plan], { ...f.review, retainedFiles: current })).toEqual(current);
+  expect(h(old)).toBe(oldHash);
+});
 
 it("accepts only a receipt-bound additive denominator and keeps an unfinished zero-review plan pending", async () => {
   const f = await fixture();

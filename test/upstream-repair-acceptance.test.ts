@@ -116,7 +116,8 @@ it.each(scenes.flatMap(scene => [true, false].map(complete => ({ ...scene, compl
       operations: [{ op: "set", entityId: "reader", field: "character.alive", value: false }] } });
   const unfreezable = (await checkClosure()).gates.find(g => g.dimension === "upstream-handoff")!;
   expect(unfreezable.state).toBe("blocked");
-  expect(unfreezable.reasons.join("\n")).toContain("UPSTREAM_REPAIR_EVALUATION_UNVERIFIED");
+  expect(unfreezable.reasons.join("\n")).toContain("UPSTREAM_REPAIR_EVALUATION_STALE");
+  expect(unfreezable.reasons.join("\n")).toContain("SOURCE_ISOLATED_BASELINE_INVALID");
   // Closure cannot renew or replace the old evaluation while checking it.
   expect((await ledger.inspect()).plans[0]!.evaluation!.result).toEqual(evaluation.results[0]);
 });

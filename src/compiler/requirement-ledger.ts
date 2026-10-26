@@ -4,6 +4,8 @@ import { representationRecordSchema, validateRepresentationHistory, assertRepres
 import { roleDependencyReviewSchema, type RoleDependencyReview } from "./role-dependency-review.js";
 import { semanticScopeRecordSchema, validateSemanticScopeHistory, type SemanticScopeRecord } from "./role-semantic-scope.js";
 import { identityRecordSchema, validateIdentityHistory, type IdentityRecord } from "./identity-requirements.js";
+import { consumerRepairRecordSchema, validateConsumerRepairHistory, type ConsumerRepairRecord } from "./identity-consumer-repair-model.js";
+import { consumerRevalidationRecordSchema, consumerRevalidationId, validateConsumerRevalidationHistory, validateConsumerCorrectionLineage, type ConsumerRevalidationRecord } from "./identity-consumer-revalidation-model.js";
 import type { IdentityRecoveryPermit } from "../runtime/compile-loop/identity-recovery-host.js";
 import { textAnchorForByteRange } from "./text-anchors.js";
 import { sourceAuditProofSchema, type SourceAuditProof } from "./role-source-audit-model.js";
@@ -41,6 +43,8 @@ export const requirementSetSchema = z.object({
 });
 export type RequirementSet = z.infer<typeof requirementSetSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("identity-consumer-revalidation"), record: consumerRevalidationRecordSchema }).strict(),
+  z.object({ kind: z.literal("identity-consumer-repair"), record: consumerRepairRecordSchema }).strict(),
   z.object({ kind: z.literal("identity-requirements"), record: identityRecordSchema }).strict(),
   z.object({ kind: z.literal("role-dependency-review"), review: roleDependencyReviewSchema }).strict(),
   z.object({ kind: z.literal("role-semantic-scope"), record: semanticScopeRecordSchema }).strict(),
@@ -211,7 +215,10 @@ export class RequirementLedger {
     if (incoming.some(record => record.sourceId !== this.sourceId)) throw new Error("Requirement journal restore source mismatch; stop for host review");
     if (incoming.length && !bytes) throw new Error("Requirement journal restore needs immutable source bytes; stop for host storage review");
     for (const record of incoming) {
-      if (record.payload.kind === "identity-requirements" && (record.payload.record.intent.sourceHash !== crypto.createHash("sha256").update(bytes!).digest("hex")
+      if (record.payload.kind === "identity-consumer-revalidation" && (record.payload.record.scope.sourceHash !== crypto.createHash("sha256").update(bytes!).digest("hex")
+        || record.payload.record.evidence.some(e => contentHash(e.anchor) !== contentHash(textAnchorForByteRange(this.sourceId, bytes!, e.anchor.startByte, e.anchor.endByte))
+          || Buffer.from(bytes!).subarray(e.anchor.startByte, e.anchor.endByte).toString("utf8") !== e.selector.exact))) throw prerequisiteStop("Consumer revalidation restore evidence mismatch");
+      if ((record.payload.kind === "identity-requirements" || record.payload.kind === "identity-consumer-repair") && (record.payload.record.intent.sourceHash !== crypto.createHash("sha256").update(bytes!).digest("hex")
         || record.payload.record.evidence.some(e => contentHash(e.anchor) !== contentHash(textAnchorForByteRange(this.sourceId, bytes!, e.anchor.startByte, e.anchor.endByte))
           || Buffer.from(bytes!).subarray(e.anchor.startByte, e.anchor.endByte).toString("utf8") !== e.selector.exact))) throw prerequisiteStop("Identity requirement restore evidence mismatch");
       if (record.payload.kind === "role-dependency-review" && record.payload.review.scope.sourceHash !== crypto.createHash("sha256").update(bytes!).digest("hex")) throw prerequisiteStop("Dependency review restore source hash mismatch");
@@ -289,6 +296,28 @@ export class RequirementLedger {
     const { verifyIdentityRecord } = await import("./identity-requirement-trace.js");
     await verifyIdentityRecord(this.root, record, previous, undefined, recoveryPermit);
     await this.publish({ kind: "identity-requirements", record });
+  }
+  async recordIdentityConsumerRevalidation(raw: ConsumerRevalidationRecord): Promise<void> {
+    const record = consumerRevalidationRecordSchema.parse(raw), history = await this.history();
+    const previous = history.flatMap(r => r.payload.kind === "identity-consumer-revalidation"
+      && consumerRevalidationId(r.payload.record.scope) === consumerRevalidationId(record.scope) ? [r.payload.record] : []);
+    const existing = previous.find(r => r.output.phase === record.output.phase);
+    if (existing && contentHash(existing) !== contentHash(record)) throw prerequisiteStop("Consumer revalidation phase was already consumed; preserve its original record, no replacement");
+    validateConsumerRevalidationHistory(existing ? previous : [...previous, record], await this.identityRequirements(record.scope.taskId));
+    await (await import("./identity-consumer-revalidation.js")).verifyConsumerRevalidationRecord(this.root, record);
+    if (!existing) await this.publish({ kind: "identity-consumer-revalidation", record });
+  }
+
+  async recordIdentityConsumerRepair(raw: ConsumerRepairRecord): Promise<void> {
+    const record = consumerRepairRecordSchema.parse(raw), history = await this.history();
+    const previous = history.flatMap(r => r.payload.kind === "identity-consumer-repair"
+      && r.payload.record.intent.findingId === record.intent.findingId ? [r.payload.record] : []);
+    const existing = previous.find(r => r.output.phase === record.output.phase);
+    if (existing && contentHash(existing) !== contentHash(record)) throw prerequisiteStop("Consumer repair phase already consumed; preserve it, no replacement or retry");
+    validateConsumerRepairHistory(existing ? previous : [...previous, record], await this.identityRequirements(record.intent.taskId));
+    const { verifyConsumerRepairRecord } = await import("./identity-consumer-repair-trace.js");
+    await verifyConsumerRepairRecord(this.root, record);
+    if (!existing) await this.publish({ kind: "identity-consumer-repair", record });
   }
   async recordRoleSemanticScope(raw: SemanticScopeRecord): Promise<void> {
     const record = semanticScopeRecordSchema.parse(raw), review = (await this.roleDependencyReviews()).find(r => r.taskId === record.taskId);
@@ -717,12 +746,30 @@ export const requirementJournalSchema = z.array(recordSchema).superRefine((recor
         const current = [...previous, entry]; validateIdentityHistory(current); identityHistories.set(intent.taskId, current);
       }
     }
+    const consumerRepairs = new Map<string, ConsumerRepairRecord[]>();
+    for (const [index, entry] of records.entries()) if (entry.payload.kind === "identity-consumer-repair") {
+      const r = entry.payload.record, previous = consumerRepairs.get(r.intent.findingId) ?? [];
+      if (r.intent.sourceId !== sourceId || (!previous.length && (r.intent.requirementPrefix.length !== index
+        || r.intent.requirementPrefix.head !== records[index - 1]?.hash))) throw prerequisiteStop("Consumer repair lost its original ledger prefix");
+      const current = [...previous, r];
+      validateConsumerRepairHistory(current, identityHistories.get(r.intent.taskId) ?? []);
+      consumerRepairs.set(r.intent.findingId, current);
+    }
     const retainedReviews = new Map<string, string>();
+    const revalidations = new Map<string, ConsumerRevalidationRecord[]>();
+    for (const [index, entry] of records.entries()) if (entry.payload.kind === "identity-consumer-revalidation") {
+      const r = entry.payload.record, id = consumerRevalidationId(r.scope), previous = revalidations.get(id) ?? [];
+      validateConsumerCorrectionLineage(r.scope, [...revalidations.values()].flat());
+      if (r.scope.sourceId !== sourceId || (!previous.length && (r.scope.requirementPrefix.length !== index
+        || r.scope.requirementPrefix.head !== records[index - 1]?.hash))) throw prerequisiteStop("Consumer revalidation changed its original ledger prefix");
+      validateConsumerRevalidationHistory([...previous, r], identityHistories.get(r.scope.taskId) ?? []);
+      revalidations.set(id, [...previous, r]);
+    }
     const reviewSnapshots = new Map<string, RoleRoster>();
     const prerequisites = new Map<string, PrerequisiteRecord[]>();
     const representations = new Map<string, RepresentationRecord[]>();
     for (const record of records) {
-      if (record.payload.kind === "role-dependency-review" || record.payload.kind === "role-semantic-scope" || record.payload.kind === "identity-requirements") continue; // Validated above; original question dispositions never change here.
+      if (record.payload.kind === "identity-consumer-revalidation" || record.payload.kind === "identity-consumer-repair" || record.payload.kind === "role-dependency-review" || record.payload.kind === "role-semantic-scope" || record.payload.kind === "identity-requirements") continue; // Validated above; original question dispositions never change here.
       const roster = record.payload.kind === "core-role-definition" ? record.payload.definition.roster : record.payload.kind === "core-role-review-revision" ? record.payload.revision.priorRoster : record.payload.kind === "core-role-review-snapshot" ? record.payload.roster : undefined;
       for (const review of roster?.reviews ?? []) {
         if (retainedReviews.has(review.runId) && retainedReviews.get(review.runId) !== contentHash(review)) throw new Error("Retained role review run was rewritten");

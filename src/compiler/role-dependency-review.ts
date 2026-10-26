@@ -36,6 +36,17 @@ export const roleDependencyReviewSchema = z.object({
 });
 export type RoleDependencyReview = z.infer<typeof roleDependencyReviewSchema>;
 
+/** Directory traversal order is not an input revision. Check the complete
+ * path/hash inventory before retaining the original serialized order/hash. */
+export function retainRoleDependencyFiles(current: RoleDependencyReview["retainedFiles"], retained?: RoleDependencyReview["retainedFiles"]) {
+  const byPath = new Map(current.map(file => [file.path, file]));
+  if (byPath.size !== current.length || (retained && (retained.length !== current.length
+    || new Set(retained.map(file => file.path)).size !== retained.length
+    || retained.some(file => byPath.get(file.path)?.hash !== file.hash))))
+    throw prerequisiteStop("Original role history file inventory changed; inspect missing, added or changed files in this source/task, preserve both versions, no repinning or retry");
+  return retained ? retained.map(file => byPath.get(file.path)!) : [...current].sort((a, b) => a.path.localeCompare(b.path));
+}
+
 export function assertAdditiveRoleInventory(prior: z.infer<typeof roleRosterSchema>, next: z.infer<typeof roleRosterSchema>,
   annotations: string[], expectedIds?: string[]) {
   if (prior.candidates.some(c => contentHash(c) !== contentHash(next.candidates.find(n => n.id === c.id) ?? null))) {

@@ -50,9 +50,10 @@ export function preparedSubjectHash(bundle: Pick<PreparedNovelBundle, "version" 
 }
 
 /** Readiness is derived from current frozen inputs. This inspection cannot publish or create a public play session. */
-export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle): Promise<NovelClosureAssessment> {
+export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle,
+  retainedInputIssues: NovelClosureAssessment["issues"] = []): Promise<NovelClosureAssessment> {
   const subjectSnapshotHash = preparedSubjectHash(bundle), closure = buildPreparedClosure(bundle);
-  const issues = [...closure.issues, ...validateFrozenAccounting(bundle)];
+  const issues = [...retainedInputIssues, ...closure.issues, ...validateFrozenAccounting(bundle)];
   issues.push(...upstreamRepairSnapshotIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "UPSTREAM_REPAIR_SNAPSHOT_INVALID", message })));
   issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true).map(message => ({ code: "REQUIREMENT_JOURNAL_INVALID", message })));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));

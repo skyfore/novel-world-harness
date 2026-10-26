@@ -80,6 +80,7 @@ import {
   validateCanonicalAdaptationContract,
 } from "./canonical-adaptation.js";
 import { applyKnowledgeDelta, emptyKnowledgeState, isActionableKnowledge, KnowledgeProjector, type KnowledgeState } from "./knowledge.js";
+import { identityConsumptionIssues } from "./identity-consumption.js";
 import { isCommunicatingKnowledgeSource, validateKnowledgeSemanticReferences } from "./knowledge-semantics.js";
 import { committedHistory, projectActorScene } from "./scene.js";
 import type { SpatialRelation } from "./spatial-ontology.js";
@@ -205,6 +206,7 @@ export function validateEventProposal(
   const proposal = normalizeActorProposal(eventProposalSchema.parse(proposalInput));
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
+  errors.push(...identityConsumptionIssues(proposal, context.entities, new Map(context.stateSchema.list().map(s => [s.key, s])), context));
   if (proposal.expectedParentCommit !== head) errors.push({ code: "STALE_PARENT", message: `Expected ${proposal.expectedParentCommit}, current head is ${head}` });
   if (state.atCommit !== head) errors.push({ code: "STATE_HEAD_MISMATCH", message: `Projected state ${state.atCommit} does not match ${head}` });
   for (const entityId of proposal.participants) if (!context.entities.has(entityId)) errors.push({ code: "UNKNOWN_PARTICIPANT", message: `Unknown participant ${entityId}` });
@@ -572,6 +574,9 @@ export class WorldEngine {
       observationActors.add(observation.actorId);
     }
     const emptyInitialState = { ...emptyWorldState("genesis", 0), logicalTime };
+    const identityIssues = identityConsumptionIssues({ initialDelta, participantPresence, projectionSeed: completeSeed, knowledge,
+      actorObservations, actorId: genesisOptions.entryActorId }, this.context.entities, new Map(this.context.stateSchema.list().map(s => [s.key, s])), this.context);
+    if (identityIssues.length) throw new Error(identityIssues.map(i => `${i.code}: ${i.message} at ${i.path}`).join("; "));
     const initialState = applyStateDelta(
       emptyInitialState,
       initialDelta,

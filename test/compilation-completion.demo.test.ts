@@ -138,10 +138,24 @@ it("a converged repair is routed to the existing requirement revalidation phase,
   const source = (await inspectCompilerStatus(root, document.id)).sources[0]!;
   const upstream = { ...emptyUpstream, plans: [{ state: "converged", plan: { planHash: contentHash("plan"), requirementIds: ["requirement"] } }] };
   const plan = compilationHandoff(root, source, null, upstream as never);
-  expect(plan.tasks.find(t => t.kind === "upstream-repair")).toMatchObject({ state: "pending", execution: "existing-phase",
-    command: { args: ["--root", root, "compile-novel", "requirements", "--source", document.id] }, dependsOn: ["phase:repair"] });
+  expect(plan.tasks.find(t => t.kind === "upstream-repair")).toMatchObject({ state: "available", execution: "existing-phase",
+    command: { args: ["--root", root, "requirements", "evaluate-upstream", "--source", document.id] }, dependsOn: [] });
   expect(plan.tasks.find(t => t.id === "phase:recover")!.dependsOn).toEqual(["phase:source"]);
   expect(plan.blockers).toEqual([]);
+});
+
+it("discovers the exact joint consumer successor without routing back to its consumed entity repair", async () => {
+  const { root, source: document } = await fixture(), source = (await inspectCompilerStatus(root, document.id)).sources[0]!;
+  const revalidationId = contentHash("supported original consumer review"), parentPlanHash = contentHash("completed entity repair");
+  const upstream = { ...emptyUpstream, plans: [
+    { state: "needs-host-review", plan: { planHash: parentPlanHash, requirementIds: ["original-requirement"] } },
+    { state: "staging", plan: { planHash: contentHash("joint successor"), requirementIds: ["original-requirement"], authorizationRef: "original authorization",
+      identityRequirements: { taskId: "original-task", consumerRepair: { entityId: "unknown" }, consumerRevalidation: { id: revalidationId, parentPlanHash } } } },
+  ] };
+  const handoff = compilationHandoff(root, source, null, upstream as never), repairs = handoff.tasks.filter(t => t.kind === "upstream-repair");
+  expect(repairs).toHaveLength(1);
+  expect(repairs[0]!.command.args).toEqual(["--root", root, "requirements", "execute-identity-repair", "--task", "original-task",
+    "--ref", `initial/${document.id}`, "--authorization-ref", "original authorization", "--revalidation-id", revalidationId, "--source", document.id]);
 });
 
 it.each(["blocked", "unknown", "unmapped", "stale"])("an evaluated repair with a %s requirement remains discoverable and blocks closure", async state => {

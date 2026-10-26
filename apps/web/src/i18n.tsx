@@ -24,6 +24,7 @@ const zhCN: Record<string, string> = {
   "Independent evaluation": "独立评测",
   "All character readiness": "完整人物可玩状态",
   "Review roles and inspect closure": "复核人物并检查世界闭合",
+  "Continue compilation": "继续编译",
   "Complete role review and independent evaluation before publication.": "发布前需完成人物复核与独立评测。",
   "unresolved-identity": "身份未解析",
   "not-run": "尚未运行",

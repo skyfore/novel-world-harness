@@ -23,7 +23,9 @@ const runSchema = z.object({
   rebuildBatchIds: z.array(z.string()).optional(),
   subjectHash: digest.optional(), planHash: digest.optional(), bundleHash: digest.optional(),
   activatedBundleHash: digest.optional(),
-  closure: compilationClosureSchema.optional(),
+  // Compiler projections and repair evaluation share this schema through a
+  // module cycle. Resolve the unchanged closure validator only when parsing.
+  closure: z.lazy(() => compilationClosureSchema).optional(),
   branchId: safeId.optional(), completed: z.boolean(),
   history: z.array(receiptSchema),
 }).strict();

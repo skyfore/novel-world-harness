@@ -14,10 +14,11 @@ import { verifyUpstreamRepairPlan, upstreamRepairHostError } from "./upstream-re
 import { checkUpstreamRepairMutation, recoverUpstreamRepairStage } from "./upstream-repair-staging.js";
 import { UpstreamRepairFinishValidationError, freezeUpstreamRepairFinishIntent, type UpstreamRepairFinishIntent } from "./upstream-repair-finish-intent.js";
 import type { UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import { isCompletedUpstreamRecovery } from "./upstream-convergence-recovery.js";
 
 const upstreamStore = (kind: UpstreamRepairFinishIntent["proposals"][number]["artifactKind"]) =>
   kind === "entity-resolution" || kind === "event-resolution" ? kind
-    : kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
+    : kind === "entity" || kind === "initial-world" || kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
 function envelopeEvidenceAssertions(envelope: unknown): readonly unknown[] {
   if (!envelope || typeof envelope !== "object") return [];
   const assertions = (envelope as { evidenceAssertions?: unknown }).evidenceAssertions;
@@ -79,7 +80,8 @@ export async function prepareUpstreamRepairFinish(root: string, sourceId: string
 /** Host verification accepts own exact outputs only after the original receipt is durable. */
 export async function verifyUpstreamRepairFinish(root: string, sourceId: string, planHash: string, expectedIntent?: UpstreamRepairFinishIntent, requireCommitted = false, expectedBatchId?: string, restoringReceipt?: import("./finish-receipts.js").CompilerFinishReceipt) {
   const current = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(item => item.plan.planHash === planHash);
-  if (!current?.finishIntent || !["finish-frozen", "finished", "converged", "evaluated"].includes(current.state)) throw upstreamRepairHostError("Original active frozen finish intent is missing");
+  if (!current?.finishIntent || (!["finish-frozen", "finished", "converged", "evaluated"].includes(current.state)
+    && !(current.state === "needs-host-review" && current.finishedReceipt && isCompletedUpstreamRecovery(root, planHash)))) throw upstreamRepairHostError("Original active frozen finish intent is missing");
   const { plan, finishIntent: intent } = current;
   if (plan.identityRequirements) await (await import("./identity-requirement-acceptance.js")).verifyIdentityUpstreamAcceptance(root, plan);
   if (plan.sourceRepresentation) await (await import("./source-representation-acceptance.js")).verifySourceUpstreamAcceptance(root, plan);

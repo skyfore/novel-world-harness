@@ -25,7 +25,9 @@ import {
   type StoryTime,
   type WorldState,
 } from "./model.js";
-import { evaluatePredicate } from "./state.js";
+import { evaluatePredicate, DEFAULT_STATE_FIELDS } from "./state.js";
+import { identityConsumptionIssues } from "./identity-consumption.js";
+import type { WorldModelContext } from "./engine.js";
 import { committedHistory, experiencedCanonicalEvents, projectActorScene, realizedCanonicalEvents } from "./scene.js";
 import { AmbiguousLegacySourceError, evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { storyTimesOverlap } from "./time.js";
@@ -326,9 +328,13 @@ export function evaluateCharacterGoal(
     realizedCanonicalEventIds?: ReadonlySet<string>;
     experiencedCanonicalEventIds?: ReadonlySet<string>;
     storyTime?: StoryTime;
+    entities?: ReadonlyMap<string, Entity>;
+    identityCatalog?: Partial<WorldModelContext>;
   },
 ): GoalActivation {
   const reasons: string[] = [];
+  const identityIssues = input.entities ? identityConsumptionIssues(goal, input.entities, new Map(DEFAULT_STATE_FIELDS.map(s => [s.key, s])), input.identityCatalog) : [];
+  if (identityIssues.length) return { active: false, complete: false, expired: false, reasons: identityIssues.map(i => `${i.code}: ${i.message}`) };
   const complete = Boolean(goal.completion?.length && goal.completion.every((predicate) => evaluatePredicate(input.state, predicate)));
   const expired = Boolean(goal.expiry?.some((predicate) => evaluatePredicate(input.state, predicate)));
   if (complete) reasons.push("completion conditions are satisfied");
@@ -610,7 +616,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           if (!action || !action.preconditions.every(predicate => evaluatePredicate(state, predicate)) || !actorActionHasMaterialEffect(action)) continue;
           const view = await knowledge.view(goal.actorId, commitId);
           const known = actionableKnowledgeClaimIds(view, activeSourceId);
-          if (!evaluateCharacterGoal(goal, {
+          if (!evaluateCharacterGoal(goal, { entities: context.entities, identityCatalog: context,
             state,
             knownClaimIds: known,
             realizedCanonicalEventIds,
@@ -675,7 +681,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
       const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
       const view = await knowledge.view(goal.actorId, commitId);
       const known = actionableKnowledgeClaimIds(view, activeSourceId);
-      const activation = evaluateCharacterGoal(goal, {
+      const activation = evaluateCharacterGoal(goal, { entities: context.entities, identityCatalog: context,
         state,
         knownClaimIds: known,
         realizedCanonicalEventIds,

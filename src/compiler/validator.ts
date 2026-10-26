@@ -12,6 +12,7 @@ import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.j
 import { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
 import { validateGoalExpressions, validateGoalExpressionEvidence } from "../world/conditional-expression.js";
 import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { validateSourceLocalIdentityEvidence } from "../world/identity-consumption.js";
 import { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { applyEventExecutions, eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import type { z } from "zod";
@@ -1633,7 +1634,8 @@ export class CompilerCommitService {
     const acquisitionEvidenceIssues = kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : [];
     const perceptionEvidenceIssues = kind === "perception-observation" ? [...validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions), ...await validatePerceptionObservationTrace(this.workspaceRoot, perceptionObservationSchema.parse(payload))] : [];
     const expressionEvidenceIssues = kind === "utterance-expression" ? [...validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions), ...await validateUtteranceExpressionTrace(this.workspaceRoot, utteranceExpressionSchema.parse(payload))] : kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(payload), evidenceAssertions) : [];
-    expressionEvidenceIssues.push(...(kind === "entity" ? validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions) : []));
+    expressionEvidenceIssues.push(...(kind === "entity" ? [...validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions),
+      ...validateSourceLocalIdentityEvidence(entitySchema.parse(payload), evidenceAssertions)] : []));
     const semanticEvidenceIssues = kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : [];
     const spatialEvidenceIssues = kind === "spatial-relation"
       ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)

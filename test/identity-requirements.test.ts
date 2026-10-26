@@ -18,7 +18,9 @@ import { assertUpstreamRepairMutation, freezeUpstreamRepairPlan, upstreamRepairP
 import { ModelRequestBudget } from "../src/runtime/model-request-budget.js";
 import * as identityTrace from "../src/compiler/identity-requirement-trace.js";
 import { identityRecoveryHost, inspectIdentityDefinitionRecovery, type IdentityDefinitionRecovery } from "../src/compiler/identity-definition-recovery.js";
-import { RequirementLedger } from "../src/compiler/requirement-ledger.js";
+import { RequirementLedger, type LedgerRecord } from "../src/compiler/requirement-ledger.js";
+import { identityRequirementDefinition } from "../src/compiler/identity-requirement-authority.js";
+import { upstreamRepairSnapshotIssues } from "../src/compiler/upstream-repair-snapshot.js";
 import { TraceRecorder } from "../src/trace/recorder.js";
 import { TraceStore } from "../src/trace/store.js";
 import { digest } from "../src/runtime/compile-loop/workspace.js";
@@ -37,6 +39,24 @@ import { decodeJsonValues } from "../src/agent/lossless-json-context.js";
 
 import { identityFixture as fixture } from "./helpers/identity-fixture.js";
 const rechain = (records: IdentityRecord[]) => { for (let i = 1; i < records.length; i++) { records[i]!.predecessorRecordHash = h(records[i - 1]); if ("proposalHash" in records[i]!.output) (records[i]!.output as any).proposalHash = h(records[i - 1]!.output); } };
+
+it("binds frozen identity authority to the original complete review without evaluating live postconditions", () => {
+  const f = fixture(), plan = buildIdentityRepairPlan(f.p, f.records);
+  const journal = f.records.map(record => ({ payload: { kind: "identity-requirements", record } })) as LedgerRecord[];
+  const before = h(journal);
+  expect(identityRequirementDefinition(journal, plan)).toEqual(f.records[0]!.output);
+  const planned = { version: 1 as const, sourceId: f.intent.sourceId, sequence: 0, predecessorHash: null,
+    payload: { kind: "planned" as const, plan, predecessorPlanHash: null } };
+  const snapshot = { upstreamRepairJournal: [{ ...planned, hash: h(planned) }], requirementJournal: journal };
+  expect(upstreamRepairSnapshotIssues(snapshot, f.intent.sourceId, f.intent.sourceHash)).toEqual(["UPSTREAM_REPAIR_PREDECESSOR_RECEIPT_MISSING"]);
+  expect(upstreamRepairSnapshotIssues({ ...snapshot, requirementJournal: journal.slice(0, -1) }, f.intent.sourceId, f.intent.sourceHash))
+    .toContain("UPSTREAM_REPAIR_IDENTITY_AUTHORITY_MISMATCH");
+  expect(() => identityRequirementDefinition(journal.slice(0, -1), plan)).toThrow(/complete consumer review/);
+  expect(() => identityRequirementDefinition(journal, { ...plan, sourceScope: { ...plan.sourceScope, sourceId: "other-source" } })).toThrow(/original source/);
+  expect(() => identityRequirementDefinition(journal, { ...plan, identityRequirements: { ...plan.identityRequirements!, intentHash: h("other-intent") } })).toThrow();
+  expect(() => identityRequirementDefinition(journal, { ...plan, requirementIds: plan.requirementIds.slice(1) })).toThrow();
+  expect(h(journal)).toBe(before);
+});
 
 it.each([1, 2, 5, 48])("derives %i identity targets from the exact operation scope while rejecting omissions", count => {
   const f = fixture(count);

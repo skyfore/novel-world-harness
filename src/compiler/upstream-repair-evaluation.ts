@@ -1,5 +1,5 @@
 import { contentHash } from "../world/canonical.js";
-import { WorkspaceStore } from "../storage/workspace-store.js";
+import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { inspectUpstreamRepairJournal, UpstreamRepairLedger } from "./upstream-repair-ledger.js";
 import { activeRequirementSets, requirementResultSchema, resultFromReport, type RequirementResult } from "./requirement-ledger.js";
 import { evaluateReviewedSceneCapabilities } from "../eval/scene-capabilities.js";
@@ -13,23 +13,37 @@ import { verifyUpstreamRepairConvergence } from "./upstream-repair-convergence.j
 import { upstreamRepairEvaluationSchema, UPSTREAM_REPAIR_EVALUATOR_VERSION } from "./upstream-repair-evaluation-model.js";
 import { sourcePatternObligationRequirementId } from "./proposal-obligations.js";
 import { representationRequirementResult } from "./source-representation-upstream.js";
-import { identityRequirementsReady, identitySemanticHash } from "./identity-requirements.js";
+import { identitySemanticHash } from "./identity-requirements.js";
+import { identityRequirementDefinition } from "./identity-requirement-authority.js";
 
 type AssessmentInputs = Pick<NovelClosureAssessment, "subjectSnapshotHash" | "roster" | "playability" | "requirementResults" | "coreRoleResult">;
+const localRepairPostconditions = (plan: UpstreamRepairPlan) => Boolean(plan.identityRequirements || plan.sourceRepresentation || plan.proposalObligation);
+
+/** Local artifact postconditions need the complete verified compiler snapshot,
+ * not role play probes. Those still run in their existing certification stage. */
+export async function inspectUpstreamRepairEvaluationInputs(root: string, source: SourceDocument, plans: readonly UpstreamRepairPlan[]) {
+  const { PreparedNovelCache } = await import("./prepared-cache.js");
+  const cache = new PreparedNovelCache(root);
+  if (plans.some(plan => !localRepairPostconditions(plan))) return cache.inspectRepairCandidate(source);
+  const snapshot = await cache.repairCandidateSnapshot(source);
+  const assessment: AssessmentInputs = { subjectSnapshotHash: preparedSubjectHash(snapshot.bundle), roster: null, playability: null };
+  return { ...snapshot, assessment };
+}
 
 /** Recompute against frozen independently reviewed definitions; never trust recorded success. */
 export function upstreamRepairRequirementResult(bundle: PreparedNovelBundle, assessment: AssessmentInputs, plan: UpstreamRepairPlan): RequirementResult {
   if (plan.identityRequirements) {
     const authority = plan.identityRequirements;
-    const records = (bundle.compilerSnapshot.requirementJournal ?? []).flatMap(r => r.payload.kind === "identity-requirements" && r.payload.record.intent.taskId === authority.taskId ? [r.payload.record] : []);
-    const definition = records[0]?.output;
-    if (!identityRequirementsReady(records) || definition?.phase !== "identity-definition" || contentHash(records.map(contentHash)) !== contentHash(authority.recordHashes)
-      || contentHash({ intentHash: contentHash(records[0]!.intent), definition }) !== plan.requirementSetHash
-      || contentHash(plan.requirementIds.slice().sort()) !== contentHash(definition.requirements.map(r => r.id).sort())) throw upstreamRepairHostError("Identity evaluation lost its independent requirement and complete consumer review");
+    const definition = identityRequirementDefinition(bundle.compilerSnapshot.requirementJournal ?? [], plan);
     return requirementResultSchema.parse({ setId: plan.batchId, revisionHash: plan.requirementSetHash, catalogHash: contentHash(bundle.compilerSnapshot.entityResolutions), evaluatorVersion: "independent-identity-uncertainty/v1",
       requirements: definition.requirements.map(d => {
         const active = bundle.compilerSnapshot.entityResolutions.find(r => r.mentionId === d.mentionId), expected = authority.semanticSlots.find(s => s.id === active?.id);
-        const ok = active && expected && identitySemanticHash(active) === expected.payloadHash && active.status === d.requiredStatus;
+        const consumer = authority.consumerRepair, entity = consumer ? bundle.canonical.entities.find(e => e.id === consumer.entityId) : undefined;
+        const basis = entity?.identityConsumption;
+        const entityReady = !consumer || active?.id !== consumer.resolutionId || (basis?.resolutionId === active.id
+          && basis.resolutionRevisionHash === contentHash(active) && basis.mentionId === d.mentionId && basis.sourceId === plan.sourceScope.sourceId
+          && (!authority.consumerRevalidation || basis.mode === "source-local"));
+        const ok = active && expected && identitySemanticHash(active) === expected.payloadHash && active.status === d.requiredStatus && entityReady;
         return { id: d.id, definitionHash: contentHash(d), state: ok ? "satisfied" : "blocked", blockedBy: ok ? [] : [d.mentionId], diagnostics: ok ? [] : ["EXACT_IDENTITY_UNCERTAINTY_POSTCONDITION_MISSING"] };
       }) }); // Never changes the original critical/blocked questions or activates consumers.
   }
@@ -137,14 +151,18 @@ export function upstreamRepairEvaluationIssues(bundle: PreparedNovelBundle, asse
 export async function prepareUpstreamRepairEvaluation(root: string, sourceId: string, planHash: string) {
   await verifyUpstreamRepairConvergence(root, sourceId, planHash);
   const state = await new UpstreamRepairLedger(root, sourceId).inspect(), current = state.plans.find(item => item.plan.planHash === planHash)!;
-  const convergence = state.records.find(item => item.payload.kind === "converged" && item.payload.planHash === planHash);
+  const convergence = state.records.findLast(item => item.payload.kind === "converged" && item.payload.planHash === planHash);
   if (!convergence || convergence.payload.kind !== "converged") throw upstreamRepairHostError("Requirement evaluation requires an observed convergence record");
   const source = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
   if (!source) throw upstreamRepairHostError("Evaluation source is not registered");
-  const { PreparedNovelCache } = await import("./prepared-cache.js");
-  const { bundle, assessment } = await new PreparedNovelCache(root).inspectCandidate(source).catch(error => {
+  const { bundle, assessment, baselineIssues } = await inspectUpstreamRepairEvaluationInputs(root, source, [current.plan]).catch(error => {
     throw upstreamRepairHostError(`Evaluation inputs cannot be frozen: ${String(error)}; inspect the original source workflow, then use requirements evaluate-upstream --source ${sourceId} after host repair`);
   });
+  // Identity/source representation and proposal-obligation postconditions inspect
+  // their exact committed artifacts. Executable scene/role requirements retain
+  // the complete valid-baseline prerequisite.
+  if (baselineIssues.length && !localRepairPostconditions(current.plan))
+    throw upstreamRepairHostError(`Executable requirement evaluation has a blocked baseline: ${baselineIssues.map(i => i.message).join("; ")}`);
   return upstreamRepairEvaluationSchema.parse({ version: 1, evaluatorVersion: UPSTREAM_REPAIR_EVALUATOR_VERSION,
     planHash, requirementSetHash: current.plan.requirementSetHash, receiptFingerprint: convergence.payload.receiptFingerprint,
     convergenceRef: convergence.hash, subjectSnapshotHash: preparedSubjectHash(bundle), result: upstreamRepairRequirementResult(bundle, assessment, current.plan) });
@@ -157,9 +175,8 @@ export async function settleUpstreamRepairRequirements(root: string, sourceId: s
   const ledger = new UpstreamRepairLedger(root, sourceId), results = [];
   for (const current of (await ledger.inspect()).plans.filter(item => ["converged", "evaluated"].includes(item.state))) results.push(await ledger.recordEvaluation(current.plan.planHash));
   if (!(await ledger.inspect()).plans.length) return { results, issues: [] as string[] };
-  const { PreparedNovelCache } = await import("./prepared-cache.js");
-  const { bundle, assessment } = await new PreparedNovelCache(root).inspectCandidate(source);
-  return { results, issues: upstreamRepairEvaluationIssues(bundle, assessment) };
+  const { bundle, assessment, baselineIssues } = await inspectUpstreamRepairEvaluationInputs(root, source, (await ledger.inspect()).plans.map(p => p.plan));
+  return { results, issues: [...upstreamRepairEvaluationIssues(bundle, assessment), ...baselineIssues.map(i => `${i.code}: ${i.message}`)] };
 }
 
 /** Invalidate derived results after any host input change, including an unfreezable candidate. */
@@ -167,11 +184,14 @@ export async function observeUpstreamRepairEvaluationValidity(root: string, sour
   const ledger = new UpstreamRepairLedger(root, sourceId), evaluated = (await ledger.inspect()).plans.filter(item => item.state === "evaluated");
   if (!evaluated.length) return;
   const source = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
-  let nextSubject: string | null = null, reason = "Current frozen compiler inputs changed";
+  let nextSubject: string | null = null, invalidBaseline = false, reason = "Current frozen compiler inputs changed";
   try {
     if (!source) throw upstreamRepairHostError("Evaluation source is not registered");
     const { PreparedNovelCache } = await import("./prepared-cache.js");
-    nextSubject = preparedSubjectHash(await new PreparedNovelCache(root).candidateSnapshot(source));
+    const snapshot = await new PreparedNovelCache(root).repairCandidateSnapshot(source);
+    nextSubject = preparedSubjectHash(snapshot.bundle); invalidBaseline = snapshot.baselineIssues.length > 0;
   } catch (error) { reason = `Current evaluation inputs cannot be frozen: ${String(error)}`; }
-  for (const current of evaluated) await ledger.invalidateEvaluation(current.plan.planHash, nextSubject, reason);
+  for (const current of evaluated) await ledger.invalidateEvaluation(current.plan.planHash,
+    invalidBaseline && !localRepairPostconditions(current.plan) ? null : nextSubject,
+    invalidBaseline && !localRepairPostconditions(current.plan) ? "Executable requirement baseline is invalid" : reason);
 }

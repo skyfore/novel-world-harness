@@ -7,6 +7,8 @@ import { ModelRequestBudget } from "../runtime/model-request-budget.js";
 import { WorkspaceOperationLock } from "../util/workspace-lock.js";
 import { RequirementLedger, type LedgerRecord } from "./requirement-ledger.js";
 import { validateIdentityHistory } from "./identity-requirements.js";
+import { validateConsumerRepairHistory, type ConsumerRepairRecord } from "./identity-consumer-repair-model.js";
+import { consumerRevalidationId, validateConsumerRevalidationHistory, validateConsumerCorrectionLineage, type ConsumerRevalidationRecord } from "./identity-consumer-revalidation-model.js";
 import { prepareCoreRoleDependencyReview, type RoleDependencyReviewInput } from "./role-dependency-review-service.js";
 import type { RoleDependencyReview } from "./role-dependency-review.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
@@ -32,7 +34,8 @@ export function verifySemanticCorrectionJournal(history: LedgerRecord[], review:
   const semantic = firstIdentity < 0 ? suffix : suffix.slice(0, firstIdentity);
   if (semantic.length > 2 || semantic.some(r => r.payload.kind !== "role-semantic-scope" || r.payload.record.taskId !== review.taskId)) stop("unexpected semantic correction history");
   if (firstIdentity < 0) return pending;
-  const records = suffix.slice(firstIdentity).map(r => {
+  const identitySuffix = suffix.slice(firstIdentity), firstRepair = identitySuffix.findIndex(r => r.payload.kind === "identity-consumer-repair");
+  const records = (firstRepair < 0 ? identitySuffix : identitySuffix.slice(0, firstRepair)).map(r => {
     if (r.payload.kind !== "identity-requirements") return stop("unrelated append after semantic correction");
     return r.payload.record;
   });
@@ -44,6 +47,26 @@ export function verifySemanticCorrectionJournal(history: LedgerRecord[], review:
     || intent.requirementPrefix.length !== prefixLength || intent.requirementPrefix.head !== history[prefixLength - 1]!.hash
     || contentHash(intent.semanticRecordHashes) !== contentHash(semantic.map(r => r.payload.kind === "role-semantic-scope" ? contentHash(r.payload.record) : null))) {
     stop("identity append is not bound to the exact original semantic prefix");
+  }
+  if (firstRepair >= 0) {
+    const repairs = new Map<string, ConsumerRepairRecord[]>();
+    const revalidations = new Map<string, ConsumerRevalidationRecord[]>();
+    for (const [index, r] of identitySuffix.slice(firstRepair).entries()) {
+      if (r.payload.kind === "identity-consumer-revalidation") {
+        const record = r.payload.record, id = consumerRevalidationId(record.scope), prior = revalidations.get(id) ?? [];
+        validateConsumerCorrectionLineage(record.scope, [...revalidations.values()].flat());
+        const at = pending + 1 + firstIdentity + firstRepair + index;
+        if (!repairs.size || (!prior.length && (record.scope.requirementPrefix.length !== at || record.scope.requirementPrefix.head !== history[at - 1]?.hash)))
+          stop("consumer revalidation lost its original repair or ledger prefix");
+        validateConsumerRevalidationHistory([...prior, record], records); revalidations.set(id, [...prior, record]); continue;
+      }
+      if (r.payload.kind !== "identity-consumer-repair") stop("unrelated append after consumer repair planning");
+      const repair = r.payload.record, prior = repairs.get(repair.intent.findingId) ?? [];
+      const at = pending + 1 + firstIdentity + firstRepair + index;
+      if (!prior.length && (repair.intent.requirementPrefix.length !== at || repair.intent.requirementPrefix.head !== history[at - 1]?.hash))
+        stop("consumer repair lost the exact original requirement prefix");
+      const current = [...prior, repair]; validateConsumerRepairHistory(current, records); repairs.set(repair.intent.findingId, current);
+    }
   }
   return pending;
 }

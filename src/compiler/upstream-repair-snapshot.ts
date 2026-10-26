@@ -1,14 +1,18 @@
 import { contentHash } from "../world/canonical.js";
 import { coreRoleDefinitions, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
-import type { RequirementSet } from "./requirement-ledger.js";
+import type { LedgerRecord, RequirementSet } from "./requirement-ledger.js";
 import { buildSceneRequirementAssessment, SCENE_REQUIREMENT_EVALUATOR_VERSION } from "../eval/scene-requirements.js";
 import type { ReconciliationObligationSnapshot } from "./reconciliation-review-ledger.js";
 import { upstreamRepairJournalSchema, type UpstreamRepairRecord } from "./upstream-repair-ledger.js";
 import { sourcePatternObligationRequirementId, sourcePatternObligationRequirementSetHash } from "./proposal-obligations.js";
+import { representationRequirementDefinition } from "./source-representation-upstream.js";
+import { representationRequirementId } from "./source-representation.js";
+import { identityRequirementDefinition } from "./identity-requirement-authority.js";
 
 /** Bind retained host plans to frozen original definitions and receipt identities, not live revisions. */
 export function upstreamRepairSnapshotIssues(snapshot: {
   upstreamRepairJournal?: UpstreamRepairRecord[];
+  requirementJournal?: LedgerRecord[];
   requirementDefinitions?: RequirementSet[];
   coreRoleRequirementDefinitions?: CoreRoleRequirementDefinition[];
   reconciliationObligations?: ReconciliationObligationSnapshot;
@@ -30,7 +34,13 @@ export function upstreamRepairSnapshotIssues(snapshot: {
     const plan = record.payload.plan;
     if (plan.sourceScope.sourceId !== sourceId || plan.sourceScope.sourceSha256 !== sourceSha256) issues.push("UPSTREAM_REPAIR_PLAN_SOURCE_MISMATCH");
     let requirementIds: string[] = [];
-    if (plan.proposalObligation) {
+    if (plan.identityRequirements) {
+      try { requirementIds = identityRequirementDefinition(snapshot.requirementJournal ?? [], plan).requirements.map(r => r.id); }
+      catch { issues.push("UPSTREAM_REPAIR_IDENTITY_AUTHORITY_MISMATCH"); }
+    } else if (plan.sourceRepresentation) {
+      try { requirementIds = representationRequirementDefinition(snapshot.requirementJournal ?? [], plan).coverage.map(q => representationRequirementId(q.questionId)); }
+      catch { issues.push("UPSTREAM_REPAIR_REPRESENTATION_AUTHORITY_MISMATCH"); }
+    } else if (plan.proposalObligation) {
       requirementIds = [sourcePatternObligationRequirementId(plan.proposalObligation)];
       if (plan.requirementSetHash !== sourcePatternObligationRequirementSetHash(plan.proposalObligation)) issues.push("UPSTREAM_REPAIR_OBLIGATION_AUTHORITY_MISMATCH");
     } else {

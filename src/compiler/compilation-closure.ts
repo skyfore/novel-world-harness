@@ -14,9 +14,8 @@ import { captureReconciliationObligations, reconciliationObligationIssues } from
 import { coreRoleDefinitions, coreRoleDefinitionBindingIssues } from "./core-role-requirement-records.js";
 import { baseStructuralUnits } from "./structure.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
-import { PreparedNovelCache } from "./prepared-cache.js";
 import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
-import { upstreamRepairEvaluationIssues } from "./upstream-repair-evaluation.js";
+import { upstreamRepairEvaluationIssues, inspectUpstreamRepairEvaluationInputs } from "./upstream-repair-evaluation.js";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const dimensions = ["source", "batch-execution", "execution-obligations", "role-source-review", "upstream-handoff",
@@ -95,6 +94,11 @@ export function compilationClosureReport(input: {
 export async function checkCompilationClosure(root: string, sourceId: string): Promise<CompilationClosure> {
   if ((await WorkspaceOperationLock.inspect(root)).owner?.pid !== process.pid)
     throw new Error("COMPILATION_CLOSURE_LOCK_REQUIRED: use compile-novel closure under the compiler lock; inspect compiler-lock inspect before retrying, never run concurrently.");
+  const { withIdentityAuthorityVerification } = await import("./identity-requirement-upstream.js");
+  return withIdentityAuthorityVerification(() => checkLockedCompilationClosure(root, sourceId));
+}
+
+async function checkLockedCompilationClosure(root: string, sourceId: string): Promise<CompilationClosure> {
   const requirements = await settleSourceRequirements(root, sourceId);
   const [status, audit, accounting, history, obligations] = await Promise.all([
     inspectCompilerStatus(root, sourceId), auditCompiler(root, { sourceId }),
@@ -128,8 +132,8 @@ export async function checkCompilationClosure(root: string, sourceId: string): P
     try {
       const document = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
       if (!document) throw new Error("The registered upstream source is missing");
-      const { bundle, assessment } = await new PreparedNovelCache(root).inspectCandidate(document);
-      upstreamIssues.push(...upstreamRepairEvaluationIssues(bundle, assessment));
+      const { bundle, assessment, baselineIssues } = await inspectUpstreamRepairEvaluationInputs(root, document, upstream.plans.map(p => p.plan));
+      upstreamIssues.push(...upstreamRepairEvaluationIssues(bundle, assessment), ...baselineIssues.map(i => `${i.code}: ${i.message}`));
     } catch (error) {
       upstreamIssues.push(`UPSTREAM_REPAIR_EVALUATION_UNVERIFIED: ${String(error)}`);
     }

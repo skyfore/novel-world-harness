@@ -17,7 +17,7 @@ import { currentCompilerFingerprint, PreparedNovelCache } from "./prepared-cache
 import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
 import { RequirementLedger } from "./requirement-ledger.js";
-import { identityReviewStatuses } from "./identity-repair-handoff.js";
+import { inspectIdentityReviewStatuses } from "./identity-repair-handoff.js";
 
 /** This path uses only peeks: no model sessions, locks, migration, assessment writes or checkpoint repair. */
 export async function inspectCompilerStatus(root: string, sourceId?: string) {
@@ -135,11 +135,11 @@ async function inspectSource(root: string, source: SourceDocument) {
         recoveryRequired: receipt.state !== "completed" || (planned.has(receipt.identity.batchId) && !completed.has(receipt.identity.batchId)),
     }));
   } catch (error) { finishInspection = "unknown"; diagnostics.push(`Finish receipt inspection: ${String(error)}`); }
-  let identityReviews: ReturnType<typeof identityReviewStatuses> = [];
+  let identityReviews: Awaited<ReturnType<typeof inspectIdentityReviewStatuses>> = [];
   let identityReviewInspection: "recorded" | "unknown" = "recorded";
   try {
     const history = await new RequirementLedger(root, source.id).history();
-    identityReviews = identityReviewStatuses(history);
+    identityReviews = await inspectIdentityReviewStatuses(root, source.id, history);
   }
   catch (error) { identityReviewInspection = "unknown"; diagnostics.push(`Identity review inspection: ${String(error)}`); }
   return {

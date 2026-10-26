@@ -40,9 +40,14 @@ export function compilationHandoff(root: string, source: SourceStatus, run: Nove
     roleDependencies.push(id);
     const additional = task.shards.reduce((n, s) => n + s.dispositions["additional-repair-required"], 0);
     const revalidate = task.shards.reduce((n, s) => n + s.dispositions["revalidate-required"], 0);
+    const receiptReviews = task.consumerRevalidation;
+    const pendingCorrections = receiptReviews.attempts.filter(a => a.compilerCorrection && a.semanticJudgmentPending);
+    const latestReviews = [...new Map(receiptReviews.reviews.map(r => [r.ref, r])).values()];
+    const blockedReviews = latestReviews.filter(r => r.status === "blocked" && !pendingCorrections.some(a => a.ref === r.ref));
     tasks.push({ id, kind: "identity-consumers", state: "blocked", dependsOn: [],
-      refs: [task.taskId, task.intentHash, task.inventoryHash], execution: "inspect-only",
-      reason: `${task.recordedReviewedShards}/${task.totalShards} shards and ${task.recordedReviewedConsumers}/${task.totalConsumers} consumers reviewed; ${additional} additional repairs, ${revalidate} revalidations. Recorded review support is not execution authority.`,
+      refs: [task.taskId, task.intentHash, task.inventoryHash, ...blockedReviews.flatMap(r => [r.ref, r.scopeHash, r.receiptFingerprint]),
+        ...pendingCorrections.flatMap(a => [a.ref, a.scopeHash])], execution: "inspect-only",
+      reason: `${task.recordedReviewedShards}/${task.totalShards} shards and ${task.recordedReviewedConsumers}/${task.totalConsumers} consumers reviewed; ${additional} additional repairs, ${revalidate} revalidations. Receipt-bound revalidation: ${receiptReviews.recordedReviewedConsumers}/${receiptReviews.totalConsumers} independently reviewed, ${receiptReviews.recordedClearedConsumers} cleared. ${blockedReviews.map(r => `${r.ref} remains blocked (independent verdict: ${r.independentVerdict}): ${r.rationale}`).join("; ")} ${pendingCorrections.map(a => `${a.ref} compiler correction is ${a.status}, with no completed semantic revalidation. Earlier negative judgments remain historical; this incomplete attempt does not establish insufficient source evidence. ${a.reason ?? "Inspect its retained stage state."} Cumulative model calls: ${a.cumulative.modelCalls}.`).join("; ")} Recorded review support is not execution authority.`,
       command: command("requirements", "inspect-identity-repairs", "--task", task.taskId),
       resumeCondition: "Copy items[].ref (or availableRefs[]) into --ref from discovery in this same source/task; allow at most one corrected ID/ref retry, never guess. Complete the original independent review and supported typed repair/acceptance, revalidate every affected consumer and original question, then verify the source-audit handoff. Preserve all consumed stages and inherited usage; no unchanged retry or parent resume from inspection." });
   }
@@ -62,16 +67,21 @@ export function compilationHandoff(root: string, source: SourceStatus, run: Nove
           return `${id}=${result?.state ?? "missing"}${result?.diagnostics.length ? ` (${result.diagnostics.join("; ")})` : ""}`;
         }).join("; ")}.`,
         command: command("requirements", "inspect-upstream"),
-        resumeCondition: "Inspect plans[].evaluation.result.result.requirements in this source and preserve the original plan, evaluation and consumed attempts. Resolve the reported dependencies through an authorized typed scope, then revalidate with compile-novel requirements. Do not restage the consumed plan or retry unchanged." });
+        resumeCondition: "Inspect plans[].evaluation.result.result.requirements in this source and preserve the original plan, evaluation and consumed attempts. Resolve the reported dependencies through an authorized typed scope, then revalidate with requirements evaluate-upstream using the same --source. Do not restage the consumed plan or retry unchanged." });
       continue;
     }
     const revalidate = repair.state === "converged";
+    const identityRepair = repair.plan.identityRequirements?.consumerRepair;
+    const consumerRevalidation = repair.plan.identityRequirements?.consumerRevalidation;
     const available = ["authorized", "staging", "finish-frozen", "finished"].includes(repair.state)
-      && Boolean(repair.finishIntent || repair.finishReview);
-    tasks.push({ id, kind: "upstream-repair", state: revalidate ? "pending" : available ? "available" : "blocked", dependsOn: revalidate ? ["phase:repair"] : [],
+      && Boolean(repair.finishIntent || repair.finishReview || identityRepair);
+    tasks.push({ id, kind: "upstream-repair", state: revalidate || available ? "available" : "blocked", dependsOn: [],
       refs: [repair.plan.planHash, ...repair.plan.requirementIds],
       reason: `Original upstream plan is ${repair.state}; ${repair.finishIntent || repair.finishReview ? "original finish review retained" : "original finish review required"}.`,
-      command: revalidate ? command("compile-novel", "requirements") : available ? command("compile-novel", "recover", "--upstream-plan", repair.plan.planHash)
+      command: revalidate ? command("requirements", "evaluate-upstream") : available && identityRepair ? command("requirements", "execute-identity-repair",
+        "--task", repair.plan.identityRequirements!.taskId, "--ref", consumerRevalidation ? `initial/${sid}` : `entity/${identityRepair.entityId}`,
+        "--authorization-ref", repair.plan.authorizationRef, ...(consumerRevalidation ? ["--revalidation-id", consumerRevalidation.id] : []))
+        : available ? command("compile-novel", "recover", "--upstream-plan", repair.plan.planHash)
         : command("requirements", "inspect-upstream"),
       execution: revalidate || available ? "existing-phase" : "inspect-only",
       resumeCondition: "Use requirements inspect-upstream in this source and copy plans[].plan.planHash with the original finish review; allow at most one corrected ID/ref retry, never guess. Existing authorization, source/dependency revisions, acceptance and remaining allowance must pass the original verifier. Convergence still requires consumer/requirement revalidation; stopped plans cannot be reopened by this plan." });

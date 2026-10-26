@@ -93,7 +93,7 @@ export function conditionalExpressionUtterances(goal: CharacterGoal, actionIndex
   // Mutable actor-store fallback cannot authorize source words on a frozen branch.
   if (!context.actorGoals?.some(item => item.id === goal.id && contentHash(item) === contentHash(goal))) return undefined;
   const known = new Set(Object.values(before.knowledge.actors[goal.actorId] ?? {}).filter(isActionableKnowledge).map(fact => fact.claimId));
-  if (!evaluateCharacterGoal(goal, {
+  if (!evaluateCharacterGoal(goal, { entities: context.entities, identityCatalog: context,
     state: before.state, knownClaimIds: known,
     realizedCanonicalEventIds: realizedCanonicalEvents(before.history),
     experiencedCanonicalEventIds: experiencedCanonicalEvents(before.history, goal.actorId, context.events),

@@ -1660,6 +1660,31 @@ explicitly and are never silently normalized.
 
 ### Upstream history in prepared candidates
 
+Candidate snapshots bind source-representation and independent-identity plans to
+their original requirement journal, independently checked definitions, exact
+source scope and receipt identities. A frozen definition is distinct from its
+current postconditions: snapshot loading must not require a later evaluation or
+silently promote it. Missing or changed authority stops candidate loading; inspect
+`requirements inspect-upstream` for the same source and copy
+`plans[].plan.planHash` once. Do not recreate the definition, restage a consumed
+plan or retry unchanged.
+
+Derived upstream evaluation/invalidation appends retain the original frozen
+prefix of a role dependency or identity review. They neither change that intent
+nor authorize new work. A rewritten prefix or appended execution/authority event
+still stops reconstruction and requires same-source/task host inspection; never
+repin the prefix to the current head.
+
+Role dependency reconstruction compares the complete retained path/hash inventory
+before preserving its original serialized ordering. Filesystem traversal order
+alone is not a changed task. Missing, additional, duplicated or changed files
+still stop reconstruction; original records and their hashes are never rewritten.
+Existing records may use the earlier producer's whole role-work tree plus original
+plan journal. Compatibility requires an exact match of that complete historical
+inventory, including archived failures and budgets. New records retain the current
+source-local capture. Unknown layouts cannot be repinned or treated as permission
+to drop files, change a budget, or reopen a phase.
+
 Candidate snapshots retain the complete upstream repair journal. Frozen plans
 must match a retained original requirement definition and the exact completed
 predecessor receipt identities; ordinary annotation-only predecessor receipts
@@ -3421,6 +3446,20 @@ missing-condition report cannot satisfy it. See
 
 ## 编译收尾交接：plan 与 closure
 
+已收敛上游计划的交接使用现有 `requirements evaluate-upstream --source <id>`。
+这个入口只重验既有独立要求，不重开 Pi staging，也不必先通过全书 `repair`
+阶段。完整 `compile-novel requirements` 仍保留其全局门禁；局部评估成功不代表
+角色问题已解决或父监督器可以恢复。
+
+Web 在修复／交付阶段的“继续编译”使用同一 `compileNovelWithLoop` 入口，沿用
+原 source、监督策略、Pi 预算、回执和失败历史，继续到原有评估／认证／激活
+阶段。Web 的单批操作也不能越过已保留的 `BREAK`。遇到该状态先读取同来源的
+`compile-novel plan/status`，解决原 `resumeCondition` 后由宿主按既有精确状态哈希
+恢复协议处理；按钮和新请求 ID 均不续 grant，不原样重试。发布审计已为
+`not-ready` 时显示阻塞，不能因尚无闭合评估而显示未知。
+监督编译保留自己的 Pi trace 与预算；Web operation 不额外创建一个持续 running
+的 `prepare` trace，以免恢复检查把界面操作误判为尚未结算的模型调用。
+
 `nwh compile-novel plan --source <id>` 是只读发现入口；不启动模型、工程监督器、迁移、认证或激活。未知 source 时运行 `nwh status --json`，复制 `sources[].sourceId`，最多纠正一次；不要猜 ID 或原样循环。输出 `sources[].handoff.tasks` 的 `command` 与 `resumeCondition` 必须一起读取；命令可发现不代表其写权限已获批准。
 
 `COMPILATION_PREREQUISITES_BLOCKED` 保留原始角色／身份停止条件。身份任务仍使用 `requirements inspect-identity-repairs` 的同 source/task：复制 `items[].ref`（或 `availableRefs[]`）到 `--ref`，至多一次实质纠正。只读检查不能重开已消费阶段。额外消费者修复需要原有窄类型、独立要求、准确计划与验收；证据不足、类型不支持或原授权耗尽时停止对应工作，不续 grant、不轮换任务 ID、不恢复父编译。
@@ -3428,3 +3467,214 @@ missing-condition report cannot satisfy it. See
 `COMPILATION_CLOSURE_BLOCKED` 的完整检查保存在原运行 `closure.gates`，计划入口也返回这份历史快照。按每项 `owner`、`refs` 与诊断处理原 requirement／repair scope，然后重新执行 `compile-novel closure`。旧快照、检查点计数、零 proposal obligations 或归档成功都不能替代新检查。闭合阶段本身不调用模型；不得把这个阶段的重新检查解释为重试原模型失败的许可。锁不归当前进程时使用正式阶段入口并先检查 `compiler-lock inspect`；不得并发执行或删锁绕过。
 
 交接命令中的绝对 `--root` 与 `--source` 必须一起保留，不能因当前目录不同而切换原任务范围。已评估上游计划的负面结果仍需检查同 source 的 `requirements inspect-upstream`，读取 `plans[].evaluation.result.result.requirements`；`UPSTREAM_REPAIR_EVALUATION_STALE` 或 `UPSTREAM_REPAIR_EVALUATION_UNVERIFIED` 要求先解决具体输入／存储条件，再通过原 `requirements` 阶段重验。发现结果不能授权重新 staging 已消费计划，闭合检查也不会刷新其评估或预算。
+
+
+### 原身份消费者 finding 的修复方案与独立复核
+
+`nwh requirements review-identity-repair --source <id> --task <hash> --ref <ref> --authorization-ref <ref>` 用于用户已授权的原 `additional-repair-required` finding。它复用原独立要求，运行两个独立的 Pi 只读会话，追加 `identity-consumer-repair` 记录；不创建要求定义、验收标准、上游写入许可或父编译恢复许可。`supported` 的能力缺口表示实现仍缺失，不能据此激活世界。
+
+任务或引用不匹配时，先在同一 source 调用 `requirements inspect-identity-repairs`，复制 `tasks[].taskId` 到 `--task`，再复制原任务 `items[].ref` 到 `--ref`，最多纠正一次；不得猜 ID、换 task/finding、重开旧消费者阶段或更改原失败文件。该入口不执行已退役的 context-recovery adapter，也不移除 `contextRecoveryAttempt`。
+
+两个阶段继承原预算文件的完整 lineage；同一阶段只按实际增量累计失败与恢复调用，保留原预算哈希和逐阶段上限。缺祖先、分叉、计数下降、来源/基线/要求前缀漂移、未结算 trace 或已消费 invocation 都必须停止，不能重置预算、缩小消费者分母或更换阶段名重试。
+
+模型工具仍为 `read_identity_source`、`read_identity_dependencies`、`submit_identity_requirements`。此入口的依赖读取没有 collection 参数：在同一任务以 `offset=0` 发现，复制 `items[].ref` 到 `refs` 获取完整基线与精确引用指针；源码读取复制 `segments[].id` 到 `segmentIds`。必须先取得完整读取结果，再单独提交。格式/发现错误最多一次实质纠正；来源、宿主、预算、消费状态或混合读取/提交错误禁止重试。
+
+实体已有修订只支持注册字段的精确差异；`id`、`kind`、能力配置、创建、合并、删除、重绑均不在该写入范围。`identityConsumption` 的 `unresolved/quarantined` 标记绑定当前未决身份决议的完整修订哈希、原提及及完整继任链。它保留历史实体，不授予确定身份；实体直接引用、状态读写、事件/知识/机制间接引用、角色入口、目标和名册消费必须检查该标记。名称或别名修订不能替代隔离语义。
+
+`requirements execute-identity-repair` 复用同 source/task/ref/authorization-ref 的原 finding 与两个独立 Pi 修复能力记录。宿主冻结窄类型计划：原身份决议槽位及唯一实体 `/identityConsumption` 修订。按依赖顺序由 Pi 提交；实体保留宿主验证的历史证据和原精确绑定，决议哈希复制 `read_upstream_repair_context` 的 `stagedDependencies[].payloadHash`，提及和链路复制其完整 `payload`。ID 失配先用同作用域 `read_upstream_repair_context`，复制 `readable[].id` 或 `stagedDependencies[].payload.id`，证据复制 `evidence[].segmentId`，最多一次实质纠正；宿主、已消费、预算、来源或作用域失败必须停止，不原样重试。
+
+实际暂存图由另一独立 Pi 会话按原要求验收。`read_identity_upstream_acceptance` 的 `segmentIds=[]` 返回 `segments[].id`；复制到 `segmentIds` 读取完整原文，之后单独调用 `submit_identity_upstream_acceptance`。此验收只允许原要求 ID，不授权下游消费、原关键问题结算或父编译恢复。负面验收保留，不补造支持结论。
+
+逐阶段调用和实际载荷计费继承原失败及方案复核预算；完整 Pi 会话、实时消息、实际请求日志和检查点分别保存并核对。恢复读取原单次 invocation、已封存检查点、暂存尝试和回执，不能重新请求已完成的模型阶段。缺少完整检查点或存在未结算 trace 时保留原状态并检查原拥有者，禁止自动重开。宿主失败状态写入历史，累计计费不归零。上游暂存仍经过原字段与证据校验、原尝试预算、冻结完成回执和确定性收敛；世界提案在完成回执后仍须收敛，不能把检查点当作实体提交或编译完成。
+
+修订后 `inspect-identity-repairs` 分别显示原 finding 基线与当前实体/修复状态，不用新目录覆盖旧上下文。全部原消费者分片、来源页、候选名单、关键问题及其失败记录仍需按原验收重验；本地隔离修复收敛不能代替全局闭合、可执行认证或激活。
+
+已完成原 finish 回执之后的宿主收敛检查失败，通过同一执行入口恢复：宿主必须持有编译锁，核对原已完成回执、全部已结算 Pi 会话、原精确提案及独立验收，再重验当前修订和证据绑定。仅同一回执中接受的证据断言可作为修复输出；其他目录漂移仍阻塞。成功时追加带 `recoveredStopRef` 的收敛记录，旧 `needs-host-review` 与 BREAK 文件原样保留。没有完成回执、调用未结算、提案/证据变更或复核不支持时禁止恢复；此路径不开放暂存、不续模型额度，也不恢复父编译。
+
+`requirements evaluate-upstream` 对身份、来源表示和 proposal obligation 的局部后置条件保留完整当前快照；下游初始世界因隔离身份而不可执行时，局部要求可单独记录结果，原无效消费者仍以 `SOURCE_ISOLATED_BASELINE_INVALID` 阻塞。它不删除该消费者、不把隔离实体改成可玩角色，也不绕过候选归档、可执行场景／角色验收、认证或激活的有效基线门禁。先读取同 source/task 的 `inspect-identity-repairs --ref` 中原消费者及其精确引用，满足其既有修复条件后再重验；不能原样重复已完成的实体修复或用局部 `satisfied` 恢复父编译。快照的来源、证据、暂存或账本无法验证时仍停止，不记成功结果。
+
+### 完成实体修复后的原消费者重验
+
+`requirements revalidate-identity-consumer --source <id> --task <hash> --ref <ref> --authorization-ref <ref>`
+仅用于已有用户授权、原任务的实体修复已独立验收并完成收敛之后。先用同来源的
+`inspect-identity-repairs` 复制 `tasks[].taskId`，再从同任务复制 `availableRefs[]` 到
+`--ref`；ID/ref 失配只允许一次发现后的更正。它追加原消费者重验及独立复核记录，
+原 536 项等清单分母由保存的任务决定，不能从成功的对象反推。旧分片、关键问题、
+负面审计和已消费阶段保持不变；局部通过不授予父流程恢复或认证。
+
+新阶段必须绑定实际已完成的上游回执、原要求定义和原消费者修订，并继承原预算
+与失败调用的累计消耗。每阶段沿用身份审查的请求/总载荷/调用门禁。旧 invocation
+不能重放；完整 Pi 会话、实际请求、消息观察及封存检查点可验证时，仅恢复其原
+提交的宿主登记，零新增模型调用。不存在完整检查点、依赖漂移、未结算 trace、
+预算耗尽或负面复核时停止，不更名、不缩小分母、不清失败。
+
+Pi 的 `read_consumer_revalidation` 在同一 scope 内通过 `collection=source`
+或 `artifacts`、`offset=0` 发现：分别复制 `items[].id` 到 `segmentIds`、
+`items[].ref` 到 `refs`，分页只复制 `nextOffset`。`collection=consumer` 复制
+`scope.ref` 到 `refs` 读取原对象和当前版本。发现不是完整证据读取。
+`submit_consumer_revalidation` 必须在完整读取后作为单独一次调用提交；格式或
+发现错误最多一次实质纠正，host/scope/consumed/budget 错误禁止重试。
+
+初始世界上游修复使用既有 `initial-world` 单例的 `singleton` 修复引用。只允许
+计划中批准的完整字段修订；不允许创建另一个初始世界、改版本或写数组子索引。
+状态、知识、开场事实、观察、时间切面和投影种子的外部引用须冻结精确依赖，
+仍经过原提案校验、完成回执和确定性收敛。独立审查提出的字段范围不是提交许可；
+实际世界修改仍需其类型化计划、原验收及 Pi 提案，不能由会话手工填写小说内容。
+
+`inspect-identity-repairs` 和编译状态的 `consumerRevalidation` 单独展示回执绑定的
+重验进度，原分片和原消费者审查计数保持不变。`independentVerdict=supported`
+只支持所记载的 disposition；若 disposition 为 `blocked`，来源审计仍依赖这项
+阻塞，不能转换成通过票或重开原单次审计。`reviews[].rationale`、
+`blockedRequirements`、`receiptFingerprint` 保留原条件与回执定位信息。
+
+世界消费者必须存在精确的当前有效修订；被继任的旧决议仅作为历史证据读取，
+不得以冻结的旧载荷替代缺失的当前对象。`artifacts` 返回的 `current=false`
+表示历史证据，不能作为新修复的当前依赖。来源页、候选和待审清单仍由原来源
+审计负责；对此类 ref 不调度世界消费者重验，回到同任务的 `sourceReviewCoverage`
+检查原阻塞，不能缩小分母、另起审计或原样重试。
+
+### 身份不确定与局部主体能力的源码纠正
+
+`identityConsumption.mode=quarantined` 继续禁止世界消费。`source-local` 表示经原文
+及独立复核支持的局部人物指称，`status` 仍为 `unresolved`，`referentScope` 必须
+保留 `crossIdentity=unresolved` 与 `distinctness=unasserted`。稳定 ID 不证明其与
+具名人物相同，也不证明其与全部其他人物不同。局部提及必须锚定同一来源位置；
+梦境、画像、传闻不能仅靠此模式获得现实身体。原身体／通道、知识、时间和证据
+检查全部保留；模式及作用域仍通过既有精确证据断言和类型化提案验收。
+
+对原消费者重验因旧代码只能表达“全隔离”而阻塞的情况，同一命令可带
+`--compiler-correction source-local-referent/v1`。宿主绑定原两份负面记录、源码
+契约哈希和原任务，不修改旧 invocation 或结论。此纠正键固定，只能继续一次，
+不能靠修改代码哈希、更换授权文字或重命名生成新机会。两阶段分别扣除原阶段
+已用调用和载荷后使用剩余额度，累计费用继承全部旧调用；无余量时停止。
+
+Pi 必须重读原证据、原条件和原负面结论，判断缺的是来源证据还是表达能力。
+只有独立支持的具体修复范围才能进入后续类型化执行；该纠正本身不清关键问题、
+不改变完整消费者分母、不恢复原来源审计或父编译。未知策略、缺前驱、源码契约
+漂移、预算变动或已消费调用均停止，检查同 source/task/ref 的原记录，不自动重试。
+
+`read_consumer_revalidation` 的工件读取兼容同一精确 `kind:id` 与 `kind/id`，不猜测
+别名。优先复制输入的 `artifactReadRefs[].ref`；缺失时使用同 scope 的
+`collection=artifacts, query=<精确已知 ID 或 kind>, offset=0`，复制返回的
+`items[].ref` 后只纠正一次。空结果应停止，不能遍历整个目录猜身份。
+
+没有终结提交的失败不会产生语义审查记录。只读状态在 `consumerRevalidation.attempts`
+保留其 `BREAK`、失败原因、原调用是否已消费、检查点、累计用量和各原阶段余量；
+`reviews` 中旧负面结论及原审查计数不变。纠正未完成不能被解读为新的“原文不足”
+结论；剩余额度本身也不能重开已消费且没有封存提交的调用。
+
+### 消费者重验未提交失败的受控续接
+
+宿主明确获准恢复后，在原 `requirements revalidate-identity-consumer` 命令、相同
+source/task/ref、授权引用及编译纠正策略下，先使用 `--resume-unsubmitted inspect`。
+该入口只读，不创建锁、不改状态、不调用模型。它验证原 Pi 完整会话、逐次实际
+请求与消息观察、失败 trace、来源和要求输入，以及真实调用／载荷累计。
+只有已结束、从未尝试终结提交的只读失败可进入此协议；已有提交须恢复原登记，
+会话缺失、预算硬停、作用域漂移、未结束 trace 或已用完纠错机会均停止。
+
+`--resume-unsubmitted run` 为同一原阶段保留唯一的 `.continuation` 目录及不可变
+`continuation.json`。原 invocation、会话、请求、错误、预算不改写。新 Pi 会话须
+重新读取原必读来源／消费者，并补读原失败请求中尚未完成的精确工件；历史发现
+和读取不冒充新会话读取。原工具错误次数继续计入有界纠错，不续发纠错次数。
+原要求、分母、来源边界、独立检查与验收规则不变，两个阶段不得互借额度。
+
+新段只能使用该阶段减去原失败实际用量后的剩余额度。读取之后的单独提交至少
+需要两次模型调用；这是启动下限，不是完成保证。余量不足时记录 `budget-blocked`
+预检，父状态保持 `BREAK`，不创建模型 invocation、不消耗最后额度、不重置预算。
+状态的 `consumerRevalidation.attempts[].stages[].continuation` 分开展示旧失败、
+续接预检、续接检查点和用量；累计计算两段的全部实际消耗。
+
+续接段自身也只有一次 invocation；其失败且无检查点时不得再开第二段。完整提交
+之后若宿主登记中断，只恢复同一封存结果，零新增模型调用。续接记录必须绑定
+原失败证明，独立检查仍使用另一 Pi 会话；任何阶段通过均不直接恢复来源审计或
+父编译，也不自动认证或激活小说世界。
+
+若该预检因调用余量不足而阻塞，且用户后来明确授权追加预算，宿主可在同一命令
+增加 `--continuation-budget <JSON 文件>`；先配合 `--resume-unsubmitted inspect`
+只读预检，随后 `run`。JSON 仅含从预检复制的 `continuationHash`、`stage`、
+`additionalCalls`（1–12）以及这次后续授权的 `authorizationRef`。原命令的授权
+引用保持不变，不得用旧授权冒充追加许可。追加记录不是新的需求或验收标准。
+
+单一不可变 `budget-amendment.json` 绑定原续接证明，只增加本阶段调用上限，
+不增加字节额度、不挪用独立检查额度，不改旧 `continuation.json`、`preflight.json`
+或预算。新调用、模型输入、预算和审查记录均绑定追加记录哈希。状态同时显示原
+余量、追加额度与两段累计用量。仅在续接尚未启动时允许追加；已经启动、授权或
+哈希不符、已有另一追加记录时停止，检查原续接目录，不换 ID、不追补许可、不重试。
+完整提交后的登记恢复仍不调用模型，也不获得第二段执行机会。
+
+`entityRepair.ref` 同样接受发现结果中的精确 `entity:id` 与旧 `entity/id`，二者须
+匹配原完成回执中的同一实体 ID 和修订哈希；不猜别名、不改写 Pi 原始提案。
+若唯一续接的终结提交只因宿主旧版斜杠校验被拒，使用同一命令的
+`--resume-unsubmitted inspect --recover-submitted-ref` 只读检查。仅允许原诊断、
+唯一独立提交、全部成功的完整读取、相同来源／要求、实际会话三方证据和旧用量
+均吻合，且完整原提交通过当前全部校验的情况。其他失败停止，不适用此恢复。
+
+通过预检后 `--resume-unsubmitted run --recover-submitted-ref` 以零新增提案模型调用
+保留单一 `consumer-revalidation.ref-recovery.json`，登记未经改写的原 Pi 提案。
+它不伪造成功工具回执：原失败 trace、消息、预算、错误均保留，记录显式绑定
+`refRecoveryHash` 而非成功会话检查点。随后仍由原独立 Pi 检查阶段判断该提案。
+恢复证明、原提案或任何读取证据漂移时停止；不得借此重开失败会话或跳过独立验收。
+
+已获独立 `supported` 的 `repair-required` 联合范围，可通过原
+`requirements execute-identity-repair --revalidation-id <id> --inspect` 查看类型化
+计划与继承预算；复制同 source/task 的 `consumerRevalidation.reviews[].id` 和
+原 `ref`，授权引用仍须一致。去掉 `--inspect` 后才进入 Pi 执行。计划由原审查
+记录确定，只修订既有实体的 `/identityConsumption` 和原初始世界单例的精确字段，
+不创建实体或身份决议。先暂存实体，再在其精确暂存依赖下修订单例，最后用另一
+Pi 会话对联合图按原要求独立验收，并经过原 finish／convergence。
+
+已退休的决议仅由原完成回执恢复为只读证据，不标作当前有效决议。完整目录基线
+由原冻结目录及前次完成回执重建，不能把无关变动重新冻结为合法基线。新的执行
+段继承所有旧阶段、续接、格式误拒及检查用量，沿用现有槽位和独立验收上限；
+任何范围、来源、精确回执、目录、预算、暂存图或独立验收不符都停止，保留原
+错误，不猜 ID、不重开调用、不改写已消费授权。局部修复完成仍不替代消费者和
+原来源审计重验，也不直接恢复父编译或认证世界。
+
+联合修复沿用修复账本的前驱协议：在完整预检通过后，以原独立重验和完成回执
+记录旧计划被后续修复接替的原因，显式关联同一前驱计划；原完成及评估记录
+保持不变。若中断只发生在前驱停记与新计划登记之间，仅允许相同原因和相同
+计划继续登记。其他宿主停止原因不得绕过。退休决议仍保留为审计依赖，收敛
+结果只列当前有效决议，不能把历史决议重新标作有效。
+
+隔离类型化槽位须传递原工具的完整 `promptGuidelines`。初始世界的事实、即时情境
+和角色观察要求精确到 `summary` 的证据绑定；引用其父对象不能替代字段绑定。
+该规则是现有校验的说明，不降低证据要求，也不自动改写模型的选择器。内层工具
+已返回 `retryable=false` 或修复账本已停止时，外层不得重新包装成可重试错误；
+保留原诊断并阻止后续模型请求。检查入口返回最近失败的 `attemptRef`、完整诊断
+和只读宿主复核命令；补充工具说明不会刷新已消费槽位或原纠正上限。
+
+若最新初始世界槽位已结算失败，且原诊断仅为 `MISSING_OPENING_FIELD_EVIDENCE`，
+先在同 source/task 的 `inspect-identity-repairs` 中复制
+`typedRepairs[].lastFailure.attemptRef`。原 `execute-identity-repair` 可带
+`--correct-failed-attempt <ref> --correction-authorization-ref <已有明确授权引用>`
+和 `--inspect` 做只读预检。首次执行须有明确的一次额外有界纠正授权；旧槽位的
+4 次上限、已用调用、失败、原计划和提案 ID 均不变。ID 不符最多按发现值纠正
+一次；其他失败、进行中会话、已开始验收、范围变化或预算漂移停止，不适用此入口。
+
+去掉 `--inspect` 后先保留 `correction.intent.json`，额外 Pi 纠正阶段最多 4 次
+调用、单次 512000 请求字节、累计 2048000 请求字节；这些是调用／字节限制，
+不是 tokenizer 估算。用量累加到原失败之后，并传给原独立验收及后续消费者。
+`read_identity_upstream_correction` 一次完整返回原上下文，精确复制
+`failedProposal.proposal_id`、`context.readable[].id`、
+`context.stagedDependencies[].payload.id` 和 `context.evidence[].segmentId`，
+不得猜测或重复发送完整上下文来消耗额度。`submit_identity_upstream_correction`
+只能在完整读取后的单独响应提交一次，只改原提案的 `evidence_selectors`；
+payload、来源与提案 ID 均保留。该工具只保留 Pi 草稿，任一错误均停止，不另开
+会话、不更名、不重复提交。原文不足时保持阻塞，不编造证据。
+
+真实 Pi 会话、完整读取、请求用量和终结回执封存后，宿主才把原样草稿交给已有
+`authorizeHostCorrection` 与常规 staging 校验。它显式关联原失败会话和新的
+只读 Pi 证明，不伪造成功的模型 staging reservation。中断只恢复同一证明、
+宿主授权或精确已预留输入，不能重放 Pi。失败的宿主校验保留完整诊断并停止。
+已暂存实体保持原样，联合图仍须由独立 Pi 按原要求验收，再进入原 finish 和
+convergence；该局部恢复不代替消费者重验、原来源审计或整体认证。
+
+后续独立验收前先运行与 finish 相同的只读 canonical commit preview，保留绑定
+暂存图的诊断，不消费 Pi 验收调用、不提交世界。该预检通过仍不能替代语义验收。
+`INACTIONABLE_INITIAL_WORLD` 沿用原多角色来源的可执行开场条件：在场角色须有
+有证据的地点、计划或动态状态；读者上下文、观察文字和 `alive=true` 不能代替。
+不得因局部身份要求已获 supported 就删除这道门禁。finish 已冻结后失败时，
+`typedRepairs[].currentStop` 返回当前停止记录与原 finish intent；旧
+`lastFailure` 继续保留原槽位错误。不能误走已完成回执的 convergence recovery，
+也不能重复 evidence-only 纠正；需要按原 pre-receipt finish revision 协议由
+Pi 提出所需语义修订，并对变化后的图重新独立验收，保留旧提案与旧验收。

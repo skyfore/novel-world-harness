@@ -31,7 +31,9 @@ installation, fabricated goals, future canon replay or budget expansion. A
 changed head, mismatched effect hash, stale dependency or stale contract requires
 host review/re-evaluation of the original candidate, never an unchanged retry.
 
-`scope-conflict` and `consumed-stage` diagnostics stop dispatch. Preserve the original stop,
+`scope-conflict` and `consumed-stage` diagnostics stop dispatch. For an identity
+consumer, use the source/task/ref discovery protocol below and inspect
+`finishRevisionProgress.entryContractReview`. Preserve the original stop,
 consumed grant, draft and acceptance status. New field support or passing code
 tests grants no new semantic attempt, ledger write, certificate or activation.
 
@@ -3726,6 +3728,40 @@ convergence；该局部恢复不代替消费者重验、原来源审计或整体
 `lastFailure` 继续保留原槽位错误。不能误走已完成回执的 convergence recovery，
 也不能重复 evidence-only 纠正；需要按原 pre-receipt finish revision 协议由
 Pi 提出所需语义修订，并对变化后的图重新独立验收，保留旧提案与旧验收。
+
+该恢复通过原 `execute-identity-repair` 的
+`--revise-failed-finish <typedRepairs[].currentStop.recordRef>` 与
+`--revision-authorization-ref <明确修复授权引用>` 进入；同 source/task/ref、
+原 authorization-ref 和 revalidation-id 必须完全一致。先带 `--inspect` 只读
+验证；ID 不符只允许从同作用域发现结果纠正一次。范围变更、未结算 I/O、已有
+prepared/completed finish 回执、已消费修订或任何修订失败均停止，不猜测、不
+换授权、不原样重试，也不与 evidence-only 纠正入口合并。
+
+`read_identity_finish_revision` 完整返回原失败图、精确可读依赖、原文和可写字段。
+复制 `intent.proposalId` 与 `source[].segmentId`，不自行生成 ID。
+`submit_identity_finish_revision` 在完整读取后的独立响应中提交一次完整
+`propose_initial_world` 输入；只允许原单例范围的实质 payload 修订，不能仅换
+证据、保留同一失败内容或写入宿主猜测的地点、计划、动态状态。工具仅封存草稿，
+任何错误都停止。一次额外草稿阶段最多 4 次调用、单次 512000 请求字节、累计
+2048000 请求字节；失败也计入原累计用量，不能重置原槽位额度。
+
+宿主验证真实 Pi 会话、原文字节、精确依赖、请求预算与唯一终结提交后，复用
+已有 pre-receipt finish revision 协议暂存，并运行原确定性 commit preview。
+独立验收写入 `finish-revision-acceptance.*`，保留 `acceptance.*` 原文件；两次
+验收合计不能超过原 24 次／12288000 请求字节上限。新验收必须使用另一会话，
+绑定变化后的完整图，旧 supported 不能授权新图。只恢复同一已封存证明的宿主
+中断，不重放 Pi；提交、收敛后仍由原回执绑定的消费者重验判定效果。
+
+验证已完成的 source-local 消费者审阅时，仍核对冻结语义契约、原输入、真实
+会话、来源、失败与预算链；后续代码或测试文件变化本身不使历史证据失效。
+新模型调用仍要求实现哈希匹配原冻结 scope，不允许以读取历史为由续 grant。
+
+如果草稿会话读取原文后未提交修订，失败和实际调用仍原样保留，独立验收不启动。
+`inspect-identity-repairs` 的 `typedRepairs[].finishRevisionProgress` 及执行入口的
+只读 `--inspect` 显示已消费阶段、实际用量和原消息文件；当前恢复类型为
+`inspect-consumed-opening-revision`，不能再次提示开启同一修订。复制
+`stages[].modelResponseFile` 查看原助手解释，它是诊断而非独立验收。来源或原字段
+不足时保留 host-review；不重放调用、不续授权、不扩张范围或降低开局门禁。
 
 ## Compile loop domain recovery
 

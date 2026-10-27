@@ -74,7 +74,7 @@ export function compilationHandoff(root: string, source: SourceStatus, run: Nove
     const revalidate = repair.state === "converged";
     const identityRepair = repair.plan.identityRequirements?.consumerRepair;
     const consumerRevalidation = repair.plan.identityRequirements?.consumerRevalidation;
-    const available = ["authorized", "staging", "finish-frozen", "finished"].includes(repair.state)
+    const available = ["authorized", "staging", "finish-frozen", "finished", ...(identityRepair && repair.finishRevision ? ["finish-revising"] : [])].includes(repair.state)
       && Boolean(repair.finishIntent || repair.finishReview || identityRepair);
     tasks.push({ id, kind: "upstream-repair", state: revalidate || available ? "available" : "blocked", dependsOn: [],
       refs: [repair.plan.planHash, ...repair.plan.requirementIds],

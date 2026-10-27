@@ -90,6 +90,10 @@ nwh compile-novel closure --source <source-id>
 
 CLI/TUI/Web 不再合成单角色 `alive=true` 开局。调用失败时保留原错误、会话与草稿；只有正常结束但未产生可用开局，才报告 `phase:opening` 语义阻塞。工程异常和提供方异常不会被改写为原文缺口。
 
+身份联合修复若在 finish 冻结后、任何 finish 回执生成前因开局不可执行而停止，先从同 source/task 的 `requirements inspect-identity-repairs` 复制 `typedRepairs[].currentStop.recordRef`。在原 `execute-identity-repair` 命令上添加 `--revise-failed-finish <recordRef> --revision-authorization-ref <明确修复授权引用> --inspect` 做预检；执行时去掉 `--inspect`。这个入口只允许一次有界 Pi 单例语义修订，保留原来源、字段范围、失败图与旧审阅，变化后的图须重新独立验收，验收只使用原剩余额度。已发放修订的 `finish-revising` 状态由同一命令续接，不重放已消费模型阶段，不回到已完成的前驱实体修复。
+
+修复验收分别覆盖：原文支持的可执行开局通过真实 staging／finish／convergence；真实 Pi 草稿封存与中断恢复不重复调用；变化后的图不能复用旧验收；后续消费者继承全部用量；已封存历史审阅可跨实现版本读取，而新调用仍受冻结版本约束。局部通过后仍须重验受影响消费者，不能清除未审分片、关键问题或整书认证缺口。
+
 完整 CLI 和 TUI 交付链在 `requirements` 后、`archive` 前执行 `closure`。这个阶段调用现有审计与要求账本，验证当前计划每个原 finish 回执，并分别检查来源、批次、执行义务、角色来源审查、上游交接、结构、证据、记账、决议、语义和已登记要求。`unknown` 不算通过，关键延后保留全部单元引用。结果保存在原编译运行的 `closure` 字段，失败也落盘；它是带来源／编译指纹／审计哈希的调度快照，不另建语义真值账本。修订后必须重新运行，不能凭旧快照跳过检查。
 
 该闭合检查不代替后续独立支持规格、真实 Pi 实验和认证。`archive` 单阶段命令仍可保存未认证候选，active 指针保持原状；完整交付须继续通过评估、认证和激活。
@@ -116,7 +120,7 @@ pnpm demo:compilation-completion
 
 未声明角色入口的旧稀疏清单可以带缺口警告归档，但不能成为运行入口或通过认证。新契约使旧入口验收失效，原候选、失败、分母和预算保留；实现升级本身不续发模型授权，也不激活本地小说。
 
-`preview_initial_world` 的 `entryDiagnostics` 提供只读缺口：分别说明状态表达待审、动作／驱动未验、字段超出范围和阶段已消费。它们不授予写权限，也不替代独立来源验收。具体恢复步骤见[工具恢复协议](agent-tool-recovery.md)。
+`preview_initial_world` 的 `entryDiagnostics` 和 `requirements inspect-identity-repairs` 的 `finishRevisionProgress.entryContractReview` 提供只读缺口：分别说明状态表达待审、动作／驱动未验、字段超出范围和阶段已消费。它们不授予写权限，也不替代独立来源验收。具体恢复步骤见[工具恢复协议](agent-tool-recovery.md)。
 
 没有适用规格时，`evaluation-plan` 使用独立 Pi 会话读取整部不可变原文、分项提交 gold 和场景草稿、复核可执行字段的来源支持。它没有修改世界真值的工具。草稿、原文阅读页偏移、真实审阅 trace ID、纠正次数和停止条件均持久化。完成冻结前检查全文阅读范围、规格引用、主要角色分母及入口切面。
 

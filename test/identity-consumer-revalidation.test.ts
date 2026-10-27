@@ -21,7 +21,7 @@ import { assertUpstreamRepairMutation, freezeUpstreamRepairPlan } from "../src/c
 import { initialWorldRepairReferences } from "../src/compiler/initial-world-repair.js";
 import { identityReviewStatus } from "../src/compiler/identity-review-status.js";
 import { identityReviewStatuses, inspectIdentityReviewStatuses } from "../src/compiler/identity-repair-handoff.js";
-import { consumerRevalidationLimits, SOURCE_LOCAL_CORRECTION, sourceLocalContractHash } from "../src/compiler/identity-consumer-correction.js";
+import { assertConsumerCompilerCorrection, consumerRevalidationLimits, SOURCE_LOCAL_CORRECTION, sourceLocalContractHash } from "../src/compiler/identity-consumer-correction.js";
 import { IDENTITY_REQUIREMENT_LIMITS } from "../src/compiler/identity-requirements.js";
 import { captureRecordTree } from "../src/runtime/compile-loop/dedicated-session.js";
 import { consumerStageRecoveryDirectory } from "../src/compiler/identity-consumer-stage-recovery.js";
@@ -448,6 +448,18 @@ it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCa
       expect(attempts.find(a => a.compilerCorrection)!.stages[0]!.continuation).toMatchObject({ status: "recovered-submission", recoveredSubmission: true, sealedSubmission: false, usage: { modelCalls: 2 } });
       await runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run", recoverSubmittedRef: true });
       expect(dispatch).toHaveBeenCalledTimes(3);
+      // Completed evidence remains verifiable after implementation/test edits.
+      // That history does not authorize a new dispatch against changed code.
+      const originalRead = fs.readFile.bind(fs);
+      const changedCode = vi.spyOn(fs, "readFile").mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+        const value = await originalRead(...args);
+        return String(args[0]).endsWith("/test/identity-consumption.test.ts") ? `${value}\n// later unrelated test` : value;
+      }) as typeof fs.readFile);
+      try {
+        await expect(assertConsumerCompilerCorrection(previous[0]!.scope)).rejects.toThrow(/implementation changed/);
+        await expect(revalidation.verifyConsumerRevalidationRecord(root, previous[0]!)).resolves.toBeUndefined();
+        await expect(revalidation.verifyConsumerRevalidationRecord(root, previous[1]!)).resolves.toBeUndefined();
+      } finally { changedCode.mockRestore(); }
       await expect(revalidation.verifyConsumerRevalidationRecord(root, { ...previous[0]!, refRecoveryHash: h("changed proof") })).rejects.toThrow(/recovery changed/);
       const messages = path.join(recovery, "consumer-revalidation.messages.jsonl"); await fs.appendFile(messages, '{"truncated":true}\n');
       await expect(revalidation.verifyConsumerRevalidationRecord(root, previous[0]!)).rejects.toThrow();

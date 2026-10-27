@@ -198,13 +198,16 @@ requirementsCommand.command("execute-identity-repair").requiredOption("--source 
   .option("--revalidation-id <hash>", "exact independently supported consumerRevalidation.reviews[].id for its joint typed repair")
   .option("--correct-failed-attempt <hash>", "exact lastFailure.attemptRef for one settled initial-world field-evidence correction; preserves original slot and failures")
   .option("--correction-authorization-ref <ref>", "explicit authorization for one additional bounded Pi correction allowance, never a reset of the original budget")
+  .option("--revise-failed-finish <hash>", "exact typedRepairs[].currentStop.recordRef for one pre-receipt opening graph revision")
+  .option("--revision-authorization-ref <ref>", "explicit authorization for one bounded semantic draft; independent review spends its original remaining allowance")
   .option("--inspect", "read-only typed plan, retained budget and dependency preflight; no invocation or state writes")
   .description("Continue the same finding through bounded Pi typed staging, independent acceptance and original finish/convergence; preserve failures and budgets")
   .action(async options => {
     const { runIdentityConsumerUpstream } = await import("./workflow/identity-consumer-upstream.js");
     console.log(JSON.stringify(await runIdentityConsumerUpstream({ root: rootFor({}), sourceId: options.source, taskId: options.task,
       ref: options.ref, authorizationRef: options.authorizationRef, revalidationId: options.revalidationId,
-      correctFailedAttempt: options.correctFailedAttempt, correctionAuthorizationRef: options.correctionAuthorizationRef, inspect: options.inspect }), null, 2));
+      correctFailedAttempt: options.correctFailedAttempt, correctionAuthorizationRef: options.correctionAuthorizationRef,
+      reviseFailedFinish: options.reviseFailedFinish, revisionAuthorizationRef: options.revisionAuthorizationRef, inspect: options.inspect }), null, 2));
   });
 requirementsCommand.command("revalidate-identity-consumer").requiredOption("--source <id>", "registered source ID")
   .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")

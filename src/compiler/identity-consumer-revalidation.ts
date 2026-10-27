@@ -14,7 +14,7 @@ import { consumerRevalidationId, consumerRevalidationDirectory, consumerRevalida
 import { verifyIdentityUpstreamSession } from "./identity-upstream-session.js";
 import { resolveTextSelectorAnchor } from "./text-anchors.js";
 import { TraceStore } from "../trace/store.js";
-import { SOURCE_LOCAL_CORRECTION, sourceLocalContractHash, sourceLocalConsumerContract, consumerRevalidationLimits, assertConsumerCompilerCorrection } from "./identity-consumer-correction.js";
+import { SOURCE_LOCAL_CORRECTION, sourceLocalContractHash, sourceLocalConsumerContract, consumerRevalidationLimits } from "./identity-consumer-correction.js";
 import { consumerStageRecoveryDirectory, consumerStageUsage, consumerRecoveryInput, verifyConsumerStageRecovery, assertConsumerRecoveryInput, maybeRecoveryFile } from "./identity-consumer-stage-recovery.js";
 import { inspectConsumerBudgetAmendment, consumerRecoveryLimits } from "./identity-consumer-budget-amendment.js";
 import { verifyConsumerRefRecovery } from "./identity-consumer-ref-recovery.js";
@@ -194,7 +194,10 @@ export async function verifyConsumerRevalidationRecord(root: string, record: Con
   const s = record.scope, ledger = new RequirementLedger(root, s.sourceId), original = await ledger.identityRequirements(s.taskId);
   const all = revalidationRecords(await ledger.history(), s.taskId);
   validateConsumerCorrectionLineage(s, all);
-  await assertConsumerCompilerCorrection(s);
+  // Historical evidence is bound to its actual scope, transcript, contract and
+  // original budget below. Current implementation bytes gate NEW dispatch in
+  // the workflow, not verification of a sealed completed judgment. Otherwise
+  // even a later regression-test edit makes every downstream receipt unreadable.
   const prior = record.output.phase === "consumer-revalidation" ? [] : revalidationRecords(await ledger.history(), s.taskId).filter(r => consumerRevalidationId(r.scope) === consumerRevalidationId(s) && r.output.phase === "consumer-revalidation");
   validateConsumerRevalidationHistory([...prior, record], original);
   const baseDirectory = consumerRevalidationDirectory(root, s), stage = record.output.phase;

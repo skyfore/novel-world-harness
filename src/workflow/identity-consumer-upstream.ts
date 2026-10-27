@@ -39,6 +39,9 @@ import { identityUpstreamBudgetStages, readIdentityCorrectionIntent } from "../c
 import { prepareIdentityUpstreamCorrection, assertIdentityCorrectionRetained } from "../compiler/identity-upstream-correction.js";
 import { runIdentityUpstreamCorrection } from "./identity-upstream-correction.js";
 import { CompilerCommitService } from "../compiler/validator.js";
+import { prepareIdentityFinishRevision, readIdentityFinishRevision, assertIdentityFinishRevisionRetained,
+  identityAcceptanceStage, FINISH_REVISION_ACCEPTANCE, inspectIdentityFinishRevisionProgress } from "../compiler/identity-finish-revision.js";
+import { runIdentityFinishRevision } from "./identity-finish-revision.js";
 
 const read = async (file: string) => JSON.parse(await fs.readFile(file, "utf8"));
 const maybe = async (file: string) => { try { return await read(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; } };
@@ -77,9 +80,11 @@ export async function preflightIdentityUpstreamCommit(root: string, plan: Upstre
  * acceptance and the existing finish/convergence receipts. Original consumer
  * judgments and the parent BREAK remain until their separate revalidation. */
 export async function runIdentityConsumerUpstream(options: { root: string; sourceId: string; taskId: string; ref: string; authorizationRef: string; revalidationId?: string;
-  correctFailedAttempt?: string; correctionAuthorizationRef?: string; inspect?: boolean }) {
+  correctFailedAttempt?: string; correctionAuthorizationRef?: string; reviseFailedFinish?: string; revisionAuthorizationRef?: string; inspect?: boolean }) {
   const { root, sourceId, taskId } = options;
   if (!!options.correctFailedAttempt !== !!options.correctionAuthorizationRef) throw prerequisiteStop("Correction requires both the exact failed attempt and its explicit bounded-allowance authorization; inspect the same source/task, no guessed ref or implicit budget reset");
+  if (!!options.reviseFailedFinish !== !!options.revisionAuthorizationRef || (options.reviseFailedFinish && options.correctFailedAttempt))
+    throw prerequisiteStop("Finish revision requires its exact stopped record and explicit bounded authorization, separately from evidence-only correction. Inspect same-source/task typedRepairs[].currentStop.recordRef once; no guessed or combined retry");
   const run = () => withIdentityAuthorityVerification(async () => {
     const requirements = new RequirementLedger(root, sourceId), records = await requirements.identityRequirements(taskId);
     const history = await requirements.history(), revalidations = options.revalidationId ? history.flatMap(r => r.payload.kind === "identity-consumer-revalidation"
@@ -112,15 +117,19 @@ export async function runIdentityConsumerUpstream(options: { root: string; sourc
     const correction = options.correctFailedAttempt ? await prepareIdentityUpstreamCorrection(root, plan, directory,
       { failedAttemptRef: options.correctFailedAttempt, authorizationRef: options.correctionAuthorizationRef! }) : await readIdentityCorrectionIntent(directory);
     if (correction) await assertIdentityCorrectionRetained(root, plan, directory, correction);
+    const finishRevision = options.reviseFailedFinish ? await prepareIdentityFinishRevision(root, plan, directory,
+      { failedFinishRef: options.reviseFailedFinish, authorizationRef: options.revisionAuthorizationRef! }) : await readIdentityFinishRevision(directory);
+    if (finishRevision) await assertIdentityFinishRevisionRetained(root, plan, directory, finishRevision);
     if (options.inspect) return { status: "typed-plan-inspected", plan, directory, order, origin,
       existingPlanState: (await ledger.inspect()).plans.find(p => p.plan.planHash === plan.planHash)?.state ?? null,
-      correction,
+      correction, finishRevision, finishRevisionProgress: await inspectIdentityFinishRevisionProgress(directory),
       slotLimits: IDENTITY_UPSTREAM_SLOT_LIMITS, acceptanceLimits: IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS,
       modelCalls: 0, executionAuthority: false, parentCompileResumeAllowed: false, certificationGranted: false };
     await fs.mkdir(directory, { recursive: true });
     await retain(path.join(directory, "start.json"), { taskId, planHash: plan.planHash, plan, order, origin,
       slotLimits: IDENTITY_UPSTREAM_SLOT_LIMITS, acceptanceLimits: IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS });
     if (correction) await retain(path.join(directory, "correction.intent.json"), correction);
+    if (finishRevision) await retain(path.join(directory, "finish-revision.intent.json"), finishRevision);
     const cumulative = async () => {
       const usage = { modelCalls: origin.priorUsage.modelCalls, totalPayloadBytes: origin.priorUsage.totalPayloadBytes };
       for (const stage of await identityUpstreamBudgetStages(directory, order)) {
@@ -139,6 +148,7 @@ export async function runIdentityConsumerUpstream(options: { root: string; sourc
     const assertOriginal = async () => {
       await assertConsumerRepairRetainedState(root, intent);
       if (correction) await assertIdentityCorrectionRetained(root, plan, directory, correction);
+      if (finishRevision) await assertIdentityFinishRevisionRetained(root, plan, directory, finishRevision);
       if (parent && contentHash(await revalidatedConsumerBudgetOrigin(root, revalidations)) !== contentHash(origin))
         throw prerequisiteStop("Revalidated consumer budget origin changed; preserve every original charge, no dispatch or retry");
     };
@@ -166,11 +176,14 @@ export async function runIdentityConsumerUpstream(options: { root: string; sourc
         await retain(path.join(directory, "host-convergence-recovery.json"), { planHash: plan.planHash,
           convergenceRef: (await ledger.history()).at(-1)!.hash, providerCalls: 0, proposalWrites: 0 });
       }
-      if (current?.state === "needs-host-review" && !current.finishedReceipt && !correction)
+      if (current?.state === "needs-host-review" && !current.finishedReceipt && !correction && !finishRevision)
         throw prerequisiteStop("Unfinished typed slot needs its explicit correction preflight. Use inspect-identity-repairs for the same source/task and copy lastFailure.attemptRef; no convergence recovery, unchanged invocation or budget reset");
       // A frozen finish has already consumed and independently reviewed its
       // model slots. Resume the deterministic protocol without requiring Pi.
-      if (current?.finishIntent) return await finish();
+      if (current?.finishIntent && !finishRevision) return await finish();
+      if (current?.finishRevision?.completed && await maybe(path.join(directory, `${FINISH_REVISION_ACCEPTANCE}.record.json`))) {
+        await verifyIdentityUpstreamAcceptance(root, plan); return await finish();
+      }
       const runtime = await ModelRuntime.create({ authPath: getAgentDir() + "/auth.json", modelsPath: getAgentDir() + "/models.json", refreshOnCreate: false });
       if ((await runtime.checkAuth("openai-codex"))?.type !== "oauth" || !runtime.getProvider("openai-codex")?.auth?.oauth?.isSubscription
         || !runtime.getModel("openai-codex", "gpt-6.1-sol")) throw prerequisiteStop("Required Pi subscription unavailable; no provider fallback or retry");
@@ -197,7 +210,8 @@ export async function runIdentityConsumerUpstream(options: { root: string; sourc
       const runStage = createIdentityUpstreamStageRunner({ root, sourceId, taskId, plan, directory, originalBudgetHash: intent.originalBudgetHash,
         origin, assertOriginal, cumulative, publish });
 
-      for (const target of order) {
+      if (finishRevision) await runIdentityFinishRevision(root, plan, directory, finishRevision, runStage);
+      for (const target of finishRevision ? [] : order) {
         let record = await maybe(path.join(directory, `${target.id}.record.json`)) as IdentityUpstreamSlotRecord | null;
         if (!record) {
           const checkpoint = await maybe(path.join(directory, `${target.id}.session-checkpoint.json`));
@@ -222,7 +236,9 @@ export async function runIdentityConsumerUpstream(options: { root: string; sourc
         }
         await verifyIdentityUpstreamSlotTrace(root, plan, record);
       }
-      let acceptance = await maybe(path.join(directory, "acceptance.record.json")) as IdentityUpstreamAcceptanceRecord | null;
+      const revisedAcceptance = await identityAcceptanceStage(root, plan, directory);
+      const acceptanceStage = revisedAcceptance?.stage ?? "acceptance", acceptanceLimits = revisedAcceptance?.limits ?? IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS;
+      let acceptance = await maybe(path.join(directory, `${acceptanceStage}.record.json`)) as IdentityUpstreamAcceptanceRecord | null;
       if (!acceptance) {
         const graph = await identityUpstreamGraph(root, plan), verified = await verifyUpstreamRepairPlan(root, plan);
         // Staging checks evidence and the authorized mutation, not executable
@@ -235,9 +251,9 @@ export async function runIdentityConsumerUpstream(options: { root: string; sourc
           consumerRequirements: records.flatMap(r => r.output.phase === "identity-consumers" ? r.output.consumers.map(({ rationale: _, ...c }) => c) : []),
           consumerActivationAuthorized: false, originalQuestions: prepared.prerequisites[0]!.scope.questions,
           currentDependencies: plan.readableRefs.filter(r => r.kind !== "source-segment").map(ref => ({ ref, payload: verified.payloads.get(`${ref.kind}:${ref.id}`) })),
-          sourceSegmentIds: plan.sourceScope.segmentIds, limits: IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS };
+          sourceSegmentIds: plan.sourceScope.segmentIds, limits: acceptanceLimits };
         let evidence: IdentityUpstreamAcceptanceRecord["evidence"] = [], output: z.infer<typeof identityUpstreamAcceptanceSchema> | undefined;
-        const checkpoint = await maybe(path.join(directory, "acceptance.session-checkpoint.json"));
+        const checkpoint = await maybe(path.join(directory, `${acceptanceStage}.session-checkpoint.json`));
         if (checkpoint) {
           output = identityUpstreamAcceptanceSchema.parse(checkpoint.output);
           for (const selector of output.judgments.flatMap(j => j.evidence)) evidence.push({ selector,
@@ -279,14 +295,14 @@ export async function runIdentityConsumerUpstream(options: { root: string; sourc
                 anchors.push({ selector, anchor: await resolveTextSelectorAnchor(root, verified.payloads.get(`source-segment:${selector.segment_id}`) as SourceSegment, selector) });
               }
               if (contentHash(await identityUpstreamGraph(root, plan)) !== input.graphHash) throw prerequisiteStop("Staged graph changed during independent acceptance; no retry");
-              await once(path.join(directory, "acceptance.proposal.json"), proposed); output = proposed; evidence = anchors;
+              await once(path.join(directory, `${acceptanceStage}.proposal.json`), proposed); output = proposed; evidence = anchors;
               return { ...result({ retained: true, consumerActivationAuthorized: false, worldTruthWritten: false }), terminate: true };
             }); } })];
-          const stage = await runStage("acceptance", identityUpstreamSessionContract("acceptance"), { graphHash: input.graphHash }, IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS,
+          const stage = await runStage(acceptanceStage, identityUpstreamSessionContract("acceptance"), { graphHash: input.graphHash }, acceptanceLimits,
             async (factory, trace, budget, signal) => {
               const session = await factory({ workspace: await LocalFileWorkspace.create(root), model: "openai-codex/gpt-6.1-sol", includeProjectInstructions: false,
                 includeLocalTools: false, includeNwhExtension: false, trackLastOpenedSession: false, interactionMode: "compiler", requestBudget: budget,
-                systemPromptOverride: parent ? revalidatedConsumerAcceptancePrompt : identityAcceptancePrompt, additionalTools: tools, trace: { parent: trace.rootContext, invocationName: "acceptance", parts: [] } });
+                systemPromptOverride: parent ? revalidatedConsumerAcceptancePrompt : identityAcceptancePrompt, additionalTools: tools, trace: { parent: trace.rootContext, invocationName: acceptanceStage, parts: [] } });
               const abort = () => { void session.abort(); }; signal.addEventListener("abort", abort, { once: true });
               try { signal.throwIfAborted(); await session.promptWithReport(JSON.stringify(input), { timeoutMs: 900000 }); }
               finally { signal.removeEventListener("abort", abort); }
@@ -297,7 +313,7 @@ export async function runIdentityConsumerUpstream(options: { root: string; sourc
           acceptance = { taskId, planHash: plan.planHash, graphHash: input.graphHash, inputHash: contentHash(input), output: output!, evidence, ...proof,
             provider: "openai-codex", model: "gpt-6.1-sol", subscription: true };
         }
-        await once(path.join(directory, "acceptance.record.json"), acceptance);
+        await once(path.join(directory, `${acceptanceStage}.record.json`), acceptance);
       }
       await verifyIdentityUpstreamAcceptance(root, plan); await assertOriginal();
       await publish("RUNNING", { stage: "host-finish" });
@@ -360,9 +376,9 @@ export function createIdentityUpstreamStageRunner(options: {
         session.promptWithReport = async (text, options) => {
           prompt = text;
           await once(path.join(directory, `${stage}.input.json`), JSON.parse(text));
-          await trace.record("stage.started", { phase: stage === "acceptance" ? "identity-upstream-acceptance" : "identity-upstream-slot",
+          await trace.record("stage.started", { phase: stage.endsWith("acceptance") ? "identity-upstream-acceptance" : "identity-upstream-slot",
             sessionId: session!.id, planHash: plan.planHash, ...(invocation.target ? { target: invocation.target } : {}),
-            inputHash: stage === "acceptance" ? contentHash(JSON.parse(text)) : contentHash(text), subscription: true });
+            inputHash: stage.endsWith("acceptance") ? contentHash(JSON.parse(text)) : contentHash(text), subscription: true });
           return actualPrompt(text, options);
         };
         return session;

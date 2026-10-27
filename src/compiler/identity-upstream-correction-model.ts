@@ -34,7 +34,9 @@ export async function identityUpstreamBudgetStages(directory: string, order: { i
     if (stages.at(-1) !== intent.target.id) throw prerequisiteStop("Correction lost its original final slot; no reordered budgets or retry");
     stages.push(IDENTITY_CORRECTION_STAGE);
   }
-  return [...stages, "acceptance"];
+  const { readIdentityFinishRevision, FINISH_REVISION_DRAFT, FINISH_REVISION_ACCEPTANCE } = await import("./identity-finish-revision.js");
+  const revision = await readIdentityFinishRevision(directory);
+  return [...stages, "acceptance", ...(revision ? [FINISH_REVISION_DRAFT, FINISH_REVISION_ACCEPTANCE] : [])];
 }
 /** The host does not author selectors. Pi may correct only the failed evidence
  * bindings, preserving its original payload, source scope and proposal ID. */

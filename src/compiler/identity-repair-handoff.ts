@@ -164,11 +164,20 @@ export async function inspectIdentityRepairHandoff(root: string, sourceId: strin
       if (contentHash(authority.recordHashes) !== contentHash(records.map(contentHash))) throw prerequisiteStop("Typed repair changed its original finding history");
       const entity = await canonical.getEntity(consumer.entityId);
       const finished = repair.state === "converged" || repair.state === "evaluated";
+      const { identityUpstreamDirectory } = await import("./identity-requirement-acceptance.js");
+      const { inspectIdentityFinishRevisionProgress } = await import("./identity-finish-revision.js");
+      const finishRevisionProgress = await inspectIdentityFinishRevisionProgress(identityUpstreamDirectory(root, repair.plan));
       return { planHash: repair.plan.planHash, findingId: consumer.findingId, state: repair.state, receiptFingerprint: repair.finishedReceipt ?? null,
         successorPlanHash: successor?.plan.planHash ?? null,
         lastFailure: lastFailure?.kind === "attempt-failed" ? { attemptRef: lastFailure.attemptRef, diagnostic: lastFailure.diagnostic } : null,
         currentStop: repair.state === "needs-host-review" && stop?.payload.kind === "needs-host-review"
-          ? { recordRef: stop.hash, diagnostic: stop.payload.reason, finishIntentHash: repair.finishIntent?.intentHash ?? null } : null,
+          ? { recordRef: stop.hash, diagnostic: stop.payload.reason, finishIntentHash: repair.finishIntent?.intentHash ?? null,
+            recovery: finishRevisionProgress?.blocked ? "inspect-consumed-opening-revision" : repair.finishIntent && !repair.finishedReceipt && !repair.finishRevision && authority.consumerRevalidation
+              ? "pre-receipt-opening-revision" : "inspect-original-stop" } : null,
+        finishRevision: repair.finishRevision ? { revisionHash: repair.finishRevision.intent.revisionHash,
+          completed: repair.finishRevision.completed, originalIntentHash: repair.finishRevision.intent.originalIntentHash,
+          independentAcceptance: "requires-revised-graph-verification" } : null,
+        finishRevisionProgress,
         currentEntity: { ref: `entity/${entity.id}`, revisionHash: contentHash(entity), payload: entity },
         acceptance: "requires-exact-receipt-verification",
         consumerRevalidation: result.summary.consumerRevalidation.attempts.some(a => a.compilerCorrection && a.semanticJudgmentPending && a.status === "BREAK")
@@ -176,7 +185,7 @@ export async function inspectIdentityRepairHandoff(root: string, sourceId: strin
         consumerRevalidationRecordIds: result.summary.consumerRevalidation.reviews.filter(r => r.receiptFingerprint === repair.finishedReceipt).map(r => r.id),
         requirementEvaluation: repair.evaluation?.result.result ?? null,
         command: { program: "nwh", args: ["--root", path.resolve(root), "requirements",
-          ...(successor || repair.state === "needs-host-review" ? ["inspect-identity-repairs", "--task", intent.taskId,
+          ...(successor || repair.state === "needs-host-review" || finishRevisionProgress?.blocked ? ["inspect-identity-repairs", "--task", intent.taskId,
             "--ref", authority.consumerRevalidation || successor ? `initial/${sourceId}` : `entity/${consumer.entityId}`]
             : repair.state === "converged" ? ["evaluate-upstream"] : repair.state === "evaluated"
             ? ["inspect-identity-repairs", "--task", intent.taskId, "--ref", `entity/${consumer.entityId}`]
@@ -184,7 +193,10 @@ export async function inspectIdentityRepairHandoff(root: string, sourceId: strin
               "--authorization-ref", repair.plan.authorizationRef, ...(authority.consumerRevalidation ? ["--revalidation-id", authority.consumerRevalidation.id] : [])]), "--source", sourceId] },
         resumeCondition: successor ? "This completed repair has an exact receipt-bound successor. Preserve its accepted revisions and history; inspect the successor instead of replaying the old plan." : finished
           ? "Typed repair is complete. Preserve its original proposal, receipt, attempts and budget. Local requirement satisfaction does not revalidate downstream consumers or the original critical questions; inspect their retained conditions before any separately authorized continuation. Do not redispatch the completed repair."
-          : "Only the original verified stage records and checkpoints may resume. Never replay a consumed invocation or use repair convergence as consumer activation." };
+          : finishRevisionProgress?.blocked ? finishRevisionProgress.resumeCondition
+          : repair.finishIntent && !repair.finishedReceipt && !repair.finishRevision && authority.consumerRevalidation
+            ? "Copy currentStop.recordRef into execute-identity-repair --revise-failed-finish with the exact task/ref/revalidation-id and explicit --revision-authorization-ref; inspect first. One bounded Pi singleton draft, unchanged source and writable fields, original remaining independent review allowance. ID misses allow one discovery-based correction; source/scope, receipts, consumed or failed revision stops do not retry. Preserve old proposals, acceptance, failures and budgets."
+            : "Only the original verified stage records and checkpoints may resume. Never replay a consumed invocation or use repair convergence as consumer activation." };
     }));
     if (contentHash(await ledger.history()) !== contentHash(history)) throw prerequisiteStop("Identity ledger changed during inspection; inspect its owning task without automatic retry");
     return { ...result, currentInputs: "original-finding-preserved-live-repair-separate", typedRepairs,

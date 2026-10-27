@@ -4,10 +4,32 @@ import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { NOVEL_COMPILATION_PHASES, newNovelCompilationRun, NovelCompilationRunStore, runNovelCompilation } from "../src/workflow/novel-compilation.js";
 import { contentHash } from "../src/world/canonical.js";
+import { CompilationBlockedError, compilationStopFromError } from "../src/compiler/compilation-stop.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 const source = { id: "fixture", contentSha256: contentHash("immutable novel") };
+
+it.each(["opening", "roles", "closure"] as const)("retains typed %s domain recovery through receipts and error causes", async phase => {
+  const run = newNovelCompilationRun(source), recovery = { kind: "semantic-repair" as const, sourceId: source.id,
+    phase, taskIds: [phase === "roles" ? "identity:original" : `phase:${phase}`], action: "inspect-compilation-plan" as const };
+  let caught: unknown;
+  try { await runNovelCompilation({ run, phase, save: async () => {}, execute: async () => {
+    throw new CompilationBlockedError("Original critical identity question", recovery);
+  } }); } catch (error) { caught = error; }
+  expect(compilationStopFromError(caught)).toEqual(recovery);
+  expect(run.history.at(-1)).toMatchObject({ status: "blocked", recovery, error: "Original critical identity question" });
+  expect(compilationStopFromError(new Error("COMPILATION_PREREQUISITES_BLOCKED: a code error"))).toBeUndefined();
+});
+
+it("preserves unknown opening exceptions without creating domain recovery receipts", async () => {
+  const run = newNovelCompilationRun(source), original = new TypeError("Broken opening adapter", { cause: new Error("original diagnostic") });
+  const result = runNovelCompilation({ run, phase: "opening", save: async () => {}, execute: async () => { throw original; } });
+  await expect(result).rejects.toMatchObject({ cause: original });
+  expect(compilationStopFromError(await result.catch(error => error))).toBeUndefined();
+  expect(run.history.at(-1)).toMatchObject({ phase: "opening", status: "blocked", error: original.message });
+  expect(run.history.at(-1)?.recovery).toBeUndefined();
+});
 
 it("runs certification and activation before declaring full completion, and revalidates phases on resume", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-lifecycle-")); roots.push(root);

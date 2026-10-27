@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CompilationBlockedError } from "./compilation-stop.js";
 import { contentHash } from "../world/canonical.js";
 import { WorkspaceOperationLock } from "../util/workspace-lock.js";
 import { auditCompiler, type CompilerAuditReport } from "./audit.js";
@@ -148,6 +149,9 @@ async function checkLockedCompilationClosure(root: string, sourceId: string): Pr
 export function assertCompilationClosure(report: CompilationClosure) {
   const checked = compilationClosureSchema.parse(report);
   if (checked.complete && checked.gates.every(g => g.state === "passed")) return;
-  throw new Error(`COMPILATION_CLOSURE_BLOCKED: ${checked.gates.filter(g => g.state !== "passed").map(g => `${g.dimension}=${g.state} (${g.refs.length} references)`).join("; ")}. `
-    + `Inspect nwh compile-novel plan --source ${checked.sourceId}; closure.gates retain every reference and owning phase. Resolve the original requirement/repair scope and re-run closure; no unchanged model retry, budget reset or completeness claim.`);
+  const gates = checked.gates.filter(g => g.state !== "passed");
+  throw new CompilationBlockedError(`COMPILATION_CLOSURE_BLOCKED: ${gates.map(g => `${g.dimension}=${g.state} (${g.refs.length} references)`).join("; ")}. `
+    + `Inspect nwh compile-novel plan --source ${checked.sourceId}; closure.gates retain every reference and owning phase. Resolve the original requirement/repair scope and re-run closure; no unchanged model retry, budget reset or completeness claim.`,
+    { kind: gates.some(g => g.state === "unknown") ? "host-state" : "semantic-repair", sourceId: checked.sourceId,
+      phase: "closure", taskIds: gates.map(g => `closure:${g.dimension}`), action: "inspect-compilation-plan" });
 }

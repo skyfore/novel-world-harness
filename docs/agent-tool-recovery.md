@@ -1,5 +1,18 @@
 # Agent tool failure recovery
 
+## Opening compiler failure recovery
+
+`ENTRY_CONTEXT_REQUIRES_SOURCE_REVIEW` is a typed `phase:opening` semantic stop
+for a settled pass that leaves no usable opening, not for an invocation exception.
+CLI and Web preserve thrown errors, their cause chains and pending drafts; TUI
+retains the actual run/finish diagnostic and stops. Unknown engineering or
+provider failures do not acquire semantic recovery merely because no opening
+was produced. Inspect the original trace/session before resolving the owning
+failure; do not reject its drafts, retry unchanged or synthesize state.
+Use `nwh compile-novel status --source <source-id>` to inspect the retained phase
+and repair conditions; do not synthesize an alive-only opening or route this
+condition into an engineering retry loop.
+
 ## Player move transport recovery
 
 A `playerMoveId` identifies one exact request on one branch. The host validates
@@ -3678,3 +3691,16 @@ convergence；该局部恢复不代替消费者重验、原来源审计或整体
 `lastFailure` 继续保留原槽位错误。不能误走已完成回执的 convergence recovery，
 也不能重复 evidence-only 纠正；需要按原 pre-receipt finish revision 协议由
 Pi 提出所需语义修订，并对变化后的图重新独立验收，保留旧提案与旧验收。
+
+## Compile loop domain recovery
+
+`COMPILE_LOOP_DOMAIN_ACTION` 保留阶段回执中的结构化领域或宿主状态停止条件。
+先在同 source 的 `compile-novel plan` 复制 `tasks[].command` 并满足
+`tasks[].resumeCondition`；不会仅凭错误文本启动工程代理或重复编译。不修改
+旧 BREAK、事故计数和原授权；未知工程异常仍进入原工程恢复，已验证宿主补丁
+仍按原独立复核协议处理。
+
+领域修复完成后，先通过原阶段入口重新验收。明确恢复原监督停止时，监督器仅在
+同一编译运行保留完整旧历史、追加对应阶段 completed 且没有后续失败的情况下
+登记领域解除证据，再让编译器重新校验当前输入；不凭一句 resolution、换 run
+或删掉失败历史启动工作，也不为已经解除的领域条件启动无关工程修复。

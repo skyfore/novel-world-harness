@@ -12,7 +12,8 @@ const directories: string[] = [];
 const ok = { code: 0, signal: null, error: null, timedOut: false, cancelled: false };
 afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(directories.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
 async function fixture(options: { blocked?: boolean; checkFailures?: number; repeatFailure?: boolean; invalidReview?: boolean;
-  unverifiedDelivery?: boolean; tamperAudit?: boolean; forbiddenPatch?: boolean; signal?: AbortSignal } = {}) {
+  unverifiedDelivery?: boolean; tamperAudit?: boolean; forbiddenPatch?: boolean; signal?: AbortSignal; domainStop?: boolean;
+  domainResolved?: boolean; changedDomainHistory?: boolean } = {}) {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-product-loop-")); directories.push(base);
   const root = path.join(base, "project"); vi.stubEnv("NWH_HOME", path.join(base, "state"));
   for (const dir of ["src/runtime/compile-loop", "test", "node_modules/typescript/bin"]) await fs.mkdir(path.join(root, dir), { recursive: true });
@@ -41,8 +42,11 @@ async function fixture(options: { blocked?: boolean; checkFailures?: number; rep
     if (label === "inspect") {
       writeFileSync(output, JSON.stringify({ compilerLock: { present: false },
         sources: [{ sourceId, sourceSha256: sourceHash, sourceIntegrity: "verified" }],
-        compilation: [{ sourceId, run: options.blocked === false && work === 0 ? null : { completed: false,
-          history: [{ phase: "roles", status: "blocked", error: "Model request budget exhausted: no new validated progress in 12 model calls" }] } }],
+        compilation: [{ sourceId, run: options.blocked === false && work === 0 ? null : { id: options.changedDomainHistory ? "replacement-run" : "original-run", completed: false,
+          history: [{ phase: "roles", status: "blocked", error: "Model request budget exhausted: no new validated progress in 12 model calls",
+            ...(options.domainStop ? { recovery: { kind: "semantic-repair", sourceId, phase: "roles",
+              taskIds: ["identity:original"], action: "inspect-compilation-plan" } } : {}) },
+            ...(options.domainResolved ? [{ phase: "roles", status: "completed" }] : [])] } }],
         supervisionTrace: { workId: "audit-29", planHash: "same-plan" } }));
     } else if (label === "worker") {
       work++;
@@ -74,6 +78,32 @@ it("adopts an existing compiler failure before running a worker, reviews and tes
 it("normal successful compilation spends no engineering round", async () => {
   const f = await fixture({ blocked: false }); const state = await runCompileLoop(f.input);
   expect(state.phase).toBe("DONE"); expect(state.repairs).toBe(0); expect(f.labels).not.toContain("repair");
+});
+
+it("hands a typed semantic dependency stop to its original domain task without engineering or compiler redispatch", async () => {
+  const f = await fixture({ domainStop: true });
+  const state = await runCompileLoop(f.input);
+  expect(state.phase).toBe("BREAK");
+  expect(state.reason).toContain("COMPILE_LOOP_DOMAIN_ACTION");
+  expect(state.reason).toContain("identity:original");
+  expect(state.repairs).toBe(0); expect(state.workers).toBe(0);
+  expect(f.labels).not.toContain("repair"); expect(f.labels).not.toContain("worker");
+  expect(await fs.readFile(path.join(f.root, "src/sample.ts"), "utf8")).toBe("existing user edit\n");
+  const before = await fs.readFile(path.join(f.directory, "state.json"), "utf8");
+  await expect(runCompileLoop(f.input)).rejects.toThrow("COMPILE_LOOP_RETAINED_STOP");
+  expect(await fs.readFile(path.join(f.directory, "state.json"), "utf8")).toBe(before);
+});
+
+it.each([false, true])("resumes a resolved original domain phase only with its retained run history (replacement: %s)", async changedDomainHistory => {
+  const options = { domainStop: true, domainResolved: false, changedDomainHistory: false }, f = await fixture(options);
+  const stopped = await runCompileLoop(f.input), original = await fs.readFile(stopped.pending!.evidenceFile, "utf8");
+  options.domainResolved = true; options.changedDomainHistory = changedDomainHistory;
+  const state = await runCompileLoop({ ...f.input, resumeStateHash: inspectCompileLoop(f.root, "source-1")!.stateHash,
+    resolution: "Original domain phase completed through its existing typed repair and revalidation" });
+  expect(state.phase).toBe(changedDomainHistory ? "BREAK" : "DONE");
+  expect(state.repairs).toBe(0); expect(f.labels).not.toContain("repair");
+  expect(state.workers).toBe(changedDomainHistory ? 0 : 1);
+  expect(await fs.readFile(stopped.pending!.evidenceFile, "utf8")).toBe(original);
 });
 
 it("a failed fixed check feeds the cumulative patch back to engineering without dispatching a worker", async () => {

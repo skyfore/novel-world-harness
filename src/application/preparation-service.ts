@@ -3,7 +3,6 @@ import { compileCommand, type CompileCommandOptions } from "../commands/compile.
 import { compileSourceCommand, type CompileSourceOptions } from "../commands/compile-source.js";
 import { INITIAL_WORLD_PROMPT } from "../commands/prepare-all.js";
 import { prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld, type CompilerBatch } from "../compiler/batches.js";
-import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import {
   ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
   EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
@@ -42,8 +41,7 @@ export interface PreparationDependencies {
   compileSource(options: CompileSourceOptions): Promise<void>;
   compileOpening(options: CompileCommandOptions): Promise<void>;
   prepareOpeningBatch(root: string, source: Parameters<typeof prepareOpeningWorldCompilerBatch>[1]): ReturnType<typeof prepareOpeningWorldCompilerBatch>;
-  proposeFallback(root: string, source: Parameters<typeof proposeMinimalOpeningWorld>[1]): Promise<string>;
-  rejectBatchProposals(root: string, batchId: string): Promise<string[]>;
+  proposeFallback(root: string, source: Parameters<typeof proposeMinimalOpeningWorld>[1]): Promise<never>;
 }
 
 const defaultDependencies: PreparationDependencies = {
@@ -52,7 +50,6 @@ const defaultDependencies: PreparationDependencies = {
   compileOpening: compileCommand,
   prepareOpeningBatch: prepareOpeningWorldCompilerBatch,
   proposeFallback: proposeMinimalOpeningWorld,
-  rejectBatchProposals: rejectPendingCompilerBatchProposals,
 };
 
 export interface PreparationApplicationServiceOptions {
@@ -246,20 +243,15 @@ export class PreparationApplicationService {
         });
       } catch (error) {
         context.signal.throwIfAborted();
-        const rejected = await this.dependencies.rejectBatchProposals(this.root, openingBatch.id);
-        progress.log(`Opening-world model pass failed; rejected ${rejected.length} partial proposal(s) before deterministic fallback.`);
+        progress.log(`Opening-world model pass failed: ${error instanceof Error ? error.message : String(error)}`);
+        await recorder.failStage(stage, error);
+        throw error;
       }
       context.signal.throwIfAborted();
       inspection = await inspectPreparation(this.root, { sourceId, ...(input.branchId ? { branchId: input.branchId } : {}) });
       if (inspection.stage === "needs-initial-world" && inspection.pending.length === 0) {
-        const fallbackId = await this.dependencies.proposeFallback(this.root, source);
-        progress.markMutation("fallback-proposal", { proposalId: fallbackId });
-        await recorder.record("validation.completed", {
-          outcome: "fallback-proposal-created",
-          proposalId: fallbackId,
-          authority: "proposal-only",
-        }, stage);
-        progress.log(`Created restricted opening-world fallback proposal '${fallbackId}'.`);
+        try { await this.dependencies.proposeFallback(this.root, source); }
+        catch (error) { await recorder.failStage(stage, error); throw error; }
       }
       progress.flush();
       await recorder.finishStage(stage, { compilerBatchId: openingBatch.id });

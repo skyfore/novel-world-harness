@@ -1,4 +1,5 @@
 import path from "node:path";
+import { CompilationBlockedError } from "./compilation-stop.js";
 import { contentHash } from "../world/canonical.js";
 import { inspectCompilerStatus } from "./status.js";
 import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
@@ -142,6 +143,8 @@ export async function inspectCompilationHandoff(root: string, sourceId: string, 
 export async function assertRoleCompilationHandoff(root: string, sourceId: string) {
   const plan = await inspectCompilationHandoff(root, sourceId);
   const blockers = plan.tasks.filter(t => ["identity-consumers", "source-audit", "inspection"].includes(t.kind) && t.state === "blocked");
-  if (blockers.length) throw new Error(`ROLE_PREREQUISITE_HOST_REVIEW: COMPILATION_PREREQUISITES_BLOCKED: ${blockers.map(t => `${t.id}: ${t.reason}`).join("; ")}\n`
-    + `Inspect nwh compile-novel plan --source ${sourceId}; use tasks[].command and satisfy tasks[].resumeCondition. Preserve original grants, traces and budgets; no unchanged role retry or parent resume.`);
+  if (blockers.length) throw new CompilationBlockedError(`ROLE_PREREQUISITE_HOST_REVIEW: COMPILATION_PREREQUISITES_BLOCKED: ${blockers.map(t => `${t.id}: ${t.reason}`).join("; ")}\n`
+    + `Inspect nwh compile-novel plan --source ${sourceId}; use tasks[].command and satisfy tasks[].resumeCondition. Preserve original grants, traces and budgets; no unchanged role retry or parent resume.`,
+    { kind: blockers.some(t => t.kind === "inspection") ? "host-state" : "semantic-repair", sourceId, phase: "roles",
+      taskIds: blockers.map(t => t.id), action: "inspect-compilation-plan" });
 }

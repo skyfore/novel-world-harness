@@ -23,9 +23,8 @@ import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js"
 import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
 import { attributionSchema, canonicalEventSchema, claimSchema, entitySchema, propositionSchema, worldRuleSchema, type Attribution, type CanonicalEvent, type Claim, type Entity, type EventParticipation, type EventRelation, type EvidenceRef, type Proposition, type WorldRule } from "../world/model.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
-import { COMPILER_STATE_FIELDS, CompilerProposalService, compilerProposalSchemas } from "./proposals.js";
+import { COMPILER_STATE_FIELDS, compilerProposalSchemas } from "./proposals.js";
 import { promptJson } from "../util/prompt-data.js";
-import { isNovelScaleCompilation } from "./scale.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./boundary-calibration.js";
 import { SourceAccountingStore } from "./source-accounting.js";
@@ -417,70 +416,15 @@ async function compilerEvidencePieces(
   return { pieces, evidenceRefs, characterCount };
 }
 
+/** Compatibility entry point: a failed model stage cannot authorize host-authored truth. */
 export async function proposeMinimalOpeningWorld(
-  workspaceRoot: string,
+  _workspaceRoot: string,
   source: SourceDocument,
-  options: { proposalIdSuffix?: string } = {},
-): Promise<string> {
-  if (isNovelScaleCompilation(source.bytes, 0)) {
-    throw new Error(
-      `Cannot synthesize a deterministic alive-only opening for long-form source ${source.id}; retry the model opening compiler so unread-reader context, direct actor observation, and actionable state remain evidence-backed.`,
-    );
-  }
-  const opening = await prepareOpeningWorldCompilerBatch(workspaceRoot, source);
-  const proposals = new CompilerProposalService(workspaceRoot);
-  const used = new Set([
-    ...(await proposals.store.list("pending")).map((item) => item.id),
-    ...(await proposals.store.list("accepted")).map((item) => item.id),
-    ...(await proposals.store.list("rejected")).map((item) => item.id),
-  ]);
-  const base = `fallback-initial-${source.id}${options.proposalIdSuffix ? `-${options.proposalIdSuffix}` : ""}`;
-  let proposalId = base;
-  for (let revision = 2; used.has(proposalId); revision += 1) proposalId = `${base}-v${revision}`;
-  const canonical = new CanonicalModelStore(workspaceRoot);
-  const sourceCharacters = (await canonical.listEntities())
-    .filter((entity) => entity.kind === "character")
-    .filter((entity) => {
-      const belongsToSource = entity.evidence.some((reference) => reference.span.sourceId === source.id);
-      if (belongsToSource) assertEvidenceExclusiveToSource(entity.evidence, source.id, `Opening character ${entity.id}`);
-      return belongsToSource;
-    });
-  const openingCharacters = sourceCharacters.filter((entity) => entity.evidence.some((reference) =>
-    opening.evidence.some((openingEvidence) => evidenceSpansOverlap(reference, openingEvidence))));
-  if (sourceCharacters.length !== 1 || openingCharacters.length !== 1) {
-    throw new Error(
-      `Cannot synthesize a safe playable opening for ${source.id}: the deterministic alive-only fallback is restricted to a single-character source. Retry the opening compiler so it can provide an evidence-backed location, plan, or momentum for a bodily present opening role.`,
-    );
-  }
-  await proposals.submit("initial-world", {
-    proposalId,
-    payload: {
-      version: 1,
-      delta: {
-        version: 1,
-        operations: openingCharacters.map((character) => ({
-          op: "set" as const,
-          entityId: character.id,
-          field: "character.alive",
-          value: true,
-        })),
-      },
-      checkpoint: {
-        mode: "textual-frame",
-        narrativeLayerId: "opening-frame",
-        rationale: "Deterministic fallback uses the first selected narrative evidence as a textual-frame checkpoint; a model-backed chronological checkpoint is preferred.",
-      },
-      evidence: opening.evidence,
-    },
-    generatedBy: { worker: "prepare-all-deterministic-fallback", compilerBatchId: opening.id },
-  });
-  return proposalId;
-}
-
-function evidenceSpansOverlap(left: EvidenceRef, right: EvidenceRef): boolean {
-  return left.span.sourceId === right.span.sourceId
-    && left.span.startLine <= right.span.endLine
-    && left.span.endLine >= right.span.startLine;
+  _options: { proposalIdSuffix?: string } = {},
+): Promise<never> {
+  const { CompilationBlockedError } = await import("./compilation-stop.js");
+  throw new CompilationBlockedError(`ENTRY_CONTEXT_REQUIRES_SOURCE_REVIEW: Cannot synthesize a deterministic alive-only opening for ${source.id}. Preserve source, drafts, failed sessions and budgets. Inspect same-source compile-novel status and phase:opening; repair the source-backed entry contract through existing unconsumed authority. Stop this stage; do not invent presence, state, rename a proposal or retry unchanged.`,
+    { kind: "semantic-repair", sourceId: source.id, phase: "opening", taskIds: ["phase:opening"], action: "inspect-compilation-plan" });
 }
 
 export async function prepareOpeningWorldCompilerBatch(

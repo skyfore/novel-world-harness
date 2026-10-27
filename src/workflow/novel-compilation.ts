@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { worldStorageRoot } from "../world/paths.js";
 import { compilationClosureSchema } from "../compiler/compilation-closure.js";
+import { compilationStopSchema, compilationStopFromError } from "../compiler/compilation-stop.js";
 
 export const NOVEL_COMPILATION_PHASES = [
   "source", "recover", "batches", "converge", "opening", "roles", "repair", "requirements", "closure",
@@ -15,6 +16,7 @@ const safeId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const receiptSchema = z.object({
   phase: z.enum(NOVEL_COMPILATION_PHASES), startedAt: z.string(), finishedAt: z.string().optional(),
   status: z.enum(["running", "completed", "blocked"]), error: z.string().optional(),
+  recovery: compilationStopSchema.optional(),
 }).strict();
 const runSchema = z.object({
   version: z.literal(1), id: safeId, sourceId: safeId, sourceSha256: digest,
@@ -91,6 +93,8 @@ export async function runNovelCompilation(input: {
     } catch (error) {
       receipt.status = "blocked";
       receipt.error = error instanceof Error ? error.message : String(error);
+      const recovery = compilationStopFromError(error);
+      if (recovery) receipt.recovery = recovery;
       receipt.finishedAt = new Date().toISOString();
       await input.save(run);
       throw new Error(`NOVEL_COMPILATION_BLOCKED [${phase}]: ${receipt.error}\n`

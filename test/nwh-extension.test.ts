@@ -2443,7 +2443,8 @@ describe("NWH TUI extension", () => {
       proposalId: "tui-initial",
       payload: {
         version: 1,
-        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }] },
         evidence: evidence.evidence("Hero waits at the opening."),
       },
       generatedBy: { worker: "test" },
@@ -2702,9 +2703,10 @@ describe("NWH TUI extension", () => {
       proposalId: "second-opening",
       payload: {
         version: 1,
+        participantPresence: [{ entityId: "second-hero", mode: "physical" }],
         delta: {
           version: 1,
-          operations: [{ op: "set", entityId: "second-hero", field: "character.alive", value: true }],
+          operations: [{ op: "set", entityId: "second-hero", field: "character.alive", value: true }, { op: "set", entityId: "second-hero", field: "character.plan", value: "wait" }],
         },
         evidence: second.evidence("Second Hero waits."),
       },
@@ -2755,6 +2757,7 @@ describe("NWH TUI extension", () => {
       proposal_id: "tui-generated-opening",
       payload: {
         version: 1,
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
         delta: {
           version: 1,
           operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait at the opening" }],
@@ -2786,7 +2789,7 @@ describe("NWH TUI extension", () => {
     await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
   });
 
-  it("falls back conservatively when an opening-state run never completes its finish handshake", async () => {
+  it.each(["missing-finish", "provider-error"])("retains the original opening failure and drafts: %s", async failure => {
     const { commands, events, registeredToolDefinitions, root } = await fixture();
     const evidence = await createEvidenceFixture(root, "Hero waits at the opening.\n", "unfinished-opening.txt");
     const batches = await prepareCompilerBatches(root, evidence.source);
@@ -2819,18 +2822,21 @@ describe("NWH TUI extension", () => {
       messages: [
         { role: "assistant", content: [{ type: "toolCall", id: "partial-opening-call", name: "propose_initial_world", arguments: proposalInput }], stopReason: "toolUse" },
         { role: "toolResult", toolCallId: "partial-opening-call", toolName: "propose_initial_world", ...proposalResult, isError: false },
-        { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+        failure === "provider-error"
+          ? { role: "assistant", content: [], stopReason: "error", errorMessage: "Provider unavailable" }
+          : { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
       ],
     }, ctx);
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
-    expect(questions).toEqual(["Generate opening world?", "Create playable branch?"]);
-    expect(notifications.some((message) => message.includes("Opening-state compiler did not complete") && message.includes("explicitly finish"))).toBe(true);
-    expect(notifications.some((message) => message.includes("restricted single-character opening fallback"))).toBe(true);
-    await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toContainEqual(
+    expect(questions).toEqual(["Generate opening world?"]);
+    expect(notifications.some((message) => message.includes("Opening-state compiler did not complete") && message.includes(failure === "provider-error" ? "Provider unavailable" : "explicitly finish"))).toBe(true);
+    expect(notifications.some((message) => message.includes("ENTRY_CONTEXT_REQUIRES_SOURCE_REVIEW"))).toBe(false);
+    await expect(new CompilerProposalService(root).store.list("pending")).resolves.toContainEqual(
       expect.objectContaining({ id: "partial-opening" }),
     );
-    await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
+    await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toEqual([]);
+    expect(await new BranchStore(root).listIds()).toEqual([]);
   });
 
   it("continues with the next compiler batch automatically during /prepare-all", async () => {

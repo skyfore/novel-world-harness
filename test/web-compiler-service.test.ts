@@ -10,6 +10,7 @@ import { ProposalApplicationService } from "../src/application/proposal-service.
 import { SourceApplicationService } from "../src/application/source-service.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { TraceStore } from "../src/trace/store.js";
 import { WebEventBroker } from "../src/web/event-stream.js";
 import { OperationManager } from "../src/web/operation-manager.js";
@@ -59,6 +60,34 @@ describe("Web source registration", () => {
 });
 
 describe("Web preparation operations", () => {
+  it.each([false, true].flatMap(unresolved => ["provider", "engineering"].map(failure => ({ unresolved, failure }))))("retains $failure failures and opening drafts (unresolved obligation=$unresolved)", async ({ unresolved, failure }) => {
+    const root = await workspace("nwh-web-opening-stop-");
+    const source = await createEvidenceFixture(root, "Hero waits.\n");
+    await new CompilerBatchStore(root).replaceCompleted(source.source.id, (await prepareCompilerBatches(root, source.source)).map(batch => batch.id));
+    await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: source.evidence("Hero") });
+    const events = new WebEventBroker(), operations = new OperationManager(events), proposals = new CompilerProposalService(root);
+    let calls = 0;
+    const original = failure === "engineering" ? new TypeError("Broken opening adapter") : new Error("Provider unavailable");
+    const service = new PreparationApplicationService({ root, events, operations, traceStore: new TraceStore(root), dependencies: {
+      compileOpening: async options => {
+        calls += 1;
+        await proposals.submit("initial-world", { proposalId: "original-opening-draft", payload: { version: 1,
+          delta: { version: 1, operations: [] }, evidence: source.evidence("Hero waits.") }, generatedBy: { worker: "fixture", compilerBatchId: options.compilerBatchId } });
+        if (unresolved) new CompilerProposalObligations(root, source.source.id, options.compilerBatchId!).record("propose_initial_world", { proposal_id: "failed-opening", payload: {} }, "failed", "invalid opening");
+        throw original;
+      },
+    } });
+    const request = { mode: "all" as const, clientRequestId: "original-opening" };
+    const operation = await service.start(source.source.id, request), result = await operations.wait(operation.operation.id);
+    expect(result).toMatchObject({ status: "failed", error: { message: original.message } });
+    expect(await new InitialWorldStore(root).get()).toBeNull();
+    expect(await proposals.store.list("accepted")).toEqual([]);
+    expect(await proposals.store.list("pending")).toContainEqual(expect.objectContaining({ id: "original-opening-draft" }));
+    expect(await proposals.store.list("rejected")).toEqual([]);
+    expect(await service.start(source.source.id, request)).toMatchObject({ reused: true });
+    expect(calls).toBe(1);
+  });
+
   it("runs compiler work behind an idempotent operation and links the durable trace", async () => {
     const root = await workspace("nwh-web-prepare-");
     const fixture = await createEvidenceFixture(root, "Hero opens the gate.\n");
@@ -245,9 +274,10 @@ describe("Web world instances", () => {
     });
     await new InitialWorldStore(root).put({
       version: 1,
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       delta: {
         version: 1,
-        operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+        operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }],
       },
       evidence,
     });

@@ -9,6 +9,7 @@ import { captureWorkspace, changes, assertPatchScope, baselineContents, digest, 
 import { runLoopChild, type ChildOutcome } from "./process.js";
 import type { WorkerRequest } from "./worker.js";
 import { workerResultSchema, deliveryVerificationSchema } from "./delivery.js";
+import { compilationStopSchema } from "../../compiler/compilation-stop.js";
 import type { inspectNovelCompilation } from "../../commands/compile-novel.js";
 import { compilerFailureFingerprint } from "../codex-compile-loop.js";
 import { dedicatedSessionSchema, dedicatedSessionMode, dedicatedSessionArgs, acceptDedicatedSession,
@@ -269,6 +270,24 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
       if (state.pending) {
         const pending = state.pending, count = state.failures[pending.key] ?? 0;
         const hostRepair = Boolean(hostPatchHash);
+        const originalRun = read<Snapshot>(pending.evidenceFile).compilation[0]?.run;
+        const originalStop = originalRun?.history.at(-1), currentRun = checked.snapshot.compilation[0]?.run;
+        const recovery = originalStop?.recovery && compilationStopSchema.parse(originalStop.recovery);
+        if (!hostRepair && recovery && recovery.sourceId === request.sourceId) {
+          const later = currentRun?.history.slice(originalRun!.history.length) ?? [];
+          if (originalStop.status === "blocked" && originalStop.phase === recovery.phase
+            && currentRun?.id === originalRun!.id
+            && digest(currentRun!.history.slice(0, originalRun!.history.length)) === digest(originalRun!.history)
+            && later.findLast(r => r.phase === recovery.phase)?.status === "completed"
+            && later.at(-1)?.status === "completed") {
+            save(path.join(directory, `domain-resolution-${randomUUID()}.json`), { recovery,
+              originalEvidenceFile: pending.evidenceFile, resolvedEvidenceFile: checked.file });
+            state.pending = null;
+            phase("READY", "Original domain phase completed under retained history; compiler will revalidate current inputs without an engineering round.");
+            continue;
+          }
+          throw new Error(`COMPILE_LOOP_DOMAIN_ACTION: ${recovery.kind}; ${pending.reason}. Inspect nwh --root ${JSON.stringify(root)} compile-novel plan --source ${request.sourceId}; resolve the original tasks ${recovery.taskIds.join(", ")} through their existing authority. No engineering invocation, unchanged compiler retry or renewed allowance.`);
+        }
         if (!hostRepair && count >= limits.repairsPerIncident) throw new Error(`COMPILE_LOOP_NO_PROGRESS: ${count} engineering rounds for the same incident exhausted; inspect ${pending.evidenceFile} and preserve its counters.`);
         if (!existsSync(path.join(root, "src/runtime/compile-loop/worker.ts")) || !existsSync(path.join(root, "node_modules/typescript/bin/tsc"))) throw new Error("COMPILE_LOOP_REPAIR_CHECKOUT_REQUIRED: repair requires this compiler's source checkout and installed verification tools; retain the incident.");
         if (!hostRepair) {

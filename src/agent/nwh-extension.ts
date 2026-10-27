@@ -1714,9 +1714,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (inspection.stage === "needs-initial-world") {
         prepareAllHostActivity?.update("Preparing the opening world state");
         if (state.initialWorldAttempted) {
-          let fallbackId: string;
           try {
-            fallbackId = await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
+            await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
           } catch (error) {
             await stopPrepareAll(
               ctx,
@@ -1725,19 +1724,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             );
             return;
           }
-          const result = await convergeWorldProposals(workspace.root, state.sourceId);
-          await quarantineUncommittableProposals(workspace.root, result);
-          ctx.ui.notify(`The model did not leave a valid opening state; accepted the restricted single-character opening fallback ${fallbackId}.`, "warning");
-          const afterFallback = await inspectPreparation(workspace.root, {
-            sourceId: state.sourceId,
-            branchId: state.branchId,
-          });
-          if (afterFallback.stage === "needs-initial-world") {
-            await stopPrepareAll(ctx, "The deterministic opening-state fallback could not be committed. Run nwh audit for conflicting world data.", "error");
-            return;
-          }
-          await advancePrepareAll(ctx);
-          return;
         }
         const decision = await choose(ctx, "Generate opening world?", [
           { value: "generate", label: "Generate proposal", description: "Ask the current compiler session for an evidence-backed opening state.", recommended: true },
@@ -2114,6 +2100,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (reconciliationRequest) prepareAllState!.reconciliationRequestRunning = false;
         const failure = compilerBatchFailure(outcome);
         if (failure) {
+          if (openingRequest) {
+            await stopPrepareAll(ctx, `Opening-state compiler did not complete (${failure}). Preserve the original session, drafts and budgets; inspect the same source/batch and resolve this failure before continuing. No automatic retry or synthesized opening.`, "error");
+            return;
+          }
           const specialBatchId = reconciliationRequest
             ? prepareAllState!.reconciliationBatchId
             : prepareAllState!.initialWorldBatchId;

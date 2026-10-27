@@ -352,6 +352,8 @@ export const stateFieldSpecSchema = z
     cardinality: z.enum(["one", "many"]),
     visibility: stateFieldVisibilitySchema.optional(),
     worldAssumption: z.enum(["open", "closed"]).optional(),
+    /** Grounded entry context, never a certificate that an action is executable. */
+    entryContext: z.enum(["spatial", "intentional", "dynamic", "bodily"]).optional(),
     required: z.boolean().optional(),
     exclusive: z.boolean().optional(),
     minimum: z.number().finite().optional(),

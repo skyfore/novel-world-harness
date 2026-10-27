@@ -1,6 +1,7 @@
 import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
 import { agencyPresenceIssues, projectAgencyChannels } from "./agency-profile.js";
 import { applyProcessDelta, emptyProcessState } from "./process-effects.js";
+import { bodilyStateEvidenceIssues } from "./bodily-state.js";
 import type { ActionSchema } from "./action-ontology.js";
 import type { ProcessTemplate } from "./process-ontology.js";
 import type { CanonicalEvent, EventParticipation, Entity, EntryProjectionSeed, EvidenceAssertion, KnowledgeDelta, ParticipantPresence, ValidationIssue } from "./model.js";
@@ -62,7 +63,7 @@ export function entryArtifactEvidenceIssues(kind: string, payload: unknown, asse
   const artifact = payload as { characterEntryCheckpoints?: (Entry & { actorId: string })[]; entryCheckpoint?: Entry & { actorId: string } };
   const entries = kind === "canonical-event" ? (artifact.characterEntryCheckpoints ?? []).map((entry, i) => ({ entry, prefix: `/characterEntryCheckpoints/${i}` }))
     : kind === "event-execution" && artifact.entryCheckpoint ? [{ entry: artifact.entryCheckpoint, prefix: "/entryCheckpoint" }] : [];
-  return entries.flatMap(({ entry, prefix }) => {
+  return [...(kind === "initial-world" ? [] : bodilyStateEvidenceIssues(payload, assertions)), ...entries.flatMap(({ entry, prefix }) => {
     const issues = remoteEntryEvidenceIssues(entry, assertions, prefix);
     if (!entry.participantPresence?.some(item => item.entityId === entry.actorId && item.mode === "remote")) return issues;
     const paths = [`${prefix}/actorId`, ...(kind === "event-execution" ? ["/actorId", "/canonicalEventId"] : [])];
@@ -70,7 +71,7 @@ export function entryArtifactEvidenceIssues(kind: string, payload: unknown, asse
       issues.push({ code: "ENTRY_AGENCY_EVIDENCE_REQUIRED", path, message: "Remote checkpoint identity and occurrence require exact source support at the pre-event cut. Inspect the named source field and correct once; otherwise stop without guessing or relabelling." });
     }
     return issues;
-  });
+  })];
 }
 
 /** A remote checkpoint cannot convert a depiction in the occurrence into live participation. */

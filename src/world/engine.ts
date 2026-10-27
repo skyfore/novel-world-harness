@@ -1130,21 +1130,20 @@ export class WorldEngine {
       };
       return { report, previousHead: head, newHead: head };
     }
-    if (!persist) return { report, previousHead: head, newHead: head };
     const deltaHash = effectiveStateIndexes.length
-      ? await this.objects.putDelta(parsed.proposedDelta)
+      ? persist ? await this.objects.putDelta(parsed.proposedDelta) : contentHash(parsed.proposedDelta)
       : undefined;
     const knowledgeDeltaHash = parsed.proposedKnowledge && effectiveKnowledgeIndexes.length
-      ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge)
+      ? persist ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge) : contentHash(parsed.proposedKnowledge)
       : undefined;
     const semanticDeltaHash = semanticDelta?.operations.length
-      ? await this.objects.putSemanticDelta(semanticDelta)
+      ? persist ? await this.objects.putSemanticDelta(semanticDelta) : contentHash(semanticDelta)
       : undefined;
     const processDeltaHash = processDelta?.operations.length
-      ? await this.objects.putProcessDelta(processDelta)
+      ? persist ? await this.objects.putProcessDelta(processDelta) : contentHash(processDelta)
       : undefined;
     const normDeltaHash = normDelta?.operations.length
-      ? await this.objects.putNormDelta(normDelta)
+      ? persist ? await this.objects.putNormDelta(normDelta) : contentHash(normDelta)
       : undefined;
     const effects: CommittedEvent["effects"] = {
       version: 1,
@@ -1171,6 +1170,7 @@ export class WorldEngine {
       ...(parsed.progress?.scene ? { sceneTransition: parsed.progress.scene } : {}),
     });
     if (!hasMaterialProgress(progressCertificate)) throw new Error("Accepted event has no host-certified progress");
+    if (!persist) return { report, previousHead: head, newHead: head, progressCertificate };
     const logicalTime = postState.logicalTime;
     const canonicalPossibilityId = !parsed.canonicalAdaptation && parsed.possibilityId?.startsWith("canon-")
       ? parsed.possibilityId.slice("canon-".length)

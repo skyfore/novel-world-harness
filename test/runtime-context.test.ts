@@ -519,7 +519,7 @@ async function preparedCorpusFixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-runtime-source-workspace-"));
   const cacheRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-runtime-source-cache-"));
   roots.push(root, cacheRoot);
-  const content = "Hero receives a letter from America because his former teacher sent it.\n";
+  const content = "Hero receives a letter from America because his former teacher sent it. Hero plans to wait.\n";
   const source = await createEvidenceFixture(root, content);
   const proposals = new CompilerProposalService(root);
   await proposals.submit("entity", {
@@ -537,9 +537,10 @@ async function preparedCorpusFixture() {
     proposalId: "runtime-source-opening",
     payload: {
       version: 1,
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       delta: {
         version: 1,
-        operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+        operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }],
       },
       evidence: source.evidence(content.trim()),
     },

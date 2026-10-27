@@ -1681,7 +1681,7 @@ async function assertPreparedInitialWorldEvidence(
   bundle: PreparedNovelBundle,
 ): Promise<void> {
   const initialWorld = bundle.canonical.initialWorld;
-  if (!initialWorld.readerContext && !initialWorld.actorObservations?.length && !(initialWorld.projectionSeed && initialWorld.participantPresence?.some(item => item.mode === "remote"))) return;
+  if (!validateInitialWorldEvidenceAssertions(initialWorld, []).length) return;
   const snapshotBinding = bundle.compilerSnapshot.evidenceBindings.find((candidate) =>
     candidate.artifactKind === "initial-world" && candidate.artifactId === "initial-world");
   const binding = snapshotBinding
@@ -1762,11 +1762,11 @@ async function assertPreparedCompilerSnapshotEvidence(
     if (entity.identityConsumption?.mode === "source-local" && (stale || validateSourceLocalIdentityEvidence(entity, binding!.assertions).length))
       throw new Error(`Source-local referent exact evidence is incomplete or stale: ${entity.id}`);
   }
-  for (const [kind, artifacts] of [["canonical-event", bundle.canonical.events], ["event-execution", bundle.canonical.eventExecutions ?? []]] as const) for (const artifact of artifacts) {
-    // Empty assertions identify artifacts requiring remote-entry bindings.
+  for (const [kind, artifacts] of [["canonical-event", bundle.canonical.events], ["event-execution", bundle.canonical.eventExecutions ?? []], ["character-goal", bundle.canonical.goals], ["world-rule", bundle.canonical.rules], ["possibility", bundle.canonical.possibilities]] as const) for (const artifact of artifacts) {
+    // Empty assertions identify artifacts requiring exact bodily/channel evidence.
     if (!entryArtifactEvidenceIssues(kind, artifact, []).length) continue;
     const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === kind && item.artifactId === artifact.id);
-    if (!binding || binding.artifactHash !== contentHash(artifact) || entryArtifactEvidenceIssues(kind, artifact, binding.assertions).length) throw new Error(`Remote entry exact evidence is incomplete or stale: ${artifact.id}`);
+    if (!binding || binding.artifactHash !== contentHash(artifact) || entryArtifactEvidenceIssues(kind, artifact, binding.assertions).length) throw new Error(`Entry/body exact evidence is incomplete or stale: ${artifact.id}`);
   }
   for (const execution of bundle.canonical.eventExecutions ?? []) if (execution.processRecoveries?.length) {
     const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "event-execution" && item.artifactId === execution.id);

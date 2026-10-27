@@ -1,5 +1,6 @@
 import { initialWorldSchema } from "../world/initial.js";
 import { modelEvidenceSelectorsSchema } from "./text-anchors.js";
+import { BODILY_STATE_INPUT_GUIDANCE } from "../world/bodily-state.js";
 
 const modelPayload = initialWorldSchema.omit({ evidence: true });
 
@@ -23,5 +24,5 @@ export const INITIAL_WORLD_INPUT_GUIDANCE = "For readerContext, include focal-id
   + "Exact supporting evidence_selectors are required for /readerSetup, /readerContext/facts/i/summary, /readerContext/immediateSituation/summary, /actorObservations/i/summary, and each entity gloss's /relationshipToFocal and /whyRelevantNow. "
   + "A selector on a parent object such as /readerContext/facts/i does not bind its /summary. These literary fields require supports with explicit or strong-inference strength. "
   + "Omitted focalKnowledgeClaimIds/dependsOnFactIds default to empty arrays; focal-knowledge still requires actual seeded claim IDs. "
-  + "The existing commit/runtime opening gate for a source with multiple characters also requires at least one non-dead bodily or channel-grounded role with source-supported character.location, character.plan or character.momentum in delta.operations. Alive alone, readerContext and actorObservations do not supply that executable state. Do not invent a place, intention or numeric momentum merely to pass this gate. "
-  + "Use preview_initial_world before submission when available; it checks input and exact evidence without staging a proposal, but does not certify graph closure or playability.";
+  + "The shared entry contract requires a non-dead bodily or channel-grounded role with final source-supported operational context, independent of the whole-book character count. Registered qualitative character.posture/breathing/sweating/wakefulness retain the source's precision; each such set operation needs an exact supporting selector on /delta/operations/i. Missing values remain unknown and imply no location, identity, numeric health or action capacity. Alive alone, readerContext and actorObservations are insufficient. Context grounding does not certify a legal action or autonomous driver: both require independent runtime witnesses. Do not invent a place, intention or number to pass. "
+  + BODILY_STATE_INPUT_GUIDANCE + " Use preview_initial_world before submission when available; it checks input and exact evidence without staging a proposal, but does not certify graph closure or playability.";

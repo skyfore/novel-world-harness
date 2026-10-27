@@ -15,6 +15,8 @@ import { readKnowledgeRepairPlan, knowledgeRepairScopeIssues } from "./knowledge
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { initialWorldInputIssues, INITIAL_WORLD_INPUT_GUIDANCE } from "./initial-world-preflight.js";
+import { diagnoseEntryRepair } from "./entry-repair-diagnostics.js";
+import { CompilerValidator } from "./validator.js";
 import { initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
 import { CompilerAccountingPages } from "./accounting-pages.js";
 import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
@@ -2322,9 +2324,20 @@ export function createCompilerProposalToolset(
           .map(issue => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`));
       }
       if (issues.length) previewFailure(issues);
+      let writablePointers = ["/delta", "/participantPresence"];
+      if (hostOptions.upstreamRepair) {
+        const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
+        const managedPlan = (await new UpstreamRepairLedger(workspaceRoot, activeSourceId!).inspect()).plans
+          .find(item => item.plan.planHash === hostOptions.upstreamRepair!.planHash)?.plan;
+        writablePointers = managedPlan?.allowedWrites.filter(write => write.kind === "initial-world" && write.id === "singleton").flatMap(write => write.pointers) ?? [];
+      }
+      const entryDiagnostics = diagnoseEntryRepair({ sourceId: activeSourceId!, entry: initialWorldSchema.parse(normalized!.payload),
+        catalog: await new CompilerValidator(new CanonicalModelStore(workspaceRoot)).loadCatalog(),
+        writablePointers, catalogScope: "canonical-catalog" });
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ valid: true, proposalId: input.proposal_id,
           checked: ["input", "exact-evidence", "field-evidence"], unchecked: ["graph-closure", "commit", "playability"],
+          entryDiagnostics,
           next: "Submit the reviewed envelope with propose_initial_world; the host revalidates it before staging." }) }],
         details: { readOnly: true, proposalStaged: false },
       };

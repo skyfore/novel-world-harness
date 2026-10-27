@@ -30,8 +30,8 @@ async function candidate() {
   const fixture = await createEvidenceFixture(root, "Hero waits.\n");
   const canonical = new CanonicalModelStore(root);
   await canonical.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") });
-  await new InitialWorldStore(root).put({ version: 1, evidence: fixture.evidence("Hero waits."), delta: { version: 1,
-    operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] } });
+  await new InitialWorldStore(root).put({ version: 1, participantPresence: [{ entityId: "hero", mode: "physical" }], evidence: fixture.evidence("Hero waits."), delta: { version: 1,
+    operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }] } });
   const batches = await prepareCompilerBatches(root, fixture.source);
   await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map(batch => batch.id));
   const cache = new PreparedNovelCache(root);

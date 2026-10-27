@@ -1,5 +1,40 @@
 # Agent tool failure recovery
 
+## Entry capability contract recovery
+
+`entry-capability/v2` separates grounded final entry state, a real actor action,
+and an independent autonomous driver. `preview_initial_world.entryDiagnostics`
+is read-only: `valid` covers shape and evidence checks, never graph closure,
+commit or playability. Its canonical catalog can omit current pending proposals.
+The report includes registered field definitions and the exact retained write
+pointers for a managed repair. Inspect source evidence and dependencies before
+submitting one corrected proposal under existing authority; never infer a missing
+entity or permission from an incomplete catalog.
+
+`BODILY_STATE_EVIDENCE_REQUIRED` needs an exact `supports` selector of explicit
+or strong-inference strength on the named operation, such as
+`/delta/operations/1`. Read the same-source evidence with
+`find_source_evidence`/`read_source_evidence`; correct the selector once only if
+it supports the subject, field and qualitative value. Omitted state remains
+unknown. Never substitute a plan, location, numeric health or identity claim.
+
+`ENTRY_ACTION_UNPROVEN` and `ENTRY_ACTION_SEARCH_INCOMPLETE` retain a missing
+witness; neither proves source impossibility. A compiled goal may omit its
+explicit action invocation: the probe and origin check use the engine's ad-hoc
+normalization of its existing title, predicates and effects. This does not create
+a new goal, effect or permission. Use same-source
+`find_compiler_artifacts` for `character-goal` and `action-schema`, copy
+`results[].readArguments.ref` into `read_compiler_artifact.ref`, and inspect the
+exact preconditions, disclosure and frozen revisions. An ID/ref miss allows at
+most one corrected discovery-based retry. The probe does not authorize module
+installation, fabricated goals, future canon replay or budget expansion. A
+changed head, mismatched effect hash, stale dependency or stale contract requires
+host review/re-evaluation of the original candidate, never an unchanged retry.
+
+`scope-conflict` and `consumed-stage` diagnostics stop dispatch. Preserve the original stop,
+consumed grant, draft and acceptance status. New field support or passing code
+tests grants no new semantic attempt, ledger write, certificate or activation.
+
 ## Opening compiler failure recovery
 
 `ENTRY_CONTEXT_REQUIRES_SOURCE_REVIEW` is a typed `phase:opening` semantic stop

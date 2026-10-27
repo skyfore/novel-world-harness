@@ -1,3 +1,4 @@
+import { assessEntryState, entryDeltaRetainsContext, groundedEntryActorIds } from "../world/entry-contract.js";
 import { RequirementLedger } from "./requirement-ledger.js";
 import { coreRoleAttemptScope, coreRoleAttemptScopeSchema, type CoreRoleAttemptScope } from "./requirement-attempts.js";
 import { selectOpeningDriverActor } from "./opening-driver.js";
@@ -244,14 +245,10 @@ export function semanticReconciliationBatchFromBatchId(
 }
 
 function completeEntryActorIds(event: CanonicalEvent): Set<string> {
-  const actionableFields = new Set(["character.location", "character.plan", "character.momentum"]);
   return new Set(event.characterEntryCheckpoints
     ?.filter((checkpoint) => checkpoint.participantPresence.some((presence) =>
       presence.entityId === checkpoint.actorId && presence.mode === "physical")
-      && checkpoint.delta.operations.some((operation) =>
-        "entityId" in operation
-        && operation.entityId === checkpoint.actorId
-        && actionableFields.has(operation.field)))
+      && entryDeltaRetainsContext(checkpoint.delta, checkpoint.actorId))
     .map((checkpoint) => checkpoint.actorId) ?? []);
 }
 
@@ -547,15 +544,12 @@ export async function buildWorldReconciliationPrompt(
     assertEvidenceExclusiveToSource(sourceInitialWorld.evidence, sourceId, "Reconciliation initial world");
   }
   const characterIds = new Set(sourceEntities.filter((entity) => entity.kind === "character").map((entity) => entity.id));
-  const actionableCheckpointFields = new Set(["character.location", "character.plan", "character.momentum"]);
-  const openingPhysicalActors = new Set(
-    sourceInitialWorld?.participantPresence
-      ?.filter((presence) => presence.mode === "physical" && sourceInitialWorld.delta.operations.some((operation) =>
-        "entityId" in operation
-        && operation.entityId === presence.entityId
-        && actionableCheckpointFields.has(operation.field)))
-      .map((presence) => presence.entityId) ?? [],
-  );
+  const entryCatalog = { sourceId, entities: new Map(sourceEntities.map(item => [item.id, item])),
+    processTemplates: new Map((await canon.listProcessTemplates()).map(item => [item.id, item])),
+    actionSchemas: new Map((await canon.listActionSchemas()).map(item => [item.id, item])),
+    acquisitions: new Map((await canon.listAcquisitions()).map(item => [item.id, item])),
+  };
+  const openingPhysicalActors = sourceInitialWorld ? groundedEntryActorIds(sourceInitialWorld, entryCatalog) : new Set<string>();
   const earliestEventLine = (event: (typeof sourceEvents)[number]) =>
     Math.min(...event.evidence.map((reference) => reference.span.startLine), Number.MAX_SAFE_INTEGER);
   const orderedEvents = [...sourceEvents].sort((left, right) =>
@@ -579,12 +573,7 @@ export async function buildWorldReconciliationPrompt(
   const hasCompleteEntryCheckpoint = (event: (typeof sourceEvents)[number], actorId: string) =>
     event.characterEntryCheckpoints?.some((checkpoint) =>
       checkpoint.actorId === actorId
-      && checkpoint.participantPresence.some((presence) =>
-        presence.entityId === actorId && presence.mode === "physical")
-      && checkpoint.delta.operations.some((operation) =>
-        "entityId" in operation
-        && operation.entityId === actorId
-        && actionableCheckpointFields.has(operation.field))) ?? false;
+      && assessEntryState(actorId, checkpoint, entryCatalog).state === "grounded") ?? false;
   const temporallyRegressingEventIds = new Set(
     audit.consistency.temporalRegressions.map(({ eventId }) => eventId),
   );
@@ -939,7 +928,7 @@ Rules:
 - Stay inside repairPlan. Do not inspect mutation candidates outside weakEventCandidates, weakCharacterCandidates, or initialWorld. openingDriverContext is an authorized read-only dependency: read its exact ref and cited source to establish opening truth and actor knowledge, even when the opening is not a mutation target. Execution capacity is a host-owned runaway safety fuse, not a semantic budget: never omit or withdraw a valid repair merely to save calls.
 ${graphAdjudicationPolicy}
 - Read proposalLifecycle before writing. Pending IDs are immutable successful drafts, not reusable edit slots. Read their exact pending refs; accepted/rejected IDs are retired and cannot be reused. After any withdrawal, follow the latest active successor for that logical artifact. For a never-staged failed call, correct the same proposal_id once; for a failed attempt to mutate/revive an existing ID, stop for host review instead of applying that rule or changing IDs to evade its obligation.
-- Every canonical-event replacement must preserve all established fields outside the named repair, including sceneOccurrenceIds, action/frame bindings, effects, knowledge, presence, entry checkpoints and evidence. Copy from the full current canonical artifact and the active pending successor, not a partial summary. An empty entry delta is not actionable: source-supported pre-event location, plan or momentum is required. Preserve unrelated successful drafts.
+- Every canonical-event replacement must preserve all established fields outside the named repair, including sceneOccurrenceIds, action/frame bindings, effects, knowledge, presence, entry checkpoints and evidence. Copy from the full current canonical artifact and the active pending successor, not a partial summary. The shared entry contract requires final source-grounded operational context for a present non-dead role. Registered qualitative bodily states need exact operation evidence and imply no location, identity, numeric health or action capacity. Actual action and autonomous-driver witnesses remain separate. Preserve unrelated successful drafts; if the source or scope cannot support the missing condition, report the capability gap and stop unchanged retries.
 - A canonical event is one causally atomic occurrence and may carry all simultaneous typed effects. Repair a weak event only when its cited text explicitly supports the missing storyTime, timeAdvance, state effect, knowledge effect, narrativeContext, precondition, typed causal relation, readerSummary, participantPresence, or later-character entry checkpoint. A readerSummary may recap only facts established through that event. An entry checkpoint describes the unresolved pre-event cut, supplies only already-true state/knowledge and direct actor perception, and must not copy the event outcome. Do not invent an effect to satisfy a percentage.
 - Match field meaning exactly. Never encode illness as alive=true, closure as location.open=true, conscription as character.location, employment as artifact.owner, or work points as character.title.
 - stateFieldCatalog is the host-owned authoritative field/type/range contract. Check each effect and predicate against its exact key, appliesTo, valueType, cardinality and bounds before submission. artifact.condition and location.condition are numeric values in [0,1], not lifecycle labels such as launched, armed, or collapsing. A type failure requires correcting the named value/field, not swapping evidence selectors. Never invent a numeric score or another field to translate an unsupported lifecycle label, and never erase established effects to bypass validation. If a source-grounded change cannot be represented by the existing contract, report that precise capability gap to the host. One corrected retry under the same proposal_id, then stop for host review.

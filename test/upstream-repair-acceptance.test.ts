@@ -78,7 +78,7 @@ it.each(scenes.flatMap(scene => [true, false].map(complete => ({ ...scene, compl
   expect((await ledger.inspect()).plans[0]!.state).toBe("finished");
   const repaired = quotationSchema.parse(await annotations.read(sourceId, quotation.id));
   expect({ ...repaired, anchor: quotation.anchor, derivation: quotation.derivation }).toEqual(quotation);
-  await new InitialWorldStore(root).put({ version: 1, evidence: source.evidence(scene.reader), participantPresence: [{ entityId: "reader", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "reader", field: "character.alive", value: true }] } });
+  await new InitialWorldStore(root).put({ version: 1, evidence: source.evidence(scene.reader), participantPresence: [{ entityId: "reader", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "reader", field: "character.alive", value: true }, { op: "set", entityId: "reader", field: "character.plan", value: "read the note" }] } });
   await new CompilerBatchStore(root).replaceCompleted(sourceId, (await prepareCompilerBatches(root, source.source)).map(item => item.id));
   const converged = await convergeWorldProposals(root, sourceId);
   if (!scene.complete) {
@@ -107,7 +107,7 @@ it.each(scenes.flatMap(scene => [true, false].map(complete => ({ ...scene, compl
   expect((await checkClosure()).gates.find(g => g.dimension === "upstream-handoff")!.state).toBe("passed");
   await new InitialWorldStore(root).put({ version: 1, evidence: source.evidence(scene.text),
     participantPresence: [{ entityId: "reader", mode: "physical" }], delta: { version: 1,
-      operations: [{ op: "set", entityId: "reader", field: "character.alive", value: true }] } });
+      operations: [{ op: "set", entityId: "reader", field: "character.alive", value: true }, { op: "set", entityId: "reader", field: "character.plan", value: "read the note" }] } });
   const changed = (await checkClosure()).gates.find(g => g.dimension === "upstream-handoff")!;
   expect(changed.state).toBe("blocked");
   expect(changed.reasons.join("\n")).toContain("UPSTREAM_REPAIR_EVALUATION_STALE");

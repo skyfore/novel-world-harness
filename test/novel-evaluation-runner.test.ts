@@ -33,7 +33,7 @@ it("freezes complete scenario inputs and records blocked runs as not-run without
   const canonical = new CanonicalModelStore(root);
   await canonical.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") });
   await canonical.putEntity({ id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: fixture.evidence("hall") });
-  await new InitialWorldStore(root).put({ version: 1, evidence: fixture.evidence("Hero stands in the hall and plans to wait."), delta: { version: 1, operations: [
+  await new InitialWorldStore(root).put({ version: 1, participantPresence: [{ entityId: "hero", mode: "physical" }], evidence: fixture.evidence("Hero stands in the hall and plans to wait."), delta: { version: 1, operations: [
     { op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.location", value: "hall" }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" },
   ] } }); // No full projection seed: deterministic entry must block before any live call.
   const batches = await prepareCompilerBatches(root, fixture.source);

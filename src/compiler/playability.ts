@@ -7,13 +7,15 @@ import { contentHash } from "../world/canonical.js";
 import { WorldContextStore } from "../world/context.js";
 import { WorldEngine } from "../world/engine.js";
 import { deriveCharacterEntrySeed } from "../world/entry-context.js";
-import { buildActorScopedActionContext, playerActionToKnowledgeAwareAction } from "../world/player-action.js";
+import { buildActorScopedActionContext } from "../world/player-action.js";
 import { WorldRuntime } from "../world/runtime.js";
 import { fsckWorld } from "../world/fsck.js";
 import { idSchema, validationIssueSchema } from "../world/model.js";
 import { majorRoleCandidates, validateRoleRoster, type RoleRoster } from "./role-roster.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { entryDriverWitnessSchema, probeEntryDriver } from "./entry-driver-probe.js";
+import { entryActionWitnessSchema, probeEntryAction } from "./entry-action-probe.js";
+import { ENTRY_CONTRACT_VERSION } from "../world/entry-contract.js";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const rolePlayabilitySchema = z.object({
@@ -21,6 +23,7 @@ export const rolePlayabilitySchema = z.object({
   status: z.enum(["ready", "blocked"]), entryCutHash: hashSchema.optional(),
   entryViewHash: hashSchema.optional(),
   driverWitness: entryDriverWitnessSchema.optional(),
+  actionWitness: entryActionWitnessSchema.optional(),
   probes: z.array(z.object({ kind: z.enum(["genesis", "decision", "driver", "intent", "wait", "resume", "fork"]), passed: z.boolean() }).strict()),
   issues: z.array(validationIssueSchema),
 }).strict();
@@ -28,6 +31,7 @@ export type RolePlayability = z.infer<typeof rolePlayabilitySchema>;
 
 export const playabilityManifestSchema = z.object({
   version: z.literal(1), subjectSnapshotHash: hashSchema, rosterHash: hashSchema,
+  contractVersion: z.string().optional(),
   roles: z.array(rolePlayabilitySchema), majorTotal: z.number().int().nonnegative(), readyTotal: z.number().int().nonnegative(),
   issues: z.array(validationIssueSchema),
 }).strict();
@@ -60,22 +64,17 @@ export async function probeMajorRoleEntries(bundle: PreparedNovelBundle, roster:
         role.probes.push({ kind: "genesis", passed: true });
         const view = await buildActorScopedActionContext(engine, actorId, head, undefined, bundle.source.id);
         if (view.selfState["character.alive"] !== true) throw new Error("Entry actor life status must be explicitly alive at the chosen historical cut");
-        if (typeof view.selfState["character.location"] !== "string") throw new Error("Entry actor physical location is unknown");
-        if (!view.decision?.goals.length && typeof view.selfState["character.plan"] !== "string") throw new Error("Entry lacks a grounded current goal or plan");
         role.entryViewHash = contentHash({ selfState: view.selfState, knowledge: view.knowledge, decision: view.decision, scene: view.scene });
         role.probes.push({ kind: "decision", passed: true });
         role.driverWitness = await probeEntryDriver(engine, scratch, { branchId, head, actorId,
           sourceId: bundle.source.id, subjectSnapshotHash, entryCutHash: seed.cut.hash });
         role.probes.push({ kind: "driver", passed: true });
-        const intent = playerActionToKnowledgeAwareAction({ branchId, actorId, expectedParentCommit: head, utterance: "I consider my next choice", candidate: {
-          title: "Consider next choice", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [],
-          proposedDelta: { version: 1, operations: [{ op: "set", entityId: actorId, field: "character.plan", value: `${String(view.selfState["character.plan"] ?? view.decision!.goals[0]!.description)}; consider the next choice` }] },
-        } });
-        const action = await engine.commitProposal(intent.proposal);
-        if (!action.report.accepted) throw new Error(action.report.errors.map((x) => `${x.code}: ${x.message}`).join("; "));
+        role.actionWitness = await probeEntryAction(engine, scratch, { branchId, head, actorId,
+          sourceId: bundle.source.id, subjectSnapshotHash, entryCutHash: seed.cut.hash });
         role.probes.push({ kind: "intent", passed: true });
-        const wait = await engine.commitProposal({ ...intent.proposal, proposalId: `wait-${candidate.id}`, expectedParentCommit: action.newHead,
+        const wait = await engine.commitProposal({ proposalId: `wait-${candidate.id}`, branchId, actorId, source: "player", expectedParentCommit: role.actionWitness.resultingHead,
           title: "One minute passes", action: { lane: "ad-hoc", actionKindId: "wait", description: "Wait one minute", footprint: { reads: [], writes: [], resources: [] } },
+          participants: [actorId], proposedTime: role.actionWitness.event.logicalTime.storyTime ?? { kind: "unknown" }, preconditions: [], causalParents: [], evidence: [],
           proposedDelta: { version: 1, operations: [] }, timeAdvance: { amount: 1, unit: "minute" } });
         if (!wait.report.accepted) throw new Error(wait.report.errors.map((x) => `${x.code}: ${x.message}`).join("; "));
         role.probes.push({ kind: "wait", passed: true });
@@ -101,6 +100,6 @@ export async function probeMajorRoleEntries(bundle: PreparedNovelBundle, roster:
     await fs.rm(stateDirectory, { recursive: true, force: true });
     await fs.rm(scratch, { recursive: true, force: true });
   }
-  return playabilityManifestSchema.parse({ version: 1, subjectSnapshotHash, rosterHash: contentHash(roster), roles,
+  return playabilityManifestSchema.parse({ version: 1, contractVersion: ENTRY_CONTRACT_VERSION, subjectSnapshotHash, rosterHash: contentHash(roster), roles,
     majorTotal: candidates.length, readyTotal: roles.filter((role) => role.status === "ready").length, issues });
 }

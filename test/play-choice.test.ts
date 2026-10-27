@@ -153,7 +153,8 @@ describe("structured play choices", () => {
     });
     await new InitialWorldStore(publisherRoot).put({
       version: 1,
-      delta: { version: 1, operations: [{ op: "set", entityId: "fugui", field: "character.alive", value: true }] },
+      participantPresence: [{ entityId: "fugui", mode: "physical" }],
+      delta: { version: 1, operations: [{ op: "set", entityId: "fugui", field: "character.alive", value: true }, { op: "set", entityId: "fugui", field: "character.plan", value: "wait" }] },
       evidence: publishedLiving.evidence("Fugui waits at the village gate."),
     });
     const livingBatches = await prepareCompilerBatches(publisherRoot, publishedLiving.source);
@@ -174,7 +175,8 @@ describe("structured play choices", () => {
     });
     await new InitialWorldStore(root).put({
       version: 1,
-      delta: { version: 1, operations: [{ op: "set", entityId: "warlord", field: "character.alive", value: true }] },
+      participantPresence: [{ entityId: "warlord", mode: "physical" }],
+      delta: { version: 1, operations: [{ op: "set", entityId: "warlord", field: "character.alive", value: true }, { op: "set", entityId: "warlord", field: "character.plan", value: "wait" }] },
       evidence: other.evidence("A warlord waits in the hall."),
     });
     const otherBatches = await prepareCompilerBatches(root, other.source);
@@ -223,10 +225,11 @@ describe("structured play choices", () => {
 
     await new InitialWorldStore(publisherRoot).put({
       version: 1,
+      participantPresence: [{ entityId: "fugui", mode: "physical" }],
       delta: {
         version: 1,
         operations: [
-          { op: "set", entityId: "fugui", field: "character.alive", value: true },
+          { op: "set", entityId: "fugui", field: "character.alive", value: true }, { op: "set", entityId: "fugui", field: "character.plan", value: "wait" },
           { op: "set", entityId: "fugui", field: "character.title", value: "Farmer" },
         ],
       },

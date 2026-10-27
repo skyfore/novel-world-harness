@@ -155,11 +155,34 @@ it("pre-cancelled supervision dispatches no process", async () => {
   expect(state.phase).toBe("BREAK"); expect(f.labels).toEqual([]);
 });
 
-it("the process runner retains a real failing exit and terminates an owned child on cancellation", async () => {
+it.each([0, 7])("the process runner persists stdout and stderr before returning exit code %i", async code => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-loop-process-")); directories.push(root);
-  const failed = await runLoopChild({ command: process.execPath, args: ["-e", "console.log('diagnostic'); process.exitCode=7"], cwd: root,
-    prefix: path.join(root, "failure"), timeoutMs: 5000, signal: new AbortController().signal });
-  expect(failed.code).toBe(7); expect(await fs.readFile(path.join(root, "failure.stdout.jsonl"), "utf8")).toContain("diagnostic");
+  // Restricted environments can classify piped stdio as UNKNOWN, making Node's
+  // console a no-op Writable. Write to the real descriptors to exercise capture.
+  const script = `const fs=require('node:fs'); fs.writeSync(1,'diagnostic\\n'); fs.writeSync(2,'error diagnostic\\n'); process.exitCode=${code}`;
+  const lines: string[] = [];
+  const result = await runLoopChild({ command: process.execPath, args: ["-e", script], cwd: root,
+    prefix: path.join(root, "exit"), timeoutMs: 5000, signal: new AbortController().signal, onLine: line => lines.push(line) });
+  expect(result).toEqual({ ...ok, code });
+  expect(await fs.readFile(path.join(root, "exit.stdout.jsonl"), "utf8")).toBe("diagnostic\n");
+  expect(await fs.readFile(path.join(root, "exit.stderr.log"), "utf8")).toBe("error diagnostic\n");
+  expect(lines).toEqual(["diagnostic"]);
+});
+
+it("the process runner flushes and redacts unterminated output before returning", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-loop-process-tail-")); directories.push(root);
+  const script = "const fs=require('node:fs'); fs.writeSync(1,'first line\\ntail Bearer regression-token'); fs.writeSync(2,'error sk-testsecret123'); process.exitCode=7";
+  const lines: string[] = [];
+  const result = await runLoopChild({ command: process.execPath, args: ["-e", script], cwd: root,
+    prefix: path.join(root, "tail"), timeoutMs: 5000, signal: new AbortController().signal, onLine: line => lines.push(line) });
+  expect(result).toEqual({ ...ok, code: 7 });
+  expect(await fs.readFile(path.join(root, "tail.stdout.jsonl"), "utf8")).toBe("first line\ntail [REDACTED]\n");
+  expect(await fs.readFile(path.join(root, "tail.stderr.log"), "utf8")).toBe("error [REDACTED]\n");
+  expect(lines).toEqual(["first line", "tail [REDACTED]"]);
+});
+
+it("the process runner terminates an owned child on cancellation", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-loop-process-cancel-")); directories.push(root);
   const controller = new AbortController();
   const cancelled = await runLoopChild({ command: process.execPath, args: ["-e", "setInterval(()=>{},1000)"], cwd: root,
     prefix: path.join(root, "cancel"), timeoutMs: 5000, signal: controller.signal, onSpawn() { controller.abort(); } });

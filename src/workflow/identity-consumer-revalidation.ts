@@ -27,7 +27,7 @@ const maybe = async (file: string) => { try { return await read(file); } catch (
 const parameters = (schema: z.ZodType) => { const { $schema: _, ...value } = z.toJSONSchema(schema); return value; };
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 const request = z.object({ collection: z.enum(["source", "artifacts", "consumer"]), offset: z.number().int().nonnegative().default(0),
-  query: z.string().trim().min(1).max(200).optional(),
+  query: z.string().trim().min(1).max(200).describe("Discovery only: literal source text for source, exact ID/kind for artifacts. Omit with refs or segmentIds.").optional(),
   segmentIds: z.array(z.string()).min(1).max(8).optional(), refs: z.array(z.string()).min(1).max(32).optional() }).strict();
 
 export const consumerRevalidationPrompt = `You are Pi, reviewing one original novel-compiler consumer after an independently accepted, committed identity repair.
@@ -213,10 +213,10 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
         };
         let output: ReturnType<typeof consumerRevalidationOutputSchema.parse> | undefined;
         const tools = [defineTool({ name: "read_consumer_revalidation", label: "Read original source and current consumer", parameters: parameters(request),
-          description: "Read-only. Copy input.artifactReadRefs[].ref directly to artifacts refs; discovery with collection=artifacts, query=<exact known ID or kind>, offset=0 returns matching items[].ref and nextOffset. Both exact kind:id and original kind/id are accepted. Source discovery copies items[].id to segmentIds; consumer uses scope.ref. Reads return full payloads. One corrected discovery retry; host/scope/consumed/budget errors stop.",
+          description: "Read-only. Choose discovery or a full read; never combine query with refs/segmentIds. Copy input.artifactReadRefs[].ref directly to artifacts refs; discovery with collection=artifacts, query=<exact known ID or kind>, offset=0 returns matching items[].ref and nextOffset. Both exact kind:id and original kind/id are accepted. Source discovery optionally searches literal original text with query; copy items[].id into segmentIds for a separate complete read. Keep collection/query when copying nextOffset. Discovery is not evidence. Consumer uses scope.ref. Reads return full payloads. One corrected discovery retry; host/scope/consumed/budget errors stop.",
           async execute(_id, raw) { return guard("read", raw, async () => {
             const a = request.parse(raw);
-            if (a.query && (a.collection !== "artifacts" || a.refs || a.segmentIds)) throw new Error("query is for artifacts discovery only; copy a known ID/kind, offset=0, then returned items[].ref into refs once.");
+            if (a.query && (a.collection === "consumer" || a.refs || a.segmentIds)) throw new Error("Use read_consumer_revalidation discovery with collection=source or artifacts, query and offset=0 only; then copy items[].id into segmentIds (source) or items[].ref into refs (artifacts) for a separate full read. Correct once; no unchanged retry.");
             if ((a.segmentIds && a.refs) || ((a.segmentIds || a.refs) && a.offset)) throw new Error("Choose discovery or one exact read mode; correct once.");
             let value: unknown;
             if (a.collection === "consumer") {
@@ -230,8 +230,10 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
                   return { id, text: Buffer.from(p.prepared.bytes).subarray(s.startByte, s.endByte).toString("utf8"), complete: true }; });
                 value = { segments }; if (Buffer.byteLength(JSON.stringify(value)) <= 240000) segments.forEach(s => sourceRead.add(s.id));
               } else {
-                if (a.offset >= p.prepared.manifest.segments.length && a.offset !== 0) throw new Error("Discover offset=0 and copy nextOffset once.");
-                value = { items: p.prepared.manifest.segments.slice(a.offset, a.offset + 32).map(s => ({ id: s.id, title: s.title })), nextOffset: a.offset + 32 < p.prepared.manifest.segments.length ? a.offset + 32 : null };
+                const bytes = Buffer.from(p.prepared.bytes);
+                const matches = p.prepared.manifest.segments.filter(s => !a.query || bytes.subarray(s.startByte, s.endByte).toString("utf8").includes(a.query));
+                if (a.offset >= matches.length && a.offset !== 0) throw new Error("Discover read_consumer_revalidation collection=source offset=0 with the same query and copy nextOffset once; no guessed offset or unchanged retry.");
+                value = { total: matches.length, items: matches.slice(a.offset, a.offset + 32).map(s => ({ id: s.id, title: s.title })), nextOffset: a.offset + 32 < matches.length ? a.offset + 32 : null };
               }
             } else {
               if (a.segmentIds) throw new Error("Use refs from artifacts discovery; correct once.");

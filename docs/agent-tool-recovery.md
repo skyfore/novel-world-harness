@@ -3622,6 +3622,10 @@ Pi 的 `read_consumer_revalidation` 在同一 scope 内通过 `collection=source
 或 `artifacts`、`offset=0` 发现：分别复制 `items[].id` 到 `segmentIds`、
 `items[].ref` 到 `refs`，分页只复制 `nextOffset`。`collection=consumer` 复制
 `scope.ref` 到 `refs` 读取原对象和当前版本。发现不是完整证据读取。
+`source` 发现支持 `query` 按原文字面搜索，`artifacts` 按准确 ID/kind 搜索；
+分页保持同一 collection/query。`query` 不与 `segmentIds` 或 `refs` 混用，
+也不用于 `consumer`。搜索结果只提供导航 ID，须另行完整读取后才能提交。
+新增发现能力不重开已耗尽纠错次数的原会话，也不使历史失败成为成功。
 `submit_consumer_revalidation` 必须在完整读取后作为单独一次调用提交；格式或
 发现错误最多一次实质纠正，host/scope/consumed/budget 错误禁止重试。
 

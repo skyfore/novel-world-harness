@@ -5,6 +5,7 @@ import path from "node:path";
 import { ModelRuntime, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxToolCall, fauxText } from "@earendil-works/pi-ai";
 import { PiAgentSession } from "../src/agent/pi-session.js";
+import { decodeJsonValues } from "../src/agent/lossless-json-context.js";
 import { mockPiProvider } from "./helpers/pi-provider.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { SegmentStore } from "../src/compiler/segments.js";
@@ -236,10 +237,10 @@ it("requires exact initial-world field authority and binds state, observations a
   expect(initialWorldRepairReferences(seeded)).toEqual(["entity:actor", "entity:from", "entity:here", "entity:owner", "entity:performer", "entity:place", "entity:subject", "entity:to", "entity:witness", "norm-template:norm-template", "process-template:process-template", "world-rule:active-rule"]);
 });
 
-it("runs two real Pi transport sessions, preserves inherited charges and recovers host registration without model replay", async () => {
+it.each([false, true])("runs independent Pi reviews with source discovery, requires full reads (%s), and recovers registration without replay", async discoveryOnly => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-revalidation-")), providers: Awaited<ReturnType<typeof mockPiProvider>>[] = [];
   try {
-    const source = await createEvidenceFixture(root, "Ada waits."), f0 = fixture();
+    const text = "Ada waits. 女孩等待。", source = await createEvidenceFixture(root, text), f0 = fixture();
     const f: ReturnType<typeof fixture> = JSON.parse(JSON.stringify(f0).replaceAll("src", source.source.id).replaceAll('"seg"', JSON.stringify(source.segmentId)).replaceAll(f0.f.intent.sourceHash, source.source.contentSha256));
     const scope = f.proposal.scope;
     scope.identityIntentHash = h(f.f.intent); scope.definitionHash = h(f.original[0]!.output);
@@ -254,7 +255,7 @@ it("runs two real Pi transport sessions, preserves inherited charges and recover
       catalog: [{ kind: "entity", id: "ada", revisionHash: h({ id: "ada" }), payload: { id: "ada" }, current: true }],
       consumer: { ref: scope.ref, revisionHash: scope.originalRevisionHash, payload: {} },
       current: { payload: {}, revisionHash: scope.currentRevisionHash }, acceptance: { output: {} }, prepared: { ...f.f.p, intent: f.f.intent, inventory: f.f.inventory,
-        bytes: Buffer.from("Ada waits."), manifest, review: { scope: { questions: [] } } } };
+        bytes: Buffer.from(text), manifest, review: { scope: { questions: [] } } } };
     const base = identityRequirementDirectory(root, scope.sourceId, scope.taskId); await fs.mkdir(base, { recursive: true });
     await fs.writeFile(path.join(base, "context.json"), JSON.stringify(p.prepared));
     vi.spyOn(revalidation, "prepareConsumerRevalidation").mockResolvedValue(p);
@@ -278,21 +279,43 @@ it("runs two real Pi transport sessions, preserves inherited charges and recover
       const check = path.basename(options.runtimeDir!) === "consumer-revalidation-check";
       const session = await create({ ...options, model: undefined, piAgentDir: path.join(root, "pi") });
       providers.push(await mockPiProvider(session, { provider: "openai-codex", modelId: "gpt-6.1-sol", response: (context, index) => {
-        if (index > 1) throw Error("Unexpected model retry");
+        if (index > (discoveryOnly ? 3 : 1)) throw Error("Unexpected model retry");
         if (index === 1) {
           for (const id of [`discovery-${check}`, `artifact-${check}`]) {
             const read = context.messages.find(m => m.role === "toolResult" && m.toolCallId === id);
             expect(read).toMatchObject({ isError: false });
             expect(read?.content).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("entity:ada") })]));
           }
+          for (const [name, expected] of [["source-search", { total: 1, items: [{ id: source.segmentId }], nextOffset: null }],
+            ["source-missing", { total: 0, items: [], nextOffset: null }]] as const) {
+            const read = context.messages.find(m => m.role === "toolResult" && m.toolCallId === `${name}-${check}`);
+            expect(read).toMatchObject({ isError: false });
+            const content = read?.content.find(b => b.type === "text");
+            if (content?.type !== "text") throw Error("Missing source discovery receipt");
+            const wire = JSON.parse(content.text);
+            const user = context.messages.find(m => m.role === "user")!;
+            const userText = typeof user.content === "string" ? user.content : user.content.find(b => b.type === "text")!.text;
+            const value = wire.$nwhContext ? decodeJsonValues(JSON.parse(userText).dictionary, [wire.value])[0] as typeof wire : wire;
+            expect(value).toMatchObject(expected);
+            expect(value.items.every((item: unknown) => !Object.hasOwn(item as object, "text"))).toBe(true);
+          }
         }
         const output = check ? { ...f.check.output, scopeHash: h(scope), proposalHash: h(previous[0]!.output) } : f.proposal.output;
+        if (discoveryOnly && index === 2) {
+          const rejected = context.messages.find(m => m.role === "toolResult" && m.toolCallId === `submit-${check}-1`);
+          expect(rejected).toMatchObject({ isError: true });
+          expect(rejected?.content).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Read every requiredSourceSegmentIds") })]));
+          return fauxAssistantMessage([fauxToolCall("read_consumer_revalidation", { collection: "source", segmentIds: [source.segmentId], offset: 0 }, { id: `full-source-${check}` })], { stopReason: "toolUse" });
+        }
         return fauxAssistantMessage(index === 0 ? [
-          fauxToolCall("read_consumer_revalidation", { collection: "source", segmentIds: [source.segmentId], offset: 0 }, { id: `source-${check}` }),
+          fauxToolCall("read_consumer_revalidation", { collection: "source", query: "女孩", offset: 0 }, { id: `source-search-${check}` }),
+          fauxToolCall("read_consumer_revalidation", { collection: "source", query: "not present", offset: 0 }, { id: `source-missing-${check}` }),
+          ...(!discoveryOnly ? [fauxToolCall("read_consumer_revalidation", { collection: "source", segmentIds: [source.segmentId], offset: 0 }, { id: `source-${check}` })] : []),
           fauxToolCall("read_consumer_revalidation", { collection: "consumer", refs: [scope.ref], offset: 0 }, { id: `consumer-${check}` }),
           fauxToolCall("read_consumer_revalidation", { collection: "artifacts", query: "ada", offset: 0 }, { id: `discovery-${check}` }),
           fauxToolCall("read_consumer_revalidation", { collection: "artifacts", refs: ["entity/ada"], offset: 0 }, { id: `artifact-${check}` }),
-        ] : [fauxToolCall("submit_consumer_revalidation", output, { id: `submit-${check}` })], { stopReason: "toolUse" });
+        ] : [fauxToolCall("submit_consumer_revalidation", index === 3 ? { ...output, rationale: `${output.rationale}; now grounded in the complete source read.` } : output,
+          { id: `submit-${check}-${index}` })], { stopReason: "toolUse" });
       } })); return session;
     });
     const args = { root, sourceId: scope.sourceId, taskId: scope.taskId, ref: scope.ref, authorizationRef: scope.authorizationRef };
@@ -300,7 +323,7 @@ it("runs two real Pi transport sessions, preserves inherited charges and recover
     expect(dispatch).toHaveBeenCalledTimes(1);
     const result = await runIdentityConsumerRevalidation(args);
     expect(result.status).toBe("blocked"); expect(result.parentResumeAllowed).toBe(false);
-    expect(result.cumulative.modelCalls).toBe(181); expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(result.cumulative.modelCalls).toBe(discoveryOnly ? 185 : 181); expect(dispatch).toHaveBeenCalledTimes(2);
     const again = await runIdentityConsumerRevalidation(args);
     expect(again.cumulative).toEqual(result.cumulative); expect(dispatch).toHaveBeenCalledTimes(2);
     const oldStates = await fs.readdir(path.join(directory, "history"));

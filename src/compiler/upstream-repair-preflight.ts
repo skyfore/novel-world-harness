@@ -28,8 +28,11 @@ export function originalIdentityCatalog(current: ReadonlyMap<string, unknown>, o
   const before = new Map(current);
   for (const revision of revisions) {
     before.set(`${revision.kind}:${revision.id}`, revision.payload);
+    // Repair scopes name the singleton slot; field evidence uses the canonical
+    // artifact ID emitted by compilerProposalArtifactId.
+    const evidenceId = revision.kind === "initial-world" && revision.id === "singleton" ? "initial-world" : revision.id;
     for (const assertion of revision.assertions) {
-      if (assertion.target.artifactKind !== revision.kind || assertion.target.artifactId !== revision.id) throw upstreamRepairHostError("Receipt-backed assertion targets another artifact");
+      if (assertion.target.artifactKind !== revision.kind || assertion.target.artifactId !== evidenceId) throw upstreamRepairHostError("Receipt-backed assertion targets another artifact");
       const key = `evidence-assertion:${assertion.id}`, actual = before.get(key);
       if (revision.committed && (actual === undefined || contentHash(actual) !== contentHash(assertion)))
         throw upstreamRepairHostError("Committed entity lost its exact receipt-backed evidence assertion; inspect the original binding, do not replace or retry the model");
@@ -40,7 +43,7 @@ export function originalIdentityCatalog(current: ReadonlyMap<string, unknown>, o
     }
     for (const item of original) if (item.kind === "evidence-assertion") {
       const target = (item.payload as { target?: { artifactKind?: string; artifactId?: string } }).target;
-      if (target?.artifactKind === revision.kind && target.artifactId === revision.id) before.set(`evidence-assertion:${item.id}`, item.payload);
+      if (target?.artifactKind === revision.kind && target.artifactId === evidenceId) before.set(`evidence-assertion:${item.id}`, item.payload);
     }
   }
   return before;

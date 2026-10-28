@@ -78,6 +78,13 @@ const recordSchema = z.object({
   if (contentHash(identity) !== recordedHash) ctx.addIssue({ code: "custom", message: "Requirement journal hash mismatch" });
 });
 export type LedgerRecord = z.infer<typeof recordSchema>;
+// Keep one bounded, fully validated history across ledger instances. A matching
+// head is insufficient: every referenced file must still have identical bytes.
+const HISTORY_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+let historyCache: {
+  directory: string; headHash: string; sequence: number; records: LedgerRecord[];
+  files: { hash: string; bytes: Buffer }[];
+} | undefined;
 export function roleJudgmentJournalIssues(history: LedgerRecord[], planHash: string, revisions: RoleJudgmentRevisionProof[], audits: RoleClaimAudit[], contracts: RoleAuditContractProof[] = []) {
   const issues: string[] = [];
   for (const proof of contracts) {
@@ -197,17 +204,35 @@ export class RequirementLedger {
   async history(): Promise<LedgerRecord[]> {
     const head = await this.readHead();
     if (!head) return [];
+    const directory = path.resolve(this.directory), cached = historyCache;
+    if (cached?.directory === directory && cached.headHash === head.hash && cached.sequence === head.sequence) {
+      let unchanged = true;
+      for (let offset = 0; offset < cached.files.length; offset += 32) {
+        const matches = await Promise.all(cached.files.slice(offset, offset + 32).map(async file =>
+          (await fs.readFile(path.join(directory, `${file.hash}.json`))).equals(file.bytes)));
+        if (matches.some(match => !match)) { unchanged = false; break; }
+      }
+      if (unchanged) return structuredClone(cached.records);
+    }
     const records: LedgerRecord[] = [];
+    let files: { hash: string; bytes: Buffer }[] | undefined = [], totalBytes = 0;
     let cursor: string | null = head.hash;
     for (let sequence = head.sequence; sequence >= 0; sequence--) {
       if (!cursor) throw new Error("Requirement journal chain truncated; stop for host review, do not reset the ledger.");
-      const record = recordSchema.parse(JSON.parse(await fs.readFile(path.join(this.directory, `${cursor}.json`), "utf8")));
+      const bytes = await fs.readFile(path.join(this.directory, `${cursor}.json`));
+      totalBytes += bytes.length;
+      if (totalBytes > HISTORY_CACHE_MAX_BYTES) files = undefined;
+      files?.push({ hash: cursor, bytes });
+      const record = recordSchema.parse(JSON.parse(bytes.toString("utf8")));
       if (record.hash !== cursor || record.sequence !== sequence || record.sourceId !== this.sourceId) throw new Error("Requirement journal chain mismatch; stop for host review.");
       records.push(record); cursor = record.predecessorHash;
     }
     if (cursor) throw new Error("Requirement journal has an invalid root; stop for host review.");
     records.reverse();
-    return requirementJournalSchema.parse(records);
+    const validated = requirementJournalSchema.parse(records);
+    historyCache = files ? { directory, headHash: head.hash, sequence: head.sequence, files,
+      records: structuredClone(validated) } : undefined;
+    return validated;
   }
   async assertJournalRestorable(input: readonly LedgerRecord[], bytes?: Uint8Array): Promise<void> {
     const incoming = requirementJournalSchema.parse(input), current = await this.history();

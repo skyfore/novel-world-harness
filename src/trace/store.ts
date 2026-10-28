@@ -336,6 +336,20 @@ export class TraceStore {
     return Promise.all(selected.map(async (entry) => structuredClone(await this.readManifestAt(entry.relativePath))));
   }
 
+  /** Recovery must find every matching retained trace, even beyond the recent
+   * run window. Keep inspection read-only and bound concurrent manifest reads. */
+  async peekRunsByOperation(sourceId: string, operationId: string): Promise<TraceRunManifest[]> {
+    let index: z.infer<typeof runIndexSchema>;
+    try { index = await this.readIndex(); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    const selected = index.runs.filter(entry => entry.sourceId === sourceId), matches: TraceRunManifest[] = [];
+    for (let offset = 0; offset < selected.length; offset += 32) {
+      const manifests = await Promise.all(selected.slice(offset, offset + 32).map(entry => this.readManifestAt(entry.relativePath)));
+      matches.push(...manifests.filter(run => run.sourceId === sourceId && run.operationId === operationId));
+    }
+    return matches;
+  }
+
   async countRuns(filter: Omit<TraceRunFilter, "limit"> = {}): Promise<number> {
     await this.initialize();
     const index = await this.readIndex();

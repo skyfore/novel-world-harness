@@ -37,6 +37,66 @@ consumer, use the source/task/ref discovery protocol below and inspect
 consumed grant, draft and acceptance status. New field support or passing code
 tests grants no new semantic attempt, ledger write, certificate or activation.
 
+An explicitly authorized entry-contract upgrade can recover a settled,
+no-proposal opening revision through the original `execute-identity-repair`.
+In the same source/task/ref, copy
+`finishRevisionProgress.contractRecoveryCandidate.previousContextHash` from
+`inspect-identity-repairs` into `--recover-entry-contract`, and supply the explicit
+`--contract-recovery-authorization-ref`. Retain the original authorization and
+revalidation ID; use `--inspect` first. Discovery and inspection confer no authority.
+An ID miss allows one correction from that exact discovery field, never guessing.
+
+The host verifies the complete old Pi session, requests, failure and source read;
+the entry schema must have changed while source bytes, dependencies, original
+revision intent and writable fields remain identical. It freezes that transition
+and retains every old artifact. `finish-revision-contract-recovery.*` records one
+new read/submission session with at most two model calls, using only the original
+draft's remaining call and byte allowance. The cumulative budget includes both
+sessions. A prior submission, unsettled request, changed scope, insufficient
+allowance, failed recovery or another invocation stops without retry, renamed
+authority or budget renewal. Passing tests alone never authorizes this transition.
+
+Recovery searches the complete retained trace index for the exact source and
+operation, independent of the recent-run listing limit. Older failures remain
+discoverable; missing or duplicate matching traces still require host review.
+Inspect the original source/task records without replaying or renaming the stage.
+
+Only a verified new Pi submission can enter the existing finish-revision protocol.
+The changed graph still needs deterministic commit preview and fresh independent
+`finish-revision-acceptance` under its original remaining allowance. A sealed
+draft may resume host persistence without replaying Pi. Old judgments and the
+parent BREAK remain until the original consumer and source-audit revalidations
+pass; this local recovery never grants certification or activation.
+
+Acceptance receives `stagedEvidence` with the original envelope's hash-bound
+field evidence assertions as well as its payload. If a completed negative review
+under this explicit contract recovery omitted that metadata, inspect
+`finishRevisionProgress.acceptanceEvidenceRecoveryCandidate.rejectedInputHash`.
+Copy it into `--recover-acceptance-evidence`, retaining both contract-recovery
+arguments and the original finding parameters, and preflight with `--inspect`.
+The host verifies the entire negative session, unchanged proposal graph and
+material omitted evidence. One separate `finish-revision-evidence-acceptance`
+session uses the original review's remaining calls/bytes after both earlier
+reviews; old verdicts, sessions and charges remain immutable. A changed proposal,
+already supplied metadata, unsettled session or failed evidence recovery stops.
+This restores transport context, never converts a negative verdict into support;
+fresh independent acceptance remains mandatory and cannot be replayed.
+
+Receipt recovery keeps the repair slot `initial-world:singleton` distinct from
+the evidence target `initial-world:initial-world`. The host maps only this
+canonical singleton identity when restoring original evidence; foreign targets
+and missing or modified committed assertions still stop. After an identity-mapping
+implementation fix, resume the original verified finish and receipt without
+another Pi draft or acceptance invocation.
+
+Checkpoint validation also keeps a consumer repair's retained identity decisions
+separate from active resolutions. It recovers them only from the exact completed
+parent plan and finish intent, with unchanged successor hashes and predecessor
+links. Missing or modified evidence, another receipt, or a reactivated predecessor
+stops. After fixing this host projection, rerun the original
+`requirements evaluate-upstream --source <id>`; do not rewrite resolutions or
+replay their model stages.
+
 ## Opening compiler failure recovery
 
 `ENTRY_CONTEXT_REQUIRES_SOURCE_REVIEW` is a typed `phase:opening` semantic stop
@@ -3762,6 +3822,10 @@ prepared/completed finish 回执、已消费修订或任何修订失败均停止
 `inspect-consumed-opening-revision`，不能再次提示开启同一修订。复制
 `stages[].modelResponseFile` 查看原助手解释，它是诊断而非独立验收。来源或原字段
 不足时保留 host-review；不重放调用、不续授权、不扩张范围或降低开局门禁。
+
+契约升级不会自动解除以上停止。仅在用户明确授权后，可按本文开头的
+Entry capability contract recovery 入口核验旧会话并登记一次契约转换；
+旧修订保持 stopped，新阶段最多使用原剩余的两次调用，失败后不可再次恢复。
 
 ## Compile loop domain recovery
 

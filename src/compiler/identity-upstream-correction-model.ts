@@ -36,7 +36,14 @@ export async function identityUpstreamBudgetStages(directory: string, order: { i
   }
   const { readIdentityFinishRevision, FINISH_REVISION_DRAFT, FINISH_REVISION_ACCEPTANCE } = await import("./identity-finish-revision.js");
   const revision = await readIdentityFinishRevision(directory);
-  return [...stages, "acceptance", ...(revision ? [FINISH_REVISION_DRAFT, FINISH_REVISION_ACCEPTANCE] : [])];
+  const { readIdentityEntryContractRecovery, ENTRY_CONTRACT_RECOVERY_STAGE } = await import("./identity-finish-contract-recovery.js");
+  const recovery = await readIdentityEntryContractRecovery(directory);
+  const { readAcceptanceEvidenceRecovery, EVIDENCE_ACCEPTANCE_STAGE } = await import("./identity-acceptance-evidence-recovery.js");
+  const evidenceRecovery = await readAcceptanceEvidenceRecovery(directory);
+  if (evidenceRecovery && !recovery) throw prerequisiteStop("Acceptance evidence recovery lost its contract authority; no continuation");
+  if (recovery && !revision) throw prerequisiteStop("Entry contract recovery lost the original draft budget; no continuation or reset");
+  return [...stages, "acceptance", ...(revision ? [FINISH_REVISION_DRAFT, ...(recovery ? [ENTRY_CONTRACT_RECOVERY_STAGE] : []), FINISH_REVISION_ACCEPTANCE,
+    ...(evidenceRecovery ? [EVIDENCE_ACCEPTANCE_STAGE] : [])] : [])];
 }
 /** The host does not author selectors. Pi may correct only the failed evidence
  * bindings, preserving its original payload, source scope and proposal ID. */

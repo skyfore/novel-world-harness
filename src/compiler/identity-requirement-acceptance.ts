@@ -147,6 +147,27 @@ export async function identityUpstreamGraph(root: string, plan: UpstreamRepairPl
   return graph;
 }
 
+/** The payload's compatibility evidence is not the proposal's path-level
+ * evidence. Review the exact envelope metadata without changing old graph hashes. */
+export async function identityUpstreamEvidence(root: string, plan: UpstreamRepairPlan, graph: Awaited<ReturnType<typeof identityUpstreamGraph>>) {
+  const world = new ProposalStore(root), resolutions = new EntityResolutionStore(root);
+  return Promise.all(graph.map(async item => {
+    if (typeof item.proposalId !== "string") throw prerequisiteStop("Acceptance graph lost its exact proposal ID; no guessed evidence or retry");
+    const proposalId = item.proposalId;
+    const readEnvelope = (status: "pending" | "accepted" | "rejected") => ["entity", "initial-world"].includes(item.target.kind)
+      ? world.readEnvelope(status, proposalId) : resolutions.readProposal(plan.sourceScope.sourceId, status, proposalId);
+    let envelope;
+    try { envelope = await readEnvelope("pending"); }
+    catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      try { envelope = await readEnvelope("accepted"); }
+      catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; envelope = await readEnvelope("rejected"); } }
+    if (contentHash(envelope) !== item.proposalHash || contentHash(envelope.payload) !== item.payloadHash)
+      throw prerequisiteStop("Acceptance evidence differs from its exact staged envelope; no changed evidence or retry");
+    return { target: item.target, proposalId: item.proposalId, proposalHash: item.proposalHash,
+      evidenceAssertions: "evidenceAssertions" in envelope ? envelope.evidenceAssertions ?? [] : [] };
+  }));
+}
+
 export async function verifyIdentityUpstreamSlotTrace(root: string, plan: UpstreamRepairPlan, raw: IdentityUpstreamSlotRecord) {
   const record = identityUpstreamSlotRecordSchema.parse(raw), state = await new UpstreamRepairLedger(root, plan.sourceScope.sourceId).inspect();
   if (record.correctionHash) return (await import("./identity-upstream-correction.js")).verifyIdentityCorrectedSlot(root, plan, identityUpstreamDirectory(root, plan), record);
@@ -181,9 +202,20 @@ export async function verifyIdentityUpstreamSlotTrace(root: string, plan: Upstre
 
 /** Mandatory before finish; checks actual pending/accepted envelopes, not a success label or a preview. */
 export async function verifyIdentityUpstreamAcceptance(root: string, plan: UpstreamRepairPlan, originalFinish = false) {
+  return verifyAcceptance(root, plan, originalFinish);
+}
+
+/** Verifies retained negative evidence, never supplies commit authority. */
+export async function verifyIdentityAcceptanceRejection(root: string, plan: UpstreamRepairPlan) {
+  return verifyAcceptance(root, plan, false, true);
+}
+
+async function verifyAcceptance(root: string, plan: UpstreamRepairPlan, originalFinish = false, rejected = false) {
   const directory = identityUpstreamDirectory(root, plan);
   const revised = originalFinish ? null : await (await import("./identity-finish-revision.js")).identityAcceptanceStage(root, plan, directory);
-  const stage = revised?.stage ?? "acceptance", acceptanceLimits = revised?.limits ?? IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS;
+  const stage = rejected ? "finish-revision-acceptance" : revised?.stage ?? "acceptance";
+  const acceptanceLimits = rejected ? revised?.intent.acceptanceLimits : revised?.limits ?? IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS;
+  if (!acceptanceLimits || (rejected && !revised)) throw prerequisiteStop("Missing exact revised graph for retained negative acceptance; no authority");
   const record = identityUpstreamAcceptanceRecordSchema.parse(await read(path.join(directory, `${stage}.record.json`)));
   const graph = await identityUpstreamGraph(root, plan, originalFinish), ledger = new RequirementLedger(root, plan.sourceScope.sourceId);
   const prerequisites = await ledger.sourcePrerequisites(plan.identityRequirements!.taskId), representations = await ledger.sourceRepresentations(plan.identityRequirements!.taskId);
@@ -195,6 +227,11 @@ export async function verifyIdentityUpstreamAcceptance(root: string, plan: Upstr
   const questions = identityRecords[0]?.intent.targets.map(t => ({ requirementId: t.requirementId }));
   const semantic = await ledger.roleSemanticScopes(plan.identityRequirements!.taskId);
   const input = await read(path.join(directory, `${stage}.input.json`)), proposal = await read(path.join(directory, `${stage}.proposal.json`));
+  if (input.stagedEvidence !== undefined && contentHash(input.stagedEvidence) !== contentHash(await identityUpstreamEvidence(root, plan, graph)))
+    throw prerequisiteStop("Independent acceptance omitted or changed staged field evidence; no finish or retry");
+  if (!rejected && revised?.evidenceRecovery && (contentHash(input.stagedEvidence) !== revised.evidenceRecovery.evidenceHash
+    || input.graphHash !== revised.evidenceRecovery.graphHash))
+    throw prerequisiteStop("Acceptance evidence recovery changed its frozen review context; no finish or retry");
   if (contentHash(input) !== record.inputHash || contentHash(proposal) !== contentHash(record.output)
     || input.taskId !== record.taskId || input.planHash !== plan.planHash || input.graphHash !== contentHash(graph)
     || contentHash(input.staged) !== contentHash(graph) || contentHash(input.originalQuestions) !== contentHash(prerequisites[0]?.scope.questions)
@@ -210,10 +247,16 @@ export async function verifyIdentityUpstreamAcceptance(root: string, plan: Upstr
     || input.currentDependencies.some((a: { ref: { kind: string; id: string }; payload: unknown }) => contentHash(a.payload) !== plan.baselineRefs.find(r => r.kind === a.ref.kind && r.id === a.ref.id)?.revisionHash)) throw prerequisiteStop("Independent acceptance omitted or changed a reused annotation");
   if (!questions || record.taskId !== plan.identityRequirements!.taskId || record.planHash !== plan.planHash || record.graphHash !== contentHash(graph)
     || record.output.planHash !== plan.planHash || record.output.graphHash !== record.graphHash
-    || record.output.judgments.some(j => j.verdict !== "supported")
+    || (rejected ? !record.output.judgments.some(j => j.verdict === "blocked") : record.output.judgments.some(j => j.verdict !== "supported"))
     || contentHash(record.output.judgments.map(j => j.requirementId).sort()) !== contentHash(questions.map(q => q.requirementId).sort())
     || [...prerequisites, ...representations, ...semantic, ...identityRecords, ...repairRecords, ...revalidationRecords].some(r => r.sessionId === record.sessionId || r.traceRunId === record.traceRunId)) throw prerequisiteStop("Independent source acceptance is negative, incomplete, stale or reused");
   const sessions = new Set([record.sessionId]), traces = new Set([record.traceRunId]);
+  if (!rejected && stage === "finish-revision-evidence-acceptance") {
+    const rejectedReview = await verifyIdentityAcceptanceRejection(root, plan);
+    if (record.sessionId === rejectedReview.sessionId || record.traceRunId === rejectedReview.traceRunId || input.stagedEvidence === undefined)
+      throw prerequisiteStop("Evidence recovery must independently review the complete exact staged evidence; no reused review or retry");
+    sessions.add(rejectedReview.sessionId); traces.add(rejectedReview.traceRunId);
+  }
   if (revised) {
     const prior = await verifyIdentityUpstreamAcceptance(root, plan, true);
     if (prior.sessionId === record.sessionId || prior.traceRunId === record.traceRunId)

@@ -20,6 +20,8 @@ import { entitySchema } from "../world/model.js";
 import { actionSchemaSchema } from "../world/action-ontology.js";
 import { processTemplateSchema } from "../world/process-ontology.js";
 import { acquisitionSchema } from "../world/acquisition.js";
+import { ENTRY_CONTRACT_RECOVERY_STAGE, readIdentityEntryContractRecovery, assertIdentityEntryContractRecovery,
+  inspectEntryContractRecoveryCandidate } from "./identity-finish-contract-recovery.js";
 
 function openingRepairDiagnostics(intent: IdentityFinishRevisionIntent, writableFields: string[], dependencies: { ref: string; payload: unknown }[], consumed: boolean) {
   const target = intent.authority.slots.find(slot => slot.artifactKind === "initial-world");
@@ -76,19 +78,32 @@ export async function inspectIdentityFinishRevisionProgress(directory: string) {
     try { return await read(path.join(directory, file)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
   };
-  const stages = await Promise.all([FINISH_REVISION_DRAFT, FINISH_REVISION_ACCEPTANCE].map(async stage => {
-    const [invocation, failure, checkpoint, budget] = await Promise.all([
+  const recovery = await readIdentityEntryContractRecovery(directory);
+  const { readAcceptanceEvidenceRecovery, EVIDENCE_ACCEPTANCE_STAGE } = await import("./identity-acceptance-evidence-recovery.js");
+  const evidenceRecovery = await readAcceptanceEvidenceRecovery(directory);
+  const stages = await Promise.all([FINISH_REVISION_DRAFT, ...(recovery ? [ENTRY_CONTRACT_RECOVERY_STAGE] : []), FINISH_REVISION_ACCEPTANCE,
+    ...(evidenceRecovery ? [EVIDENCE_ACCEPTANCE_STAGE] : [])].map(async stage => {
+    const [invocation, failure, checkpoint, budget, record] = await Promise.all([
       maybe(`${stage}.invocation.json`), maybe(`${stage}.failure.json`), maybe(`${stage}.session-checkpoint.json`), maybe(`${stage}.budget.json`),
+      maybe(`${stage}.record.json`),
     ]);
-    return { stage, status: failure ? "stopped" as const : checkpoint ? "sealed" as const : invocation ? "unsettled" as const : "not-started" as const,
-      diagnostic: failure?.error ?? null, usage: budget?.state?.usage ?? null, cumulative: budget?.cumulative ?? null,
+    const rejected = record?.output?.judgments?.filter((j: { verdict: string }) => j.verdict === "blocked");
+    return { stage, status: failure || rejected?.length ? "stopped" as const : checkpoint ? "sealed" as const : invocation ? "unsettled" as const : "not-started" as const,
+      diagnostic: failure?.error ?? (rejected?.length ? `Independent acceptance blocked: ${rejected.map((j: { requirementId: string }) => j.requirementId).join(", ")}` : null), usage: budget?.state?.usage ?? null, cumulative: budget?.cumulative ?? null,
       modelResponseFile: invocation ? path.join(directory, `${stage}.messages.jsonl`) : null };
   }));
-  const blocked = stages.some(s => s.status === "stopped" || s.status === "unsettled");
-  const context = await maybe(`${FINISH_REVISION_DRAFT}.context.json`);
+  const activeStages = (recovery ? stages.slice(1) : stages).filter(s => !evidenceRecovery || s.stage !== FINISH_REVISION_ACCEPTANCE);
+  const blocked = activeStages.some(s => s.status === "stopped" || s.status === "unsettled");
+  const context = await maybe(`${recovery ? ENTRY_CONTRACT_RECOVERY_STAGE : FINISH_REVISION_DRAFT}.context.json`) ?? await maybe(`${FINISH_REVISION_DRAFT}.context.json`);
   const entryContractReview = context ? openingRepairDiagnostics(intent, context.writableFields, context.dependencies,
-    stages.some(stage => stage.status !== "not-started")) : null;
+    activeStages.some(stage => stage.status !== "not-started")) : null;
+  const rejected = await maybe(`${FINISH_REVISION_ACCEPTANCE}.record.json`), rejectedInput = await maybe(`${FINISH_REVISION_ACCEPTANCE}.input.json`);
   return { inspection: "recorded-only" as const, blocked, stages, entryContractReview,
+    contractRecovery: recovery ? { intentHash: h(recovery), stage: ENTRY_CONTRACT_RECOVERY_STAGE, limits: recovery.limits, authorizationRef: recovery.authorizationRef } : null,
+    contractRecoveryCandidate: recovery ? null : await inspectEntryContractRecoveryCandidate(directory),
+    acceptanceEvidenceRecovery: evidenceRecovery ? { intentHash: h(evidenceRecovery), stage: EVIDENCE_ACCEPTANCE_STAGE, limits: evidenceRecovery.limits } : null,
+    acceptanceEvidenceRecoveryCandidate: recovery && !evidenceRecovery && rejected?.output?.judgments?.some((j: { verdict: string }) => j.verdict === "blocked") && rejectedInput && rejectedInput.stagedEvidence === undefined
+      ? { rejectedInputHash: rejected.inputHash, executionAuthority: false, condition: "Verify omitted existing field evidence on the identical graph under the retained explicit contract-recovery authorization; no proposal change or budget renewal." } : null,
     resumeCondition: blocked
       ? "The original finish revision has a stopped or unsettled invocation. Inspect stages[].diagnostic and copy stages[].modelResponseFile to read the retained assistant explanation; that explanation is not independent acceptance. No model redispatch, renamed grant, budget reset or parent resume. Preserve the current source/scope stop for host review."
       : "Only the original unconsumed stage or sealed host continuation may proceed after its existing verifier; recorded status grants no new authority." };
@@ -195,10 +210,16 @@ export async function verifyIdentityFinishRevisionProof(root: string, plan: Upst
   const intent = await readIdentityFinishRevision(directory);
   if (!intent) throw prerequisiteStop("Missing original opening revision intent; no inferred authority");
   await assertIdentityFinishRevisionRetained(root, plan, directory, intent);
+  const recovery = await readIdentityEntryContractRecovery(directory);
+  if (recovery) await assertIdentityEntryContractRecovery(root, plan, directory, recovery);
+  const stage = recovery ? ENTRY_CONTRACT_RECOVERY_STAGE : FINISH_REVISION_DRAFT;
   const proof = await read(path.join(directory, "finish-revision.proof.json"));
-  const input = await read(path.join(directory, `${FINISH_REVISION_DRAFT}.input.json`));
-  const context = await read(path.join(directory, `${FINISH_REVISION_DRAFT}.context.json`));
-  const proposal = validateIdentityFinishRevisionDraft(intent, await read(path.join(directory, `${FINISH_REVISION_DRAFT}.proposal.json`)));
+  const input = await read(path.join(directory, `${stage}.input.json`));
+  const context = await read(path.join(directory, `${stage}.context.json`));
+  const proposal = validateIdentityFinishRevisionDraft(intent, await read(path.join(directory, `${stage}.proposal.json`)));
+  if (recovery ? proof.contractRecoveryHash !== h(recovery) || input.contractRecoveryHash !== h(recovery) || h(context) !== recovery.contextHash
+    : proof.contractRecoveryHash || input.contractRecoveryHash)
+    throw prerequisiteStop("Opening revision lost its exact authorized contract transition; no staging or retry");
   const refs = plan.readableRefs.filter(r => r.kind !== "source-segment").map(r => `${r.kind}:${r.id}`);
   if (h(context.writableFields) !== h(plan.allowedWrites.find(w => w.kind === "initial-world" && w.id === "singleton")?.pointers)
     || h(context.dependencies.map((d: { ref: string }) => d.ref)) !== h(refs)
@@ -214,19 +235,20 @@ export async function verifyIdentityFinishRevisionProof(root: string, plan: Upst
     return { segmentId, text: bytes.subarray(segment.startByte, segment.endByte).toString("utf8"), complete: true };
   });
   if (h(context.source) !== h(segments)) throw prerequisiteStop("Opening revision did not retain the exact original source bytes; no retry");
-  const checkpoint = await verifyIdentityUpstreamSession(root, directory, FINISH_REVISION_DRAFT, proof, finishRevisionContract);
+  const checkpoint = await verifyIdentityUpstreamSession(root, directory, stage, proof, finishRevisionContract);
   if (proof.planHash !== plan.planHash || proof.intentHash !== h(intent) || proof.inputHash !== h(input) || proof.outputHash !== h(proposal)
     || h(input.intent) !== h(intent) || input.contextHash !== h(context) || h(context.intent) !== h(intent)
     || h(JSON.parse(checkpoint.output.proposal_json)) !== h(proposal)) throw prerequisiteStop("Opening revision proof differs from its exact Pi submission; no staging or retry");
   const traces = new TraceStore(root), run = await traces.peekRun(proof.traceRunId), events = await traces.peekEvents(proof.traceRunId);
   const { verifyInvocationBudget } = await import("./identity-requirement-acceptance.js");
-  const invocation = await verifyInvocationBudget(root, plan, FINISH_REVISION_DRAFT, events, FINISH_REVISION_LIMITS);
+  const invocation = await verifyInvocationBudget(root, plan, stage, events, recovery?.limits ?? FINISH_REVISION_LIMITS);
   const submits = events.filter(e => e.type === "tool.call.completed" && e.data?.toolName === finishRevisionContract.terminalTool);
   const call = submits.length === 1 ? events.find(e => e.type === "tool.call.started" && e.toolCallId === submits[0]!.toolCallId) : undefined;
   const reads = events.filter(e => e.type === "tool.call.completed" && e.data?.toolName === finishRevisionContract.readTools[0]);
   const provenance = events.filter(e => e.type === "stage.started" && e.data?.phase === "identity-upstream-slot");
-  if (invocation.finishRevisionIntentHash !== h(intent) || run.status !== "succeeded" || !run.endedAt || run.sourceId !== plan.sourceScope.sourceId
-    || run.counts.retries || run.operationId !== `identity-upstream-${intent.taskId}-${FINISH_REVISION_DRAFT}`
+  if (invocation.finishRevisionIntentHash !== h(intent) || (recovery && invocation.contractRecoveryHash !== h(recovery))
+    || run.status !== "succeeded" || !run.endedAt || run.sourceId !== plan.sourceScope.sourceId
+    || run.counts.retries || run.operationId !== `identity-upstream-${intent.taskId}-${stage}`
     || !call?.blobRef || !reads.length || reads.some(e => e.seq >= call.seq) || h(await traces.peekBlob(call.blobRef)) !== h(checkpoint.output)
     || provenance.length !== 1 || provenance[0]!.data?.sessionId !== proof.sessionId || provenance[0]!.data?.planHash !== plan.planHash
     || provenance[0]!.data?.inputHash !== h(JSON.stringify(input)) || provenance[0]!.data?.subscription !== true
@@ -251,5 +273,8 @@ export async function identityAcceptanceStage(root: string, plan: UpstreamRepair
   const verified = await verifyIdentityFinishRevisionProof(root, plan, directory);
   if (!current.finishRevision.completed || current.finishRevision.intent.auditRef !== `pi-identity-finish-revision:${h(verified.proof)}`)
     throw prerequisiteStop("Revised opening graph lacks its completed exact Pi-backed revision; no finish or unchanged retry");
-  return { stage: FINISH_REVISION_ACCEPTANCE, limits: verified.intent.acceptanceLimits, ...verified };
+  const { readAcceptanceEvidenceRecovery, assertAcceptanceEvidenceRecovery, EVIDENCE_ACCEPTANCE_STAGE } = await import("./identity-acceptance-evidence-recovery.js");
+  const evidenceRecovery = await readAcceptanceEvidenceRecovery(directory);
+  if (evidenceRecovery) await assertAcceptanceEvidenceRecovery(root, plan, directory, evidenceRecovery);
+  return { stage: evidenceRecovery ? EVIDENCE_ACCEPTANCE_STAGE : FINISH_REVISION_ACCEPTANCE, limits: evidenceRecovery?.limits ?? verified.intent.acceptanceLimits, evidenceRecovery, ...verified };
 }

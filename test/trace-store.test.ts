@@ -21,15 +21,24 @@ describe("append-only trace storage", () => {
   it("inspects a running audit without turning it into a host-restart interruption", async () => {
     const root = await workspace();
     const writer = new TraceStore(root);
-    const run = await writer.createRun({ kind: "prepare", sourceId: "source-1" });
+    const run = await writer.createRun({ kind: "prepare", sourceId: "source-1", operationId: "operation-1" });
     const blob = await writer.putBlob({ message: "read-only inspection" });
     const before = await readDirectoryTree(writer.root);
     const reader = new TraceStore(root);
     expect((await reader.peekRun(run.id)).status).toBe("running");
     expect(await reader.peekRuns({ sourceId: "source-1" })).toHaveLength(1);
+    expect(await reader.peekRunsByOperation("source-1", "operation-1")).toEqual([run]);
+    expect(await reader.peekRunsByOperation("source-2", "operation-1")).toEqual([]);
+    expect(await reader.peekRunsByOperation("source-1", "operation-2")).toEqual([]);
     expect(await reader.peekEvents(run.id)).toEqual([]);
     expect(await reader.peekBlob(blob)).toEqual({ message: "read-only inspection" });
     expect(await readDirectoryTree(writer.root)).toBe(before);
+  });
+
+  it("looks up retained operations without creating missing trace storage", async () => {
+    const store = new TraceStore(await workspace());
+    expect(await store.peekRunsByOperation("source-1", "operation-1")).toEqual([]);
+    await expect(fs.access(store.root)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("redacts secrets at every event, blob, and manifest persistence boundary", async () => {

@@ -158,7 +158,7 @@ it("carries the checked original consumer finding into exact typed staging witho
   expect(() => freezeUpstreamRepairPlan({ ...identity, allowedWrites: [{ kind: "entity", id: "unknown", pointers: ["/canonicalName"] }] })).toThrow();
 });
 
-it("derives the supported joint repair without recreating identities or clearing old requirements", () => {
+it("derives the supported joint repair without recreating identities or clearing old requirements", async () => {
   const f = fixture(true, true), parent = buildIdentityRepairPlan(f.p, f.records, [f.plan, f.review]);
   const decisions = f.semantic[0].output.operations.map((o: any) => JSON.parse(o.payloadJson)), decision = decisions.at(-1);
   const quarantined = { ...f.entity, identityConsumption: { version: 1, mode: "quarantined", status: "unresolved", sourceId: "src", mentionId: decision.mentionId,
@@ -195,6 +195,27 @@ it("derives the supported joint repair without recreating identities or clearing
   expect(plan.baselineRefs.some(r => r.id === "original-creation")).toBe(true);
   const activeRevisions = new Map(plan.baselineRefs.filter(r => r.id !== "original-creation").map(r => [`${r.kind}:${r.id}`, r.revisionHash]));
   const retired = plan.baselineRefs.find(r => r.id === "original-creation")!;
+  const { retainedConsumerResolutionBaselines } = await import("../src/compiler/upstream-repair-checkpoint.js");
+  const active = new Map<string, unknown>(f.p.catalog.filter((r: any) => r.id !== retired.id).map((r: any) => [`${r.kind}:${r.id}`, r.payload]));
+  for (const d of decisions) active.set(`entity-resolution:${d.id}`, d);
+  const lineage: any = { plan: parent, finishedReceipt: scope.receiptFingerprint, finishIntent: {
+    baselines: parent.baselineRefs.map(ref => ({ ...ref, payload: f.p.catalog.find((r: any) => r.kind === ref.kind && r.id === ref.id)?.payload })),
+    proposals: decisions.map((d: any) => ({ artifactKind: "entity-resolution", artifactId: d.id, payloadHash: h(d) })),
+  } };
+  const retainedPayload = f.p.catalog.find((r: any) => r.id === retired.id)!.payload;
+  expect(retainedConsumerResolutionBaselines(plan, active, lineage)).toEqual(new Map([[`entity-resolution:${retired.id}`, retainedPayload]]));
+  expect(active.has(`entity-resolution:${retired.id}`)).toBe(false);
+  expect(() => retainedConsumerResolutionBaselines(plan, active)).toThrow(/exact completed parent/);
+  expect(() => retainedConsumerResolutionBaselines(plan, active, { ...lineage, finishedReceipt: h("another receipt") })).toThrow(/exact completed parent/);
+  const missing = new Map(active); missing.delete(`entity-resolution:${decision.id}`);
+  expect(() => retainedConsumerResolutionBaselines(plan, missing, lineage)).toThrow(/retired identity baseline/);
+  const changed = new Map(active); changed.set(`entity-resolution:${decision.id}`, { ...decision, rationale: "Changed decision" });
+  expect(() => retainedConsumerResolutionBaselines(plan, changed, lineage)).toThrow(/retired identity baseline/);
+  const reactivated = new Map(active); reactivated.set(`entity-resolution:${retired.id}`, retainedPayload);
+  expect(() => retainedConsumerResolutionBaselines(plan, reactivated, lineage)).toThrow(/Competing resolution|retired identity baseline/);
+  const altered = structuredClone(lineage);
+  altered.finishIntent.baselines.find((r: any) => r.id === retired.id).payload = { ...retainedPayload, rationale: "Tampered predecessor" };
+  expect(() => retainedConsumerResolutionBaselines(plan, active, altered)).toThrow(/Missing original resolution baseline/);
   const local = { ...quarantined, identityConsumption: { ...quarantined.identityConsumption, mode: "source-local", referentScope: { mentionIds: [decision.mentionId], crossIdentity: "unresolved", distinctness: "unasserted" } } };
   const mutation = { kind: "entity" as const, id: "unknown", baseline: quarantined, payload: local, activeRevisions,
     retainedRevisions: new Map([[`entity-resolution:${retired.id}`, retired.revisionHash]]), sourceSha256: scope.sourceHash,

@@ -328,6 +328,28 @@ it("restores only receipt-bound entity evidence when checking the original consu
   expect(() => originalIdentityCatalog(new Map(), catalog, [{ ...revisions[0]!, assertions: [{ ...addedAssertion, target: { ...addedAssertion.target, artifactId: "other" } }] }])).toThrow(/another artifact/);
 });
 
+it("restores singleton opening evidence by its canonical artifact ID without accepting another artifact or missing committed evidence", () => {
+  const old = { delta: { operations: [] } }, updated = { delta: { operations: [{ field: "character.posture", value: "sitting" }] } };
+  const target = { artifactKind: "initial-world", artifactId: "initial-world" };
+  const originalAssertion = { id: "opening-before", target, pointer: "/readerSetup" };
+  const addedAssertion = { id: "opening-after", target, pointer: "/delta/operations/0" };
+  const unrelated = { id: "other", target: { artifactKind: "entity", artifactId: "other" } };
+  const catalog = [{ kind: "initial-world", id: "singleton", payload: old },
+    { kind: "evidence-assertion", id: originalAssertion.id, payload: originalAssertion }];
+  const current = new Map<string, unknown>([["initial-world:singleton", updated],
+    ["evidence-assertion:opening-after", addedAssertion], ["evidence-assertion:other", unrelated]]);
+  const revision = { kind: "initial-world", id: "singleton", payload: old, committed: true, assertions: [addedAssertion] };
+  const restored = originalIdentityCatalog(current, catalog, [revision]);
+  expect(restored.get("initial-world:singleton")).toEqual(old);
+  expect(restored.get("evidence-assertion:opening-before")).toEqual(originalAssertion);
+  expect(restored.has("evidence-assertion:opening-after")).toBe(false);
+  expect(restored.get("evidence-assertion:other")).toEqual(unrelated);
+  expect(current.get("initial-world:singleton")).toEqual(updated);
+  for (const wrong of [{ artifactKind: "entity", artifactId: "initial-world" }, { artifactKind: "initial-world", artifactId: "other" }])
+    expect(() => originalIdentityCatalog(current, catalog, [{ ...revision, assertions: [{ ...addedAssertion, target: wrong }] }])).toThrow(/another artifact/);
+  expect(() => originalIdentityCatalog(new Map(), catalog, [revision])).toThrow(/lost its exact receipt-backed evidence/);
+});
+
 it("revalidates a completed host-stop receipt without renewing attempts or removing failures", async () => {
   const { withWorkspaceOperationLock } = await import("../src/util/workspace-lock.js");
   const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");

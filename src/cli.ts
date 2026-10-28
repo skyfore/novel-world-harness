@@ -200,6 +200,9 @@ requirementsCommand.command("execute-identity-repair").requiredOption("--source 
   .option("--correction-authorization-ref <ref>", "explicit authorization for one additional bounded Pi correction allowance, never a reset of the original budget")
   .option("--revise-failed-finish <hash>", "exact typedRepairs[].currentStop.recordRef for one pre-receipt opening graph revision")
   .option("--revision-authorization-ref <ref>", "explicit authorization for one bounded semantic draft; independent review spends its original remaining allowance")
+  .option("--recover-entry-contract <hash>", "exact finishRevisionProgress.contractRecoveryCandidate.previousContextHash for one authorized contract transition")
+  .option("--contract-recovery-authorization-ref <ref>", "explicit authorization to use the stopped draft's remaining allowance after an entry contract upgrade")
+  .option("--recover-acceptance-evidence <hash>", "exact rejectedInputHash to restore omitted staged evidence under the same contract-recovery authority and remaining review budget")
   .option("--inspect", "read-only typed plan, retained budget and dependency preflight; no invocation or state writes")
   .description("Continue the same finding through bounded Pi typed staging, independent acceptance and original finish/convergence; preserve failures and budgets")
   .action(async options => {
@@ -207,7 +210,9 @@ requirementsCommand.command("execute-identity-repair").requiredOption("--source 
     console.log(JSON.stringify(await runIdentityConsumerUpstream({ root: rootFor({}), sourceId: options.source, taskId: options.task,
       ref: options.ref, authorizationRef: options.authorizationRef, revalidationId: options.revalidationId,
       correctFailedAttempt: options.correctFailedAttempt, correctionAuthorizationRef: options.correctionAuthorizationRef,
-      reviseFailedFinish: options.reviseFailedFinish, revisionAuthorizationRef: options.revisionAuthorizationRef, inspect: options.inspect }), null, 2));
+      reviseFailedFinish: options.reviseFailedFinish, revisionAuthorizationRef: options.revisionAuthorizationRef,
+      recoverEntryContract: options.recoverEntryContract, contractRecoveryAuthorizationRef: options.contractRecoveryAuthorizationRef,
+      recoverAcceptanceEvidence: options.recoverAcceptanceEvidence, inspect: options.inspect }), null, 2));
   });
 requirementsCommand.command("revalidate-identity-consumer").requiredOption("--source <id>", "registered source ID")
   .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")

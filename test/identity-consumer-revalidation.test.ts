@@ -312,6 +312,8 @@ it("runs two real Pi transport sessions, preserves inherited charges and recover
   } finally { for (const p of providers) await p.host.session.dispose(); vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
+// The 23-turn case persists real Pi transcripts and repeatedly verifies them;
+// allow disk/CPU contention in the full suite without timing out its cleanup.
 it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCalls: 2, rejectedRef: true }])("continues a never-submitted Pi stage with retained charges $failedCalls and ref recovery $rejectedRef", async ({ failedCalls, rejectedRef }) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-unsubmitted-consumer-")), providers: Awaited<ReturnType<typeof mockPiProvider>>[] = [];
   try {
@@ -549,4 +551,4 @@ it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCa
       expect(dispatch).toHaveBeenCalledTimes(3);
     }
   } finally { for (const p of providers) await p.host.session.dispose(); vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }); }
-});
+}, 20_000);

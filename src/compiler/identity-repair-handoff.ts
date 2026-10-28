@@ -172,7 +172,7 @@ export async function inspectIdentityRepairHandoff(root: string, sourceId: strin
         lastFailure: lastFailure?.kind === "attempt-failed" ? { attemptRef: lastFailure.attemptRef, diagnostic: lastFailure.diagnostic } : null,
         currentStop: repair.state === "needs-host-review" && stop?.payload.kind === "needs-host-review"
           ? { recordRef: stop.hash, diagnostic: stop.payload.reason, finishIntentHash: repair.finishIntent?.intentHash ?? null,
-            recovery: finishRevisionProgress?.blocked ? "inspect-consumed-opening-revision" : repair.finishIntent && !repair.finishedReceipt && !repair.finishRevision && authority.consumerRevalidation
+            recovery: finishRevisionProgress?.blocked ? "inspect-consumed-opening-revision" : finishRevisionProgress?.contractRecovery ? "entry-contract-recovery" : repair.finishIntent && !repair.finishedReceipt && !repair.finishRevision && authority.consumerRevalidation
               ? "pre-receipt-opening-revision" : "inspect-original-stop" } : null,
         finishRevision: repair.finishRevision ? { revisionHash: repair.finishRevision.intent.revisionHash,
           completed: repair.finishRevision.completed, originalIntentHash: repair.finishRevision.intent.originalIntentHash,
@@ -194,6 +194,8 @@ export async function inspectIdentityRepairHandoff(root: string, sourceId: strin
         resumeCondition: successor ? "This completed repair has an exact receipt-bound successor. Preserve its accepted revisions and history; inspect the successor instead of replaying the old plan." : finished
           ? "Typed repair is complete. Preserve its original proposal, receipt, attempts and budget. Local requirement satisfaction does not revalidate downstream consumers or the original critical questions; inspect their retained conditions before any separately authorized continuation. Do not redispatch the completed repair."
           : finishRevisionProgress?.blocked ? finishRevisionProgress.resumeCondition
+          : finishRevisionProgress?.contractRecovery
+            ? "Continue the original execute-identity-repair with its retained source/task/ref, authorization and revalidation ID. Verify the explicit contract recovery and its remaining budget before dispatch; a sealed draft resumes only host staging. Preserve the original stopped invocation and require fresh independent acceptance; no replay, renewed recovery or parent resume."
           : repair.finishIntent && !repair.finishedReceipt && !repair.finishRevision && authority.consumerRevalidation
             ? "Copy currentStop.recordRef into execute-identity-repair --revise-failed-finish with the exact task/ref/revalidation-id and explicit --revision-authorization-ref; inspect first. One bounded Pi singleton draft, unchanged source and writable fields, original remaining independent review allowance. ID misses allow one discovery-based correction; source/scope, receipts, consumed or failed revision stops do not retry. Preserve old proposals, acceptance, failures and budgets."
             : "Only the original verified stage records and checkpoints may resume. Never replay a consumed invocation or use repair convergence as consumer activation." };

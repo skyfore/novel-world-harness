@@ -12,6 +12,8 @@ import { upstreamRepairHostError } from "./upstream-repair-preflight.js";
 import { COMPILER_PIPELINE_VERSION } from "./batch-progress.js";
 import { compilerProposalLogicalIdentity, compilerProposalSchemas } from "./proposals.js";
 import { loadCompilerArtifactRecords } from "./artifact-retrieval.js";
+import type { UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import type { UpstreamRepairFinishIntent } from "./upstream-repair-finish-intent.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const common = { planHash: hash, attemptRef: hash, status: z.enum(["pending", "accepted"]) };
@@ -176,6 +178,35 @@ export async function restoreUpstreamRepairCheckpoint(root: string, sourceId: st
   for (const receipt of checkpoint.activeReceipts) await CompilerFinishReceipts.restoreActiveUpstreamFinish(root, sourceId, receipt);
 }
 
+/** Recover only the exact completed parent's retired identity decisions as audit
+ * evidence. They must never reappear in the incoming active projection. */
+export function retainedConsumerResolutionBaselines(plan: UpstreamRepairPlan, active: ReadonlyMap<string, unknown>, parent?: {
+  plan: UpstreamRepairPlan; finishedReceipt?: string;
+  finishIntent?: Pick<UpstreamRepairFinishIntent, "baselines" | "proposals">;
+}) {
+  const authority = plan.identityRequirements?.consumerRevalidation, retained = new Map<string, unknown>();
+  if (!authority) return retained;
+  if (!parent?.finishIntent || parent.plan.planHash !== authority.parentPlanHash
+    || parent.finishedReceipt !== authority.parentReceiptFingerprint
+    || parent.plan.identityRequirements?.taskId !== plan.identityRequirements!.taskId
+    || parent.plan.sourceScope.sourceId !== plan.sourceScope.sourceId
+    || parent.plan.sourceScope.sourceSha256 !== plan.sourceScope.sourceSha256
+    || contentHash(authority.retainedResolutionIds.slice().sort()) !== contentHash((parent.plan.resolutionRevisions ?? [])
+      .filter(r => r.kind === "entity-resolution").map(r => r.predecessorId).sort()))
+    throw upstreamRepairHostError("Checkpoint retained identity evidence lacks its exact completed parent");
+  const recovered = new Map(active);
+  recoverUpstreamResolutionBaselines(parent.plan, recovered,
+    new Map(parent.finishIntent.proposals.map(p => [`${p.artifactKind}:${p.artifactId}`, p.payloadHash])), parent.finishIntent.baselines);
+  for (const id of authority.retainedResolutionIds) {
+    const key = `entity-resolution:${id}`, payload = recovered.get(key);
+    const expected = plan.baselineRefs.find(r => r.kind === "entity-resolution" && r.id === id);
+    if (active.has(key) || !payload || contentHash(payload) !== expected?.revisionHash)
+      throw upstreamRepairHostError(`Checkpoint retired identity baseline is missing, changed or active: ${key}`);
+    retained.set(key, payload);
+  }
+  return retained;
+}
+
 /** Validate incoming active revisions and field/evidence authority before any materialization write. */
 export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRepairCheckpoint, journal: readonly UpstreamRepairRecord[], sourceId: string, sourceSha256: string, bytes: Buffer, payloads: Map<string, unknown>) {
   assertUpstreamRepairCheckpoint(checkpoint, journal, sourceId);
@@ -192,6 +223,10 @@ export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRe
     assertUpstreamResolutionAbsences(plan, payloads, receipt ? new Map([...outputs].map(([key, value]) => [key, contentHash(value)])) : new Map());
     const recovered = new Map(payloads);
     recoverUpstreamResolutionBaselines(plan, recovered, receipt ? new Map([...outputs].map(([key, value]) => [key, contentHash(value)])) : new Map(), current.finishIntent?.baselines ?? []);
+    const retained = retainedConsumerResolutionBaselines(plan, payloads,
+      state.plans.find(p => p.plan.planHash === plan.identityRequirements?.consumerRevalidation?.parentPlanHash));
+    for (const [key, payload] of retained) { recovered.set(key, payload); original.set(key, payload); }
+    const retainedRevisions = new Map([...retained].map(([key, value]) => [key, contentHash(value)]));
     for (const ref of plan.baselineRefs) {
       const key = `${ref.kind}:${ref.id}`, output = outputs.get(key);
       if (contentHash(recovered.get(key) ?? null) !== ref.revisionHash && (!receipt || !output || actual.get(key) !== contentHash(output))) throw upstreamRepairHostError(`Checkpoint active baseline changed: ${key}`);
@@ -205,7 +240,8 @@ export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRe
     for (const draft of drafts) {
       const kind = draftKind(draft);
       if ((draft.status === "accepted" || (draft.store !== "world" && receipt?.state === "completed")) && actual.get(`${kind}:${draftId(draft)}`) !== contentHash(draft.envelope.payload)) throw upstreamRepairHostError("Checkpoint accepted proposal differs from its active artifact");
-      checkUpstreamRepairMutation({ plan, bytes, payloads: original, activeRevisions: new Map([...original].map(([key, value]) => [key, contentHash(value)])) }, kind as import("./upstream-repair-plan.js").UpstreamRepairKind, draftId(draft), draft.envelope.payload, outputs,
+      checkUpstreamRepairMutation({ plan, bytes, payloads: original, retainedRevisions,
+        activeRevisions: new Map([...original].filter(([key]) => !retained.has(key)).map(([key, value]) => [key, contentHash(value)])) }, kind as import("./upstream-repair-plan.js").UpstreamRepairKind, draftId(draft), draft.envelope.payload, outputs,
         draft.store === "world" ? draft.envelope.evidenceAssertions : []);
     }
   }

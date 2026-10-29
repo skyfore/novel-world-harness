@@ -83,21 +83,30 @@ it.each(["candidateAction", "actionPatterns"] as const)("proves an executable %s
   const source = await createEvidenceFixture(root, "Hero decides to wait.\n"), canon = new CanonicalModelStore(root);
   const evidence = source.evidence("Hero decides to wait.");
   await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+  await canon.putClaim({ id: "old-detail", subject: "hero", predicate: "waits", object: true, epistemicType: "explicit-fact", evidence });
   const action = { title: "Decide to wait", preconditions: [], proposedDelta: { version: 1 as const,
     operations: [{ op: "set" as const, entityId: "hero", field: "character.plan", value: "wait" }] } };
-  const goal: CharacterGoal = { id: "wait-goal", actorId: "hero", description: "Wait", priority: 1, requiresKnowledge: [], evidence,
+  const goal: CharacterGoal = { id: "wait-goal", actorId: "hero", description: "Wait", priority: 0.5, requiresKnowledge: [], evidence,
     activation: { preconditions: [], afterCanonicalEventIds: [] },
     ...(slot === "candidateAction" ? { candidateAction: action } : { actionPatterns: [action] }) };
   const { context } = await loadWorldContext(root);
-  context.actorGoals = [goal];
+  const timedGoal: CharacterGoal = { ...goal, id: "continue-goal", priority: 1, actionPatterns: [],
+    candidateAction: { ...action, title: "Continue deciding for a minute", timeAdvance: { amount: 1, unit: "minute" },
+      proposedDelta: { version: 1, operations: [] },
+      proposedKnowledge: { version: 1, operations: [{ op: "forget", actorId: "hero", claimId: "old-detail" }] } } };
+  context.actorGoals = [timedGoal, goal];
   const engine = new WorldEngine(root, context), head = await engine.createBranch("probe", "Probe", { version: 1, operations: [
     { op: "set", entityId: "hero", field: "character.alive", value: true },
     { op: "set", entityId: "hero", field: "character.plan", value: "decide" },
   ] }, undefined, source.source.id, undefined, evidence, {}, { participantPresence: [{ entityId: "hero", mode: "physical" }] });
   const candidates = await deterministicActorProposalSource(engine, new ActorModelStore(root))({ branchId: "probe", commitId: head, maxActors: 1 });
   expect(candidates).toHaveLength(1);
+  expect(candidates[0]!.goalId).toBe(timedGoal.id);
   expect(candidates[0]!.proposal.action).toBeUndefined();
-  expect((await engine.previewProposal(candidates[0]!.proposal)).report.accepted).toBe(true);
+  const preview = await engine.previewProposal(candidates[0]!.proposal);
+  expect(preview.report.accepted).toBe(true);
+  expect(preview.progressCertificate?.channels).toContain("time");
+  expect(preview.progressCertificate?.channels).not.toContain("state");
   const scope = { sourceId: source.source.id, subjectSnapshotHash: contentHash(goal), entryCutHash: contentHash(head), actorId: "hero" };
   const witness = await probeEntryAction(engine, root, { ...scope, branchId: "probe", head });
   expect(witness.origin).toMatchObject({ kind: "compiled-goal", id: goal.id, revisionHash: contentHash(goal) });

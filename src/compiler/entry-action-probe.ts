@@ -76,7 +76,8 @@ export async function probeEntryAction(engine: WorldEngine, scratch: string, inp
   let incomplete = false;
   const exclude = new Set([...context.entities.keys()].filter(id => id !== input.actorId));
   try {
-    const source = deterministicActorProposalSource(engine, new ActorModelStore(scratch), { excludedActorIds: exclude });
+    const source = deterministicActorProposalSource(engine, new ActorModelStore(scratch), { excludedActorIds: exclude,
+      acceptCandidate: (_candidate, preview) => Boolean(preview.progressCertificate && materialAction(preview.progressCertificate)) });
     for (const candidate of await source({ branchId: input.branchId, commitId: input.head, maxActors: 1 })) {
       const goal = context.actorGoals?.find(goal => goal.id === candidate.goalId && goal.actorId === input.actorId);
       if (goal) candidates.push({ proposal: normalizeActorProposal(candidate.proposal), origin: { kind: "compiled-goal", id: goal.id, revisionHash: contentHash(goal) } });

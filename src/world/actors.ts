@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
-import type { WorldEngine } from "./engine.js";
+import type { CommitProposalResult, WorldEngine } from "./engine.js";
 import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
 import { isCommunicatingKnowledgeSource } from "./knowledge-semantics.js";
 import { worldStorageRoot } from "./paths.js";
@@ -576,7 +576,14 @@ export type ActorProposalSource = (input: {
   maxModelCalls?: number;
 }) => Promise<readonly ActorProposalCandidate[]> | readonly ActorProposalCandidate[];
 
-export function deterministicActorProposalSource(engine: WorldEngine, actors: ActorModelStore, options: { excludedActorIds?: ReadonlySet<string> } = {}): ActorProposalSource {
+export type DeterministicActorProposalOptions = {
+  excludedActorIds?: ReadonlySet<string>;
+  /** Additional host selection constraints, checked after engine validation but
+   * before actor deduplication. Rejections share the original preview budget. */
+  acceptCandidate?: (candidate: ActorProposalCandidate, preview: CommitProposalResult) => boolean;
+};
+
+export function deterministicActorProposalSource(engine: WorldEngine, actors: ActorModelStore, options: DeterministicActorProposalOptions = {}): ActorProposalSource {
   const excludedActorIds = new Set(options.excludedActorIds ?? []);
   const knowledge = new KnowledgeProjector(engine);
   return async ({ branchId, commitId, maxActors }) => {
@@ -661,7 +668,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           });
         }
       }
-      return selectExecutableActorCandidates(engine, candidates, maxActors);
+      return selectExecutableActorCandidates(engine, candidates, maxActors, options.acceptCandidate);
     }
     const initiatingActorId = latestPlayerEvent.event.actorId;
     const scene = await projectActorScene(engine, initiatingActorId, commitId, activeSourceId);
@@ -745,7 +752,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
         });
       }
     }
-    return selectExecutableActorCandidates(engine, candidates, maxActors);
+    return selectExecutableActorCandidates(engine, candidates, maxActors, options.acceptCandidate);
   };
 }
 
@@ -781,7 +788,8 @@ export class ActorAlternativeBudgetError extends Error {
 }
 
 /** Rank legal alternatives, with a bounded read-only engine search before actor deduplication. */
-async function selectExecutableActorCandidates(engine: WorldEngine, candidates: readonly ActorProposalCandidate[], maxActors: number | undefined): Promise<ActorProposalCandidate[]> {
+async function selectExecutableActorCandidates(engine: WorldEngine, candidates: readonly ActorProposalCandidate[], maxActors: number | undefined,
+  acceptCandidate?: DeterministicActorProposalOptions["acceptCandidate"]): Promise<ActorProposalCandidate[]> {
   const limit = maxActors ?? 32;
   if (!Number.isInteger(limit) || limit < 0 || limit > 32) throw new Error("Actor source maxActors must be an integer between 0 and 32");
   const selected: ActorProposalCandidate[] = [], seen = new Set<string>();
@@ -801,6 +809,10 @@ async function selectExecutableActorCandidates(engine: WorldEngine, candidates: 
     const result = await engine.previewProposal(candidate.proposal);
     if (!result.report.accepted) {
       rejected.push(`${candidate.proposal.proposalId}[${result.report.errors.map(issue => issue.code).join("|")}]`);
+      continue;
+    }
+    if (acceptCandidate && !acceptCandidate(candidate, result)) {
+      rejected.push(`${candidate.proposal.proposalId}[HOST_SELECTION_CONSTRAINT]`);
       continue;
     }
     seen.add(actorId);

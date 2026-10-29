@@ -212,8 +212,7 @@ async function exhaustedMigrationEvidence(store: RoleReviewWorkStore, workId: st
   }
 
   const traceStore = new TraceStore(store.root);
-  const allRuns = await traceStore.peekRuns({ sourceId: store.plan.sourceId, kind: "prepare", limit: 1000 });
-  if (allRuns.length === 1000) throw roleWorkStop("trace inspection horizon is incomplete; identify the exact retained runs before granting any invocation");
+  const allRuns = await traceStore.peekAllRuns({ sourceId: store.plan.sourceId, kind: "prepare" });
   const manifests = allRuns.filter(run => run.operationId === prior.plan.batchId);
   const traced: Array<{ binding: TraceBinding; events: Awaited<ReturnType<TraceStore["peekEvents"]>>; startedAt: string; endedAt: string }> = [];
   for (const run of manifests) {

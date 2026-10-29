@@ -45,8 +45,7 @@ export async function assertIdentityCorrectionRetained(root: string, plan: Upstr
     || budget.originHash !== intent.originHash || budget.originalBudgetHash !== intent.originalBudgetHash || h(budget.cumulative) !== h(intent.priorUsage))
     throw prerequisiteStop("Correction allowance lost the original failed budget lineage; no charge reset or dispatch");
   const failureFile = await read(path.join(directory, "singleton.failure.json")), traces = new TraceStore(root);
-  const runs = (await traces.peekRuns({ sourceId: plan.sourceScope.sourceId, limit: 1000 }))
-    .filter(r => r.operationId === `identity-upstream-${intent.taskId}-singleton`);
+  const runs = await traces.peekRunsByOperation(plan.sourceScope.sourceId, `identity-upstream-${intent.taskId}-singleton`);
   if (runs.length !== 1 || h({ run: runs[0], events: await traces.peekEvents(runs[0]!.id) }) !== intent.traceHash
     || !state.modelSessions.some(s => s.sessionRef === intent.failedSessionRef && s.closed && !s.chargedFailure)
     || !failureFile.sessionId)
@@ -86,8 +85,8 @@ export async function prepareIdentityUpstreamCorrection(root: string, plan: Upst
   const { verifyIdentityUpstreamSlotTrace, verifyInvocationBudget, IDENTITY_UPSTREAM_SLOT_LIMITS } = await import("./identity-requirement-acceptance.js");
   for (const target of start.order.slice(0, -1)) await verifyIdentityUpstreamSlotTrace(root, plan, await read(path.join(directory, `${target.id}.record.json`)));
   const failureFile = await read(path.join(directory, "singleton.failure.json")), budget = await read(path.join(directory, "singleton.budget.json"));
-  const traces = new TraceStore(root), runs = (await traces.peekRuns({ sourceId: plan.sourceScope.sourceId, limit: 1000 }))
-    .filter(r => r.operationId === `identity-upstream-${plan.identityRequirements!.taskId}-singleton`), run = runs[0];
+  const traces = new TraceStore(root), runs = await traces.peekRunsByOperation(plan.sourceScope.sourceId,
+    `identity-upstream-${plan.identityRequirements!.taskId}-singleton`), run = runs[0];
   if (runs.length !== 1 || run?.status !== "failed" || !run.endedAt || run.counts.retries
     || !failureFile.sessionFile?.startsWith(path.join(directory, "sessions", "singleton") + path.sep)
     || await fs.realpath(failureFile.sessionFile) !== failureFile.sessionFile)

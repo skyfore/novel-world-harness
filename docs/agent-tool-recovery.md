@@ -998,6 +998,12 @@ mismatch; they cannot use this bounded source-plan retirement authority.
 
 ## Contract
 
+恢复验收中的 trace 存在性、唯一性及后续调用检查必须读取完整的同来源历史。
+精确 operation 使用 `TraceStore.peekRunsByOperation`，跨 operation 的历史约束使用
+`peekAllRuns`；二者只读、按时间倒序并限制并发文件读取。`peekRuns` 的最近记录
+窗口只供状态发现，不能证明旧调用不存在或唯一。完整查询仍保留重复、未结算及
+缺失记录的原停止条件，不重新派发模型、不改变预算或把历史失败改为成功。
+
 The `compile-novel` lifecycle preserves the same failure/finish/requirement authorities across stage commands and full runs. Its scheduling journal is not a semantic certificate and cannot reset an obligation, role review or repair budget. `compile-novel status` reports the stopped stage, original diagnostic and retained evaluation review/report without executing recovery. Follow a host-review stop before invoking the suggested stage command again; `--rebuild` is not an error-reset mechanism.
 
 Independent evaluation review exposes only source retrieval, `read_evaluation_input`, `propose_evaluation_item` and the single-use `finish_evaluation_plan`. For unknown input sections, read `read_evaluation_input` with `section=index` and copy `sections[]` or `itemSections[]` exactly. Read `section=schema` and `section=draft` before correcting the same stable item key. Binding fields come from `section=roles` (`candidateId`, `entityId`, `entryCutHash`) and `section=assertions` (`assertion.id`, `assertionHash`); never guess. Page using the exact returned `nextOffset`. Original text uses `find_source_evidence` and the exact `results[].ref` in `read_source_evidence`; finish requires complete source-page coverage. An invalid item/finish permits at most one corrected retry. `EVALUATION_REVIEW_HOST_REQUIRED`, `EVALUATION_REVIEW_NO_PROGRESS`, scope/index changes and `EVALUATION_PLAN_ALREADY_FROZEN` stop model retries; preserve draft identity, offsets, counters and trace IDs. A frozen result cannot be submitted again.

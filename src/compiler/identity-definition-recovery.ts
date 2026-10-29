@@ -73,10 +73,7 @@ export async function inspectIdentityDefinitionRecovery(root: string, p: Prepare
   if ((await ledger.identityRequirements(p.intent.taskId)).length || (await traces.peekRuns({ status: "running", limit: 100 })).length) {
     throw prerequisiteStop("Identity registration already consumed or a trace remains unsettled; no recovery retry");
   }
-  // peekRuns is capped/paginated. Inspect the complete retained index so a
-  // dispatched stage cannot disappear behind a page boundary.
-  const index = JSON.parse(await fs.readFile(traces.indexPath, "utf8")) as { runs: { id: string; sourceId?: string; kind: string }[] };
-  const priorRuns = await Promise.all(index.runs.filter(r => r.sourceId === p.intent.sourceId && r.kind === "prepare").map(r => traces.peekRun(r.id)));
+  const priorRuns = await traces.peekAllRuns({ sourceId: p.intent.sourceId, kind: "prepare" });
   for (const { stage } of identityStages(p.intent).slice(1)) {
     if (names.some(name => name.startsWith(stage + ".")) || priorRuns
       .some(run => run.operationId === `identity-requirements-${p.intent.taskId}-${stage}`)) {

@@ -117,11 +117,10 @@ it("seals an actual Pi correction, resumes host staging after interruption witho
   await write(path.join(directory, "singleton.budget.json"), { usage: { modelCalls: 4 }, originHash: h(origin), originalBudgetHash: f.intent.originalBudgetHash, cumulative: f.intent.priorUsage });
   f.intent.retainedFiles = await Promise.all(["singleton.failure.json", "singleton.budget.json"].map(async file => ({ path: file, hash: h(await fs.readFile(path.join(directory, file), "utf8")) })));
   f.intent.failureRecordHash = h(failureRecord);
-  const oldRun: any = { id: "original-failed-run", operationId: `identity-upstream-${f.intent.taskId}-singleton`, status: "failed" };
-  f.intent.traceHash = h({ run: oldRun, events: [] });
-  vi.spyOn(TraceStore.prototype, "peekRuns").mockResolvedValue([oldRun]);
-  const peekEvents = TraceStore.prototype.peekEvents;
-  vi.spyOn(TraceStore.prototype, "peekEvents").mockImplementation(function (id, ...args) { return id === oldRun.id ? Promise.resolve([]) : peekEvents.call(this, id, ...args); });
+  const traces = new TraceStore(root);
+  const oldRun = await traces.createRun({ id: "original-failed-run", kind: "prepare", sourceId: "src",
+    operationId: `identity-upstream-${f.intent.taskId}-singleton` });
+  f.intent.traceHash = h({ run: await traces.finishRun(oldRun.id, "failed"), events: await traces.peekEvents(oldRun.id) });
   await write(path.join(directory, "correction.intent.json"), f.intent);
   // Historical task admission and persistence are fixtures. The Pi tools,
   // complete transcript, provider request journal, trace and correction proof

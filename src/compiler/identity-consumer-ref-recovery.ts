@@ -49,8 +49,8 @@ export async function inspectConsumerRefRecovery(root: string, scope: ConsumerRe
   if (proof.transcript.responses !== usage.modelCalls || sizes.length !== usage.payloads || sizes.reduce((a, b) => a + b, 0) !== usage.totalPayloadBytes
     || Math.max(...sizes, ...proof.contexts.map(c => Buffer.byteLength(JSON.stringify(c)))) !== usage.largestRequestBytes)
     throw prerequisiteStop("Rejected submission charges disagree with its actual Pi requests; no recovery or charge reset");
-  const traces = new TraceStore(root), runs = (await traces.peekRuns({ sourceId: scope.sourceId, limit: 1000 }))
-    .filter(r => r.operationId === `receipt-bound-${scopeHash}-${stage}-continuation`), run = runs[0];
+  const traces = new TraceStore(root), runs = await traces.peekRunsByOperation(scope.sourceId,
+    `receipt-bound-${scopeHash}-${stage}-continuation`), run = runs[0];
   if (runs.length !== 1 || !run || run.status !== "failed" || !run.endedAt)
     throw prerequisiteStop("Rejected submission trace is missing, ambiguous or unsettled; inspect its original owner, no recovery");
   const events = await traces.peekEvents(run.id), starts = events.filter(e => e.type === "tool.call.started" && e.data?.toolName === contract.terminalTool);

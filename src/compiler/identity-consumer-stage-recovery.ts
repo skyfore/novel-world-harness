@@ -72,8 +72,7 @@ export async function prepareConsumerStageRecovery(root: string, scope: Consumer
     || Math.max(...sizes, ...proof.contexts.map(c => Buffer.byteLength(JSON.stringify(c)))) !== usage.largestRequestBytes
     || usage.modelCalls > limits.maxModelCalls || usage.totalPayloadBytes > limits.maxTotalPayloadBytes || usage.largestRequestBytes > limits.maxRequestBytes)
     throw prerequisiteStop("Failed stage charges disagree with its actual Pi requests; retain every charge, no continuation");
-  const traces = new TraceStore(root), candidates = (await traces.peekRuns({ sourceId: scope.sourceId, limit: 1000 }))
-    .filter(r => r.operationId === `receipt-bound-${scopeHash}-${stage}`);
+  const traces = new TraceStore(root), candidates = await traces.peekRunsByOperation(scope.sourceId, `receipt-bound-${scopeHash}-${stage}`);
   const run = candidates[0];
   if (candidates.length !== 1 || !run || run.status !== "failed" || !run.endedAt)
     throw prerequisiteStop("Original failed trace is missing, ambiguous or unsettled; inspect its owning operation, no continuation");

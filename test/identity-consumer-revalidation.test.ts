@@ -26,6 +26,8 @@ import { assertConsumerCompilerCorrection, consumerRevalidationLimits, SOURCE_LO
 import { IDENTITY_REQUIREMENT_LIMITS } from "../src/compiler/identity-requirements.js";
 import { captureRecordTree } from "../src/runtime/compile-loop/dedicated-session.js";
 import { consumerStageRecoveryDirectory } from "../src/compiler/identity-consumer-stage-recovery.js";
+import { TraceStore } from "../src/trace/store.js";
+import { appendUnrelatedTraceHistory } from "./helpers/trace-history.js";
 import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 import { inspectConsumerRevalidationAttempts } from "../src/compiler/identity-consumer-attempt-status.js";
 import * as revalidationModel from "../src/compiler/identity-consumer-revalidation-model.js";
@@ -567,6 +569,17 @@ it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCa
       expect(plan.limits.maxModelCalls).toBe(22);
       for (const file of plan.retainedFiles) expect(h(await fs.readFile(path.join(directory, file.path), "utf8"))).toBe(file.hash);
       await runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" });
+      expect(dispatch).toHaveBeenCalledTimes(3);
+      const traces = new TraceStore(root);
+      await appendUnrelatedTraceHistory(traces, scope.sourceId);
+      expect((await traces.peekRuns({ sourceId: scope.sourceId, limit: 1_000 })).some(run => run.id === plan.originalTraceRunId)).toBe(false);
+      await expect(revalidation.verifyConsumerRevalidationRecord(root, previous[0]!)).resolves.toBeUndefined();
+      await expect(revalidation.verifyConsumerRevalidationRecord(root, previous[1]!)).resolves.toBeUndefined();
+      const originalTrace = await traces.peekRun(plan.originalTraceRunId);
+      const duplicate = await traces.createRun({ kind: "prepare", sourceId: scope.sourceId,
+        operationId: originalTrace.operationId, startedAt: "2020-01-01T00:00:00.000Z" });
+      await traces.finishRun(duplicate.id, "failed");
+      await expect(revalidation.verifyConsumerRevalidationRecord(root, previous[0]!)).rejects.toThrow(/trace is missing, ambiguous or unsettled/);
       expect(dispatch).toHaveBeenCalledTimes(3);
       const oldMessages = path.join(directory, "consumer-revalidation.messages.jsonl");
       await fs.appendFile(oldMessages, '{"tampered":true}\n');

@@ -26,9 +26,9 @@ export type RoleProviderResumptionInput = z.infer<typeof inputSchema>;
  * That exact deterministic trace is not another model invocation. Everything
  * else after the retained refusal still requires separate host inspection. */
 async function assertNoLaterInvocation(traces: TraceStore, sourceId: string, failedRunId: string) {
-  const runs = await traces.peekRuns({ sourceId, kind: "prepare", limit: 1000 });
+  const runs = await traces.peekAllRuns({ sourceId, kind: "prepare" });
   const original = runs.findIndex(run => run.id === failedRunId);
-  if (original < 0) stop("the retained refusal is outside the bounded trace discovery window");
+  if (original < 0) stop("the retained refusal is missing from the complete source trace history");
   for (const run of runs.slice(0, original)) {
     const events = await traces.peekEvents(run.id), checkpoints = events[2]?.data;
     if (run.status !== "succeeded" || !run.endedAt || run.operationId || run.lastSeq !== 4

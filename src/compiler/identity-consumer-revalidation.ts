@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentHash } from "../world/canonical.js";
+import { canonicalEventSchema, idSchema, type CanonicalEvent } from "../world/model.js";
+import { applyEventExecutions, eventExecutionSchema, type EventExecution } from "../world/event-execution.js";
 import { RequirementLedger } from "./requirement-ledger.js";
 import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
@@ -47,6 +49,38 @@ export function currentConsumerPayload(consumer: { ref: string; reason: string; 
     spatial: "spatial-relation", scene: "scene-occurrence", frame: "event-frame", action: "action-schema", constraint: "action-constraint",
     norm: "norm-template", process: "process-template", rule: "world-rule", goal: "character-goal", model: "character-model" };
   const [kind, ...idParts] = consumer.ref.split("/"), id = idParts.join("/");
+  if (kind === "entry") {
+    const stop = (reason: string) => prerequisiteStop(`${reason}. Inspect requirements inspect-identity-repairs with the same --source/--task and --ref ${consumer.ref}, and its owning canonical-event/event-execution revisions. Resolve the active dependency before dispatch; no frozen-payload fallback, guessed ref or unchanged retry`);
+    const [actorId, eventId] = idParts;
+    if (idParts.length !== 2 || !idSchema.safeParse(actorId).success || !idSchema.safeParse(eventId).success)
+      throw stop("Entry consumer ref is not the original actor/event pair");
+    const active = (key: string) => {
+      const payload = current.payloads.get(key);
+      if (!payload || current.activeRevisions.get(key) !== contentHash(payload))
+        throw stop(`Entry owner has no exact active world revision: ${key}`);
+      return payload;
+    };
+    const rawEvent = active(`canonical-event:${eventId}`), parsedEvent = canonicalEventSchema.safeParse(rawEvent);
+    if (!parsedEvent.success || parsedEvent.data.id !== eventId) throw stop("Entry owner is not the exact canonical event");
+    const event = rawEvent as CanonicalEvent, bindings: EventExecution[] = [];
+    for (const key of current.activeRevisions.keys()) {
+      if (!key.startsWith("event-execution:")) continue;
+      const raw = active(key), parsed = eventExecutionSchema.safeParse(raw);
+      if (!parsed.success || key !== `event-execution:${parsed.data.id}`) throw stop("Active execution binding is missing or invalid");
+      const binding = raw as EventExecution;
+      if (binding.canonicalEventId !== event.id || !binding.entryCheckpoint
+        || binding.actorId !== actorId && binding.entryCheckpoint.actorId !== actorId) continue;
+      if (binding.actorId !== binding.entryCheckpoint.actorId) throw stop("Entry execution binding changed its owning actor");
+      bindings.push(binding);
+    }
+    if (bindings.length > 1 || (event.characterEntryCheckpoints ?? []).filter(c => c.actorId === actorId).length > 1)
+      throw stop("Entry consumer has ambiguous active checkpoints or execution bindings");
+    // Match the inventory/runtime projection without treating a retained entry
+    // snapshot as an independently active artifact or mutating either owner.
+    const checkpoint = applyEventExecutions([event], bindings)[0]!.characterEntryCheckpoints?.find(c => c.actorId === actorId);
+    if (!checkpoint) throw stop("Selected actor has no entry checkpoint in the active event projection");
+    return checkpoint;
+  }
   const annotation = kind === "annotation" && consumer.payload && typeof consumer.payload === "object" && "annotationType" in consumer.payload
     ? String(consumer.payload.annotationType) : null;
   const key = `${annotation ?? artifactKind[kind!] ?? kind}:${kind === "initial" ? "singleton" : id}`;

@@ -3618,6 +3618,13 @@ Web 在修复／交付阶段的“继续编译”使用同一 `compileNovelWithL
 提交的宿主登记，零新增模型调用。不存在完整检查点、依赖漂移、未结算 trace、
 预算耗尽或负面复核时停止，不更名、不缩小分母、不清失败。
 
+`entry/<actorId>/<eventId>` 是当前 canonical event 与有效 event-execution 的
+只读投影，不是独立存储工件。重验按同一事件执行投影规则定位入口，核对事件及
+执行绑定的活动修订哈希；已退休绑定不参与投影。缺失当前事件／入口、修订不符、
+角色错配或重复绑定均保留停止，不能退回冻结的旧入口。先在同 source/task 的
+`inspect-identity-repairs --ref` 检查原对象及其拥有者，解决实际版本条件后才续行。
+定位修复不重新派发已消费阶段，不放宽独立复核、完整消费者分母或父编译门禁。
+
 Pi 的 `read_consumer_revalidation` 在同一 scope 内通过 `collection=source`
 或 `artifacts`、`offset=0` 发现：分别复制 `items[].id` 到 `segmentIds`、
 `items[].ref` 到 `refs`，分页只复制 `nextOffset`。`collection=consumer` 复制

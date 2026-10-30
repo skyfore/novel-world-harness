@@ -17,15 +17,65 @@ import type { SceneReviewCatalog } from "../eval/scene-capabilities.js";
 import { CompilerProposalObligations, sourcePatternObligationRequirementId } from "./proposal-obligations.js";
 import { readAccountingBatchSegments } from "./accounting-review.js";
 import { buildRepresentationRepairPlan, representationRecordsFromJournal } from "./source-representation-upstream.js";
+import { ProposalStore } from "../world/canonical-model.js";
+import { evidenceAssertionSchema } from "../world/model.js";
+
+/** Restore only evidence bindings owned by an exact receipt-backed revision.
+ * New assertions in that accepted envelope are outputs too, not unrelated
+ * catalog drift. Every other current artifact remains visible to the guard. */
+export function originalIdentityCatalog(current: ReadonlyMap<string, unknown>, original: readonly { kind: string; id: string; payload: unknown }[],
+  revisions: readonly { kind: string; id: string; payload: unknown; committed?: boolean; assertions: readonly { id: string; target: { artifactKind: string; artifactId: string } }[] }[]) {
+  const before = new Map(current);
+  for (const revision of revisions) {
+    before.set(`${revision.kind}:${revision.id}`, revision.payload);
+    // Repair scopes name the singleton slot; field evidence uses the canonical
+    // artifact ID emitted by compilerProposalArtifactId.
+    const evidenceId = revision.kind === "initial-world" && revision.id === "singleton" ? "initial-world" : revision.id;
+    for (const assertion of revision.assertions) {
+      if (assertion.target.artifactKind !== revision.kind || assertion.target.artifactId !== evidenceId) throw upstreamRepairHostError("Receipt-backed assertion targets another artifact");
+      const key = `evidence-assertion:${assertion.id}`, actual = before.get(key);
+      if (revision.committed && (actual === undefined || contentHash(actual) !== contentHash(assertion)))
+        throw upstreamRepairHostError("Committed entity lost its exact receipt-backed evidence assertion; inspect the original binding, do not replace or retry the model");
+      if (actual !== undefined && contentHash(actual) !== contentHash(assertion)
+        && !original.some(o => `${o.kind}:${o.id}` === key && contentHash(o.payload) === contentHash(actual)))
+        throw upstreamRepairHostError("Receipt-backed evidence assertion changed outside its accepted envelope");
+      before.delete(key);
+    }
+    for (const item of original) if (item.kind === "evidence-assertion") {
+      const target = (item.payload as { target?: { artifactKind?: string; artifactId?: string } }).target;
+      if (target?.artifactKind === revision.kind && target.artifactId === evidenceId) before.set(`evidence-assertion:${item.id}`, item.payload);
+    }
+  }
+  return before;
+}
 
 export function upstreamRepairHostError(reason: string): Error {
   return new Error(`UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: ${reason}. Preserve plan, receipts, budget and drafts. Stop this task and model retries; do not reset history, rotate namespaces, guess IDs or retry unchanged.`);
+}
+
+/** Read-only continuation preflight. Only the original active receipt can
+ * explain changed baselines; this does not reopen a stopped model invocation. */
+export async function verifyUpstreamRepairContinuation(root: string, plan: UpstreamRepairPlan) {
+  const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
+  const current = (await new UpstreamRepairLedger(root, plan.sourceScope.sourceId).inspect()).plans.find(item => item.plan.planId === plan.planId);
+  if (current && current.plan.planHash !== plan.planHash) throw upstreamRepairHostError("Original continuation plan changed");
+  const receipt = await new CompilerFinishReceipts(root, plan.sourceScope.sourceId, plan.batchId).read();
+  if (!receipt) {
+    if (current?.finishedReceipt) throw upstreamRepairHostError("Original completed continuation receipt is missing");
+    return verifyUpstreamRepairPlan(root, plan);
+  }
+  const intent = receipt.identity.upstreamRepairIntent;
+  if (!intent || !current?.finishIntent || contentHash(intent) !== contentHash(current.finishIntent)
+    || (current.finishedReceipt && (receipt.state !== "completed" || receipt.fingerprint !== current.finishedReceipt)))
+    throw upstreamRepairHostError("Continuation receipt differs from the original frozen finish intent");
+  return verifyUpstreamRepairPlan(root, plan, new Map(intent.proposals.map(item => [`${item.artifactKind}:${item.artifactId}`, item.payloadHash])));
 }
 
 /** Read actual source-local host state under the compiler lock; no caller-supplied revision claims. */
 export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepairPlan, committedOutputs: ReadonlyMap<string, string> = new Map(), restoringReceipt?: import("./finish-receipts.js").CompilerFinishReceipt) {
   const plan = upstreamRepairPlanSchema.parse(raw), sourceId = plan.sourceScope.sourceId;
   let recoveryBaselines: NonNullable<import("./finish-receipts.js").CompilerFinishReceipt["identity"]["upstreamRepairIntent"]>["baselines"] = [];
+  let recoveryProposals: NonNullable<import("./finish-receipts.js").CompilerFinishReceipt["identity"]["upstreamRepairIntent"]>["proposals"] = [];
   if (committedOutputs.size) {
     const active = await new CompilerFinishReceipts(root, sourceId, plan.batchId).read();
     const retained = restoringReceipt && (await CompilerFinishReceipts.listRetained(root, sourceId)).find(item => contentHash(item.receipt) === contentHash(restoringReceipt))?.receipt;
@@ -34,6 +84,7 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
     if (!intent || intent.planHash !== plan.planHash || committedOutputs.size !== intent.proposals.length
       || intent.proposals.some(item => committedOutputs.get(`${item.artifactKind}:${item.artifactId}`) !== item.payloadHash)) throw upstreamRepairHostError("Recovery revisions lack the exact durable upstream finish receipt");
     recoveryBaselines = intent.baselines;
+    recoveryProposals = intent.proposals;
   }
   const source = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
   if (!source) throw upstreamRepairHostError("Registered source is missing");
@@ -105,12 +156,42 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   const activeRevisions = new Map([...payloads].map(([key, value]) => [key, contentHash(value)]));
   // Retained predecessor payloads are readable audit evidence, never active decisions.
   recoverUpstreamResolutionBaselines(plan, payloads, committedOutputs, recoveryBaselines);
+  const retainedRevisions = new Map<string, string>();
   if (identityContext) {
     const p = identityContext.prepared;
-    const currentCatalog = [...payloads].filter(([key]) => !key.startsWith("source-segment:") && !key.startsWith("structural-discourse:") && !committedOutputs.has(key))
+    const preceding = identityContext.parentCatalog;
+    if (preceding) {
+      const intent = preceding.receipt.identity.upstreamRepairIntent!;
+      recoverUpstreamResolutionBaselines(identityContext.parentPlan, payloads,
+        new Map(intent.proposals.map(p => [`${p.artifactKind}:${p.artifactId}`, p.payloadHash])), intent.baselines);
+      for (const id of plan.identityRequirements!.consumerRevalidation!.retainedResolutionIds) {
+        const payload = payloads.get(`entity-resolution:${id}`);
+        if (!payload) throw upstreamRepairHostError("Original retained resolution is missing from its exact predecessor receipt");
+        retainedRevisions.set(`entity-resolution:${id}`, contentHash(payload));
+      }
+    }
+    const originalCatalog = preceding?.catalog ?? p.catalog;
+    const revisions = [];
+    for (const write of plan.allowedWrites) if (committedOutputs.has(`${write.kind}:${write.id}`)) {
+      const original = recoveryBaselines.find(b => b.kind === write.kind && b.id === write.id);
+      if (!original || contentHash(original.payload) !== plan.baselineRefs.find(b => b.kind === write.kind && b.id === write.id)?.revisionHash)
+        throw upstreamRepairHostError("Identity revision recovery lacks its exact original entity baseline");
+      const proposal = recoveryProposals.find(p => p.artifactKind === write.kind && p.artifactId === write.id);
+      if (!proposal || !["entity", ...(preceding ? ["initial-world"] : [])].includes(write.kind)) throw upstreamRepairHostError("Identity catalog recovery lacks its exact typed proposal");
+      let envelope, accepted = true;
+      try { envelope = await new ProposalStore(root).readEnvelope("accepted", proposal.proposalId); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; accepted = false; envelope = await new ProposalStore(root).readEnvelope("pending", proposal.proposalId); }
+      if (contentHash(envelope) !== proposal.proposalHash || contentHash(envelope.payload) !== proposal.payloadHash) throw upstreamRepairHostError("Identity entity evidence recovery differs from its exact finish envelope");
+      revisions.push({ kind: write.kind, id: write.id, payload: original.payload,
+        committed: accepted && activeRevisions.get(`${write.kind}:${write.id}`) === proposal.payloadHash,
+        assertions: evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []) });
+    }
+    const before = originalIdentityCatalog(payloads, originalCatalog, revisions);
+    const created = new Set(plan.allowedCreations.map(c => `${c.kind}:${c.id}`));
+    const currentCatalog = [...before].filter(([key]) => !key.startsWith("source-segment:") && !key.startsWith("structural-discourse:") && !(created.has(key) && committedOutputs.has(key)))
       .map(([key, payload]) => ({ kind: key.slice(0, key.indexOf(":")), id: key.slice(key.indexOf(":") + 1), payload, revisionHash: contentHash(payload) }))
       .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
-    if (contentHash(currentCatalog) !== p.intent.catalogHash) throw upstreamRepairHostError("Identity consumer catalog changed outside exact receipt-backed outputs");
+    if (contentHash(currentCatalog) !== (preceding ? contentHash(preceding.catalog) : p.intent.catalogHash)) throw upstreamRepairHostError("Identity consumer catalog changed outside exact receipt-backed outputs");
     if (contentHash(await new RoleRosterStore(root).read(sourceId)) !== contentHash(p.review.priorRoster)
       || contentHash(await new SourceStructureStore(root).read(sourceId)) !== p.review.priorPlan.structureHash) throw upstreamRepairHostError("Identity consumer roster or source structure changed");
     const { RoleReviewWorkStore } = await import("./role-review-work.js");
@@ -136,5 +217,5 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
     const receipt = receipts.find(item => item.receipt.fingerprint === fingerprint)?.receipt;
     if (!receipt || receipt.state !== "completed" || receipt.identity.sourceSha256 !== source.contentSha256) throw upstreamRepairHostError("Predecessor receipt is missing, incomplete or from another source revision");
   }
-  return { plan, source, bytes, activeRevisions, payloads };
+  return { plan, source, bytes, activeRevisions, retainedRevisions, payloads };
 }

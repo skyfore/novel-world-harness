@@ -80,6 +80,7 @@ import {
   validateCanonicalAdaptationContract,
 } from "./canonical-adaptation.js";
 import { applyKnowledgeDelta, emptyKnowledgeState, isActionableKnowledge, KnowledgeProjector, type KnowledgeState } from "./knowledge.js";
+import { identityConsumptionIssues } from "./identity-consumption.js";
 import { isCommunicatingKnowledgeSource, validateKnowledgeSemanticReferences } from "./knowledge-semantics.js";
 import { committedHistory, projectActorScene } from "./scene.js";
 import type { SpatialRelation } from "./spatial-ontology.js";
@@ -205,6 +206,7 @@ export function validateEventProposal(
   const proposal = normalizeActorProposal(eventProposalSchema.parse(proposalInput));
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
+  errors.push(...identityConsumptionIssues(proposal, context.entities, new Map(context.stateSchema.list().map(s => [s.key, s])), context));
   if (proposal.expectedParentCommit !== head) errors.push({ code: "STALE_PARENT", message: `Expected ${proposal.expectedParentCommit}, current head is ${head}` });
   if (state.atCommit !== head) errors.push({ code: "STATE_HEAD_MISMATCH", message: `Projected state ${state.atCommit} does not match ${head}` });
   for (const entityId of proposal.participants) if (!context.entities.has(entityId)) errors.push({ code: "UNKNOWN_PARTICIPANT", message: `Unknown participant ${entityId}` });
@@ -572,6 +574,9 @@ export class WorldEngine {
       observationActors.add(observation.actorId);
     }
     const emptyInitialState = { ...emptyWorldState("genesis", 0), logicalTime };
+    const identityIssues = identityConsumptionIssues({ initialDelta, participantPresence, projectionSeed: completeSeed, knowledge,
+      actorObservations, actorId: genesisOptions.entryActorId }, this.context.entities, new Map(this.context.stateSchema.list().map(s => [s.key, s])), this.context);
+    if (identityIssues.length) throw new Error(identityIssues.map(i => `${i.code}: ${i.message} at ${i.path}`).join("; "));
     const initialState = applyStateDelta(
       emptyInitialState,
       initialDelta,
@@ -1125,21 +1130,20 @@ export class WorldEngine {
       };
       return { report, previousHead: head, newHead: head };
     }
-    if (!persist) return { report, previousHead: head, newHead: head };
     const deltaHash = effectiveStateIndexes.length
-      ? await this.objects.putDelta(parsed.proposedDelta)
+      ? persist ? await this.objects.putDelta(parsed.proposedDelta) : contentHash(parsed.proposedDelta)
       : undefined;
     const knowledgeDeltaHash = parsed.proposedKnowledge && effectiveKnowledgeIndexes.length
-      ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge)
+      ? persist ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge) : contentHash(parsed.proposedKnowledge)
       : undefined;
     const semanticDeltaHash = semanticDelta?.operations.length
-      ? await this.objects.putSemanticDelta(semanticDelta)
+      ? persist ? await this.objects.putSemanticDelta(semanticDelta) : contentHash(semanticDelta)
       : undefined;
     const processDeltaHash = processDelta?.operations.length
-      ? await this.objects.putProcessDelta(processDelta)
+      ? persist ? await this.objects.putProcessDelta(processDelta) : contentHash(processDelta)
       : undefined;
     const normDeltaHash = normDelta?.operations.length
-      ? await this.objects.putNormDelta(normDelta)
+      ? persist ? await this.objects.putNormDelta(normDelta) : contentHash(normDelta)
       : undefined;
     const effects: CommittedEvent["effects"] = {
       version: 1,
@@ -1166,6 +1170,7 @@ export class WorldEngine {
       ...(parsed.progress?.scene ? { sceneTransition: parsed.progress.scene } : {}),
     });
     if (!hasMaterialProgress(progressCertificate)) throw new Error("Accepted event has no host-certified progress");
+    if (!persist) return { report, previousHead: head, newHead: head, progressCertificate };
     const logicalTime = postState.logicalTime;
     const canonicalPossibilityId = !parsed.canonicalAdaptation && parsed.possibilityId?.startsWith("canon-")
       ? parsed.possibilityId.slice("canon-".length)

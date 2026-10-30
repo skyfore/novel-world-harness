@@ -1,4 +1,5 @@
 import { remoteEntryEvidenceIssues } from "./entry-agency.js";
+import { bodilyStateEvidenceIssues } from "./bodily-state.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -223,7 +224,7 @@ export function validateInitialWorldEvidenceAssertions(
   initial: InitialWorld,
   assertions: readonly EvidenceAssertion[],
 ): ValidationIssue[] {
-  const entryIssues = remoteEntryEvidenceIssues(initial, assertions);
+  const entryIssues = [...remoteEntryEvidenceIssues(initial, assertions), ...bodilyStateEvidenceIssues(initial, assertions)];
   if (!initial.readerContext && !initial.actorObservations?.length) return entryIssues;
   const supported = exactSupportPaths(assertions);
   const issues: ValidationIssue[] = [...entryIssues];

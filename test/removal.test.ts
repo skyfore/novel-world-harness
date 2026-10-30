@@ -143,7 +143,7 @@ describe("novel-world removal", () => {
       proposalId: "pinned-opening",
       payload: {
         version: 1,
-        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }] },
         participantPresence: [{ entityId: "hero", mode: "physical" }],
         evidence: fixture.evidence("Hero waits at the opening."),
       },

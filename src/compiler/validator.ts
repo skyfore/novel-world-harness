@@ -1,5 +1,6 @@
 import { entryArtifactEvidenceIssues, remoteEntryOccurrenceIssues } from "../world/entry-agency.js";
 import { entryAgencyIssues, playableEntryActorIds } from "../world/entry-agency.js";
+import { assessEntryState, groundedEntryActorIds } from "../world/entry-contract.js";
 import { validateIdentityName } from "../world/actor-recognition.js";
 import { validateProcessRecoveryEvidence } from "../world/event-execution.js";
 import { validateIncapacityEvidence } from "../world/process-capacity.js";
@@ -12,6 +13,7 @@ import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.j
 import { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
 import { validateGoalExpressions, validateGoalExpressionEvidence } from "../world/conditional-expression.js";
 import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { validateSourceLocalIdentityEvidence } from "../world/identity-consumption.js";
 import { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { applyEventExecutions, eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import type { z } from "zod";
@@ -364,7 +366,7 @@ export class CompilerValidator {
         rules: prospectiveRules,
       }));
     }
-    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors, catalog);
+    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors, catalog, warnings);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, propositions, claims, events, rules, goals, errors);
     return { accepted: errors.length === 0, errors, warnings };
@@ -561,11 +563,9 @@ export class CompilerValidator {
       if (!checkpoint.projectionSeed && checkpoint.delta.operations.length > 16) {
         errors.push(issue("OVERSIZED_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} contains more than 16 state operations`, `${prefix}.delta.operations`));
       }
-      if (!checkpoint.delta.operations.some((operation) =>
-        "entityId" in operation
-        && operation.entityId === checkpoint.actorId
-        && ["character.location", "character.plan", "character.momentum"].includes(operation.field))) {
-        errors.push(issue("INACTIONABLE_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} must establish that actor's location, plan, or momentum before the event`, `${prefix}.delta.operations`));
+      const entryState = assessEntryState(checkpoint.actorId, checkpoint, { ...catalog, sourceId: event.evidence[0]?.span.sourceId }, this.stateSchema);
+      if (entryState.state !== "grounded") {
+        errors.push(issue("INACTIONABLE_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId}: ${entryState.issues.map(item => `${item.code}: ${item.message}`).join("; ")}`, `${prefix}.delta.operations`));
       }
       for (let presenceIndex = 0; presenceIndex < checkpoint.participantPresence.length; presenceIndex += 1) {
         const presence = checkpoint.participantPresence[presenceIndex]!;
@@ -650,6 +650,7 @@ export class CompilerValidator {
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
     catalog: CompilerValidationCatalog,
+    warnings: ValidationIssue[],
   ): void {
     if (!initial.evidence.length) errors.push(issue("MISSING_EVIDENCE", "Initial world has no source evidence", "evidence"));
     if (initial.checkpoint?.beforeCanonicalEventId && !events.has(initial.checkpoint.beforeCanonicalEventId)) {
@@ -840,24 +841,23 @@ export class CompilerValidator {
       .filter((entity) => entity.kind === "character")
       .filter((entity) => entity.evidence.some((reference) => initialSourceIds.has(reference.span.sourceId)))
       .map((entity) => entity.id);
-    const actionableOpening = initial.delta.operations.some((operation) =>
-      "entityId" in operation
-      && sourceCharacterIds.includes(operation.entityId)
-      && playableOpeningIds.has(operation.entityId)
-      && !explicitlyDead.has(operation.entityId)
-      && ["character.location", "character.plan", "character.momentum"].includes(operation.field)
-      && (operation.op !== "set" || operation.value !== null));
-    if (sourceCharacterIds.length > 1 && !playableOpeningIds.size) {
-      errors.push(issue(
+    const groundedActors = groundedEntryActorIds(initial, { ...catalog, sourceId: initial.evidence[0]?.span.sourceId }, this.stateSchema);
+    const actionableOpening = sourceCharacterIds.some(id => groundedActors.has(id));
+    // Legacy inventories may be archived as unproven compiler input. Only an
+    // explicit entry claims this contract; discovery and certification never
+    // use a sole-character/alive fallback to turn an inventory into an entry.
+    const entryIssues = initial.participantPresence?.length || initial.readerContext || initial.actorObservations?.length ? errors : warnings;
+    if (!playableOpeningIds.size) {
+      entryIssues.push(issue(
         "MISSING_OPENING_PRESENCE",
-        "A multi-character source must explicitly identify at least one bodily or channel-grounded opening role; identity, mention, or alive state is not presence.",
+        "An opening must explicitly identify at least one bodily or channel-grounded role; identity, mention, or alive state is not presence. Inspect same-source entry evidence; correct once only within scope, otherwise stop for host review.",
         "participantPresence",
       ));
     }
-    if (sourceCharacterIds.length > 1 && !actionableOpening) {
-      errors.push(issue(
+    if (!actionableOpening) {
+      entryIssues.push(issue(
         "INACTIONABLE_INITIAL_WORLD",
-        "A multi-character source must establish a bodily or channel-grounded opening role through a grounded location, plan, or momentum; a bare alive inventory cannot create a playable scene.",
+        "Opening requires a non-dead bodily or channel-grounded role with final source-supported operational context under the shared entry contract. Alive and presentation prose alone are insufficient. Inspect the state-field catalog and exact source; correct once within scope or stop for capability/source review, never invent a place, plan or number. Actual action and autonomous-driver proofs remain separate.",
         "delta.operations",
       ));
     }
@@ -1633,7 +1633,8 @@ export class CompilerCommitService {
     const acquisitionEvidenceIssues = kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : [];
     const perceptionEvidenceIssues = kind === "perception-observation" ? [...validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions), ...await validatePerceptionObservationTrace(this.workspaceRoot, perceptionObservationSchema.parse(payload))] : [];
     const expressionEvidenceIssues = kind === "utterance-expression" ? [...validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions), ...await validateUtteranceExpressionTrace(this.workspaceRoot, utteranceExpressionSchema.parse(payload))] : kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(payload), evidenceAssertions) : [];
-    expressionEvidenceIssues.push(...(kind === "entity" ? validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions) : []));
+    expressionEvidenceIssues.push(...(kind === "entity" ? [...validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions),
+      ...validateSourceLocalIdentityEvidence(entitySchema.parse(payload), evidenceAssertions)] : []));
     const semanticEvidenceIssues = kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : [];
     const spatialEvidenceIssues = kind === "spatial-relation"
       ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)

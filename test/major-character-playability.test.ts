@@ -6,6 +6,8 @@ import type { Entity } from "../src/world/model.js";
 import { describePreparedRoles, requireCertifiedEntry } from "../src/world/play-roles.js";
 import { entryDriverWitnessIssues } from "../src/compiler/entry-driver-probe.js";
 import { preparedPlayRoleSchema } from "../src/world/play-role-schema.js";
+import { selfActionFixture } from "./helpers/entry-action.js";
+import { preparedSubjectHash, type NovelClosureAssessment } from "../src/compiler/certification.js";
 
 const evidence = [{ span: { sourceId: "source", startByte: 0, endByte: 4, startLine: 1, endLine: 1, quoteHash: "a".repeat(64) }, strength: "explicit" as const }];
 const entities: Entity[] = ["hero", "regent", "courier"].map((id) => ({ id, kind: "character", canonicalName: id, aliases: [], evidence }));
@@ -27,6 +29,7 @@ function fixture() {
       },
     },
   } as PreparedNovelBundle;
+  bundle.canonical.actionSchemas = [selfActionFixture()];
   return { bundle, roster };
 }
 
@@ -58,6 +61,31 @@ it("probes the real engine per major character and retains an unplayable major a
   expect(roles.every((role) => role.status !== "ready")).toBe(true);
   expect(() => requireCertifiedEntry(bundle, "hero")).toThrow("WORLD_CLOSURE_BLOCKED");
   expect(preparedPlayRoleSchema.safeParse({ ...roles[0], status: "ready", actorId: undefined }).success).toBe(false);
+});
+
+it("admits a bodily entry without a named location or plan only with independent real action and driver witnesses", async () => {
+  const { bundle, roster } = fixture();
+  const opening = bundle.canonical.initialWorld!;
+  opening.delta.operations = opening.delta.operations.filter(op => !("entityId" in op && op.entityId === "hero" && "field" in op && ["character.location", "character.plan"].includes(op.field)));
+  opening.delta.operations.push({ op: "set", entityId: "hero", field: "character.posture", value: "lying" });
+  opening.actorObservations = [{ actorId: "hero", summary: "You are lying down." }];
+  bundle.canonical.actionSchemas = [selfActionFixture("character.posture", "lying", "sitting")];
+  const result = await probeMajorRoleEntries(bundle, roster, "c".repeat(64));
+  expect(result.contractVersion).toBe("entry-capability/v2");
+  const hero = result.roles.find(role => role.actorId === "hero")!;
+  expect(hero.status).toBe("ready");
+  expect(hero.actionWitness?.effects.stateDelta?.operations).toEqual([{ op: "set", entityId: "hero", field: "character.posture", value: "sitting" }]);
+  expect(hero.driverWitness?.events[0]!.event.actorId).toBe("courier");
+  const assessment = { subjectSnapshotHash: preparedSubjectHash(bundle), fullNovelReady: true, playability: result } as NovelClosureAssessment;
+  expect(describePreparedRoles(bundle, assessment).find(role => role.actorId === "hero")?.status).toBe("ready");
+  delete result.contractVersion;
+  expect(describePreparedRoles(bundle, assessment).find(role => role.actorId === "hero")?.status).toBe("blocked");
+  bundle.canonical.actionSchemas = [];
+  const withoutAction = await probeMajorRoleEntries(bundle, roster, "c".repeat(64));
+  const blocked = withoutAction.roles.find(role => role.actorId === "hero")!;
+  expect(blocked.driverWitness).toBeDefined();
+  expect(blocked.status).toBe("blocked");
+  expect(blocked.issues[0]?.message).toContain("ENTRY_ACTION_UNPROVEN");
 });
 
 

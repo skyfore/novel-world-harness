@@ -694,7 +694,7 @@ describe("compiler audit", () => {
     expect(report.sources).toMatchObject({ registered: 1, changedSinceIngest: [] });
     expect(report.canonical.entities).toBe(1);
     expect(report.evidence.invalidReferences).toBe(0);
-    expect(report.notes[0]).toContain(`scoped to source ${selected.source.id}`);
+    expect(report.notes).toContainEqual(expect.stringContaining(`scoped to source ${selected.source.id}`));
   });
 
   it("reports controlled character semantics without collapsing dispositions, appraisals, and development", async () => {

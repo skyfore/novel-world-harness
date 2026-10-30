@@ -1,3 +1,4 @@
+import { BODILY_STATE_FIELDS } from "./bodily-state.js";
 import type {
   Entity,
   EntityId,
@@ -11,6 +12,7 @@ import type {
 } from "./model.js";
 import { compareStoryTime } from "./time.js";
 import { RELATIONSHIP_TYPE_IDS } from "./relationship-ontology.js";
+import { identityConsumptionIssues } from "./identity-consumption.js";
 
 export class StateSchemaRegistry {
   private readonly specs = new Map<string, StateFieldSpec>();
@@ -35,6 +37,8 @@ export class StateSchemaRegistry {
   }
 
   validateOperation(operation: StateOperation, entities: ReadonlyMap<EntityId, Entity>): void {
+    const identityIssues = identityConsumptionIssues(operation, entities, this.specs);
+    if (identityIssues.length) throw new Error(identityIssues.map(i => `${i.code}: ${i.message} at ${i.path}`).join("; "));
     if (operation.op === "activate-rule" || operation.op === "deactivate-rule") return;
     const entity = entities.get(operation.entityId);
     if (!entity) throw new Error(`Unknown entity: ${operation.entityId}`);
@@ -71,6 +75,8 @@ export class StateSchemaRegistry {
         if (spec.maximum !== undefined && value > spec.maximum) throw new Error(`${spec.key} must be <= ${spec.maximum}`);
         break;
       case "string":
+        if (typeof value !== "string") throw new Error(`Expected string for ${spec.key}`);
+        break;
       case "json-scalar":
         if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
           throw new Error(`Expected scalar for ${spec.key}`);
@@ -132,11 +138,12 @@ export const DEFAULT_STATE_FIELDS: StateFieldSpec[] = [
   { key: "character.experience", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "engine", minimum: 0 },
   { key: "character.reputation", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "knowledge", minimum: -1, maximum: 1 },
   { key: "character.wealth", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "self" },
-  { key: "character.location", appliesTo: ["character"], valueType: "entity-ref", cardinality: "one", visibility: "self" },
+  { key: "character.location", appliesTo: ["character"], valueType: "entity-ref", cardinality: "one", visibility: "self", entryContext: "spatial" },
   { key: "character.faction", appliesTo: ["character"], valueType: "entity-ref", cardinality: "one", visibility: "self" },
   { key: "character.title", appliesTo: ["character"], valueType: "string", cardinality: "one", visibility: "public" },
-  { key: "character.plan", appliesTo: ["character"], valueType: "string", cardinality: "one", visibility: "self" },
-  { key: "character.momentum", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "engine" },
+  { key: "character.plan", appliesTo: ["character"], valueType: "string", cardinality: "one", visibility: "self", entryContext: "intentional" },
+  { key: "character.momentum", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "engine", entryContext: "dynamic" },
+  ...BODILY_STATE_FIELDS,
   { key: "character.relationships", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" },
   { key: "character.obligations", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" },
   { key: "character.inventory", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" },

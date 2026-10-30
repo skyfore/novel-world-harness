@@ -3,7 +3,6 @@ import { compileCommand, type CompileCommandOptions } from "../commands/compile.
 import { compileSourceCommand, type CompileSourceOptions } from "../commands/compile-source.js";
 import { INITIAL_WORLD_PROMPT } from "../commands/prepare-all.js";
 import { prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld, type CompilerBatch } from "../compiler/batches.js";
-import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import {
   ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
   EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
@@ -27,6 +26,8 @@ import { readPreparationSnapshot } from "./preparation-projection.js";
 import { reviewNovelRoles } from "../workflow/role-review.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { compileNovelWithLoop, type SupervisedCompileOptions } from "../commands/compile-novel-loop.js";
+import { inspectCompileLoop } from "../runtime/compile-loop/state.js";
 
 const OPENING_DISABLED_TOOLS = [
   "propose_state_delta",
@@ -36,19 +37,19 @@ const OPENING_DISABLED_TOOLS = [
 ] as const;
 
 export interface PreparationDependencies {
+  compileNovel(options: SupervisedCompileOptions): Promise<unknown>;
   compileSource(options: CompileSourceOptions): Promise<void>;
   compileOpening(options: CompileCommandOptions): Promise<void>;
   prepareOpeningBatch(root: string, source: Parameters<typeof prepareOpeningWorldCompilerBatch>[1]): ReturnType<typeof prepareOpeningWorldCompilerBatch>;
-  proposeFallback(root: string, source: Parameters<typeof proposeMinimalOpeningWorld>[1]): Promise<string>;
-  rejectBatchProposals(root: string, batchId: string): Promise<string[]>;
+  proposeFallback(root: string, source: Parameters<typeof proposeMinimalOpeningWorld>[1]): Promise<never>;
 }
 
 const defaultDependencies: PreparationDependencies = {
+  compileNovel: compileNovelWithLoop,
   compileSource: compileSourceCommand,
   compileOpening: compileCommand,
   prepareOpeningBatch: prepareOpeningWorldCompilerBatch,
   proposeFallback: proposeMinimalOpeningWorld,
-  rejectBatchProposals: rejectPendingCompilerBatchProposals,
 };
 
 export interface PreparationApplicationServiceOptions {
@@ -88,6 +89,16 @@ export class PreparationApplicationService {
     }
     await this.requireSource(sourceId);
     this.assertNoActiveCompilerOperation(sourceId);
+    if (input.mode === "all") {
+      const inspection = await inspectPreparation(this.root, { sourceId, ...(input.branchId ? { branchId: input.branchId } : {}) });
+      if (["repair", "create-branch", "ready"].includes(inspection.stage)) {
+        this.assertNoActiveCompilerOperation(sourceId);
+        // The supervisor and Pi own their durable traces. An additional running
+        // prepare trace here would look like unsettled model work to recovery.
+        return this.options.operations.start({ kind: "prepare", scopeId: sourceId, clientRequestId: input.clientRequestId,
+          request: input, run: context => this.runSupervisedPreparation(sourceId, input, context) });
+      }
+    }
     const recorder = await TraceRecorder.start(this.options.traceStore, {
       kind: "prepare",
       sourceId,
@@ -115,6 +126,25 @@ export class PreparationApplicationService {
       await recorder.finish("failed", {}, traceError(error)).catch(() => undefined);
       throw error;
     }
+  }
+
+  private async runSupervisedPreparation(sourceId: string, input: PrepareNovelRequest, context: OperationRunContext): Promise<PreparationSnapshot> {
+    context.signal.throwIfAborted();
+    this.assertSupervisorAllowsPreparation(sourceId);
+    const progress = new PreparationProgress(context);
+    progress.phase("continuing-novel-compilation");
+    // Supervisor reservations and partial worker commits are durable. Cancelling
+    // this operation must never imply rollback of its original attempt history.
+    progress.markMutation("novel-compilation-dispatch");
+    await this.dependencies.compileNovel({ root: this.root, sourceId,
+      ...(this.options.configPath ? { configPath: this.options.configPath } : {}),
+      ...(input.model ?? this.options.model ? { model: input.model ?? this.options.model } : {}),
+      ...(input.branchId ? { branchId: input.branchId } : {}),
+      signal: context.signal, onProgress: message => progress.log(message) });
+    progress.flush();
+    const result = await this.inspect(sourceId, input.branchId);
+    this.options.events.publish("catalog.invalidated", { reason: "preparation-finished", sourceId, stage: result.stage }, { operationId: context.operationId });
+    return result;
   }
 
   private async runWithTrace(
@@ -153,6 +183,7 @@ export class PreparationApplicationService {
     const workspace = await WorkspaceStore.create(this.root);
     const source = await workspace.getSource(sourceId);
     if (!source) throw new Error(`Unknown source id: ${sourceId}`);
+    this.assertSupervisorAllowsPreparation(sourceId);
     const before = await inspectPreparation(this.root, { sourceId, ...(input.branchId ? { branchId: input.branchId } : {}) });
     const progress = new PreparationProgress(context);
     progress.log(`Preparation stage is '${before.stage}'.`);
@@ -212,20 +243,15 @@ export class PreparationApplicationService {
         });
       } catch (error) {
         context.signal.throwIfAborted();
-        const rejected = await this.dependencies.rejectBatchProposals(this.root, openingBatch.id);
-        progress.log(`Opening-world model pass failed; rejected ${rejected.length} partial proposal(s) before deterministic fallback.`);
+        progress.log(`Opening-world model pass failed: ${error instanceof Error ? error.message : String(error)}`);
+        await recorder.failStage(stage, error);
+        throw error;
       }
       context.signal.throwIfAborted();
       inspection = await inspectPreparation(this.root, { sourceId, ...(input.branchId ? { branchId: input.branchId } : {}) });
       if (inspection.stage === "needs-initial-world" && inspection.pending.length === 0) {
-        const fallbackId = await this.dependencies.proposeFallback(this.root, source);
-        progress.markMutation("fallback-proposal", { proposalId: fallbackId });
-        await recorder.record("validation.completed", {
-          outcome: "fallback-proposal-created",
-          proposalId: fallbackId,
-          authority: "proposal-only",
-        }, stage);
-        progress.log(`Created restricted opening-world fallback proposal '${fallbackId}'.`);
+        try { await this.dependencies.proposeFallback(this.root, source); }
+        catch (error) { await recorder.failStage(stage, error); throw error; }
       }
       progress.flush();
       await recorder.finishStage(stage, { compilerBatchId: openingBatch.id });
@@ -248,6 +274,11 @@ export class PreparationApplicationService {
     }
 
     return this.inspect(sourceId, input.branchId);
+  }
+
+  private assertSupervisorAllowsPreparation(sourceId: string): void {
+    const supervision = inspectCompileLoop(this.root, sourceId);
+    if (supervision?.phase === "BREAK") throw new Error(`COMPILE_LOOP_RETAINED_STOP: ${supervision.reason}. Inspect nwh compile-novel plan --source ${sourceId} and resolve the original host condition before resuming the retained supervisor. Browser preparation cannot renew consumed stages or budgets; do not retry unchanged.`);
   }
 
   private async requireSource(sourceId: string): Promise<void> {

@@ -13,6 +13,7 @@ import { webError } from "../web/errors.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { NovelClosureStore, preparedSubjectHash } from "../compiler/certification.js";
 import { describePreparedRoles } from "../world/play-roles.js";
+import { inspectCompileLoop } from "../runtime/compile-loop/state.js";
 
 export async function readPreparationSnapshot(
   rootValue: string,
@@ -48,6 +49,13 @@ export async function readPreparationSnapshot(
   }
   const totalBatches = inspection.totalBatches;
   const completedBatches = Math.min(inspection.completedBatches, totalBatches);
+  const repairReasons = [...(inspection.repairReasons ?? [])];
+  try {
+    const supervision = inspectCompileLoop(root, sourceId);
+    if (supervision?.phase === "BREAK") repairReasons.push(`BREAK: ${supervision.reason}`);
+  } catch (error) {
+    repairReasons.push(`COMPILATION_SUPERVISION_UNAVAILABLE: ${String(error)}; inspect the original compile-novel status before recovery; do not reset or retry unchanged.`);
+  }
   let closure: PreparationSnapshot["closure"];
   if (["create-branch", "ready"].includes(inspection.stage)) {
     try {
@@ -80,7 +88,7 @@ export async function readPreparationSnapshot(
       accepted: accepted.length,
       rejected: rejected.length,
     },
-    repairReasons: inspection.repairReasons ?? [],
+    repairReasons,
     ...(closure ? { closure } : {}),
     ...(inspection.audit ? { audit: projectAudit(inspection.audit) } : {}),
     updatedAt: new Date().toISOString(),

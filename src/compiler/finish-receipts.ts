@@ -38,7 +38,7 @@ const identitySchema = z.object({
   const upstream = identity.upstreamRepairIntent;
   if (upstream) {
     const expected = upstream.proposals.map(p => ({ store: p.artifactKind.endsWith("resolution") ? p.artifactKind
-      : p.artifactKind === "canonical-event" || p.artifactKind === "event-participation" ? "world" as const : "annotation" as const,
+      : p.artifactKind === "entity" || p.artifactKind === "initial-world" || p.artifactKind === "canonical-event" || p.artifactKind === "event-participation" ? "world" as const : "annotation" as const,
     proposalId: p.proposalId, hash: p.proposalHash })).sort((a, b) => `${a.store}:${a.proposalId}`.localeCompare(`${b.store}:${b.proposalId}`));
     if (identity.requirementScope || identity.requirementAttempts || Object.keys(identity.metadata).length || upstream.sourceId !== identity.sourceId || upstream.sourceSha256 !== identity.sourceSha256 || contentHash(upstream.input) !== contentHash(identity.input)
       || contentHash(expected) !== contentHash(identity.dependencies.slice().sort((a, b) => `${a.store}:${a.proposalId}`.localeCompare(`${b.store}:${b.proposalId}`)))) ctx.addIssue({ code: "custom", message: "Finish differs from frozen upstream authority" });

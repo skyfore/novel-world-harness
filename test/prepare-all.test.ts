@@ -1,5 +1,6 @@
 import * as roleReview from "../src/workflow/role-review.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
+import { CompilationBlockedError, compilationStopFromError } from "../src/compiler/compilation-stop.js";
 import { useOfflinePreparationBoundary } from "./helpers/offline-preparation.js";
 useOfflinePreparationBoundary();
 import fs from "node:fs/promises";
@@ -197,7 +198,8 @@ describe("prepare-all command", () => {
       proposalId: "upgrade-opening",
       payload: {
         version: 1,
-        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }] },
         evidence: fixture.evidence("Hero waits at the opening."),
       },
       generatedBy: { worker: "test" },
@@ -289,7 +291,7 @@ describe("prepare-all command", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-batches-"));
     roots.push(root);
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
-    const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
+    const fixture = await createEvidenceFixture(root, "Hero waits while the world begins quietly.\n");
     let compileCalls = 0;
 
     const result = await prepareAllCommand({
@@ -308,17 +310,18 @@ describe("prepare-all command", () => {
           kind: "character",
           canonicalName: "Hero",
           aliases: [],
-          evidence: fixture.evidence("The world begins quietly."),
+          evidence: fixture.evidence("Hero waits while the world begins quietly."),
         });
         await new CompilerProposalService(root).submit("initial-world", {
           proposalId: "compiled-initial-world",
           payload: {
             version: 1,
+            participantPresence: [{ entityId: "hero", mode: "physical" }],
             delta: {
               version: 1,
-              operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+              operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }],
             },
-            evidence: fixture.evidence("The world begins quietly."),
+            evidence: fixture.evidence("Hero waits while the world begins quietly."),
           },
           generatedBy: { worker: "test" },
         });
@@ -355,9 +358,10 @@ describe("prepare-all command", () => {
       proposalId: "initial-world",
       payload: {
         version: 1,
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
         delta: {
           version: 1,
-          operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+          operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }],
         },
         evidence: fixture.evidence("Hero waits at the opening."),
       },
@@ -420,9 +424,10 @@ describe("prepare-all command", () => {
     });
     await new InitialWorldStore(root).put({
       version: 1,
+      participantPresence: [{ entityId: "second-hero", mode: "physical" }],
       delta: {
         version: 1,
-        operations: [{ op: "set", entityId: "second-hero", field: "character.alive", value: true }],
+        operations: [{ op: "set", entityId: "second-hero", field: "character.alive", value: true }, { op: "set", entityId: "second-hero", field: "character.plan", value: "wait" }],
       },
       evidence: second.evidence("Second Hero waits."),
     });
@@ -498,7 +503,8 @@ describe("prepare-all command", () => {
           proposalId: "fallback-opening",
           payload: {
             version: 1,
-            delta: { version: 1, operations: [] },
+            participantPresence: [{ entityId: "playable-hero", mode: "physical" }],
+            delta: { version: 1, operations: [{ op: "set", entityId: "playable-hero", field: "character.alive", value: true }, { op: "set", entityId: "playable-hero", field: "character.plan", value: "wait" }] },
             evidence: fixture.evidence("Hero waits."),
           },
           generatedBy: { worker: "test" },
@@ -511,7 +517,6 @@ describe("prepare-all command", () => {
     await expect(proposals.store.list("pending")).resolves.toEqual([]);
     await expect(proposals.store.list("rejected")).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "entity-invalid" }),
-      expect.objectContaining({ id: "fallback-opening" }),
     ]));
   });
 
@@ -519,7 +524,7 @@ describe("prepare-all command", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-initial-"));
     roots.push(root);
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
-    const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
+    const fixture = await createEvidenceFixture(root, "Hero waits while the world begins quietly.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
     await new CanonicalModelStore(root).putEntity({
@@ -527,7 +532,7 @@ describe("prepare-all command", () => {
       kind: "character",
       canonicalName: "Hero",
       aliases: [],
-      evidence: fixture.evidence("The world begins quietly."),
+      evidence: fixture.evidence("Hero waits while the world begins quietly."),
     });
     let initialCompilerCalls = 0;
 
@@ -546,9 +551,9 @@ describe("prepare-all command", () => {
         expect(options.compilerBatchId).toMatch(/^opening-batch-/);
         expect(options.sourceId).toBe(fixture.source.id);
         expect(options.prompt).toContain("<source-segment");
-        expect(options.prompt).toContain("The world begins quietly.");
+        expect(options.prompt).toContain("Hero waits while the world begins quietly.");
         expect(options.prompt).toContain("one explicit world-time cut");
-        expect(options.prompt).toContain("Later discourse may establish a pre-checkpoint fact");
+        expect(options.prompt).toContain("mark it later-discourse-preexisting");
         expect(options.prompt).toContain("never counterpart character IDs");
         expect(options.prompt).toContain("same-finish new-entity resolution");
         expect(options.prompt).toContain("Every proposal envelope ID in this pass must end with -repair-test-run");
@@ -559,8 +564,9 @@ describe("prepare-all command", () => {
           proposalId: "generated-initial-world-repair-test-run",
           payload: {
             version: 1,
-            delta: { version: 1, operations: [] },
-            evidence: fixture.evidence("The world begins quietly."),
+            participantPresence: [{ entityId: "hero", mode: "physical" }],
+            delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }] },
+            evidence: fixture.evidence("Hero waits while the world begins quietly."),
           },
           generatedBy: { worker: "test" },
         });
@@ -701,7 +707,8 @@ describe("prepare-all command", () => {
           proposalId: "replacement-initial-world",
           payload: {
             version: 1,
-            delta: { version: 1, operations: [] },
+            participantPresence: [{ entityId: "hero", mode: "physical" }],
+            delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }] },
             evidence: batches[2]!.evidence,
           },
           generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
@@ -717,11 +724,11 @@ describe("prepare-all command", () => {
     });
   });
 
-  it("uses the restricted single-character opening fallback when the model pass fails", async () => {
+  it.each(["provider", "engineering", "domain", "missing-opening"])("preserves the actual opening outcome without synthesizing truth: %s", async failure => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-initial-fallback-"));
     roots.push(root);
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
-    const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
+    const fixture = await createEvidenceFixture(root, "Hero waits while the world begins quietly.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
     await new CanonicalModelStore(root).putEntity({
@@ -729,42 +736,48 @@ describe("prepare-all command", () => {
       kind: "character",
       canonicalName: "Hero",
       aliases: [],
-      evidence: fixture.evidence("The world begins quietly."),
+      evidence: fixture.evidence("Hero waits while the world begins quietly."),
     });
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
+    const recovery = { kind: "semantic-repair" as const, sourceId: fixture.source.id, phase: "opening" as const,
+      taskIds: ["phase:opening"], action: "inspect-compilation-plan" as const };
+    const original = failure === "domain" ? new CompilationBlockedError("Source context is unresolved", recovery)
+      : failure === "engineering" ? new TypeError("Broken compiler adapter") : new Error("provider unavailable", { cause: new Error("connection failed") });
+    const result = prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },
       compileInitialWorld: async (options) => {
+        if (failure === "missing-opening") return;
         await new CompilerProposalService(root).submit("initial-world", {
           proposalId: "partial-model-opening",
           payload: {
             version: 1,
             delta: { version: 1, operations: [] },
-            evidence: fixture.evidence("The world begins quietly."),
+            evidence: fixture.evidence("Hero waits while the world begins quietly."),
           },
           generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
         });
-        throw new Error("provider unavailable");
+        throw original;
       },
       converge: convergeWorldProposals,
       createBranch: worldCreateCommand,
     });
 
-    expect(result.stage).toBe("ready");
-    await expect(new InitialWorldStore(root).get()).resolves.toMatchObject({
-      delta: { operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
-      evidence: [expect.objectContaining({ span: expect.objectContaining({ sourceId: fixture.source.id }) })],
-    });
-    await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toContainEqual(
-      expect.objectContaining({ id: "partial-model-opening" }),
-    );
+    if (failure === "missing-opening") await expect(result).rejects.toMatchObject({ recovery });
+    else {
+      await expect(result).rejects.toBe(original);
+      expect(compilationStopFromError(await result.catch(error => error))).toEqual(failure === "domain" ? recovery : undefined);
+      await expect(new CompilerProposalService(root).store.list("pending")).resolves.toContainEqual(expect.objectContaining({ id: "partial-model-opening" }));
+    }
+    await expect(new InitialWorldStore(root).get()).resolves.toBeNull();
+    expect(await new BranchStore(root).listIds()).toEqual([]);
+    await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toEqual([]);
   });
 
   it("preserves staged opening drafts and the original failure when the journal is unresolved", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-initial-fallback-"));
     roots.push(root);
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
-    const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
+    const fixture = await createEvidenceFixture(root, "Hero waits while the world begins quietly.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
     await new CanonicalModelStore(root).putEntity({
@@ -772,7 +785,7 @@ describe("prepare-all command", () => {
       kind: "character",
       canonicalName: "Hero",
       aliases: [],
-      evidence: fixture.evidence("The world begins quietly."),
+      evidence: fixture.evidence("Hero waits while the world begins quietly."),
     });
 
     const result = prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
@@ -783,7 +796,7 @@ describe("prepare-all command", () => {
           payload: {
             version: 1,
             delta: { version: 1, operations: [] },
-            evidence: fixture.evidence("The world begins quietly."),
+            evidence: fixture.evidence("Hero waits while the world begins quietly."),
           },
           generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
         });
@@ -805,7 +818,7 @@ describe("prepare-all command", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-nontty-"));
     roots.push(root);
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
-    const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
+    const fixture = await createEvidenceFixture(root, "Hero waits while the world begins quietly.\n");
 
     await expect(prepareAllCommand({ root, sourceId: fixture.source.id, cacheRoot: path.join(root, "prepared-cache") }))
       .rejects.toThrow("Re-run with --yes");

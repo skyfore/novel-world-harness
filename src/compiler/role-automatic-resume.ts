@@ -446,11 +446,11 @@ export async function inspectAutomaticRoleResume(store: RoleReviewWorkStore, pag
   store.journal.assertModelRecoveryAllowed();
   const unresolved = store.journal.unresolved();
   const traces = new TraceStore(store.root);
-  // Bounded discovery fails closed when an older original trace is outside the
-  // window. It never selects an earlier failure behind a newer invocation.
+  // Inspect the latest matching work invocation across the complete operation
+  // history; unrelated newer traces cannot hide the original failure.
   let selected: { run: Awaited<ReturnType<TraceStore["peekRun"]>>; events: Awaited<ReturnType<TraceStore["peekEvents"]>> } | undefined;
-  for (const run of await traces.peekRuns({ sourceId: store.plan.sourceId, kind: "prepare", limit: 1000 })) {
-    if (run.operationId !== store.plan.batchId) continue;
+  for (const run of await traces.peekRunsByOperation(store.plan.sourceId, store.plan.batchId)) {
+    if (run.kind !== "prepare") continue;
     const events = await traces.peekEvents(run.id);
     if (events.some(e => e.data?.phase === "role-review-work" && e.data.workId === workId)) { selected = { run, events }; break; }
   }

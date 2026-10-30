@@ -18,6 +18,8 @@ import { worldStorageRoot } from "../world/paths.js";
 import { buildPreparedClosure, closureGraphSchema } from "./closure.js";
 import { buildRoleRoster, majorRoleCandidates, roleRosterSchema, validateRoleRoster, validateRoleDevelopmentExpectations } from "./role-roster.js";
 import { entryDriverWitnessIssues } from "./entry-driver-probe.js";
+import { entryActionDependencyIssues, entryActionWitnessIssues } from "./entry-action-probe.js";
+import { ENTRY_CONTRACT_VERSION } from "../world/entry-contract.js";
 import { evaluateCoreRoleCapabilities, coreRoleResultIssues } from "./core-role-capabilities.js";
 import { assertCoreRoleDefinitionEvidence, coreRoleDefinitionBindingIssues } from "./core-role-requirement-records.js";
 import { playabilityManifestSchema, probeMajorRoleEntries } from "./playability.js";
@@ -50,9 +52,10 @@ export function preparedSubjectHash(bundle: Pick<PreparedNovelBundle, "version" 
 }
 
 /** Readiness is derived from current frozen inputs. This inspection cannot publish or create a public play session. */
-export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle): Promise<NovelClosureAssessment> {
+export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle,
+  retainedInputIssues: NovelClosureAssessment["issues"] = []): Promise<NovelClosureAssessment> {
   const subjectSnapshotHash = preparedSubjectHash(bundle), closure = buildPreparedClosure(bundle);
-  const issues = [...closure.issues, ...validateFrozenAccounting(bundle)];
+  const issues = [...retainedInputIssues, ...closure.issues, ...validateFrozenAccounting(bundle)];
   issues.push(...upstreamRepairSnapshotIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "UPSTREAM_REPAIR_SNAPSHOT_INVALID", message })));
   issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true).map(message => ({ code: "REQUIREMENT_JOURNAL_INVALID", message })));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));
@@ -132,12 +135,18 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
   if (contentHash(buildSceneExecutionContracts(bundle, assessment.roster).contracts) !== contentHash(assessment.sceneContracts)) issues.push("SCENE_CONTRACT_STALE: scene execution inputs changed");
   if (contentHash(assessSemanticSupport(bundle, assessment.quality?.supportReviews).assessments) !== contentHash(assessment.supportAssessments)) issues.push("SUPPORT_ASSESSMENT_STALE: support review inputs changed");
   if (assessment.playability && (assessment.playability.subjectSnapshotHash !== assessment.subjectSnapshotHash || assessment.playability.rosterHash !== contentHash(assessment.roster))) issues.push("MAJOR_ROLE_ROSTER_MISMATCH: entry probes refer to another source or roster");
+  if (assessment.playability?.contractVersion !== ENTRY_CONTRACT_VERSION) issues.push("ENTRY_CONTRACT_STALE: re-evaluate entries under the current contract; preserve the old assessment and history");
   for (const role of assessment.playability?.roles ?? []) {
     if (!role.actorId) { issues.push(`ENTRY_DRIVER_NOT_EVALUATED: ${role.candidateId}`); continue; }
     try {
       const cut = deriveCharacterEntrySeed(bundle, role.actorId).cut;
       issues.push(...entryDriverWitnessIssues(role.driverWitness, { sourceId: bundle.source.id,
         subjectSnapshotHash: assessment.subjectSnapshotHash, entryCutHash: cut.hash, actorId: role.actorId }));
+      issues.push(...entryActionWitnessIssues(role.actionWitness, { sourceId: bundle.source.id,
+        subjectSnapshotHash: assessment.subjectSnapshotHash, entryCutHash: cut.hash, actorId: role.actorId }));
+      if (role.actionWitness) {
+        issues.push(...entryActionDependencyIssues(role.actionWitness, bundle.canonical));
+      }
     } catch (error) { issues.push(`ENTRY_DRIVER_CUT_INVALID: ${role.candidateId}: ${String(error)}`); }
   }
   return issues;

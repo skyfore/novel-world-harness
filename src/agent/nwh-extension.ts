@@ -233,7 +233,7 @@ TUI shortcuts:
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
 const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
-const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence, whole-source evidence retrieval, and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Treat the human player as an unread reader: in addition to concise readerSetup, populate readerContext with the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, the actual holder and direction of each relevant attitude or social pressure, completed pre-checkpoint beats, and the immediate unresolved situation. These are presentation facts, not actor knowledge. Add an actorObservation for every physically present opening character using only what that actor directly perceives. readerSetup, every readerContext summary/gloss, and every actorObservation summary requires an exact explicit or strong-inference field-level evidence selector; weak inference is insufficient. Use find_source_evidence/read_source_evidence only to recover missing identity, causation, stance, or other preexisting context from later discourse; classify it as later-discourse-preexisting and never import an outcome or development after the checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Establish an actionable lived state only for characters bodily present at the opening, with location, plan, or momentum whenever supported; a catalog-wide alive list is not a scene. Later characters receive separate source-backed entry checkpoints on their first embodied canonical events. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.` + "\n\n" + INITIAL_WORLD_INPUT_GUIDANCE;
+const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence, whole-source evidence retrieval, and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Treat the human player as an unread reader: in addition to concise readerSetup, populate readerContext with the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, the actual holder and direction of each relevant attitude or social pressure, completed pre-checkpoint beats, and the immediate unresolved situation. These are presentation facts, not actor knowledge. Add an actorObservation for every physically present opening character using only what that actor directly perceives. readerSetup, every readerContext summary/gloss, and every actorObservation summary requires an exact explicit or strong-inference field-level evidence selector; weak inference is insufficient. Use find_source_evidence/read_source_evidence only to recover missing identity, causation, stance, or other preexisting context from later discourse; classify it as later-discourse-preexisting and never import an outcome or development after the checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Establish an actionable lived state only for characters bodily present at the opening, with final source-supported operational context under the shared entry contract; retain qualitative bodily facts at their original precision with exact operation evidence. Context grounding still requires independent action and autonomous-driver proofs; a catalog-wide alive list is not a scene. Later characters receive separate source-backed entry checkpoints on their first embodied canonical events. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.` + "\n\n" + INITIAL_WORLD_INPUT_GUIDANCE;
 
 type TuiPrepareAllState = {
   sourceId: string;
@@ -1714,9 +1714,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (inspection.stage === "needs-initial-world") {
         prepareAllHostActivity?.update("Preparing the opening world state");
         if (state.initialWorldAttempted) {
-          let fallbackId: string;
           try {
-            fallbackId = await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
+            await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
           } catch (error) {
             await stopPrepareAll(
               ctx,
@@ -1725,19 +1724,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             );
             return;
           }
-          const result = await convergeWorldProposals(workspace.root, state.sourceId);
-          await quarantineUncommittableProposals(workspace.root, result);
-          ctx.ui.notify(`The model did not leave a valid opening state; accepted the restricted single-character opening fallback ${fallbackId}.`, "warning");
-          const afterFallback = await inspectPreparation(workspace.root, {
-            sourceId: state.sourceId,
-            branchId: state.branchId,
-          });
-          if (afterFallback.stage === "needs-initial-world") {
-            await stopPrepareAll(ctx, "The deterministic opening-state fallback could not be committed. Run nwh audit for conflicting world data.", "error");
-            return;
-          }
-          await advancePrepareAll(ctx);
-          return;
         }
         const decision = await choose(ctx, "Generate opening world?", [
           { value: "generate", label: "Generate proposal", description: "Ask the current compiler session for an evidence-backed opening state.", recommended: true },
@@ -2114,6 +2100,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (reconciliationRequest) prepareAllState!.reconciliationRequestRunning = false;
         const failure = compilerBatchFailure(outcome);
         if (failure) {
+          if (openingRequest) {
+            await stopPrepareAll(ctx, `Opening-state compiler did not complete (${failure}). Preserve the original session, drafts and budgets; inspect the same source/batch and resolve this failure before continuing. No automatic retry or synthesized opening.`, "error");
+            return;
+          }
           const specialBatchId = reconciliationRequest
             ? prepareAllState!.reconciliationBatchId
             : prepareAllState!.initialWorldBatchId;

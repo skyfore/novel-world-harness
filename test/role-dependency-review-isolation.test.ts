@@ -86,7 +86,7 @@ test('freezes only the selected source while retaining its own plans, budgets an
     expect(saved.retainedFiles.some((f: { path: string }) => f.path.includes(h('unrelated-source-B')))).toBe(false);
     expect(saved.retainedFiles.some((f: { path: string }) => f.path.endsWith('usage.json'))).toBe(true);
     await fs.writeFile(path.join(budgetDir, 'usage.json'), JSON.stringify({ consumed: 4 }));
-    await expect(prepareCoreRoleDependencyReview(f.root, input)).rejects.toThrow('Frozen pending denominator revision changed');
+    await expect(prepareCoreRoleDependencyReview(f.root, input)).rejects.toThrow('Original role history file inventory changed');
     await fs.writeFile(path.join(budgetDir, 'usage.json'), JSON.stringify({ consumed: 3 }));
     await fs.writeFile(path.join(workDir, 'v1', h(sourceId), 'running.pending'), 'in flight');
     await expect(prepareCoreRoleDependencyReview(f.root, input)).rejects.toThrow('Unsettled');

@@ -142,7 +142,27 @@ export const agencyProfileSchema = z.object({
 });
 export type AgencyProfile = z.infer<typeof agencyProfileSchema>;
 
-export const entitySchema = z.object({ id: idSchema, kind: entityKindSchema, canonicalName: z.string().min(1), aliases: z.array(z.string().min(1)), evidence: z.array(evidenceRefSchema), agencyProfile: agencyProfileSchema.optional() }).strict();
+/** A retained compiler identity may lack authority for world consumption.
+ * This is a versioned identity decision, never an assertion of another person
+ * or a mutable temporal fact. Absence preserves legacy behavior. */
+const identityConsumptionBasis = {
+  version: z.literal(1), status: z.literal("unresolved"),
+  sourceId: idSchema, mentionId: idSchema, resolutionId: idSchema,
+  resolutionRevisionHash: z.string().regex(/^[a-f0-9]{64}$/),
+  supersedesResolutionIds: z.array(idSchema).min(1), rationale: z.string().trim().min(1),
+};
+export const identityConsumptionSchema = z.discriminatedUnion("mode", [
+  z.object({ ...identityConsumptionBasis, mode: z.literal("quarantined") }).strict(),
+  z.object({ ...identityConsumptionBasis, mode: z.literal("source-local"),
+    // A stable handle for this source occurrence is not a claim that it names a
+    // known person, or a different person from every other handle in the book.
+    referentScope: z.object({ mentionIds: z.array(idSchema).min(1).max(16),
+      crossIdentity: z.literal("unresolved"), distinctness: z.literal("unasserted"),
+    }).strict(),
+  }).strict(),
+]);
+export type IdentityConsumption = z.infer<typeof identityConsumptionSchema>;
+export const entitySchema = z.object({ id: idSchema, kind: entityKindSchema, canonicalName: z.string().min(1), aliases: z.array(z.string().min(1)), evidence: z.array(evidenceRefSchema), agencyProfile: agencyProfileSchema.optional(), identityConsumption: identityConsumptionSchema.optional() }).strict();
 export type Entity = z.infer<typeof entitySchema>;
 
 export const claimSchema = z
@@ -332,6 +352,8 @@ export const stateFieldSpecSchema = z
     cardinality: z.enum(["one", "many"]),
     visibility: stateFieldVisibilitySchema.optional(),
     worldAssumption: z.enum(["open", "closed"]).optional(),
+    /** Grounded entry context, never a certificate that an action is executable. */
+    entryContext: z.enum(["spatial", "intentional", "dynamic", "bodily"]).optional(),
     required: z.boolean().optional(),
     exclusive: z.boolean().optional(),
     minimum: z.number().finite().optional(),
@@ -1971,4 +1993,4 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
 export const WORLD_SCHEMA_VERSION = 3;
-export const WORLD_ENGINE_VERSION = "0.35.0";
+export const WORLD_ENGINE_VERSION = "0.36.0";

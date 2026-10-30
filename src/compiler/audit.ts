@@ -1,4 +1,5 @@
-import { entryArtifactEvidenceIssues, entryAgencyIssues, remoteEntryOccurrenceIssues } from "../world/entry-agency.js";
+import { entryArtifactEvidenceIssues, remoteEntryOccurrenceIssues } from "../world/entry-agency.js";
+import { assessEntryState, groundedEntryActorIds, ENTRY_CONTRACT_VERSION } from "../world/entry-contract.js";
 import { playableEntryActorIds } from "../world/entry-agency.js";
 import { applyEventExecutions, eventExecutionSchema, validateProcessRecoveryEvidence } from "../world/event-execution.js";
 import { validateIncapacityEvidence } from "../world/process-capacity.js";
@@ -10,6 +11,7 @@ import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.j
 import { expressionActionConditionsSatisfied, validateGoalExpressions, validateGoalExpressionEvidence } from "../world/conditional-expression.js";
 import { emptyKnowledgeState } from "../world/knowledge.js";
 import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { validateSourceLocalIdentityEvidence } from "../world/identity-consumption.js";
 import { validateSemanticEffect } from "../world/semantic-effect.js";
 import { selectOpeningDriverActor } from "./opening-driver.js";
 import { ActorModelStore, actorActionHasMaterialEffect, characterGoalHasDevelopmentBoundary, characterGoalSchema, characterModelSchema, evaluateCharacterGoal } from "../world/actors.js";
@@ -694,7 +696,8 @@ export async function auditCompiler(
       invalidAssertions += entryIssues.length;
       evidenceErrors.push(...entryIssues.map(issue => ({ artifact: artifact.name, code: issue.code, message: issue.message })));
       if (artifact.kind === "entity") {
-        const issues = validateAgencyProfileEvidence(artifact.payload as import("../world/model.js").Entity, []);
+        const issues = [...validateAgencyProfileEvidence(artifact.payload as import("../world/model.js").Entity, []),
+          ...validateSourceLocalIdentityEvidence(artifact.payload as import("../world/model.js").Entity, [])];
         invalidAssertions += issues.length;
         evidenceErrors.push(...issues.map(issue => ({ artifact: artifact.name, code: issue.code, message: issue.message })));
       }
@@ -710,7 +713,7 @@ export async function auditCompiler(
       if (artifact.kind === "utterance-expression") { invalidAssertions += 1; evidenceErrors.push({ artifact: artifact.name, code: "EXPRESSION_EVIDENCE_MISSING", message: "Expression has no exact evidence binding; it is unverified." }); }
       if (artifact.kind === "initial-world") {
         const parsedInitialWorld = initialWorldSchema.parse(artifact.payload);
-        if (parsedInitialWorld.readerContext || parsedInitialWorld.actorObservations?.length || parsedInitialWorld.projectionSeed && parsedInitialWorld.participantPresence?.some(item => item.mode === "remote")) {
+        if (validateInitialWorldEvidenceAssertions(parsedInitialWorld, []).length) {
           invalidAssertions += 1;
           evidenceErrors.push({
             artifact: artifact.name,
@@ -759,6 +762,7 @@ export async function auditCompiler(
       ...(artifact.kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(artifact.payload), binding.assertions) : []),
       ...(artifact.kind === "entity" ? validateAgencyProfileEvidence(artifact.payload as import("../world/model.js").Entity, binding.assertions) : []),
+      ...(artifact.kind === "entity" ? validateSourceLocalIdentityEvidence(artifact.payload as import("../world/model.js").Entity, binding.assertions) : []),
       ...validateEvidenceAssertionTargets(artifact.kind, artifact.id, artifact.payload, binding.assertions),
       ...(artifact.kind === "character-model"
         ? validateCharacterOntologyEvidenceAssertions(
@@ -1088,7 +1092,6 @@ export async function auditCompiler(
   const readerSummaryCoverage = events.length
     ? events.filter((event) => Boolean(event.readerSummary?.trim())).length / events.length
     : null;
-  const actionableOpeningFields = new Set(["character.location", "character.plan", "character.momentum"]);
   const physicalOpeningActorIds = new Set(initialWorld?.participantPresence
     ?.filter((presence) => presence.mode === "physical" && characterIds.has(presence.entityId))
     .map((presence) => presence.entityId) ?? []);
@@ -1098,19 +1101,9 @@ export async function auditCompiler(
   };
   const playableOpeningActorIds = initialWorld ? playableEntryActorIds(initialWorld, entryCatalog) : new Set<string>();
   const openingLivePresence = initialWorld ? (playableOpeningActorIds.size ? 1 : 0) : null;
-  const openingActorIds = new Set(initialWorld?.delta.operations.flatMap((operation) =>
-    "entityId" in operation
-    && characterIds.has(operation.entityId)
-    && playableOpeningActorIds.has(operation.entityId)
-    && actionableOpeningFields.has(operation.field)
-      ? [operation.entityId]
-      : []) ?? []);
+  const openingActorIds = initialWorld ? groundedEntryActorIds(initialWorld, entryCatalog) : new Set<string>();
   const openingActionability = initialWorld
-    ? initialWorld.delta.operations.some((operation) =>
-        "entityId" in operation
-        && characterIds.has(operation.entityId)
-        && playableOpeningActorIds.has(operation.entityId)
-        && actionableOpeningFields.has(operation.field)) ? 1 : 0
+    ? openingActorIds.size ? 1 : 0
     : null;
   const openingReaderSetup = initialWorld
     ? (initialWorld.readerSetup?.trim() ? 1 : 0)
@@ -1147,22 +1140,14 @@ export async function auditCompiler(
         firstLiveEventByActor.get(actorId)?.characterEntryCheckpoints?.some((checkpoint) =>
           checkpoint.actorId === actorId
           && !remoteEntryOccurrenceIssues(actorId, checkpoint, firstLiveEventByActor.get(actorId)!, eventParticipations).length
-          && !entryAgencyIssues(actorId, checkpoint, entryCatalog).length
-          && checkpoint.delta.operations.some((operation) =>
-            "entityId" in operation
-            && operation.entityId === actorId
-            && actionableOpeningFields.has(operation.field))))
+          && assessEntryState(actorId, checkpoint, entryCatalog).state === "grounded"))
       .length / laterEntryActors.length
     : null;
   const incompleteEntryActors = laterEntryActors.filter((actorId) =>
     !firstLiveEventByActor.get(actorId)?.characterEntryCheckpoints?.some((checkpoint) =>
       checkpoint.actorId === actorId
       && !remoteEntryOccurrenceIssues(actorId, checkpoint, firstLiveEventByActor.get(actorId)!, eventParticipations).length
-          && !entryAgencyIssues(actorId, checkpoint, entryCatalog).length
-      && checkpoint.delta.operations.some((operation) =>
-        "entityId" in operation
-        && operation.entityId === actorId
-        && actionableOpeningFields.has(operation.field))));
+      && assessEntryState(actorId, checkpoint, entryCatalog).state === "grounded"));
   const autonomousPossibilities = possibilities.filter((possibility) =>
     !["canon-analogue", "player-choice", "actor-plan"].includes(possibility.kind)
     && hasExecutablePossibilityEffect(possibility));
@@ -1256,7 +1241,7 @@ export async function auditCompiler(
               && openingEvidence.span.startLine <= goalEvidence.span.endLine
               && openingEvidence.span.endLine >= goalEvidence.span.startLine)));
         if (!phaseSupported) return false;
-        return evaluateCharacterGoal(goal, {
+        return evaluateCharacterGoal(goal, { entities: entityCatalog,
           state: openingState!,
           knownClaimIds: knownClaimsByActor.get(goal.actorId) ?? new Set(),
           realizedCanonicalEventIds,
@@ -1385,7 +1370,7 @@ export async function auditCompiler(
       semanticRepairInitialWorld = true;
     }
     if (initialWorld && openingActionability !== 1) {
-      semanticIssues.push("The initial world has no grounded opening character location, plan, or momentum; it is not an actionable lived checkpoint.");
+      semanticIssues.push("The initial world has no grounded final operational context for a live entry role under the shared entry contract; inspect source-supported state before action and driver evaluation.");
       semanticRepairInitialWorld = true;
     }
     if (initialWorld && openingActorObservation !== 1) {
@@ -1846,6 +1831,7 @@ export async function auditCompiler(
       blockingIssues: readinessBlockingIssues,
     },
     notes: [
+      `${ENTRY_CONTRACT_VERSION}: openingActionability records grounded final entry context only; independent action and autonomous-driver witnesses are still required.`,
       ...(options.sourceId ? [`Audit is scoped to source ${options.sourceId}; unrelated registered sources and artifacts are excluded.`] : []),
       "Null coverage values are intentional: the compiler does not have a trustworthy denominator for those dimensions yet.",
       "Readiness states distinguish ready, not-ready, and unknown; unknown required dimensions prevent publication readiness.",

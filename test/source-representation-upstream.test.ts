@@ -9,6 +9,15 @@ import { prepareUpstreamRepairFinish } from "../src/compiler/upstream-repair-fin
 import { sourceUpstreamDirectory, verifySourceUpstreamAcceptance } from "../src/compiler/source-representation-acceptance.js";
 import { runSourceRepresentationUpstream } from "../src/workflow/source-representation-upstream.js";
 import { representationFixture, cleanupRepresentationFixtures } from "./helpers/source-representation.js";
+import { upstreamRepairSnapshotIssues } from "../src/compiler/upstream-repair-snapshot.js";
+import { captureReconciliationObligations } from "../src/compiler/reconciliation-review-ledger.js";
+import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
+import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { InitialWorldStore } from "../src/world/initial.js";
+import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { settleUpstreamRepairRequirements } from "../src/compiler/upstream-repair-evaluation.js";
+import { withWorkspaceOperationLock } from "../src/util/workspace-lock.js";
+import { retainedUpstreamReviewPrefix } from "../src/compiler/upstream-review-prefix.js";
 
 afterEach(cleanupRepresentationFixtures);
 // This runs prerequisite review, representation review, staging and acceptance
@@ -65,6 +74,47 @@ it.each([false, true])("requires real isolated typed staging and acceptance befo
   expect((await f.ledger.history()).filter(r => r.payload.kind === "role-review-question-disposition").every(r => r.payload.kind === "role-review-question-disposition" && r.payload.disposition.status === "blocked")).toBe(true);
   await expect(runSourceRepresentationUpstream(args)).rejects.toThrow(/already reserved/); expect(sessions).toBe(2);
   if (!negative) {
+    const snapshot = { upstreamRepairJournal: upstream.records, requirementJournal: await f.ledger.history(),
+      reconciliationObligations: await captureReconciliationObligations(f.root, sourceId) };
+    expect(upstreamRepairSnapshotIssues(snapshot, sourceId, f.f.source.contentSha256)).toEqual([]);
+    expect(upstreamRepairSnapshotIssues({ ...snapshot, reconciliationObligations: [] }, sourceId, f.f.source.contentSha256))
+      .toContain("UPSTREAM_REPAIR_FINISH_RECEIPT_MISSING");
+    const batches = await prepareCompilerBatches(f.root, f.f.source);
+    await new CompilerBatchStore(f.root).replaceCompleted(sourceId, batches.map(b => b.id));
+    await new CanonicalModelStore(f.root).putEntity({ id: "ada", kind: "character", canonicalName: "Ada", aliases: [], evidence: f.f.evidence("Ada") });
+    await new InitialWorldStore(f.root).put({ version: 1, evidence: f.f.evidence("Ada waits."), delta: { version: 1,
+      operations: [{ op: "set", entityId: "ada", field: "character.alive", value: true }] } });
+    const cache = new PreparedNovelCache(f.root, path.join(f.root, "prepared-cache"));
+    const bundle = await cache.candidateSnapshot(f.f.source);
+    expect(bundle.compilerSnapshot.requirementJournal).toEqual(snapshot.requirementJournal);
+    const result = await withWorkspaceOperationLock(f.root, "compiler", () => settleUpstreamRepairRequirements(f.root, sourceId));
+    expect(result.issues).toEqual([]);
+    const evaluated = await new UpstreamRepairLedger(f.root, sourceId).inspect();
+    expect(evaluated.plans[0]!.state).toBe("evaluated");
+    const prefix = retainedUpstreamReviewPrefix(snapshot.upstreamRepairJournal);
+    expect(evaluated.records.slice(0, prefix.length)).toEqual(snapshot.upstreamRepairJournal);
+    expect(retainedUpstreamReviewPrefix(evaluated.records, prefix)).toEqual(prefix);
+    expect(() => retainedUpstreamReviewPrefix(evaluated.records, { ...prefix, head: contentHash("changed") })).toThrow(/prefix/);
+    expect(() => retainedUpstreamReviewPrefix([...evaluated.records, snapshot.upstreamRepairJournal[0]!], prefix)).toThrow(/authority changed/);
+    expect(await cache.loadActive(f.f.source)).toBeNull();
+    expect(sessions).toBe(2); // Deterministic settlement must not replay Pi work.
+    // A retained invalid consumer must not erase accepted source-local results,
+    // or become an executable baseline just because those results passed.
+    const invalidOpening = { version: 1 as const, evidence: f.f.evidence("Ada waits."), delta: { version: 1 as const,
+      operations: [{ op: "set" as const, entityId: "missing-consumer", field: "character.alive", value: true }] } };
+    await new InitialWorldStore(f.root).put(invalidOpening);
+    const blocked = await withWorkspaceOperationLock(f.root, "compiler", () => settleUpstreamRepairRequirements(f.root, sourceId));
+    expect(blocked.results[0]!.result.requirements.every(r => r.state === "satisfied")).toBe(true);
+    expect(blocked.issues.some(i => i.includes("SOURCE_ISOLATED_BASELINE_INVALID"))).toBe(true);
+    const inspection = await cache.inspectRepairCandidate(f.f.source);
+    expect(inspection.bundle.canonical.initialWorld).toEqual(invalidOpening);
+    expect(inspection.assessment.fullNovelReady).toBe(false);
+    await expect(cache.archiveCandidate(f.f.source)).rejects.toThrow("Cannot cache source-isolated baseline");
+    const { observeUpstreamRepairEvaluationValidity } = await import("../src/compiler/upstream-repair-evaluation.js");
+    const beforeObservation = await new UpstreamRepairLedger(f.root, sourceId).history();
+    await observeUpstreamRepairEvaluationValidity(f.root, sourceId);
+    expect(await new UpstreamRepairLedger(f.root, sourceId).history()).toEqual(beforeObservation);
+    expect(sessions).toBe(2);
     const accepted = await verifySourceUpstreamAcceptance(f.root, plan);
     expect(accepted.output.judgments.every(j => j.verdict === "supported")).toBe(true);
     const file = path.join(directory, "acceptance.record.json"), forged = structuredClone(accepted);

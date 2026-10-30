@@ -826,7 +826,7 @@ describe("compiler batches", () => {
     );
 
     await expect(proposeMinimalOpeningWorld(root, source)).rejects.toThrow(
-      "Cannot synthesize a deterministic alive-only opening for long-form source",
+      "ENTRY_CONTEXT_REQUIRES_SOURCE_REVIEW",
     );
   });
 

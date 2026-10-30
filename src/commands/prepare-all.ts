@@ -8,7 +8,6 @@ import { worldStorageRoot } from "../world/paths.js";
 import { reconciliationAuditResults } from "../compiler/reconciliation-review.js";
 import { INITIAL_WORLD_INPUT_GUIDANCE } from "../compiler/initial-world-preflight.js";
 import path from "node:path";
-import { CompilerHostReviewRequiredError, CompilerProposalObligations } from "../compiler/proposal-obligations.js";
 import { CompilerFinishReceipts } from "../compiler/finish-receipts.js";
 import { reviewNovelRoles } from "../workflow/role-review.js";
 import { stdout } from "node:process";
@@ -21,7 +20,6 @@ import { askUserQuestion, recommendedAnswer, type AskUserQuestion } from "../uti
 import { compileCommand } from "./compile.js";
 import { compileSourceCommand } from "./compile-source.js";
 import { prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld } from "../compiler/batches.js";
-import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { ingestWorkspaceSource } from "./ingest.js";
 import { worldCreateCommand } from "./world.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
@@ -390,15 +388,10 @@ export async function prepareAllCommand(
     } catch (error) {
       options.signal?.throwIfAborted();
       report(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}`);
-      // Host-review and interrupted proposal/finish state must survive intact.
-      // Rejection/fallback is never a way to settle a durable compiler failure.
-      const obligations = new CompilerProposalObligations(root, sourceId, openingBatch.id);
-      if (error instanceof CompilerHostReviewRequiredError
-        || /host review|host-repair-required/i.test(error instanceof Error ? error.message : String(error))
-        || obligations.unresolved().length
-        || await new CompilerFinishReceipts(root, sourceId, openingBatch.id).read()) throw error;
-      const rejected = await rejectPendingCompilerBatchProposals(root, openingBatch.id);
-      if (rejected.length) report(`Rejected ${rejected.length} partial opening-state proposal(s) before fallback.`);
+      // A failed invocation is not evidence of a semantic gap. Preserve its
+      // exact cause and drafts for the owning recovery path, including typed
+      // domain stops; only a settled pass may reach the missing-opening gate.
+      throw error;
     }
     inspection = await inspectPreparation(root, { sourceId, branchId });
     if (inspection.pending.length) {
@@ -417,12 +410,9 @@ export async function prepareAllCommand(
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
     if (inspection.stage === "needs-initial-world") {
-      const fallbackId = await proposeMinimalOpeningWorld(root, inspection.source!, {
+      await proposeMinimalOpeningWorld(root, inspection.source!, {
         ...(options.reparseRunId ? { proposalIdSuffix: options.reparseRunId } : {}),
       });
-      report(`No valid model opening state remained; created the restricted single-character opening fallback ${fallbackId}.`);
-      await convergeForPreparation(root, sourceId, dependencies.converge, report);
-      inspection = await inspectPreparation(root, { sourceId, branchId });
     }
   }
 

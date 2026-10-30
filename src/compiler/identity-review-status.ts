@@ -2,10 +2,48 @@ import { contentHash } from "../world/canonical.js";
 import { identityConsumerShardReady, identityDefinitionGaps, identityRequirementsReady, sameIdentitySet,
   validateIdentityHistory, type IdentityRecord } from "./identity-requirements.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
+import { consumerRevalidationId, validateConsumerRevalidationHistory, type ConsumerRevalidationRecord } from "./identity-consumer-revalidation-model.js";
+import type { ConsumerRevalidationAttempt } from "./identity-consumer-attempt-status.js";
+
+/** Receipt-bound reviews are additional evidence. They never replace the old
+ * shard denominator or turn support for a blocked decision into clearance. */
+export function consumerRevalidationStatus(original: IdentityRecord[], records: ConsumerRevalidationRecord[]) {
+  const groups = new Map<string, ConsumerRevalidationRecord[]>();
+  for (const record of records) {
+    const id = consumerRevalidationId(record.scope), group = groups.get(id) ?? [];
+    group.push(record); groups.set(id, group);
+  }
+  const reviews = [...groups.entries()].map(([id, group]) => {
+    validateConsumerRevalidationHistory(group, original);
+    const first = group[0]!, proposal = first.output, check = group[1]?.output;
+    if (proposal.phase !== "consumer-revalidation") throw prerequisiteStop("Consumer revalidation lost its original proposal; inspect the same task without redispatch");
+    const independent = check?.phase === "consumer-revalidation-check" ? check : null;
+    return { id, ref: first.scope.ref, scopeHash: contentHash(first.scope), upstreamPlanHash: first.scope.upstreamPlanHash,
+      receiptFingerprint: first.scope.receiptFingerprint, currentRevisionHash: first.scope.currentRevisionHash,
+      proposalRecordHash: contentHash(first), checkRecordHash: group[1] ? contentHash(group[1]) : null,
+      disposition: proposal.disposition, independentVerdict: independent?.verdict ?? null,
+      status: !independent ? "awaiting-independent-check" as const : independent.verdict === "blocked" ? "blocked" as const : proposal.disposition,
+      rationale: proposal.rationale, independentRationale: independent?.rationale ?? null,
+      blockedRequirements: proposal.requirements.filter(r => r.verdict === "blocked"),
+      retainedQuestionIds: proposal.retainedQuestionIds, initialWorldRepair: proposal.initialWorldRepair,
+      entityRepair: proposal.entityRepair ?? null, compilerCorrection: first.scope.compilerCorrection ?? null };
+  });
+  const latest = [...new Map(reviews.map(r => [r.ref, r])).values()];
+  const total = original[0]?.intent.consumerShards.reduce((n, s) => n + s.refs.length, 0) ?? 0;
+  return { totalConsumers: total, recordedConsumers: latest.length,
+    recordedReviewedConsumers: latest.filter(r => r.independentVerdict !== null).length,
+    recordedClearedConsumers: latest.filter(r => ["unaffected", "revalidated"].includes(r.status)).length,
+    unrecordedConsumers: total - latest.length,
+    blockedRefs: latest.filter(r => r.status === "blocked").map(r => r.ref),
+    repairRequiredRefs: latest.filter(r => r.status === "repair-required").map(r => r.ref), reviews,
+    attempts: [] as ConsumerRevalidationAttempt[],
+    verification: "ledger-snapshot-only" as const, sourceAuditResumeAllowed: false as const,
+    interpretation: "Receipt-bound records retain the original denominator. Independent support approves the recorded disposition, including blocked. Current dependency verification, original questions and source-audit continuation remain separate; no execution or resume authority." };
+}
 
 /** A projection of retained ledger records, never a replacement acceptance gate.
  * A supported check can support a decision to keep a consumer blocked. */
-export function identityReviewStatus(records: IdentityRecord[]) {
+export function identityReviewStatus(records: IdentityRecord[], revalidations: ConsumerRevalidationRecord[] = []) {
   validateIdentityHistory(records);
   const first = records[0];
   if (!first) throw prerequisiteStop("Identity review has no retained records; inspect requirements inspect-identity-repairs for this source and copy tasks[].taskId once; do not guess or retry unchanged");
@@ -40,7 +78,7 @@ export function identityReviewStatus(records: IdentityRecord[]) {
   });
   return {
     taskId: intent.taskId, intentHash: contentHash(intent), sourceId: intent.sourceId,
-    inventoryHash: intent.inventoryHash, revisionHash: intent.revisionHash,
+    inventoryHash: intent.inventoryHash, revisionHash: intent.revisionHash, originalPlanHash: intent.originalPlanHash,
     totalShards: shards.length, recordedReviewedShards: shards.filter(s => s.recordedReviewComplete).length,
     totalConsumers: shards.reduce((n, s) => n + s.totalConsumers, 0),
     recordedReviewedConsumers: shards.filter(s => s.recordedReviewComplete).reduce((n, s) => n + s.totalConsumers, 0),
@@ -51,7 +89,7 @@ export function identityReviewStatus(records: IdentityRecord[]) {
     // shrink the full denominator to those target bindings.
     targetQuestionIds: [...new Set(intent.targets.flatMap(t => t.questionIds))],
     originalQuestionIds: firstConsumers?.phase === "identity-consumers" ? firstConsumers.originalQuestionIds : null,
-    priorUsage: intent.priorUsage, shards,
+    priorUsage: intent.priorUsage, shards, consumerRevalidation: consumerRevalidationStatus(records, revalidations),
     verification: "ledger-snapshot-only" as const,
     executionAuthority: false as const, parentResumeAllowed: false as const, certificationGranted: false as const,
   };

@@ -7,10 +7,12 @@ import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.j
 import { utteranceExpressionSchema, validateUtteranceExpressionEvidence } from "../world/utterance-expression.js";
 import { validateGoalExpressionEvidence } from "../world/conditional-expression.js";
 import { validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { validateSourceLocalIdentityEvidence } from "../world/identity-consumption.js";
 import { semanticEffectSchema, validateSemanticEffectEvidence } from "../world/semantic-effect.js";
 import { upstreamRepairCheckpointSchema, captureUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointState, assertUpstreamRepairCheckpoint, assertUpstreamRepairCheckpointRestorable, restoreUpstreamRepairCheckpoint, type UpstreamRepairCheckpoint } from "./upstream-repair-checkpoint.js";
 import { UpstreamRepairLedger, upstreamRepairJournalSchema, type UpstreamRepairRecord } from "./upstream-repair-ledger.js";
 import { upstreamRepairSnapshotIssues } from "./upstream-repair-snapshot.js";
+import { compilerProposalLogicalIdentity, type CompilerProposalKind } from "./proposals.js";
 import { roleReviewResumeIssues } from "./role-review-finish.js";
 import { roleReviewRevisionSchema, type RoleReviewRevision } from "./role-review-revision.js";
 import { coreRoleRequirementHistorySchema, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
@@ -34,7 +36,7 @@ import {
   initialWorldSchema,
   validateInitialWorldEvidenceAssertions,
 } from "../world/initial.js";
-import { WORLD_ENGINE_VERSION, attributionSchema, canonicalEventSchema, claimSchema, entitySchema, eventParticipationSchema, eventRelationSchema, propositionSchema, worldRuleSchema, type EvidenceRef } from "../world/model.js";
+import { WORLD_ENGINE_VERSION, attributionSchema, canonicalEventSchema, claimSchema, entitySchema, eventParticipationSchema, eventRelationSchema, propositionSchema, worldRuleSchema, type EvidenceRef, type ValidationIssue } from "../world/model.js";
 import { validateEventParticipationCatalog } from "../world/event-semantics.js";
 import { validateEventRelationCatalog } from "../world/event-relations.js";
 import {
@@ -510,6 +512,22 @@ export class PreparedNovelCache {
     return { bundle, assessment: await assessNovelClosure(this.workspaceRoot, bundle) };
   }
 
+  /** Inspect retained compiler inputs for local repair postconditions. An invalid
+   * downstream baseline stays in the snapshot and blocks readiness; it is never
+   * omitted, normalized, archived or made executable by this inspection. */
+  async repairCandidateSnapshot(source: SourceDocument) {
+    const identity = await sourceIdentity(this.workspaceRoot, source), baselineIssues: ValidationIssue[] = [];
+    const bundle = await this.buildBundle(source, identity, { allowSemanticDebtForRollback: true }, error => {
+      baselineIssues.push({ code: "SOURCE_ISOLATED_BASELINE_INVALID", message: error.message });
+    });
+    return { bundle, baselineIssues };
+  }
+
+  async inspectRepairCandidate(source: SourceDocument) {
+    const { bundle, baselineIssues } = await this.repairCandidateSnapshot(source);
+    return { bundle, baselineIssues, assessment: await assessNovelClosure(this.workspaceRoot, bundle, baselineIssues) };
+  }
+
   /** Freeze reviewable compiler output while keeping public Play activation unchanged. */
   async archiveCandidate(source: SourceDocument, options: { lineage?: PreparedRevisionLineage } = {}): Promise<PreparedCacheResult> {
     return this.publish(source, { ...options, allowSemanticDebtForRollback: true });
@@ -801,6 +819,7 @@ export class PreparedNovelCache {
       legacyRollbackCheckpoint?: PersistedBatchProgress;
       lineage?: PreparedRevisionLineage;
     },
+    onInvalidBaseline?: (error: Error) => void,
   ): Promise<PreparedNovelBundle> {
     const proposals = new ProposalStore(this.workspaceRoot);
     const pending = await proposals.list("pending", source.id);
@@ -980,7 +999,11 @@ export class PreparedNovelCache {
     await assertPreparedCharacterEvidence(this.workspaceRoot, bundle);
     await assertPreparedSpatialEvidence(this.workspaceRoot, bundle);
     await assertPreparedWorldRuleEvidence(this.workspaceRoot, bundle);
-    assertSelfContainedBaseline(bundle, canonical);
+    try { assertSelfContainedBaseline(bundle, canonical); }
+    catch (error) {
+      if (!onInvalidBaseline || !(error instanceof Error)) throw error;
+      onInvalidBaseline(error);
+    }
     return bundle;
   }
 
@@ -1658,7 +1681,7 @@ async function assertPreparedInitialWorldEvidence(
   bundle: PreparedNovelBundle,
 ): Promise<void> {
   const initialWorld = bundle.canonical.initialWorld;
-  if (!initialWorld.readerContext && !initialWorld.actorObservations?.length && !(initialWorld.projectionSeed && initialWorld.participantPresence?.some(item => item.mode === "remote"))) return;
+  if (!validateInitialWorldEvidenceAssertions(initialWorld, []).length) return;
   const snapshotBinding = bundle.compilerSnapshot.evidenceBindings.find((candidate) =>
     candidate.artifactKind === "initial-world" && candidate.artifactId === "initial-world");
   const binding = snapshotBinding
@@ -1702,7 +1725,11 @@ async function assertPreparedCompilerSnapshotEvidence(
     const bytes = await readSourceMaterial(workspaceRoot, source);
     const manifest = await segmentSource(workspaceRoot, source, { chapterSplitPlan: bundle.chapterSplitPlan ?? null });
     const payloads = new Map<string, unknown>();
-    for (const artifact of artifacts.values()) payloads.set(`${artifact.kind}:${artifact.id}`, artifact.payload);
+    for (const artifact of artifacts.values()) {
+      // Evidence target IDs and logical storage IDs differ for singletons.
+      const identity = compilerProposalLogicalIdentity(artifact.kind as CompilerProposalKind, artifact.payload);
+      if (identity) payloads.set(identity, artifact.payload);
+    }
     for (const annotation of snapshot.annotations) payloads.set(`${annotation.annotationType}:${annotation.id}`, annotation);
     for (const item of snapshot.entityResolutions) payloads.set(`entity-resolution:${item.id}`, item);
     for (const item of snapshot.eventResolutions) payloads.set(`event-resolution:${item.id}`, item);
@@ -1727,15 +1754,19 @@ async function assertPreparedCompilerSnapshotEvidence(
     if (!binding || binding.artifactHash !== contentHash(goal) || issues.length) throw new Error(`Conditional expression goal evidence is incomplete or stale: ${goal.id}`);
   }
   for (const entity of bundle.canonical.entities) {
-    if (!entity.agencyProfile) continue;
+    if (!entity.agencyProfile && entity.identityConsumption?.mode !== "source-local") continue;
     const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "entity" && item.artifactId === entity.id);
-    if (!binding || binding.artifactHash !== contentHash(entity) || validateAgencyProfileEvidence(entity, binding.assertions).length) throw new Error(`Agency profile exact evidence is incomplete or stale: ${entity.id}`);
+    const stale = !binding || binding.artifactHash !== contentHash(entity);
+    if (entity.agencyProfile && (stale || validateAgencyProfileEvidence(entity, binding!.assertions).length))
+      throw new Error(`Agency profile exact evidence is incomplete or stale: ${entity.id}`);
+    if (entity.identityConsumption?.mode === "source-local" && (stale || validateSourceLocalIdentityEvidence(entity, binding!.assertions).length))
+      throw new Error(`Source-local referent exact evidence is incomplete or stale: ${entity.id}`);
   }
-  for (const [kind, artifacts] of [["canonical-event", bundle.canonical.events], ["event-execution", bundle.canonical.eventExecutions ?? []]] as const) for (const artifact of artifacts) {
-    // Empty assertions identify artifacts requiring remote-entry bindings.
+  for (const [kind, artifacts] of [["canonical-event", bundle.canonical.events], ["event-execution", bundle.canonical.eventExecutions ?? []], ["character-goal", bundle.canonical.goals], ["world-rule", bundle.canonical.rules], ["possibility", bundle.canonical.possibilities]] as const) for (const artifact of artifacts) {
+    // Empty assertions identify artifacts requiring exact bodily/channel evidence.
     if (!entryArtifactEvidenceIssues(kind, artifact, []).length) continue;
     const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === kind && item.artifactId === artifact.id);
-    if (!binding || binding.artifactHash !== contentHash(artifact) || entryArtifactEvidenceIssues(kind, artifact, binding.assertions).length) throw new Error(`Remote entry exact evidence is incomplete or stale: ${artifact.id}`);
+    if (!binding || binding.artifactHash !== contentHash(artifact) || entryArtifactEvidenceIssues(kind, artifact, binding.assertions).length) throw new Error(`Entry/body exact evidence is incomplete or stale: ${artifact.id}`);
   }
   for (const execution of bundle.canonical.eventExecutions ?? []) if (execution.processRecoveries?.length) {
     const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "event-execution" && item.artifactId === execution.id);

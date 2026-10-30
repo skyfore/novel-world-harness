@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TraceRecorder } from "../src/trace/recorder.js";
 import { TraceStore } from "../src/trace/store.js";
+import { appendUnrelatedTraceHistory } from "./helpers/trace-history.js";
 
 const roots: string[] = [];
 
@@ -21,16 +22,46 @@ describe("append-only trace storage", () => {
   it("inspects a running audit without turning it into a host-restart interruption", async () => {
     const root = await workspace();
     const writer = new TraceStore(root);
-    const run = await writer.createRun({ kind: "prepare", sourceId: "source-1" });
+    const run = await writer.createRun({ kind: "prepare", sourceId: "source-1", operationId: "operation-1" });
     const blob = await writer.putBlob({ message: "read-only inspection" });
     const before = await readDirectoryTree(writer.root);
     const reader = new TraceStore(root);
     expect((await reader.peekRun(run.id)).status).toBe("running");
     expect(await reader.peekRuns({ sourceId: "source-1" })).toHaveLength(1);
+    expect(await reader.peekAllRuns({ sourceId: "source-1" })).toEqual([run]);
+    expect(await reader.peekRunsByOperation("source-1", "operation-1")).toEqual([run]);
+    expect(await reader.peekRunsByOperation("source-2", "operation-1")).toEqual([]);
+    expect(await reader.peekRunsByOperation("source-1", "operation-2")).toEqual([]);
     expect(await reader.peekEvents(run.id)).toEqual([]);
     expect(await reader.peekBlob(blob)).toEqual({ message: "read-only inspection" });
     expect(await readDirectoryTree(writer.root)).toBe(before);
   });
+
+  it("looks up retained operations without creating missing trace storage", async () => {
+    const store = new TraceStore(await workspace());
+    expect(await store.peekAllRuns()).toEqual([]);
+    expect(await store.peekRunsByOperation("source-1", "operation-1")).toEqual([]);
+    await expect(fs.access(store.root)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("finds old operations and duplicate invocations beyond recent discovery, in deterministic order", async () => {
+    const store = new TraceStore(await workspace());
+    const original = await store.createRun({ kind: "prepare", sourceId: "source-1", operationId: "original-work", startedAt: "2020-01-01T00:00:00.000Z" });
+    await store.finishRun(original.id, "failed");
+    await appendUnrelatedTraceHistory(store, "source-1");
+    expect(await store.peekRuns({ sourceId: "source-1", limit: 1_000 })).toHaveLength(1_000);
+    expect((await store.peekRuns({ sourceId: "source-1", limit: 1_000 })).some(run => run.id === original.id)).toBe(false);
+    expect((await store.peekRunsByOperation("source-1", "original-work")).map(run => run.id)).toEqual([original.id]);
+    const duplicate = await store.createRun({ kind: "prepare", sourceId: "source-1", operationId: "original-work", startedAt: "2020-01-02T00:00:00.000Z" });
+    await store.finishRun(duplicate.id, "failed");
+    const foreign = await store.createRun({ kind: "prepare", sourceId: "source-2", operationId: "original-work" });
+    await store.finishRun(foreign.id, "succeeded");
+    const before = await readDirectoryTree(store.root);
+    expect((await store.peekRunsByOperation("source-1", "original-work")).map(run => run.id)).toEqual([duplicate.id, original.id]);
+    expect((await store.peekAllRuns({ sourceId: "source-1", kind: "prepare", status: "failed" })).map(run => run.id)).toEqual([duplicate.id, original.id]);
+    expect((await store.peekAllRuns({ sourceId: "source-1" }))).toHaveLength(1_003);
+    expect(await readDirectoryTree(store.root)).toBe(before);
+  }, 30_000);
 
   it("redacts secrets at every event, blob, and manifest persistence boundary", async () => {
     const root = await workspace("nwh-trace-redaction-");

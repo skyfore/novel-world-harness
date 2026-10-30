@@ -2,6 +2,12 @@
 
 `nwh compile-novel` 从不可变原文一直执行到独立评估、认证、激活和可玩分支交付。默认继续已有编译进度；`--rebuild` 明确启动全量重编。完成标准遵循[小说编译流程与完整性验收规范](novel-compilation-protocol.zh-CN.md)。
 
+新消费者复核使用 `consumer-work/v1`：宿主一次准备完整必读证据，模型预检草稿后单独提交，再由独立会话验收。`--inspect-execution` 只读显示证据规模、提交预留和是否可执行；`stages[].execution` 显示进展窗口、草稿和实际消耗，旧 `remainingAllowance` 继续描述历史执行段。
+
+已停止的旧消费者须显式选择 `--execution-policy consumer-work/v1`，并以 `--execution-authorization-ref` 引用既有用户对策略迁移的授权。先带 `--inspect-execution`，核验通过后去掉它执行。保留原 `--source`、`--task`、`--ref` 和 `--authorization-ref`；这些值从同作用域 `inspect-identity-repairs` 复制，不猜测或重命名。完整清单、旧失败、预算和会话不变，转换记录追加在原消费者的 `execution-v1` 下。不能与旧续接／额度修订 flags 混用。已有提交恢复登记，不重新生成；无进展、负面语义判断和显式额度修订不能借迁移重开。
+
+大角色表的机械来源 ID 采用可核验的 hash/count 视图，全部角色和其他语义字段仍交给模型。超出上下文的完整工作集在付费调用前停止，不能删证据或减少分母。配额失败保留消耗并等待外部恢复，不自动循环。详细策略和恢复边界见[工具恢复协议](agent-tool-recovery.md#versioned-consumer-work-execution)及[实施计划](plans/2026-10-30-consumer-execution.zh-CN.md)。
+
 ```sh
 # 首次编译：登记原文并执行全流程
 nwh compile-novel fixtures/corpus/longzu_1.txt
@@ -52,6 +58,7 @@ nwh compile-novel --source a28585b1cf867f3e3a16 --rebuild --loop-new-run <comple
 | `roles` | 独立全文角色复核，登记主要角色能力要求 |
 | `repair` | 恢复已授权的上游修复，执行图关系和世界语义修复 |
 | `requirements` | 重验已登记要求、关键延后项及全局闭合条件 |
+| `closure` | 在编译锁内重新校验当前计划的原始 finish 回执、执行义务、来源记账、身份／角色交接和全局编译维度；保存逐维度结果 |
 | `archive` | 归档不可变候选；不改变 active 指针，不授予认证 |
 | `evaluation-plan` | 生成／复用／导入并冻结独立 gold、字段支持复核和逐主要角色场景规格 |
 | `evaluate` | 执行独立真实 Pi 实验，复用相同候选和规格下已完成的实验 |
@@ -59,6 +66,7 @@ nwh compile-novel --source a28585b1cf867f3e3a16 --rebuild --loop-new-run <comple
 | `activate` | 验证候选仍对应当前编译输入，再切换 active 指针 |
 | `branch` | 创建或复用固定到当前认证版本的可玩分支 |
 | `status` | 只读快照；不调用模型、不迁移、不重验、不激活 |
+| `plan` | 只读生成全部后续阶段、依赖任务、原始引用和恢复条件；不新增授权、不启动监督器 |
 
 例如修正角色复核后继续后续流程：
 
@@ -69,11 +77,78 @@ nwh compile-novel --source <source-id>
 
 默认续编会重新核对每个阶段的当前证据：复用批次检查点、原 finish 回执、已完成角色审阅、同候选的冻结评估规格及有效实验结果。历史调度记录中的 `completed` 不能替代当前版本的认证。
 
+### 批次完成后的统一交接
+
+```sh
+nwh compile-novel plan --source <source-id>
+nwh compile-novel closure --source <source-id>
+```
+
+`plan` 的 `sources[].handoff.tasks` 保留全部阶段和已发现的身份消费者、来源审计、上游修复任务。每项包含稳定 `id`、`dependsOn`、原始 `refs`、结构化 `command` 和 `resumeCondition`。`recorded` 只表示历史调度回执；`available` 表示存在原有阶段入口，实际执行仍需通过该入口的当前权限与依赖验证。`inspect-only` 不可作为模型续跑或写入授权。尚未完成语义诊断的范围仍由对应阶段负责，计划不宣称已发现原文中的全部遗漏。
+
+结构化命令携带被检查工作区的绝对 `--root`，可从其他目录执行而不切换修复范围。上游计划处于 `evaluated` 不等于要求已满足：未满足或未知结果继续显示为阻塞任务。闭合阶段还会以当前候选重验已评估计划，旧评估与当前输入不符或无法验证时保留阻塞；不会自动替换原评估或续期修复授权。
+
+已收敛的上游修复交给 `requirements` 重验，不再重新 staging。已授权且保留原 finish 审阅的修复继续使用 `recover`。负面的来源审计修复、未完成的身份消费者审查和无法读取的依赖记录，会在 `roles` 的新模型调用前停止，并给出原任务入口。未审分片、额外修复和重验需求不会因一个独立审查返回 supported 而消失。该交接不创建新的身份续跑许可；缺证据、缺受支持的消费者修复类型或已耗尽的授权仍保留明确阻塞。
+
+迁移已退休的角色计划保留在历史中，`roleReviewWork[].current` 区分当前分母；不会将两代审查数量相加。`status` 的 `compilation[].handoff` 使用同一交接实现。
+
+角色依赖或闭合检查的领域阻塞会随阶段回执保存结构化 `recovery`。监督器转交同来源 `plan` 中的原任务，不为同一语义缺口启动工程回合或原样重复编译；真实工程异常仍沿用既有修复协议。只读检查失败标为 `host-state`，不能当作语义缺证据或成功。
+
+CLI/TUI/Web 不再合成单角色 `alive=true` 开局。调用失败时保留原错误、会话与草稿；只有正常结束但未产生可用开局，才报告 `phase:opening` 语义阻塞。工程异常和提供方异常不会被改写为原文缺口。
+
+身份联合修复若在 finish 冻结后、任何 finish 回执生成前因开局不可执行而停止，先从同 source/task 的 `requirements inspect-identity-repairs` 复制 `typedRepairs[].currentStop.recordRef`。在原 `execute-identity-repair` 命令上添加 `--revise-failed-finish <recordRef> --revision-authorization-ref <明确修复授权引用> --inspect` 做预检；执行时去掉 `--inspect`。这个入口只允许一次有界 Pi 单例语义修订，保留原来源、字段范围、失败图与旧审阅，变化后的图须重新独立验收，验收只使用原剩余额度。已发放修订的 `finish-revising` 状态由同一命令续接，不重放已消费模型阶段，不回到已完成的前驱实体修复。
+
+修复验收分别覆盖：原文支持的可执行开局通过真实 staging／finish／convergence；真实 Pi 草稿封存与中断恢复不重复调用；变化后的图不能复用旧验收；后续消费者继承全部用量；已封存历史审阅可跨实现版本读取，而新调用仍受冻结版本约束。局部通过后仍须重验受影响消费者，不能清除未审分片、关键问题或整书认证缺口。
+
+完整 CLI 和 TUI 交付链在 `requirements` 后、`archive` 前执行 `closure`。这个阶段调用现有审计与要求账本，验证当前计划每个原 finish 回执，并分别检查来源、批次、执行义务、角色来源审查、上游交接、结构、证据、记账、决议、语义和已登记要求。`unknown` 不算通过，关键延后保留全部单元引用。结果保存在原编译运行的 `closure` 字段，失败也落盘；它是带来源／编译指纹／审计哈希的调度快照，不另建语义真值账本。修订后必须重新运行，不能凭旧快照跳过检查。
+
+该闭合检查不代替后续独立支持规格、真实 Pi 实验和认证。`archive` 单阶段命令仍可保存未认证候选，active 指针保持原状；完整交付须继续通过评估、认证和激活。
+
+### 短 demo 与回归
+
+```sh
+pnpm demo:compilation-completion
+```
+
+这个可重复的确定性 demo 使用临时小说和隔离工作区，不调用付费模型。它验证：检查点 100%／零执行义务仍不能跳过真实回执与缺口；闭合失败持久保存；状态与计划读取不写状态；未认证候选可归档但不激活；部分身份分母、退休角色计划和已消费的负面审计被正确交接；已收敛修复转入重验。demo 同时是普通测试集的一部分。它证明流程行为，不证明《龙族》语义内容已补齐或真实多轮体验已通过。
+
+### 角色审计恢复
+
 角色复核阶段现在由同一命令调度有界修复，无需临时脚本逐页接力：先完成来源记录、候选判定及其独立核验，再收齐来源审查中的全部问题。未受支持的候选判定复用既有单次修订机制；来源审查中的遗留问题各允许一次修复提案和一次独立验证。修复可检索同一小说的非相邻章节，但不能删除原问题、遗漏角色要求或覆盖原审查结果。修复与验证共享继承的累计用量，独立验证通过后写入要求账本和最终审阅证据；仍缺证据或验证为否时保留阻塞。
 
 来源审查因已确认的 Codex 用量限制中断后，额度恢复时再次执行同一条 `compile-novel --source …` 即可尝试续跑。宿主先核对原 trace、完整工具结果、原任务和依赖，恢复原草稿并重新读取证据，只消耗原来剩余的会话和无进展额度。未完成写入、工具失败、预算耗尽、会话耗尽或无法验证的旧任务不适用自动恢复，仍按具体诊断停止。`status` 中的 `roleReviewWork[].sourceAuditRepairs` 显示修复提案和独立验证状态；审查和修复成功仍不等于全书认证通过。
 
 ## 独立规格与评估
+
+已确认的消费者原文搜索契约缺陷或请求体超限，使用同一原任务的
+`requirements revalidate-identity-consumer --host-recovery <JSON> --resume-unsubmitted inspect`
+预检，随后按相同 JSON 执行 `run`。授权、失败哈希、真实会话和剩余额度均绑定；
+旧记录不改写；恢复再次失败默认停止，只有可验证的首请求零输出额度拒绝适用下述续接。字段发现与边界见
+[宿主恢复协议](agent-tool-recovery.md#已确认读取缺陷或请求体超限的宿主恢复)。
+
+身份消费者重验若在首个请求即遇到订阅用量上限，用户后续要求继续且同一 Pi 订阅已恢复时，
+宿主可按[消费者续接协议](agent-tool-recovery.md#消费者重验未提交失败的受控续接)使用
+`requirements revalidate-identity-consumer --resume-unsubmitted inspect --provider-resumption <JSON>`
+核验原失败。通过后以 `run` 消耗原阶段剩余额度及唯一续接；已提交、部分输出或已消费续接
+不适用，旧失败与父 loop 的停止状态保留。
+
+首请求额度拒绝若发生在原宿主恢复中，复制同一状态的
+`stages[].hostRecovery.traceRunId`，按相同 `--provider-resumption` 协议检查并续接。
+这是原恢复下唯一的额度续接，保留原失败与所有已用调用／字节；不会再扩大预算或
+重开独立检查。再次失败只能保留现场，有封存提交时仅恢复登记。
+
+入口使用共享的 `entry-capability/v2` 契约。编译校验、审计、入口选择和修复规划投影同一份最终状态：空值、撤销和最终死亡不能保留旧操作的“可行动”结论，增加场外角色也不改变门槛。`character.posture/breathing/sweating/wakefulness` 可表达定性身体状态；每个写入必须绑定原文的精确操作证据。缺失仍为未知，不推导身份、地点、健康数值或行动能力。
+
+验收分为三个独立问题：入口状态是否有依据、角色是否确实能执行动作、世界是否能自主推进。动作探针只使用冻结目标或已披露机制，通过真实内核预检和提交，保存绑定来源、候选、切点、角色及机制版本的事件凭据；不再合成计划变化。直接机制搜索限于 32 个单角色、无参数机制，复杂动作可由已有目标候选提供；找不到凭据只报告未证明或搜索未完成，不宣称原文不可能支持行动。世界自主推进、知识隔离、恢复与回放继续单独验证。
+
+目标候选的宿主筛选条件在内核验证通过后、同角色去重前生效。入口动作探针据真实
+进展凭据排除只有时间推进的候选，并继续检查该角色的其他目标／动作；这些拒绝
+仍计入原 64 次只读预检上限。普通运行时保持自己的合法动作选择语义，搜索耗尽
+继续报告未完成，不放宽证据、机制披露、提交门禁或重试预算。
+
+未声明角色入口的旧稀疏清单可以带缺口警告归档，但不能成为运行入口或通过认证。新契约使旧入口验收失效，原候选、失败、分母和预算保留；实现升级本身不续发模型授权，也不激活本地小说。
+
+`preview_initial_world` 的 `entryDiagnostics` 和 `requirements inspect-identity-repairs` 的 `finishRevisionProgress.entryContractReview` 提供只读缺口：分别说明状态表达待审、动作／驱动未验、字段超出范围和阶段已消费。它们不授予写权限，也不替代独立来源验收。具体恢复步骤见[工具恢复协议](agent-tool-recovery.md)。
 
 没有适用规格时，`evaluation-plan` 使用独立 Pi 会话读取整部不可变原文、分项提交 gold 和场景草稿、复核可执行字段的来源支持。它没有修改世界真值的工具。草稿、原文阅读页偏移、真实审阅 trace ID、纠正次数和停止条件均持久化。完成冻结前检查全文阅读范围、规格引用、主要角色分母及入口切面。
 
@@ -99,4 +174,4 @@ nwh compile-novel evaluate --source <source-id> --plan-hash <frozen-plan-hash>
 
 旧的 `compile-source`、`prepare-all`、`rebuild`、`reparse`、`repair-existing`、`requirements` 和 `prepared-cache` 入口保留兼容。其中 `prepare-all --candidate-only` 仍只负责候选准备；完整交付请使用 `compile-novel`。
 
-Pi TUI 的 `/prepare-all` 在候选准备后复用 `compile-novel` 的角色复核、修复、要求闭合、归档、独立评估规格、评估、认证和激活阶段。通过这些门禁后才询问是否创建可玩分支；任何门禁失败均保留诊断，不声明准备完成。
+Pi TUI 的 `/prepare-all` 在候选准备后复用 `compile-novel` 的角色复核、修复、要求重验、全局闭合、归档、独立评估规格、评估、认证和激活阶段。通过这些门禁后才询问是否创建可玩分支；任何门禁失败均保留诊断，不声明准备完成。

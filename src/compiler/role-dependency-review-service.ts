@@ -1,8 +1,4 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import { createHash } from "node:crypto";
 import { contentHash } from "../world/canonical.js";
-import { worldStorageRoot } from "../world/paths.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { CanonicalModelStore } from "../world/canonical-model.js";
@@ -27,10 +23,11 @@ import { inspectRoleReviewBudget } from "./role-review-budget.js";
 import { loadCompilerArtifactRecords } from "./artifact-retrieval.js";
 import { discoverUpstreamRepairDiagnostics } from "./upstream-repair-discovery.js";
 import { assertAdditiveRoleInventory, freezeRoleDependencyReview, type RoleDependencyReview } from "./role-dependency-review.js";
+import { retainedUpstreamReviewPrefix } from "./upstream-review-prefix.js";
+import { captureRoleDependencyHistory } from "./role-dependency-history.js";
 
 export type RoleDependencyReviewInput = { scope: PrerequisiteScope; upstreamPlanHash: string; authorizationRef: string };
 export type SemanticCatalogItem = { kind: string; id: string; revisionHash: string; payload: unknown };
-const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 /** Strictly read-only. Reconstruct the OLD roster by removing only exact outputs
  * of the completed receipt. Shared text or a caller's candidate count is insufficient. */
@@ -45,7 +42,7 @@ export async function prepareCoreRoleDependencyReview(root: string, input: RoleD
   for (const r of representations) await verifyRepresentationTrace(root, r);
   const upstream = await new UpstreamRepairLedger(root, sourceId).inspect();
   const completed = upstream.plans.find(p => p.plan.planHash === input.upstreamPlanHash);
-  if (!completed || completed.state !== "converged" || completed.plan.sourceRepresentation?.taskId !== taskId
+  if (!completed || !["converged", "evaluated"].includes(completed.state) || completed.plan.sourceRepresentation?.taskId !== taskId
     || !completed.finishedReceipt || upstream.modelSessions.some(s => !s.closed)) throw prerequisiteStop("Exact source dependency has no settled converged receipt");
   const acceptance = await verifySourceUpstreamAcceptance(root, completed.plan);
   const receipt = await new CompilerFinishReceipts(root, sourceId, completed.plan.batchId).read();
@@ -101,33 +98,25 @@ export async function prepareCoreRoleDependencyReview(root: string, input: RoleD
   }
   const uniqueCatalog = [...catalogByKey.values()].sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
   const discovery = await discoverUpstreamRepairDiagnostics(root, sourceId);
-  const retainedFiles: RoleDependencyReview["retainedFiles"] = [];
-  const storage = worldStorageRoot(root);
-  async function capture(file: string) {
-    const stat = await fs.lstat(file).catch((e: NodeJS.ErrnoException) => { if (e.code === "ENOENT") return null; throw e; });
-    if (!stat) return;
-    if (stat.isSymbolicLink() || file.endsWith(".tmp") || file.endsWith(".pending")) throw prerequisiteStop("Unsettled or redirected original role work");
-    if (stat.isDirectory()) { for (const name of (await fs.readdir(file)).sort()) await capture(path.join(file, name)); return; }
-    retainedFiles.push({ path: path.relative(storage, file), hash: digest(await fs.readFile(file)) });
-  }
-  // Includes all inherited plans, failed invocations, semantic grants and budgets,
-  // rather than only the ordinary source/candidate allowance keys.
-  await capture(path.join(storage, "compiler", "role-review-work", "v1", contentHash(sourceId)));
-  for (const plan of sourcePlans) {
-    await capture(path.join(storage, "compiler", "role-review-work", "budgets", contentHash(plan)));
-    await capture(path.join(storage, "compiler", "proposal-obligations", createHash("sha256").update(JSON.stringify([sourceId, plan.batchId])).digest("hex")));
-  }
+  const retainedFiles = await captureRoleDependencyHistory(root, sourceId, sourcePlans, existing);
   const prefix = existing?.requirementPrefix ?? { length: history.length, head: history.at(-1)!.hash };
   if (history[prefix.length - 1]?.hash !== prefix.head) throw prerequisiteStop("Original requirement prefix changed");
   const convergence = upstream.records.findLast(r => r.payload.kind === "converged" && r.payload.planHash === input.upstreamPlanHash);
   if (!convergence) throw prerequisiteStop("Source convergence record missing");
+  const upstreamPrefix = retainedUpstreamReviewPrefix(upstream.records, existing
+    ? { length: existing.upstream.prefixLength, head: existing.upstream.prefixHead } : undefined);
   const review = freezeRoleDependencyReview({ version: 1, taskId, scope, authorizationRef: input.authorizationRef,
     authority: "semantic-scope-planning-only", priorPlan, priorRoster: saved, nextRoster,
     prerequisiteRecordHashes: prerequisites.map(contentHash), representationRecordHashes: representations.map(contentHash),
     upstream: { planHash: input.upstreamPlanHash, receiptFingerprint: receipt.fingerprint, acceptanceRecordHash: contentHash(acceptance),
-      convergenceRef: convergence.hash, prefixLength: upstream.records.length, prefixHead: upstream.records.at(-1)!.hash },
-    requirementPrefix: prefix, addedCandidateIds, addedAnnotationIds, catalogHash: contentHash(uniqueCatalog), discoveryHash: contentHash(discovery), retainedFiles });
-  if (existing && contentHash(existing) !== contentHash(review)) throw prerequisiteStop("Frozen pending denominator revision changed; preserve it, never allocate another task or grant");
+      convergenceRef: convergence.hash, prefixLength: upstreamPrefix.length, prefixHead: upstreamPrefix.head },
+    requirementPrefix: prefix, addedCandidateIds, addedAnnotationIds, catalogHash: contentHash(uniqueCatalog), discoveryHash: contentHash(discovery),
+    retainedFiles });
+  if (existing && contentHash(existing) !== contentHash(review)) {
+    const changed = (Object.keys(review) as (keyof RoleDependencyReview)[])
+      .filter(key => key !== "revisionHash" && contentHash(existing[key]) !== contentHash(review[key]));
+    throw prerequisiteStop(`Frozen pending denominator revision changed (${changed.join(", ")}); inspect those original same-source/task inputs, preserve both versions, never repin or allocate another task or grant`);
+  }
   return { review, catalog: uniqueCatalog, discovery, prerequisites, representations, bytes, source, upstreamPlan: completed.plan };
 }
 

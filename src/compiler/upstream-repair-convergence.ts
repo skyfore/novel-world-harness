@@ -7,11 +7,14 @@ import { EntityResolutionStore } from "./entity-resolution.js";
 import { EventResolutionStore } from "./event-resolution.js";
 import { SourceAccountingStore } from "./source-accounting.js";
 import { verifyUpstreamRepairPlan, upstreamRepairHostError } from "./upstream-repair-preflight.js";
+import { isCompletedUpstreamRecovery } from "./upstream-convergence-recovery.js";
+import { upstreamRepairConvergedRevisions } from "./upstream-repair-plan.js";
 
 /** Reads actual post-commit state. A caller cannot supply revision hashes or success claims. */
 export async function verifyUpstreamRepairConvergence(root: string, sourceId: string, planHash: string) {
   const current = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(item => item.plan.planHash === planHash);
-  if (!current?.finishIntent || !["finished", "converged", "evaluated"].includes(current.state)) throw upstreamRepairHostError("Convergence requires the original finished repair");
+  if (!current?.finishIntent || (!["finished", "converged", "evaluated"].includes(current.state)
+    && !(current.state === "needs-host-review" && current.finishedReceipt && isCompletedUpstreamRecovery(root, planHash)))) throw upstreamRepairHostError("Convergence requires the original finished repair");
   const receipts = new CompilerFinishReceipts(root, sourceId, current.plan.batchId), receipt = await receipts.read();
   if (!receipt || receipt.state !== "completed") throw upstreamRepairHostError("Convergence requires its original completed active receipt");
   await receipts.verify(receipt);
@@ -26,9 +29,13 @@ export async function verifyUpstreamRepairConvergence(root: string, sourceId: st
   const outputs = new Map(current.finishIntent.proposals.map(item => [`${item.artifactKind}:${item.artifactId}`, item.payloadHash]));
   const verified = await verifyUpstreamRepairPlan(root, current.plan, outputs);
   for (const proposal of current.finishIntent.proposals) if (verified.activeRevisions.get(`${proposal.artifactKind}:${proposal.artifactId}`) !== proposal.payloadHash) throw upstreamRepairHostError(`Converged output is no longer active: ${proposal.artifactKind}:${proposal.artifactId}`);
+  const expected = upstreamRepairConvergedRevisions(current.plan, current.finishIntent.proposals);
   const refs = new Map(current.plan.baselineRefs.map(ref => [`${ref.kind}:${ref.id}`, { kind: ref.kind, id: ref.id }]));
   for (const proposal of current.finishIntent.proposals) refs.set(`${proposal.artifactKind}:${proposal.artifactId}`, { kind: proposal.artifactKind, id: proposal.artifactId });
-  for (const revision of current.plan.resolutionRevisions ?? []) refs.delete(`${revision.kind}:${revision.predecessorId}`);
+  for (const [key] of refs) {
+    if (!expected.has(key)) refs.delete(key);
+    else if (verified.activeRevisions.get(key) !== expected.get(key)) throw upstreamRepairHostError(`Convergence dependency is no longer active: ${key}`);
+  }
   const activeRevisions = [...refs].sort(([a], [b]) => a.localeCompare(b)).map(([key, ref]) => ({ ...ref, revisionHash: verified.activeRevisions.get(key)! }));
   return { receiptFingerprint: receipt.fingerprint, activeRevisions };
 }

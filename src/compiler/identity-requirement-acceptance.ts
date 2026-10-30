@@ -5,6 +5,7 @@ import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "../world/canonical.js";
 import { TraceStore } from "../trace/store.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
+import { ProposalStore } from "../world/canonical-model.js";
 import { RequirementLedger } from "./requirement-ledger.js";
 import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
 import { prerequisiteEvidenceSchema, prerequisiteStop } from "./role-source-prerequisites.js";
@@ -16,12 +17,18 @@ import { SegmentStore } from "./segments.js";
 import { resolveTextSelectorAnchor } from "./text-anchors.js";
 import type { ModelRequestLimits } from "../runtime/model-request-budget.js";
 import type { TraceEvent } from "../trace/schema.js";
+import { identityUpstreamSessionContract, verifyIdentityUpstreamSession } from "./identity-upstream-session.js";
+import { consumerRepairDirectory } from "./identity-consumer-repair-model.js";
+import { isCompletedUpstreamRecovery } from "./upstream-convergence-recovery.js";
+import { consumerRevalidationId } from "./identity-consumer-revalidation-model.js";
+import { revalidatedConsumerBudgetOrigin } from "./identity-consumer-revalidated-plan.js";
+import { identityUpstreamBudgetStages } from "./identity-upstream-correction-model.js";
 
 export const IDENTITY_UPSTREAM_SLOT_LIMITS = Object.freeze({ maxModelCalls: 4, maxRequestBytes: 512_000, maxTotalPayloadBytes: 2_048_000 });
 export const IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS = Object.freeze({ maxModelCalls: 24, maxRequestBytes: 512_000, maxTotalPayloadBytes: 12_288_000 });
 const read = async (file: string) => JSON.parse(await fs.readFile(file, "utf8"));
 
-async function verifyInvocationBudget(root: string, plan: UpstreamRepairPlan, stage: string, events: TraceEvent[], limits: ModelRequestLimits) {
+export async function verifyInvocationBudget(root: string, plan: UpstreamRepairPlan, stage: string, events: TraceEvent[], limits: ModelRequestLimits) {
   const directory = identityUpstreamDirectory(root, plan), invocation = await read(path.join(directory, `${stage}.invocation.json`));
   const budget = await read(path.join(directory, `${stage}.budget.json`));
   const original = (await new RequirementLedger(root, plan.sourceScope.sourceId).sourcePrerequisites(plan.identityRequirements!.taskId))[0]!;
@@ -35,13 +42,44 @@ async function verifyInvocationBudget(root: string, plan: UpstreamRepairPlan, st
     || !Number.isSafeInteger(usage.largestRequestBytes) || usage.largestRequestBytes < 1 || usage.largestRequestBytes > limits.maxRequestBytes) throw prerequisiteStop("Original invocation or retained request budget changed");
   for (const start of requests) if (!events.some(e => e.type === "llm.response.completed" && e.callId === start.callId && e.seq > start.seq)) throw prerequisiteStop("Unsettled provider request in source upstream trace");
   for (const start of events.filter(e => e.type === "tool.call.started")) if (!events.some(e => ["tool.call.completed", "tool.call.failed"].includes(e.type) && e.toolCallId === start.toolCallId && e.seq > start.seq)) throw prerequisiteStop("Unsettled tool call in source upstream trace");
+  if (plan.identityRequirements?.consumerRepair) {
+    const records = (await new RequirementLedger(root, plan.sourceScope.sourceId).history()).flatMap(r => r.payload.kind === "identity-consumer-repair"
+      && r.payload.record.intent.findingId === plan.identityRequirements!.consumerRepair!.findingId ? [r.payload.record] : []);
+    if (records.length !== 2) throw prerequisiteStop("Missing original consumer planning budget lineage");
+    const intent = records[0]!.intent, priorUsage = { ...intent.priorUsage }, planningBudgetHashes = [];
+    for (const r of records) {
+      const b = await read(path.join(consumerRepairDirectory(root, intent), `${r.output.phase}.budget.json`));
+      priorUsage.modelCalls += b.state.usage.modelCalls; priorUsage.totalPayloadBytes += b.state.usage.totalPayloadBytes; planningBudgetHashes.push(contentHash(b));
+    }
+    const reviews = plan.identityRequirements.consumerRevalidation ? (await new RequirementLedger(root, plan.sourceScope.sourceId).history()).flatMap(r =>
+      r.payload.kind === "identity-consumer-revalidation" && consumerRevalidationId(r.payload.record.scope) === plan.identityRequirements!.consumerRevalidation!.id ? [r.payload.record] : []) : [];
+    const origin = plan.identityRequirements.consumerRevalidation ? await revalidatedConsumerBudgetOrigin(root, reviews)
+      : { originalBudgetHash: intent.originalBudgetHash, priorUsage, planningBudgetHashes };
+    const start = await read(path.join(directory, "start.json"));
+    if (contentHash(start.plan) !== contentHash(plan) || contentHash(start.origin) !== contentHash(origin) || budget.originHash !== contentHash(origin))
+      throw prerequisiteStop("Upstream budget detached from original planning/failure charges; no authority or reset");
+    const stages = await identityUpstreamBudgetStages(directory, start.order), index = stages.indexOf(stage);
+    if (index < 0 || new Set(stages).size !== stages.length || contentHash(start.order.map((t: { kind: string; id: string }) => `${t.kind}:${t.id}`).sort())
+      !== contentHash([...plan.allowedCreations, ...plan.allowedWrites].map(t => `${t.kind}:${t.id}`).sort())) throw prerequisiteStop("Upstream budget lost an exact original slot");
+    const inherited = { modelCalls: origin.priorUsage.modelCalls, totalPayloadBytes: origin.priorUsage.totalPayloadBytes };
+    for (const previous of stages.slice(0, index)) {
+      const b = await read(path.join(directory, `${previous}.budget.json`));
+      if (contentHash(b.priorUsage) !== contentHash(inherited) || b.originHash !== contentHash(origin)) throw prerequisiteStop("Upstream budget lineage is missing, reordered or reset");
+      inherited.modelCalls += b.state.usage.modelCalls; inherited.totalPayloadBytes += b.state.usage.totalPayloadBytes;
+    }
+    if (contentHash(budget.priorUsage) !== contentHash(inherited) || contentHash(budget.cumulative) !== contentHash({
+      modelCalls: inherited.modelCalls + usage.modelCalls, totalPayloadBytes: inherited.totalPayloadBytes + usage.totalPayloadBytes }))
+      throw prerequisiteStop("Upstream budget cumulative charges changed; retain original failures without replay");
+  }
   return invocation;
 }
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/), text = z.string().trim().min(1).max(6000);
 export const identityUpstreamDirectory = (root: string, plan: UpstreamRepairPlan) => {
   if (!plan.identityRequirements) throw prerequisiteStop("Identity upstream execution has no exact representation authority");
-  return path.join(workspaceStateDir(root), "compile-loops", plan.sourceScope.sourceId, "prerequisites", plan.identityRequirements.taskId, "identity-requirements", "upstream");
+  const base = path.join(workspaceStateDir(root), "compile-loops", plan.sourceScope.sourceId, "prerequisites", plan.identityRequirements.taskId, "identity-requirements");
+  if (plan.identityRequirements.consumerRevalidation) return path.join(base, "consumer-revalidation", plan.identityRequirements.consumerRevalidation.id, "upstream");
+  return plan.identityRequirements.consumerRepair ? path.join(base, "consumer-repairs", plan.identityRequirements.consumerRepair.findingId, "upstream") : path.join(base, "upstream");
 };
 export const identityUpstreamAcceptanceSchema = z.object({
   phase: z.literal("upstream-acceptance"), planHash: hash, graphHash: hash,
@@ -52,38 +90,87 @@ export const identityUpstreamAcceptanceRecordSchema = z.object({
   taskId: hash, planHash: hash, graphHash: hash, inputHash: hash, output: identityUpstreamAcceptanceSchema,
   traceRunId: text, sessionId: text, provider: z.literal("openai-codex"), model: z.literal("gpt-6.1-sol"), subscription: z.literal(true),
   evidence: z.array(prerequisiteEvidenceSchema).min(1).max(384),
+  sessionCheckpointHash: hash.optional(),
 }).strict();
 export type IdentityUpstreamAcceptanceRecord = z.infer<typeof identityUpstreamAcceptanceRecordSchema>;
 export const identityUpstreamSlotRecordSchema = z.object({ planHash: hash, target: z.object({ kind: z.string(), id: z.string() }).strict(),
-  traceRunId: text, sessionId: text, sessionRef: hash, attemptRef: hash, proposalId: text, proposalHash: hash }).strict();
+  traceRunId: text, sessionId: text, sessionRef: hash, attemptRef: hash, proposalId: text, proposalHash: hash, sessionCheckpointHash: hash.optional(), correctionHash: hash.optional() }).strict();
 export type IdentityUpstreamSlotRecord = z.infer<typeof identityUpstreamSlotRecordSchema>;
 
 /** Read exact original staged envelopes; accepted history remains identical after a finish. */
-export async function identityUpstreamGraph(root: string, plan: UpstreamRepairPlan) {
-  if (!plan.identityRequirements || plan.allowedWrites.length) throw prerequisiteStop("Only reviewed identity creations may enter this acceptance graph");
+export async function identityUpstreamGraph(root: string, plan: UpstreamRepairPlan, originalFinish = false) {
+  if (!plan.identityRequirements || (plan.allowedWrites.length && !plan.identityRequirements.consumerRepair)) throw prerequisiteStop("Only reviewed identity creations and the exact typed entity repair may enter this acceptance graph");
   const state = await new UpstreamRepairLedger(root, plan.sourceScope.sourceId).inspect();
   const current = state.plans.find(p => p.plan.planHash === plan.planHash);
-  if (!current || contentHash(current.plan) !== contentHash(plan) || current.state === "needs-host-review"
+  const retained = originalFinish ? current?.originalFinishIntent ?? current?.finishIntent : undefined;
+  if (!current || (originalFinish && !retained) || contentHash(current.plan) !== contentHash(plan) || (current.state === "needs-host-review" && !retained && !(current.finishedReceipt && isCompletedUpstreamRecovery(root, plan.planHash)))
     || state.modelSessions.some(s => s.started.planHash === plan.planHash && !s.closed)) throw prerequisiteStop("Original upstream plan has stopped or unsettled sessions");
-  const store = new EntityResolutionStore(root), graph = [];
-  for (const target of plan.allowedCreations) {
-    const attempt = state.attempts.findLast(a => a.started.planHash === plan.planHash && a.started.artifactId === target.id && a.staged);
-    if (!attempt?.validatedHash || attempt.failed || !attempt.started.modelSessionRef) throw prerequisiteStop("A source slot lacks its original Pi-staged attempt");
+  const store = new EntityResolutionStore(root), world = new ProposalStore(root), graph = [];
+  for (const target of [...plan.allowedCreations, ...plan.allowedWrites]) {
+    const original = retained?.proposals.find(p => p.artifactKind === target.kind && p.artifactId === target.id);
+    const attempt = original ? state.attempts.find(a => a.attemptRef === original.attemptRef)
+      : state.attempts.findLast(a => a.started.planHash === plan.planHash && a.started.artifactKind === target.kind && a.started.artifactId === target.id && a.staged);
+    if (!attempt?.validatedHash || attempt.failed) throw prerequisiteStop("A source slot lacks its original validated Pi proposal");
+    let correction: IdentityUpstreamSlotRecord | undefined;
+    const revision = !originalFinish ? current.finishRevision?.intent.corrections.find(c => c.artifactKind === target.kind && c.artifactId === target.id) : undefined;
+    let revisedProof: { sessionId: string; traceRunId: string; sessionCheckpointHash: string } | undefined;
+    if (revision) {
+      const { verifyIdentityFinishRevisionProof } = await import("./identity-finish-revision.js");
+      const verified = await verifyIdentityFinishRevisionProof(root, plan, identityUpstreamDirectory(root, plan));
+      if (current.finishRevision!.intent.corrections.length !== 1 || revision.artifactKind !== "initial-world" || revision.artifactId !== "singleton"
+        || current.finishRevision!.intent.auditRef !== `pi-identity-finish-revision:${contentHash(verified.proof)}`
+        || revision.inputHash !== contentHash(verified.proposal) || contentHash(attempt.started.toolInput) !== revision.inputHash
+        || attempt.started.proposalId !== revision.replacementProposalId || attempt.started.modelSessionRef)
+        throw prerequisiteStop("Revised identity graph differs from its exact Pi-backed singleton correction; no acceptance or retry");
+      revisedProof = verified.proof;
+    } else if (!attempt.started.modelSessionRef) {
+      correction = identityUpstreamSlotRecordSchema.parse(await read(path.join(identityUpstreamDirectory(root, plan), `${target.id}.record.json`)));
+      await (await import("./identity-upstream-correction.js")).verifyIdentityCorrectedSlot(root, plan, identityUpstreamDirectory(root, plan), correction);
+      if (correction.attemptRef !== attempt.attemptRef) throw prerequisiteStop("Graph changed its verified host correction attempt");
+    }
     let envelope;
-    try { envelope = await store.readProposal(plan.sourceScope.sourceId, "pending", attempt.started.proposalId); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; envelope = await store.readProposal(plan.sourceScope.sourceId, "accepted", attempt.started.proposalId); }
+    const readEnvelope = (status: "pending" | "accepted" | "rejected") => ["entity", "initial-world"].includes(target.kind) ? world.readEnvelope(status, attempt.started.proposalId) : store.readProposal(plan.sourceScope.sourceId, status, attempt.started.proposalId);
+    try { envelope = await readEnvelope("pending"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      try { envelope = await readEnvelope("accepted"); }
+      catch (error) { if (!retained || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error; envelope = await readEnvelope("rejected"); } }
     const staged = state.records.find(r => r.payload.kind === "attempt-staged" && r.payload.attemptRef === attempt.attemptRef)?.payload;
-    if (envelope.payload.id !== target.id || target.kind !== "entity-resolution" || contentHash(envelope.payload) !== attempt.validatedHash
+    if ((target.kind === "initial-world" ? "singleton" : (envelope.payload as { id?: string }).id) !== target.id
+      || !["entity-resolution", "entity", ...(plan.identityRequirements.consumerRevalidation ? ["initial-world"] : [])].includes(target.kind) || contentHash(envelope.payload) !== attempt.validatedHash
       || staged?.kind !== "attempt-staged" || staged.proposalHash !== contentHash(envelope)) throw prerequisiteStop("Source acceptance graph differs from the original validated proposal");
-    graph.push({ target: { kind: target.kind, id: target.id }, attemptRef: attempt.attemptRef, sessionRef: attempt.started.modelSessionRef,
+    graph.push({ target: { kind: target.kind, id: target.id }, attemptRef: attempt.attemptRef, sessionRef: attempt.started.modelSessionRef ?? (revisedProof ? contentHash(revisedProof) : correction!.sessionRef),
+      ...(correction ? { correctionHash: correction.correctionHash } : {}),
+      ...(revisedProof ? { finishRevisionHash: current.finishRevision!.intent.revisionHash, revisionProof: revisedProof } : {}),
       proposalId: envelope.id, proposalHash: contentHash(envelope), payloadHash: attempt.validatedHash, payload: envelope.payload });
   }
   if (state.attempts.some(a => a.started.planHash === plan.planHash && !a.staged && !a.failed)) throw prerequisiteStop("Unsettled source proposal attempt");
   return graph;
 }
 
+/** The payload's compatibility evidence is not the proposal's path-level
+ * evidence. Review the exact envelope metadata without changing old graph hashes. */
+export async function identityUpstreamEvidence(root: string, plan: UpstreamRepairPlan, graph: Awaited<ReturnType<typeof identityUpstreamGraph>>) {
+  const world = new ProposalStore(root), resolutions = new EntityResolutionStore(root);
+  return Promise.all(graph.map(async item => {
+    if (typeof item.proposalId !== "string") throw prerequisiteStop("Acceptance graph lost its exact proposal ID; no guessed evidence or retry");
+    const proposalId = item.proposalId;
+    const readEnvelope = (status: "pending" | "accepted" | "rejected") => ["entity", "initial-world"].includes(item.target.kind)
+      ? world.readEnvelope(status, proposalId) : resolutions.readProposal(plan.sourceScope.sourceId, status, proposalId);
+    let envelope;
+    try { envelope = await readEnvelope("pending"); }
+    catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      try { envelope = await readEnvelope("accepted"); }
+      catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; envelope = await readEnvelope("rejected"); } }
+    if (contentHash(envelope) !== item.proposalHash || contentHash(envelope.payload) !== item.payloadHash)
+      throw prerequisiteStop("Acceptance evidence differs from its exact staged envelope; no changed evidence or retry");
+    return { target: item.target, proposalId: item.proposalId, proposalHash: item.proposalHash,
+      evidenceAssertions: "evidenceAssertions" in envelope ? envelope.evidenceAssertions ?? [] : [] };
+  }));
+}
+
 export async function verifyIdentityUpstreamSlotTrace(root: string, plan: UpstreamRepairPlan, raw: IdentityUpstreamSlotRecord) {
   const record = identityUpstreamSlotRecordSchema.parse(raw), state = await new UpstreamRepairLedger(root, plan.sourceScope.sourceId).inspect();
+  if (record.correctionHash) return (await import("./identity-upstream-correction.js")).verifyIdentityCorrectedSlot(root, plan, identityUpstreamDirectory(root, plan), record);
   const attempt = state.attempts.find(a => a.attemptRef === record.attemptRef), session = state.modelSessions.find(s => s.sessionRef === record.sessionRef);
   if (record.planHash !== plan.planHash || !session?.closed || session.chargedFailure || !attempt?.staged || attempt.failed
     || attempt.started.modelSessionRef !== record.sessionRef || attempt.started.artifactKind !== record.target.kind || attempt.started.artifactId !== record.target.id
@@ -106,54 +193,104 @@ export async function verifyIdentityUpstreamSlotTrace(root: string, plan: Upstre
   const call = events.find(e => e.type === "tool.call.started" && e.toolCallId === completed[0]!.toolCallId);
   const args = call?.blobRef ? await store.peekBlob(call.blobRef) as { proposal_json?: string } : undefined;
   if (!args?.proposal_json || contentHash(JSON.parse(args.proposal_json)) !== contentHash(attempt.started.toolInput)) throw prerequisiteStop("Staged source proposal is not the actual Pi tool input");
+  if (plan.identityRequirements?.consumerRepair) {
+    const checkpoint = await verifyIdentityUpstreamSession(root, identityUpstreamDirectory(root, plan), record.target.id, record, identityUpstreamSessionContract(record.target.kind));
+    if (contentHash(checkpoint.output) !== contentHash(args)) throw prerequisiteStop("Staging transcript differs from the actual reserved tool input");
+  }
   for (const start of events.filter(e => e.type === "tool.call.started")) if (!events.some(e => ["tool.call.completed", "tool.call.failed"].includes(e.type) && e.toolCallId === start.toolCallId && e.seq > start.seq)) throw prerequisiteStop("Slot has an unsettled tool call");
 }
 
 /** Mandatory before finish; checks actual pending/accepted envelopes, not a success label or a preview. */
-export async function verifyIdentityUpstreamAcceptance(root: string, plan: UpstreamRepairPlan) {
+export async function verifyIdentityUpstreamAcceptance(root: string, plan: UpstreamRepairPlan, originalFinish = false) {
+  return verifyAcceptance(root, plan, originalFinish);
+}
+
+/** Verifies retained negative evidence, never supplies commit authority. */
+export async function verifyIdentityAcceptanceRejection(root: string, plan: UpstreamRepairPlan) {
+  return verifyAcceptance(root, plan, false, true);
+}
+
+async function verifyAcceptance(root: string, plan: UpstreamRepairPlan, originalFinish = false, rejected = false) {
   const directory = identityUpstreamDirectory(root, plan);
-  const record = identityUpstreamAcceptanceRecordSchema.parse(JSON.parse(await fs.readFile(path.join(directory, "acceptance.record.json"), "utf8")));
-  const graph = await identityUpstreamGraph(root, plan), ledger = new RequirementLedger(root, plan.sourceScope.sourceId);
+  const revised = originalFinish ? null : await (await import("./identity-finish-revision.js")).identityAcceptanceStage(root, plan, directory);
+  const stage = rejected ? "finish-revision-acceptance" : revised?.stage ?? "acceptance";
+  const acceptanceLimits = rejected ? revised?.intent.acceptanceLimits : revised?.limits ?? IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS;
+  if (!acceptanceLimits || (rejected && !revised)) throw prerequisiteStop("Missing exact revised graph for retained negative acceptance; no authority");
+  const record = identityUpstreamAcceptanceRecordSchema.parse(await read(path.join(directory, `${stage}.record.json`)));
+  const graph = await identityUpstreamGraph(root, plan, originalFinish), ledger = new RequirementLedger(root, plan.sourceScope.sourceId);
   const prerequisites = await ledger.sourcePrerequisites(plan.identityRequirements!.taskId), representations = await ledger.sourceRepresentations(plan.identityRequirements!.taskId);
   const identityRecords = await ledger.identityRequirements(plan.identityRequirements!.taskId);
+  const repairRecords = plan.identityRequirements!.consumerRepair ? (await ledger.history()).flatMap(r => r.payload.kind === "identity-consumer-repair"
+    && r.payload.record.intent.findingId === plan.identityRequirements!.consumerRepair!.findingId ? [r.payload.record] : []) : [];
+  const revalidationRecords = plan.identityRequirements!.consumerRevalidation ? (await ledger.history()).flatMap(r => r.payload.kind === "identity-consumer-revalidation"
+    && consumerRevalidationId(r.payload.record.scope) === plan.identityRequirements!.consumerRevalidation!.id ? [r.payload.record] : []) : [];
   const questions = identityRecords[0]?.intent.targets.map(t => ({ requirementId: t.requirementId }));
   const semantic = await ledger.roleSemanticScopes(plan.identityRequirements!.taskId);
-  const input = await read(path.join(directory, "acceptance.input.json")), proposal = await read(path.join(directory, "acceptance.proposal.json"));
+  const input = await read(path.join(directory, `${stage}.input.json`)), proposal = await read(path.join(directory, `${stage}.proposal.json`));
+  if (input.stagedEvidence !== undefined && contentHash(input.stagedEvidence) !== contentHash(await identityUpstreamEvidence(root, plan, graph)))
+    throw prerequisiteStop("Independent acceptance omitted or changed staged field evidence; no finish or retry");
+  if (!rejected && revised?.evidenceRecovery && (contentHash(input.stagedEvidence) !== revised.evidenceRecovery.evidenceHash
+    || input.graphHash !== revised.evidenceRecovery.graphHash))
+    throw prerequisiteStop("Acceptance evidence recovery changed its frozen review context; no finish or retry");
   if (contentHash(input) !== record.inputHash || contentHash(proposal) !== contentHash(record.output)
     || input.taskId !== record.taskId || input.planHash !== plan.planHash || input.graphHash !== contentHash(graph)
     || contentHash(input.staged) !== contentHash(graph) || contentHash(input.originalQuestions) !== contentHash(prerequisites[0]?.scope.questions)
     || contentHash(input.requirements) !== contentHash(identityRecords[0]?.output) || contentHash(input.identityReviewRecordHashes) !== contentHash(identityRecords.map(contentHash))
     || contentHash(input.consumerRequirements) !== contentHash(identityRecords.flatMap(r => r.output.phase === "identity-consumers" ? r.output.consumers.map(({ rationale: _, ...c }) => c) : []))
     || input.consumerActivationAuthorized !== false
-    || contentHash(input.sourceSegmentIds) !== contentHash(plan.sourceScope.segmentIds) || contentHash(input.limits) !== contentHash(IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS)) throw prerequisiteStop("Independent acceptance input or proposal changed");
+    || (repairRecords.length && contentHash(input.consumerRepairRecords) !== contentHash(repairRecords))
+    || (plan.identityRequirements!.consumerRevalidation && (contentHash(revalidationRecords.map(contentHash)) !== contentHash(plan.identityRequirements!.consumerRevalidation.recordHashes)
+      || contentHash(input.consumerRevalidationRecords) !== contentHash(revalidationRecords)))
+    || contentHash(input.sourceSegmentIds) !== contentHash(plan.sourceScope.segmentIds) || contentHash(input.limits) !== contentHash(acceptanceLimits)) throw prerequisiteStop("Independent acceptance input or proposal changed");
   const expectedRefs = plan.readableRefs.filter(r => r.kind !== "source-segment");
   if (contentHash(input.currentDependencies.map((a: { ref: unknown }) => a.ref)) !== contentHash(expectedRefs)
     || input.currentDependencies.some((a: { ref: { kind: string; id: string }; payload: unknown }) => contentHash(a.payload) !== plan.baselineRefs.find(r => r.kind === a.ref.kind && r.id === a.ref.id)?.revisionHash)) throw prerequisiteStop("Independent acceptance omitted or changed a reused annotation");
   if (!questions || record.taskId !== plan.identityRequirements!.taskId || record.planHash !== plan.planHash || record.graphHash !== contentHash(graph)
     || record.output.planHash !== plan.planHash || record.output.graphHash !== record.graphHash
-    || record.output.judgments.some(j => j.verdict !== "supported")
+    || (rejected ? !record.output.judgments.some(j => j.verdict === "blocked") : record.output.judgments.some(j => j.verdict !== "supported"))
     || contentHash(record.output.judgments.map(j => j.requirementId).sort()) !== contentHash(questions.map(q => q.requirementId).sort())
-    || [...prerequisites, ...representations, ...semantic, ...identityRecords].some(r => r.sessionId === record.sessionId || r.traceRunId === record.traceRunId)) throw prerequisiteStop("Independent source acceptance is negative, incomplete, stale or reused");
+    || [...prerequisites, ...representations, ...semantic, ...identityRecords, ...repairRecords, ...revalidationRecords].some(r => r.sessionId === record.sessionId || r.traceRunId === record.traceRunId)) throw prerequisiteStop("Independent source acceptance is negative, incomplete, stale or reused");
   const sessions = new Set([record.sessionId]), traces = new Set([record.traceRunId]);
+  if (!rejected && stage === "finish-revision-evidence-acceptance") {
+    const rejectedReview = await verifyIdentityAcceptanceRejection(root, plan);
+    if (record.sessionId === rejectedReview.sessionId || record.traceRunId === rejectedReview.traceRunId || input.stagedEvidence === undefined)
+      throw prerequisiteStop("Evidence recovery must independently review the complete exact staged evidence; no reused review or retry");
+    sessions.add(rejectedReview.sessionId); traces.add(rejectedReview.traceRunId);
+  }
+  if (revised) {
+    const prior = await verifyIdentityUpstreamAcceptance(root, plan, true);
+    if (prior.sessionId === record.sessionId || prior.traceRunId === record.traceRunId)
+      throw prerequisiteStop("Changed graph reused the original independent acceptance; no finish or retry");
+    sessions.add(prior.sessionId); traces.add(prior.traceRunId);
+  }
   for (const item of graph) {
+    if (item.revisionProof) {
+      if (sessions.has(item.revisionProof.sessionId) || traces.has(item.revisionProof.traceRunId))
+        throw prerequisiteStop("Revised graph reused its draft session for acceptance; no finish or retry");
+      sessions.add(item.revisionProof.sessionId); traces.add(item.revisionProof.traceRunId); continue;
+    }
     const staged = identityUpstreamSlotRecordSchema.parse(JSON.parse(await fs.readFile(path.join(directory, `${item.target.id}.record.json`), "utf8")));
     if (staged.proposalHash !== item.proposalHash || staged.attemptRef !== item.attemptRef || staged.sessionRef !== item.sessionRef || contentHash(staged.target) !== contentHash(item.target)
       || sessions.has(staged.sessionId) || traces.has(staged.traceRunId)
-      || [...prerequisites, ...representations, ...semantic, ...identityRecords].some(r => r.sessionId === staged.sessionId || r.traceRunId === staged.traceRunId)) throw prerequisiteStop("Acceptance reused a staging session or changed its exact slot");
+      || [...prerequisites, ...representations, ...semantic, ...identityRecords, ...repairRecords, ...revalidationRecords].some(r => r.sessionId === staged.sessionId || r.traceRunId === staged.traceRunId)) throw prerequisiteStop("Acceptance reused a staging session or changed its exact slot");
     await verifyIdentityUpstreamSlotTrace(root, plan, staged); sessions.add(staged.sessionId); traces.add(staged.traceRunId);
   }
   const store = new TraceStore(root), run = await store.peekRun(record.traceRunId), events = await store.peekEvents(record.traceRunId);
   const requests = events.filter(e => e.type === "llm.request.started"), submissions = events.filter(e => e.type === "tool.call.completed" && e.data?.toolName === "submit_identity_upstream_acceptance");
   const provenance = events.filter(e => e.type === "stage.started" && e.data?.phase === "identity-upstream-acceptance");
-  const invocation = await verifyInvocationBudget(root, plan, "acceptance", events, IDENTITY_UPSTREAM_ACCEPTANCE_LIMITS);
+  const invocation = await verifyInvocationBudget(root, plan, stage, events, acceptanceLimits);
   if (invocation.graphHash !== record.graphHash) throw prerequisiteStop("Independent acceptance invocation changed its graph");
-  if (run.status !== "succeeded" || !run.endedAt || run.sourceId !== plan.sourceScope.sourceId || run.operationId !== `identity-upstream-${record.taskId}-acceptance` || run.counts.retries
+  if (run.status !== "succeeded" || !run.endedAt || run.sourceId !== plan.sourceScope.sourceId || run.operationId !== `identity-upstream-${record.taskId}-${stage}` || run.counts.retries
     || !requests.length || requests.some(e => e.data?.providerId !== record.provider || e.data?.modelId !== record.model)
     || submissions.length !== 1 || provenance.length !== 1 || provenance[0]!.data?.sessionId !== record.sessionId
     || provenance[0]!.data?.inputHash !== record.inputHash || provenance[0]!.data?.subscription !== true
     || events.some(e => e.type.startsWith("world.commit.") || e.type === "llm.response.failed" || (e.type === "tool.call.started" && !["read_identity_upstream_acceptance", "submit_identity_upstream_acceptance"].includes(String(e.data?.toolName))))) throw prerequisiteStop("Independent acceptance lacks actual read-only Pi subscription provenance");
   const start = events.find(e => e.type === "tool.call.started" && e.toolCallId === submissions[0]!.toolCallId);
   if (!start?.blobRef || contentHash(identityUpstreamAcceptanceSchema.parse(await store.peekBlob(start.blobRef))) !== contentHash(record.output)) throw prerequisiteStop("Acceptance output is not the actual Pi submission");
+  if (repairRecords.length) {
+    const checkpoint = await verifyIdentityUpstreamSession(root, directory, stage, record, identityUpstreamSessionContract("acceptance"));
+    if (contentHash(checkpoint.output) !== contentHash(record.output)) throw prerequisiteStop("Acceptance differs from the complete actual Pi session submission");
+  }
   const readSegments = new Set<string>();
   for (const completed of events.filter(e => e.type === "tool.call.completed" && e.data?.toolName === "read_identity_upstream_acceptance" && e.seq < start.seq)) {
     const call = events.find(e => e.type === "tool.call.started" && e.toolCallId === completed.toolCallId);

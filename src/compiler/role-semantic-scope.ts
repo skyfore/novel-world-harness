@@ -120,7 +120,7 @@ export function inspectSemanticScopePlan(output: z.infer<typeof semanticScopePla
     let payload: ReturnType<typeof parseUpstreamRepairPayload> | undefined;
     try { payload = parseUpstreamRepairPayload(o.kind, JSON.parse(o.payloadJson)); }
     catch { issue(`${location}/payloadJson`, "Payload must match the current schema returned by read_semantic_dependencies.schemaKind", "payload-schema"); }
-    if (payload && (payload.id !== o.id || ("sourceId" in payload && payload.sourceId !== review.scope.sourceId))) issue(`${location}/payloadJson`, "Semantic payload changed allocated identity or immutable source");
+    if (payload && (("id" in payload ? payload.id : "singleton") !== o.id || ("sourceId" in payload && payload.sourceId !== review.scope.sourceId))) issue(`${location}/payloadJson`, "Semantic payload changed allocated identity or immutable source");
     if (o.readableRefs.some(r => !catalog.some(c => c.kind === r.kind && c.id === r.id && c.revisionHash === r.revisionHash))) issue(`${location}/readableRefs`, "Read-only dependency revision is missing or stale");
     if (payload && upstreamRepairReferencedKeys(o.kind, payload).some(key => !keys.includes(key) && !o.readableRefs.some(r => `${r.kind}:${r.id}` === key))) issue(`${location}/readableRefs`, "Semantic payload has an unbound typed dependency");
     if (o.mode === "create") {

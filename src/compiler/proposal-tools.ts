@@ -15,6 +15,8 @@ import { readKnowledgeRepairPlan, knowledgeRepairScopeIssues } from "./knowledge
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { initialWorldInputIssues, INITIAL_WORLD_INPUT_GUIDANCE } from "./initial-world-preflight.js";
+import { diagnoseEntryRepair } from "./entry-repair-diagnostics.js";
+import { CompilerValidator } from "./validator.js";
 import { initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
 import { CompilerAccountingPages } from "./accounting-pages.js";
 import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
@@ -1051,7 +1053,7 @@ function safeTextSuffix(text: string, maxChars: number): string {
 export function createCompilerProposalToolset(
   workspaceRoot: string,
   generatedBy: { provider?: string; model?: string } = {},
-  hostOptions: { recoverPreparedFinish?: boolean; hostObligationCorrection?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown, evidenceAssertions?: readonly EvidenceAssertion[]) => Promise<void> } } = {},
+  hostOptions: { recoverPreparedFinish?: boolean; hostObligationCorrection?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; retainedEntityEvidence?: { id: string; evidence: EvidenceRef[]; assertions: EvidenceAssertion[] }; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown, evidenceAssertions?: readonly EvidenceAssertion[]) => Promise<void> } } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
@@ -1428,6 +1430,13 @@ export function createCompilerProposalToolset(
     }
     if (kind === "world-rule") {
       payload = injectHostWorldRuleEvidence(payload, supportingSemanticEvidence, counterEvidence);
+    }
+    const retained = kind === "entity" ? hostOptions.upstreamRepair?.retainedEntityEvidence : undefined;
+    if (retained && (payload as { id: string }).id === retained.id) {
+      // A marker-only revision does not re-author the entity's historical source
+      // support. Keep the host-verified original evidence and exact bindings.
+      payload = { ...(payload as Record<string, unknown>), evidence: structuredClone(retained.evidence) };
+      evidenceAssertions.unshift(...structuredClone(retained.assertions));
     }
     return kind === "state-delta"
       ? { payload, evidence, evidenceAssertions }
@@ -2224,8 +2233,8 @@ export function createCompilerProposalToolset(
             ...(compilerBatchId ? { compilerBatchId } : {}),
           },
           ...(hostOptions.upstreamRepair ? { beforeWrite: async (payload: unknown, evidenceAssertions: readonly EvidenceAssertion[]) => {
-            if (kind !== "canonical-event" && kind !== "event-participation") throw finishHostError("managed semantic upstream repair attempted an unauthorized world proposal kind");
-            await hostOptions.upstreamRepair!.beforeStage(kind, compilerProposalArtifactId(kind, payload, input.proposal_id), payload, evidenceAssertions);
+            if (kind !== "entity" && kind !== "initial-world" && kind !== "canonical-event" && kind !== "event-participation") throw finishHostError("managed semantic upstream repair attempted an unauthorized world proposal kind");
+            await hostOptions.upstreamRepair!.beforeStage(kind, kind === "initial-world" ? "singleton" : compilerProposalArtifactId(kind, payload, input.proposal_id), payload, evidenceAssertions);
           } } : {}),
         });
         successfulProposalIds.add(accepted.proposalId);
@@ -2315,9 +2324,20 @@ export function createCompilerProposalToolset(
           .map(issue => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`));
       }
       if (issues.length) previewFailure(issues);
+      let writablePointers = ["/delta", "/participantPresence"];
+      if (hostOptions.upstreamRepair) {
+        const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
+        const managedPlan = (await new UpstreamRepairLedger(workspaceRoot, activeSourceId!).inspect()).plans
+          .find(item => item.plan.planHash === hostOptions.upstreamRepair!.planHash)?.plan;
+        writablePointers = managedPlan?.allowedWrites.filter(write => write.kind === "initial-world" && write.id === "singleton").flatMap(write => write.pointers) ?? [];
+      }
+      const entryDiagnostics = diagnoseEntryRepair({ sourceId: activeSourceId!, entry: initialWorldSchema.parse(normalized!.payload),
+        catalog: await new CompilerValidator(new CanonicalModelStore(workspaceRoot)).loadCatalog(),
+        writablePointers, catalogScope: "canonical-catalog" });
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ valid: true, proposalId: input.proposal_id,
           checked: ["input", "exact-evidence", "field-evidence"], unchecked: ["graph-closure", "commit", "playability"],
+          entryDiagnostics,
           next: "Submit the reviewed envelope with propose_initial_world; the host revalidates it before staging." }) }],
         details: { readOnly: true, proposalStaged: false },
       };
@@ -3436,7 +3456,7 @@ export function createCompilerProposalToolset(
     ].map(trackProposal).map((tool): CompilerToolDefinition => {
       const run = async (invoke: () => ReturnType<ToolDefinition["execute"]>) => {
         if (!batchReady) throw finishHostError("compiler batch initialization did not complete; stop tool calls and preserve the original scope for host review");
-        if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(tool.name))) {
+        if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity", "propose_initial_world", "propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(tool.name))) {
           throw finishHostError(hostOptions.upstreamFinish
             ? "frozen upstream finish authorizes only the original host finish; preserve its receipt and drafts, and stop other tool calls"
             : "managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
@@ -3464,7 +3484,7 @@ export function createCompilerProposalToolset(
   return {
     tools,
     async executeHostProposal(name, callId, input) {
-      if (!managedUpstream || !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(name)) {
+      if (!managedUpstream || !["propose_entity", "propose_initial_world", "propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(name)) {
         throw finishHostError("host proposal execution requires an authorized upstream staging scope and an exact proposal tool; do not retry in a model session");
       }
       const tool = tools.find(candidate => candidate.name === name);

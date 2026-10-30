@@ -60,8 +60,8 @@ export async function inspectRoleAuditNarrowRepair(store: RoleReviewWorkStore, p
 
   const traces = new TraceStore(store.root);
   let selected: { run: Awaited<ReturnType<TraceStore["peekRun"]>>; events: Awaited<ReturnType<TraceStore["peekEvents"]>> } | undefined;
-  for (const run of await traces.peekRuns({ sourceId: store.plan.sourceId, kind: "prepare", limit: 1000 })) {
-    if (run.operationId !== store.plan.batchId) continue;
+  for (const run of await traces.peekRunsByOperation(store.plan.sourceId, store.plan.batchId)) {
+    if (run.kind !== "prepare") continue;
     const events = await traces.peekEvents(run.id);
     if (events.some(event => event.data?.phase === "role-review-work"
       && event.data.workId === workId && event.data.continuationAuthorityHash === parent.authorityHash)) {

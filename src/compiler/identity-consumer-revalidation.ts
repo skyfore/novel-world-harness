@@ -17,9 +17,13 @@ import { verifyIdentityUpstreamSession } from "./identity-upstream-session.js";
 import { resolveTextSelectorAnchor } from "./text-anchors.js";
 import { TraceStore } from "../trace/store.js";
 import { SOURCE_LOCAL_CORRECTION, sourceLocalContractHash, sourceLocalConsumerContract, consumerRevalidationLimits } from "./identity-consumer-correction.js";
-import { consumerStageRecoveryDirectory, consumerStageUsage, consumerRecoveryInput, verifyConsumerStageRecovery, assertConsumerRecoveryInput, maybeRecoveryFile } from "./identity-consumer-stage-recovery.js";
+import { consumerStageRecoveryDirectory, consumerStageBudgetDirectories, consumerStageUsage, consumerRecoveryInput, verifyConsumerStageRecovery, assertConsumerRecoveryInput, maybeRecoveryFile } from "./identity-consumer-stage-recovery.js";
 import { inspectConsumerBudgetAmendment, consumerRecoveryLimits } from "./identity-consumer-budget-amendment.js";
+import { inspectConsumerHostRecovery, consumerHostRecoveryDirectory, consumerHostRecoveryInput } from "./identity-consumer-host-recovery.js";
 import { verifyConsumerRefRecovery } from "./identity-consumer-ref-recovery.js";
+import { consumerArtifactKey, consumerDependencyCatalog, consumerArtifactReadHint, ConsumerArtifactReadTracker } from "./identity-consumer-artifacts.js";
+import { consumerWorkContract, consumerWorkDirectory, consumerWorkInput, consumerWorkBudgetPolicy, verifyConsumerWorkProgress } from "./consumer-work-plan.js";
+import { prepareConsumerWorkExecution, prepareConsumerWorkRecord, verifyRecordedConsumerWork } from "./identity-consumer-work.js";
 
 export const revalidationContract = { terminalTool: "submit_consumer_revalidation", readTools: ["read_consumer_revalidation"], receipt: "retained" as const, allowCorrectedSubmission: true };
 export const consumerRevalidationModelScope = (scope: ConsumerRevalidationScope) => {
@@ -32,22 +36,19 @@ export function revalidationRecords(history: Awaited<ReturnType<RequirementLedge
 
 /** Both forms are already emitted by compiler discovery. Resolve an exact
  * kind/id pair only; never change an ID, guess an alias or cross source scope. */
-export function findConsumerArtifact<T extends { kind: string; id: string }>(catalog: readonly T[], ref: string): T | undefined {
-  return catalog.find(c => ref === `${c.kind}:${c.id}` || ref === `${c.kind}/${c.id}`);
+export function findConsumerArtifact<T extends { kind: string; id: string; aliases?: string[] }>(catalog: readonly T[], ref: string): T | undefined {
+  return catalog.find(c => ref === `${c.kind}:${c.id}` || ref === `${c.kind}/${c.id}` || c.aliases?.includes(ref));
 }
 
-export function discoverConsumerArtifacts<T extends { kind: string; id: string }>(catalog: readonly T[], query = "") {
+export function discoverConsumerArtifacts<T extends { kind: string; id: string; aliases?: string[] }>(catalog: readonly T[], query = "") {
   const term = query.trim().toLowerCase();
-  return catalog.filter(c => !term || `${c.kind}:${c.id}`.toLowerCase().includes(term));
+  return catalog.filter(c => !term || [`${c.kind}:${c.id}`, ...c.aliases ?? []].some(ref => ref.toLowerCase().includes(term)));
 }
 
 export function currentConsumerPayload(consumer: { ref: string; reason: string; payload: unknown }, current: {
   payloads: ReadonlyMap<string, unknown>; activeRevisions: ReadonlyMap<string, string>;
 }) {
   if (consumer.reason !== "typed-consumer") throw prerequisiteStop("Source-review consumers require their original owning audit, not a world-payload revalidation. Inspect requirements inspect-identity-repairs for the same source/task and its sourceReviewCoverage; preserve the full denominator, no dispatch or unchanged retry");
-  const artifactKind: Record<string, string> = { initial: "initial-world", event: "canonical-event", participation: "event-participation",
-    spatial: "spatial-relation", scene: "scene-occurrence", frame: "event-frame", action: "action-schema", constraint: "action-constraint",
-    norm: "norm-template", process: "process-template", rule: "world-rule", goal: "character-goal", model: "character-model" };
   const [kind, ...idParts] = consumer.ref.split("/"), id = idParts.join("/");
   if (kind === "entry") {
     const stop = (reason: string) => prerequisiteStop(`${reason}. Inspect requirements inspect-identity-repairs with the same --source/--task and --ref ${consumer.ref}, and its owning canonical-event/event-execution revisions. Resolve the active dependency before dispatch; no frozen-payload fallback, guessed ref or unchanged retry`);
@@ -81,11 +82,9 @@ export function currentConsumerPayload(consumer: { ref: string; reason: string; 
     if (!checkpoint) throw stop("Selected actor has no entry checkpoint in the active event projection");
     return checkpoint;
   }
-  const annotation = kind === "annotation" && consumer.payload && typeof consumer.payload === "object" && "annotationType" in consumer.payload
-    ? String(consumer.payload.annotationType) : null;
-  const key = `${annotation ?? artifactKind[kind!] ?? kind}:${kind === "initial" ? "singleton" : id}`;
-  const payload = current.payloads.get(key);
-  if (!payload || current.activeRevisions.get(key) !== contentHash(payload))
+  const key = consumerArtifactKey(consumer.ref, consumer.payload, id);
+  const payload = key ? current.payloads.get(key) : undefined;
+  if (!key || !payload || current.activeRevisions.get(key) !== contentHash(payload))
     throw prerequisiteStop("Selected consumer has no exact active world revision; a retained predecessor is audit evidence, not current truth. Inspect the same source/task/ref and its owning replacement history; no fallback to the frozen payload or model dispatch");
   return payload;
 }
@@ -117,7 +116,7 @@ export async function inheritConsumerRevalidationBudgets(upstreamDirectory: stri
   const names = await fs.readdir(reviewsDirectory, { withFileTypes: true }).catch((e: NodeJS.ErrnoException) => { if (e.code === "ENOENT") return []; throw e; });
   for (const entry of names.filter(e => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
     const directory = path.join(reviewsDirectory, entry.name);
-    for (const stage of ["consumer-revalidation", "consumer-revalidation-check"]) for (const dir of [directory, consumerStageRecoveryDirectory(directory, stage)]) {
+    for (const stage of ["consumer-revalidation", "consumer-revalidation-check"]) for (const dir of consumerStageBudgetDirectories(directory, stage)) {
       const file = path.join(dir, `${stage}.budget.json`);
       if (await maybeRecoveryFile(file)) await remember(file, undefined, true);
     }
@@ -143,10 +142,10 @@ async function prepareOriginalConsumerRevalidation(root: string, sourceId: strin
   const current = await verifyUpstreamRepairPlan(root, upstream.plan, new Map(receipt.identity.upstreamRepairIntent.proposals.map(p => [`${p.artifactKind}:${p.artifactId}`, p.payloadHash])));
   // Historical resolution baselines remain readable, explicitly distinguished
   // from active decisions. Source-review consumers keep their original owners.
-  const catalog = [...current.payloads].filter(([key]) => !key.startsWith("source-segment:")).map(([key, payload]) => ({
+  const catalog = consumerDependencyCatalog([...current.payloads].filter(([key]) => !key.startsWith("source-segment:")).map(([key, payload]) => ({
     kind: key.slice(0, key.indexOf(":")), id: key.slice(key.indexOf(":") + 1), revisionHash: contentHash(payload), payload,
     current: current.activeRevisions.get(key) === contentHash(payload),
-  }));
+  })), { sourceId, sourceHash: prepared.intent.sourceHash }, prepared.inventory, prepared.review.priorRoster);
   const payload = currentConsumerPayload(consumer, current);
   const old = original[0]!.intent, definition = original[0]!.output;
   if (definition.phase !== "identity-definition") throw prerequisiteStop("Original independent requirements missing");
@@ -168,6 +167,7 @@ async function prepareOriginalConsumerRevalidation(root: string, sourceId: strin
     originalRevisionHash: consumer.revisionHash, currentRevisionHash: contentHash(payload), upstreamPlanHash: upstream.plan.planHash,
     receiptFingerprint: receipt.fingerprint, acceptanceHash: contentHash(acceptance), parentStateHash: old.parentStateHash,
     originalBudgetHash: old.originalBudgetHash, authorizationRef, priorUsage, priorBudgetFiles,
+    ...(!retained || retained.executionPolicy ? { executionPolicy: "consumer-work/v1" as const } : {}),
     requirementPrefix: retained?.requirementPrefix ?? { length: history.length, head: history.at(-1)!.hash } });
   if ((retained && contentHash(retained) !== contentHash(scope)) || history[scope.requirementPrefix.length - 1]?.hash !== scope.requirementPrefix.head)
     throw prerequisiteStop("Frozen consumer revalidation dependencies changed; preserve both versions, no repinning or redispatch");
@@ -208,11 +208,14 @@ export function consumerRevalidationInput(p: Awaited<ReturnType<typeof prepareCo
   const dependencyKeys = new Set(["initial-world:singleton", ...p.prepared.intent.targets.flatMap(t => [
     `entity-mention:${t.mentionId}`, ...(t.predecessor ? [`entity-resolution:${t.predecessor.id}`] : []),
   ]), ...(p.receipt?.identity.upstreamRepairIntent?.proposals ?? []).map(r => `${r.artifactKind}:${r.artifactId}`)]);
+  for (const d of p.consumer.dependencies ?? []) {
+    const dependency = d as { kind?: string; id?: string }, c = findConsumerArtifact(p.catalog, `${dependency.kind}/${dependency.id}`);
+    if (c) dependencyKeys.add(`${c.kind}:${c.id}`);
+  }
   return { scope: consumerRevalidationModelScope(p.scope), scopeHash: contentHash(p.scope), definition: p.original[0]!.output, definitionCheck: p.original[1]!.output,
     originalQuestions: p.prepared.review.scope.questions, originalSemanticScope: p.prepared.semantic[0]!.output,
     originalConsumer: p.consumer, currentConsumer: p.current, acceptedDependency: p.acceptance.output,
-    artifactReadRefs: p.catalog.filter(c => dependencyKeys.has(`${c.kind}:${c.id}`)).map(c => ({ ref: `${c.kind}:${c.id}`,
-      revisionHash: c.revisionHash, current: c.current })),
+    artifactReadRefs: p.catalog.filter(c => dependencyKeys.has(`${c.kind}:${c.id}`)).map(consumerArtifactReadHint),
     ...(p.scope.compilerCorrection ? { compilerCorrection: sourceLocalConsumerContract, previousCompilerJudgments: p.correctionPredecessor.map(r => r.output) } : {}),
     requiredSourceSegmentIds: [...new Set([...p.prepared.intent.requiredSourceSegmentIds,
       ...(check && previous[0]!.output.phase === "consumer-revalidation" ? [...previous[0]!.output.initialWorldRepair?.segmentIds ?? [], ...previous[0]!.output.entityRepair?.segmentIds ?? []] : [])])],
@@ -235,48 +238,105 @@ export async function verifyConsumerRevalidationRecord(root: string, record: Con
   const prior = record.output.phase === "consumer-revalidation" ? [] : revalidationRecords(await ledger.history(), s.taskId).filter(r => consumerRevalidationId(r.scope) === consumerRevalidationId(s) && r.output.phase === "consumer-revalidation");
   validateConsumerRevalidationHistory([...prior, record], original);
   const baseDirectory = consumerRevalidationDirectory(root, s), stage = record.output.phase;
-  const continuation = record.continuationHash ? await verifyConsumerStageRecovery(root, s, stage, record.continuationHash, revalidationContract, record.budgetAmendmentHash) : null;
-  const directory = continuation ? consumerStageRecoveryDirectory(baseDirectory, stage) : baseDirectory;
+  let work: Awaited<ReturnType<typeof prepareConsumerWorkExecution>> | undefined;
+  if (record.executionPlanHash) {
+    await read(path.join(consumerWorkDirectory(baseDirectory), `${stage}.plan.json`));
+    work = all.some(accepted => contentHash(accepted) === contentHash(record))
+      ? await verifyRecordedConsumerWork(root, record) : await prepareConsumerWorkRecord(root, s, prior, stage);
+    if (contentHash(work.plan) !== record.executionPlanHash) throw prerequisiteStop("Work record lost its frozen execution plan; no registration or retry");
+  }
+  const hostRecovery = record.hostRecoveryHash ? await inspectConsumerHostRecovery(root, s, revalidationContract, undefined, record.hostRecoveryHash) : undefined;
+  const continuation = record.continuationHash ? await verifyConsumerStageRecovery(root, s, stage, record.continuationHash, revalidationContract, record.budgetAmendmentHash, hostRecovery) : null;
+  const failedDirectory = hostRecovery && stage === "consumer-revalidation" ? consumerHostRecoveryDirectory(baseDirectory) : baseDirectory;
+  const directory = work ? work.directory : continuation ? consumerStageRecoveryDirectory(failedDirectory, stage) : failedDirectory;
   const amendment = continuation ? await inspectConsumerBudgetAmendment(directory, continuation) : undefined;
   const proof = record.refRecoveryHash ? await verifyConsumerRefRecovery(root, s, directory, revalidationContract, record.refRecoveryHash)
-    : await verifyIdentityUpstreamSession(root, directory, stage, { ...record, planHash: contentHash(s) }, revalidationContract);
+    : await verifyIdentityUpstreamSession(root, directory, stage, { ...record, planHash: contentHash(s) }, work ? consumerWorkContract : revalidationContract);
   const input = await read(path.join(directory, `${stage}.input.json`)), budget = await read(path.join(directory, `${stage}.budget.json`));
+  if (work) {
+    const invocation = await read(path.join(directory, `${stage}.invocation.json`));
+    if (contentHash(input) !== contentHash(consumerWorkInput(work.plan)) || budget.executionPlanHash !== record.executionPlanHash
+      || contentHash(budget.policy) !== contentHash(consumerWorkBudgetPolicy) || invocation.executionPlanHash !== record.executionPlanHash
+      || invocation.scopeHash !== contentHash(s) || invocation.stage !== stage)
+      throw prerequisiteStop("Consumer work input, policy or invocation changed; preserve the original execution plan, no registration or retry");
+    const messages = (await fs.readFile(path.join(directory, `${stage}.messages.jsonl`), "utf8")).trimEnd().split("\n").map(line => JSON.parse(line).message);
+    verifyConsumerWorkProgress(work.plan, budget.state, messages);
+    const lastPreview = messages.findLast(m => m.role === "toolResult" && !m.isError && m.toolName === "preview_consumer_revalidation");
+    const preview = lastPreview?.content.find((c: { type: string }) => c.type === "text");
+    if (!preview || JSON.parse(preview.text).draftHash !== contentHash(record.output)
+      || contentHash(await read(path.join(directory, `${stage}.draft-${contentHash(record.output)}.json`)))
+        !== contentHash({ workKey: work.plan.workKey, output: record.output, evidence: record.evidence }))
+      throw prerequisiteStop("Consumer submission has no exact validated retained draft; no registration or retry");
+  }
   if (continuation) {
-    assertConsumerRecoveryInput(await read(path.join(baseDirectory, `${stage}.input.json`)), input);
+    assertConsumerRecoveryInput(await read(path.join(failedDirectory, `${stage}.input.json`)), input);
     const invocation = await read(path.join(directory, `${stage}.invocation.json`));
     if (invocation.scopeHash !== contentHash(s) || invocation.stage !== stage || invocation.continuationHash !== record.continuationHash
       || invocation.budgetAmendmentHash !== record.budgetAmendmentHash)
       throw prerequisiteStop("Continuation invocation is detached from its frozen original failure; no replay");
   }
-  const limits = continuation ? consumerRecoveryLimits(continuation, amendment) : await consumerRevalidationLimits(root, s, stage);
+  const limits = work ? work.plan.limits : continuation ? consumerRecoveryLimits(continuation, amendment)
+    : hostRecovery ? (stage === "consumer-revalidation" ? hostRecovery.proposalLimits : hostRecovery.checkLimits) : await consumerRevalidationLimits(root, s, stage);
+  if (hostRecovery) {
+    const invocation = await read(path.join(directory, `${stage}.invocation.json`));
+    if (invocation.scopeHash !== contentHash(s) || invocation.stage !== stage || invocation.hostRecoveryHash !== record.hostRecoveryHash
+      || contentHash(input.hostRecovery) !== contentHash(consumerHostRecoveryInput(hostRecovery)))
+      throw prerequisiteStop("Consumer host recovery detached its input or invocation; no registration or retry");
+    if (stage === "consumer-revalidation") assertConsumerRecoveryInput(await read(path.join(baseDirectory, `${stage}.input.json`)), input);
+  }
   const traces = new TraceStore(root), run = await traces.peekRun(record.traceRunId), events = await traces.peekEvents(record.traceRunId);
   if (run.status !== (record.refRecoveryHash ? "failed" : "succeeded") || run.sourceId !== s.sourceId || contentHash(input) !== record.inputHash
     || proof.sessionId !== record.sessionId || proof.traceRunId !== record.traceRunId
     || contentHash(proof.output) !== contentHash(record.output) || contentHash(input.scope) !== contentHash(consumerRevalidationModelScope(s))
     || contentHash(budget.limits) !== contentHash(limits) || budget.originalBudgetHash !== s.originalBudgetHash
-    || budget.budgetAmendmentHash !== record.budgetAmendmentHash)
+    || budget.budgetAmendmentHash !== record.budgetAmendmentHash || budget.hostRecoveryHash !== record.hostRecoveryHash)
     throw prerequisiteStop("Consumer revalidation is detached from its actual source, session or budget; stop without replay");
   if (continuation && (contentHash(input.continuation) !== contentHash(consumerRecoveryInput(continuation, amendment))
     || record.sessionId === continuation.originalSessionId || record.traceRunId === continuation.originalTraceRunId
-    || run.operationId !== `receipt-bound-${contentHash(s)}-${stage}-continuation`))
+    || run.operationId !== `receipt-bound-${contentHash(s)}-${stage}${hostRecovery ? "-host-recovery" : ""}-continuation`))
     throw prerequisiteStop("Consumer continuation lost its exact failure lineage or fresh evidence session; no retry");
-  const sourceIds = new Set<string>(), refs = new Set<string>();
+  if (hostRecovery && run.operationId !== `receipt-bound-${contentHash(s)}-${stage}-host-recovery${continuation ? "-continuation" : ""}`)
+    throw prerequisiteStop("Consumer host recovery lost its exact operation; no registration or retry");
+  if (work && run.operationId !== `receipt-bound-${contentHash(s)}-${stage}-work-v1`)
+    throw prerequisiteStop("Consumer work lost its exact trace operation; no registration or retry");
+  const raw = await read(path.join(identityRequirementDirectory(root, s.sourceId, s.taskId), "context.json"));
+  const canonicalRef = (ref: string) => {
+    const consumer = raw.inventory.consumers.find((c: { ref: string }) => c.ref === ref || c.ref.replace("/", ":") === ref);
+    return consumer && consumerArtifactKey(consumer.ref, consumer.payload, s.sourceId) || ref.replace("/", ":");
+  };
+  const sourceIds = new Set<string>(), refs = new Set<string>(), artifactReads = new ConsumerArtifactReadTracker();
+  if (work) {
+    work.plan.sources.forEach(s => sourceIds.add(s.id)); refs.add(s.ref);
+    work.plan.artifacts.forEach(a => refs.add(`${a.kind}:${a.id}`));
+  }
   for (const event of events.filter(e => e.type === "tool.call.completed" && e.data?.toolName === "read_consumer_revalidation")) {
     const call = events.find(e => e.type === "tool.call.started" && e.toolCallId === event.toolCallId);
     if (!call?.blobRef) throw prerequisiteStop("Consumer revalidation lost its complete read receipt");
     const request = await traces.peekBlob(call.blobRef) as { collection?: string; segmentIds?: string[]; refs?: string[] };
     request.segmentIds?.forEach(id => sourceIds.add(id));
-    request.refs?.forEach(id => refs.add(request.collection === "artifacts" && !id.includes(":") ? id.replace("/", ":") : id));
+    if (request.collection === "artifacts" && request.refs) {
+      const result = event.blobRef ? await traces.peekBlob(event.blobRef) as { content?: { type: string; text?: string }[] } : undefined;
+      const text = result?.content?.find(c => c.type === "text")?.text;
+      if (!text) throw prerequisiteStop("Consumer artifact read lost its complete result receipt; no registration or retry");
+      for (const item of JSON.parse(text).items ?? []) {
+        if (!request.refs.some(ref => canonicalRef(ref) === item.ref)) throw prerequisiteStop("Consumer artifact response changed the requested dependency; no retry");
+        artifactReads.accept(item);
+      }
+    } else request.refs?.forEach(id => refs.add(id));
   }
+  artifactReads.completed.forEach(ref => refs.add(ref));
   if (input.requiredSourceSegmentIds.some((id: string) => !sourceIds.has(id)) || !refs.has(s.ref)) throw prerequisiteStop("Consumer revalidation omitted required full source or consumer reads");
-  if (continuation?.pendingArtifactRefs.some(ref => !refs.has(ref))) throw prerequisiteStop("Consumer continuation omitted its original unfinished artifact reads; no registration or retry");
-  const raw = await read(path.join(identityRequirementDirectory(root, s.sourceId, s.taskId), "context.json"));
+  if (continuation?.pendingArtifactRefs.some(ref => !refs.has(canonicalRef(ref)))) throw prerequisiteStop("Consumer continuation omitted its original unfinished artifact reads; no registration or retry");
+  if (hostRecovery && (hostRecovery.requiredSourceSegmentIds.some(id => !sourceIds.has(id))
+    || hostRecovery.requiredArtifactRefs.some(ref => !refs.has(canonicalRef(ref)))))
+    throw prerequisiteStop("Consumer host recovery omitted its retained source/dependency reads; no registration or retry");
   if (contentHash(raw.intent) !== s.identityIntentHash || contentHash(raw.inventory) !== s.inventoryHash
     || contentHash(record.evidence.map(e => e.selector)) !== contentHash(record.output.evidence)) throw prerequisiteStop("Consumer revalidation changed its original inventory or evidence");
-  if (contentHash(input.definition) !== contentHash(original[0]!.output) || contentHash(input.definitionCheck) !== contentHash(original[1]!.output)
+  const criteria = work ? work.plan.baseInput : input;
+  if (contentHash(criteria.definition) !== contentHash(original[0]!.output) || contentHash(criteria.definitionCheck) !== contentHash(original[1]!.output)
     || contentHash(input.originalQuestions) !== contentHash(raw.review.scope.questions)
     || contentHash(input.originalSemanticScope) !== contentHash(raw.semantic[0].output)
-    || contentHash(input.denominator) !== contentHash({ total: raw.inventory.consumers.length, refs: raw.inventory.consumers.map((c: { ref: string }) => c.ref),
+    || contentHash(criteria.denominator) !== contentHash({ total: raw.inventory.consumers.length, refs: raw.inventory.consumers.map((c: { ref: string }) => c.ref),
       candidateIds: raw.inventory.candidateIds, sourcePages: raw.inventory.sourcePages, originalQuestionIds: raw.inventory.originalQuestionIds })
     || input.originalConsumer.ref !== s.ref || input.originalConsumer.revisionHash !== s.originalRevisionHash
     || input.currentConsumer.revisionHash !== s.currentRevisionHash
@@ -287,17 +347,19 @@ export async function verifyConsumerRevalidationRecord(root: string, record: Con
     const proposalUsage = await consumerStageUsage(baseDirectory, "consumer-revalidation");
     inherited.modelCalls += proposalUsage.modelCalls; inherited.totalPayloadBytes += proposalUsage.totalPayloadBytes;
   }
+  if (hostRecovery && stage === "consumer-revalidation") Object.assign(inherited, hostRecovery.priorUsage);
   if (continuation) {
-    const failedBudget = await read(path.join(baseDirectory, `${stage}.budget.json`));
+    const failedBudget = await read(path.join(failedDirectory, `${stage}.budget.json`));
     inherited.modelCalls += failedBudget.state.usage.modelCalls; inherited.totalPayloadBytes += failedBudget.state.usage.totalPayloadBytes;
     if (contentHash(inherited) !== contentHash(continuation.priorUsage)) throw prerequisiteStop("Continuation changed its inherited original usage");
   }
+  if (work) Object.assign(inherited, work.plan.priorUsage);
   const usage = budget.state.usage;
   if (s.compilerCorrection && (contentHash(input.compilerCorrection) !== contentHash(sourceLocalConsumerContract)
     || contentHash(input.previousCompilerJudgments) !== contentHash(all.filter(r => consumerRevalidationId(r.scope) === s.compilerCorrection!.predecessorId).map(r => r.output))))
     throw prerequisiteStop("Compiler correction omitted its original negative judgments or changed its typed capability contract");
-  if (contentHash(budget.priorUsage) !== contentHash(inherited) || usage.modelCalls < 1 || usage.modelCalls > limits.maxModelCalls
-    || usage.totalPayloadBytes > limits.maxTotalPayloadBytes || usage.largestRequestBytes > limits.maxRequestBytes
+  if (contentHash(budget.priorUsage) !== contentHash(inherited) || usage.modelCalls < 1 || !work && usage.modelCalls > limits.maxModelCalls
+    || !work && usage.totalPayloadBytes > limits.maxTotalPayloadBytes || usage.largestRequestBytes > limits.maxRequestBytes
     || contentHash(budget.cumulative) !== contentHash({ modelCalls: inherited.modelCalls + usage.modelCalls, totalPayloadBytes: inherited.totalPayloadBytes + usage.totalPayloadBytes }))
     throw prerequisiteStop("Consumer revalidation reset or detached inherited usage; retain all original charges");
   if (record.output.phase === "consumer-revalidation" && !sameQuestions(record.output.retainedQuestionIds, raw.inventory.originalQuestionIds)) throw prerequisiteStop("Consumer revalidation omitted an original blocked question");

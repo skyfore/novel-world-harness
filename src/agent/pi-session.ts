@@ -87,6 +87,7 @@ export type PiAgentSessionOptions = {
   requestBudget?: ModelRequestBudget | readonly ModelRequestBudget[];
   /** Exact request-local sharing for JSON evidence; raw sessions remain intact. */
   losslessJsonReadTools?: readonly string[];
+  losslessJsonDictionaryProfile?: import("./lossless-json-context.js").JsonDictionaryProfile;
   onLosslessContext?: (context: import("@earendil-works/pi-ai").TranscriptContext) => Promise<void>;
   beforeModelRequest?: () => Promise<void>;
 };
@@ -897,7 +898,7 @@ export class PiAgentSession {
         installLosslessJsonContext(created.session.agent, this.options.losslessJsonReadTools, async (receipt, original) => {
           await this.options.onLosslessContext?.(original);
           await this.options.trace?.parent.recorder.record("context.assembled", { phase: "lossless-json-transport", ...receipt });
-        });
+        }, this.options.losslessJsonDictionaryProfile);
       }
       if (this.options.beforeModelRequest) {
         const stream = created.session.agent.streamFunction;

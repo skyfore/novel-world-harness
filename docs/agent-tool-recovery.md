@@ -1,5 +1,73 @@
 # Agent tool failure recovery
 
+## Versioned consumer work execution
+
+New identity-consumer scopes use `consumer-work/v1`. Before dispatch, the host
+freezes exact source ranges, the current consumer, original requirements/questions
+and required artifact revisions. All semantic fields remain present. Only the
+ordered `unitIds`/`extractionRunIds` of a retained roster and mechanical denominator
+lists use versioned hash/count views; complete values remain in the plan and
+original inventory. These manifests prove coverage, not semantic support.
+Conservative closure dependencies and the complete consumer denominator remain.
+
+`revalidate-identity-consumer --inspect-execution` is read-only. For a legacy
+scope, select `--execution-policy consumer-work/v1`; a consumed legacy stage
+also requires `--execution-authorization-ref` naming existing explicit user
+authorization for that migration. Do not combine these with legacy continuation,
+host-recovery, provider-resumption or budget-amendment flags. Copy the original
+source/task/ref from the same `inspect-identity-repairs` result; an ID miss permits
+one discovery-based correction, never guessing or scope changes.
+
+Migration verifies every settled original read-only session, actual request,
+untransmitted final context, failure and cumulative charge. Original scope, IDs,
+files and blocked budgets remain unchanged. A separate
+`execution-v1/<stage>.plan.json` binds the history. No proposal, negative semantic
+judgment, unsettled write, explicit call amendment or verified no-progress stop
+can be turned into another attempt. A sealed submission must use zero-generation
+registration recovery. Missing or changed proof stops migration. Consumed read
+correction allowances carry forward, including failed argument hashes; preloading
+corrected evidence does not pardon an old tool failure.
+
+The initial evidence packet satisfies delivery for this session. Additional
+source discovery through `read_consumer_revalidation` is navigation only: copy
+`items[].id` into `segmentIds`; artifact discovery supplies `items[].ref` for
+`refs`. At most one corrected read remains if the original allowance permits it.
+No empty search, hash manifest, summary or former-session read proves support.
+The independent checker receives its own session with the original packet,
+decisive proposal source selectors and exact proposed repair dependencies.
+
+Use `preview_consumer_revalidation` with a complete grounded draft. It retains
+the draft and checks structure, exact scope, original question coverage, delivery
+and original text anchors. Success is not semantic acceptance, world truth or
+certification. Submit that exact draft through `submit_consumer_revalidation` in
+a later sole-tool response. A format/selector miss permits one correction from
+the same input/discovery fields; unchanged retries, host/scope errors and consumed
+stages stop.
+
+The persistent 12-call no-progress window renews only for the first host-validated
+draft, keyed by the immutable work. Reads, repeated previews and new wording earn
+nothing. Every call and payload remains charged and cumulatively reported. The
+historical 12,288,000 total-byte default is observational for this policy; the
+512,000 single-request bound remains hard. Explicit amended ceilings cannot be
+bypassed by migration. Complete evidence and draft/submission space are checked
+before dispatch. Admission is not a guarantee of successful reasoning. Oversized
+work is `context-blocked`, with zero model calls, and requires a host-validated
+split that preserves coverage; never silently truncate or retry unchanged.
+
+`message/v1` lossless transport uses a self-contained dictionary per message.
+Earlier messages remain unchanged as new results arrive. Historical profiles
+retain exact reconstruction; prefix stability tests do not establish provider
+cache savings.
+
+Quota refusals are `external-wait`, not semantic judgments. They retain actual
+charges and cause no automatic retry or provider fallback. Context, no-progress,
+unsubmitted and host failures retain exact plans, drafts, messages and budgets.
+Inspect the same source/task/ref before further host work; a consumed work-policy
+stage cannot be restarted or relabeled. Status exposes `stages[].execution`
+separately from legacy allowances. Only a sealed successful session permits
+registration recovery without new generation. Neither a draft nor a completed
+consumer resumes the parent, shrinks coverage, certifies or activates a world.
+
 ## Entry capability contract recovery
 
 `entry-capability/v2` separates grounded final entry state, a real actor action,
@@ -3680,10 +3748,28 @@ Pi 必须重读原证据、原条件和原负面结论，判断缺的是来源�
 不改变完整消费者分母、不恢复原来源审计或父编译。未知策略、缺前驱、源码契约
 漂移、预算变动或已消费调用均停止，检查同 source/task/ref 的原记录，不自动重试。
 
-`read_consumer_revalidation` 的工件读取兼容同一精确 `kind:id` 与 `kind/id`，不猜测
-别名。优先复制输入的 `artifactReadRefs[].ref`；缺失时使用同 scope 的
+`read_consumer_revalidation` 区分闭包依赖引用与工件引用：仅从已验证的原 inventory
+建立 `event` → `canonical-event`、`norm` → `norm-template` 等明确映射，
+`initial/<sourceId>` 只能映射本来源的 `initial-world:singleton`。同一精确
+`kind:id` 与 `kind/id` 均可读取；返回 `aliases` 供原失败引用交接，禁止猜别名或跨来源。
+优先复制输入的 `artifactReadRefs[].ref`；缺失时使用同 scope 的
 `collection=artifacts, query=<精确已知 ID 或 kind>, offset=0`，复制返回的
-`items[].ref` 后只纠正一次。空结果应停止，不能遍历整个目录猜身份。
+`items[].ref` 后只纠正一次。`CONSUMER_ARTIFACT_REF_MISS` 是引用缺失，不因恢复说明
+含 `offset=0` 而误判为分页错误。空结果应停止，不能遍历整个目录猜身份。
+
+`roster/<sourceId>` 读取经过原 inventory 哈希和来源验证的冻结角色名册，标记
+`evidenceRole=retained-role-roster, current=false`；它是原审查依据，不是世界真值或新审查。
+大工件的 `readMode=paged` 提供精确 `readArguments`，单独读取后复制
+`items[0].page.nextOffset`，直到 `complete=true`。页面采用 `consumer-artifact-json/v1`：
+按序拼接文本并解析 JSON，依返回说明展开固定宽度 ID 后缀与前缀；`hex85` 仅对十六进制
+不透明 ID 后缀做可逆基数编码，不改变语义文本。每个 ID、顺序、重复项
+和字段均保留，不摘要、不删减分母。只有完整顺序页重建的 payload 哈希匹配原 revision
+才计入读取；漏页、跳页、哈希漂移不构成证据。历史未分页读取仍按原完整返回核验。
+分页及无损编码不增加调用或字节限额；原失败次数、原 pending 引用和恢复证明保持不变。
+新消费者会话可选择 JSON 字典 `compact/v1` 编码，共享重复的短 ID，并以
+`$nwh.front-coded` 保存 ID 数组中相邻项的共同前缀长度和完整后缀；所有项及顺序均能
+精确重建，原文字段不摘要。实际 wire 明确记录所选 profile。核验旧请求仍使用旧 profile，
+原会话、请求正文和预算不重写；紧凑编码不比原编码节省时保留原表示。
 
 没有终结提交的失败不会产生语义审查记录。只读状态在 `consumerRevalidation.attempts`
 保留其 `BREAK`、失败原因、原调用是否已消费、检查点、累计用量和各原阶段余量；
@@ -3691,6 +3777,73 @@ Pi 必须重读原证据、原条件和原负面结论，判断缺的是来源�
 结论；剩余额度本身也不能重开已消费且没有封存提交的调用。
 
 ### 消费者重验未提交失败的受控续接
+
+#### 已确认读取缺陷或请求体超限的宿主恢复
+
+`requirements revalidate-identity-consumer --host-recovery <JSON> --resume-unsubmitted inspect`
+仅检查原消费者提案阶段的两种已结束、从未提交的失败：`source-search-contract`
+（旧实现拒绝合法原文搜索）和 `request-size`（包括原唯一续接已消费后的请求体硬停）。
+这是用户明确授权修复后的独立恢复协议，不是自动重试或另一份语义授权。
+
+先使用同 source/task/ref 的 `requirements inspect-identity-repairs`，复制匹配
+`summary.consumerRevalidation.attempts[].stages[].hostRecoveryCandidate` 中的
+`scopeHash`、`stage`、`failedTraceRunId`、`failureHash`、`cause`；JSON 另含后来明确
+授权的 `authorizationRef`、`authorizedAt` 和 `maxRequestBytes`。保持命令原有
+`--authorization-ref`。引用不匹配最多从同作用域发现结果纠正一次，不猜测或不变重试。
+预检不写状态、不调用模型；通过后同一 JSON 配合 `--resume-unsubmitted run`。
+
+宿主核对完整 Pi 会话、实时消息、实际请求、未发送的超限请求、失败 trace 和
+全部旧预算。请求体上限可有界增加至最多 2048000 字节，同时绑定该消费者尚未开始
+的独立检查；两个阶段都不增加调用数或累计字节额度，提案扣除原阶段及旧续接用量。
+搜索契约恢复保持所有字节上限，保留被旧实现误拒的搜索及其次数，修复不是删除错误。
+搜索契约错误不得因为诊断包含 `offset=0` 而报告为分页错误。混合发现与读取参数时，
+分别发现 `items[].id` / `items[].ref` 后只允许一次纠正；原文查询与工件查询均受来源限定。
+
+唯一的 `consumer-revalidation.host-recovery/recovery.json` 保存原文件哈希、失败、
+后续授权和剩余额度。原 `.continuation` 与预算不改写。恢复会话重新完整读取原必需
+来源、先前读取的来源与依赖，并以单独工具调用提交；独立 Pi 审查仍不可省略。
+状态分开展示原失败、旧续接、新恢复及累计用量。完整封存后的登记中断复用原回执，
+不重放模型。已有提交、独立检查已开始而无原恢复证明、原证据漂移、剩余额度不足、
+未知失败或恢复再次失败时停止，不更名、不补写授权、不清空计数或启动第二次恢复。
+唯一例外是下述可完整证明的首请求、零输出用量拒绝；它只续接原恢复的剩余额度。
+该局部恢复不解除原语义问题，不恢复父编译，不认证或激活世界。
+
+中断消费者的 `scope.requirementPrefix` 始终指向原冻结账本前缀，不随恢复更新。
+前缀后的追加记录只有属于同一 `taskId` 和 `identityIntentHash` 的只读消费者重验时，
+才允许原封存提案继续登记与独立检查；前缀哈希变化、未来前缀或其他任务／写入记录
+均停止，不改写 scope 或历史。新增审查记录必须先通过完整预期账本校验，再发布 head。
+若旧实现已封存并登记有效提案后因把合法追加误认为前缀漂移而停止，宿主核验原
+同作用域记录及完整会话后复用该提案，只运行尚未消费的独立检查，不能重跑提案。
+
+首次请求即被 Pi `openai-codex/gpt-6.1-sol` 用量限制拒绝的消费者阶段，可在用户后来明确
+要求继续、宿主核实同提供方／模型恢复后使用原唯一续接。增加 `--provider-resumption <JSON>`，
+保持原 source/task/ref 和 `--authorization-ref`。从同作用域 `inspect-identity-repairs` 的
+`summary.consumerRevalidation.attempts[]` 中匹配 ref 的 `scopeHash`、`stages[].stage`、`stages[].traceRunId` 复制
+`scopeHash`、`stage`、`failedTraceRunId`，另记录这次后续用户授权的 `authorizationRef`
+和 `authorizedAt`（ISO 时间）。先以 `--resume-unsubmitted inspect` 验证；发现引用错误最多
+更正一次，禁止猜测或不变重试。
+
+原完整 Pi 会话、实时消息、实际请求、预算和唯一失败 trace 必须共同证明：恰好一次请求、
+明确的用量限制错误、空输出、零提供方用量、零工具调用和零重试。未知错误、部分输出、
+已尝试提交、未结束会话、硬预算停止或已消费续接均不适用。后续授权必须晚于原失败并
+绑定同一 trace；不得复用原授权冒充新的宿主决定。授权随原 `continuation.json` 冻结，
+以后恢复登记和验证历史复用同一证明，不能换授权再开会话。原失败请求的调用和字节
+照常扣除，独立检查额度不变；此入口不提高预算、不解除原语义阻塞、不恢复父 loop。
+
+若这一拒绝发生在已绑定的 `consumer-revalidation.host-recovery` 提案阶段，宿主同样先
+检查原提供方／模型已恢复，从同一发现结果的 `stages[].hostRecovery.traceRunId` 复制
+`failedTraceRunId`，使用晚于拒绝的新用户授权及原 `--authorization-ref`。原宿主恢复
+自动读取已冻结的 `recovery.json`；如传 `--host-recovery`，仍必须是原 JSON。不得把
+最初修复授权冒充这次续接授权。先 `inspect`，然后同一 `--provider-resumption` 执行
+`run`；发现引用不符最多纠正一次，不能改名或反复尝试。
+
+证明与唯一会话存放于原宿主恢复下面的 `consumer-revalidation.continuation`，同时绑定
+`hostRecoveryHash` 和 `continuationHash`。原始失败、旧续接、宿主恢复全部保持不可变，
+每段实际调用与字节只累计一次。用量拒绝的那次请求仍扣除；请求体上限不提高，原必读
+来源和依赖重新完整读取，独立检查仍用另一会话且额度不变。状态单独显示原拒绝与
+`hostRecovery.providerResumption` 的结果。此续接再次失败且无封存检查点时停止，不能
+继续派生新段；有封存检查点时仅恢复原登记。独立检查已启动、部分输出、非额度错误、
+证据或授权漂移均不适用，不恢复父任务、认证或激活。
 
 宿主明确获准恢复后，在原 `requirements revalidate-identity-consumer` 命令、相同
 source/task/ref、授权引用及编译纠正策略下，先使用 `--resume-unsubmitted inspect`。

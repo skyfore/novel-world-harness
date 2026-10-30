@@ -57,11 +57,11 @@ export function buildRevalidatedConsumerPlan(p: PreparedIdentityRequirements, or
 /** Every prior stage/segment remains an immutable charge, including rejected
  * submissions. A new typed plan has the existing slot/acceptance limits. */
 export async function revalidatedConsumerBudgetOrigin(root: string, reviews: ConsumerRevalidationRecord[]) {
-  const { consumerStageRecoveryDirectory, maybeRecoveryFile } = await import("./identity-consumer-stage-recovery.js");
+  const { consumerStageBudgetDirectories, maybeRecoveryFile } = await import("./identity-consumer-stage-recovery.js");
   const scope = reviews[0]!.scope, directory = consumerRevalidationDirectory(root, scope), priorUsage = { ...scope.priorUsage };
   const budgetFiles = [...scope.priorBudgetFiles];
   for (const file of budgetFiles) if (contentHash(JSON.parse(await fs.readFile(file.path, "utf8"))) !== file.hash) throw prerequisiteStop("Original inherited budget changed; no typed continuation");
-  for (const stage of ["consumer-revalidation", "consumer-revalidation-check"]) for (const dir of [directory, consumerStageRecoveryDirectory(directory, stage)]) {
+  for (const stage of ["consumer-revalidation", "consumer-revalidation-check"]) for (const dir of consumerStageBudgetDirectories(directory, stage)) {
     const file = path.join(dir, `${stage}.budget.json`), budget = await maybeRecoveryFile(file);
     if (!budget) continue;
     if (budget.scopeHash !== contentHash(scope) || budget.originalBudgetHash !== scope.originalBudgetHash) throw prerequisiteStop("Consumer stage charges changed scope; no typed continuation");

@@ -415,7 +415,7 @@ export function buildNwhToolRecoveryAdvice(
 
 
 
-  if (/tool-call budget|tool call budget|tool-call safety fuse|circuit breaker|circuit-breaker/u.test(lower)) {
+  if (/tool-call budget|tool call budget|model request budget exhausted|no new validated progress|tool-call safety fuse|circuit breaker|circuit-breaker/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
@@ -865,6 +865,37 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  if (toolName === "read_consumer_revalidation" && errorText.startsWith("query is for artifacts discovery only;")) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "The source-search contract must be repaired and the original stopped task explicitly recovered by the host.",
+      steps: ["Stop this invocation; changing offset cannot repair the old source-query contract.",
+        "Inspect requirements inspect-identity-repairs in the same source/task/ref and retain the exact failure, trace and budget.",
+        "Do not repeat the query, switch scopes, reset attempts or start another model session."] };
+  }
+  if (toolName === "read_consumer_revalidation" && errorText.startsWith("CONSUMER_READ_MODE ")) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one corrected discovery/read selection in the same source/task; no unchanged retry.",
+      steps: ["For discovery call read_consumer_revalidation with collection=source or artifacts, query and offset=0, omitting refs and segmentIds.",
+        "Copy source items[].id into segmentIds, or artifact items[].ref into refs, for a separate complete read without query.",
+        "If discovery returns no match or correction fails, stop; never guess an ID or change scope."] };
+  }
+  if (toolName === "read_consumer_revalidation" && errorText.startsWith("CONSUMER_ARTIFACT_REF_MISS ")) {
+    const ref = /^CONSUMER_ARTIFACT_REF_MISS ("(?:[^"\\]|\\.)*"):/u.exec(errorText)?.[1];
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "lookup-miss", retryable: true,
+      retryCondition: "At most one corrected read after exact-ref discovery in the same source/task; an absent result or another failure requires host review.",
+      steps: ["Call read_consumer_revalidation with collection=artifacts, query equal to the exact failed ref, and offset=0.",
+        "Copy items[].ref into refs. If readMode=paged, copy readArguments and follow items[0].page.nextOffset with that single ref until complete.",
+        "Never guess, repeat unchanged arguments, scan the whole catalog or switch source/task. If discovery is empty, stop and preserve the failed ref, trace and budget."],
+      ...(ref ? { suggestedCall: { tool: toolName, arguments: { collection: "artifacts", query: JSON.parse(ref), offset: 0 } } } : {}) };
+  }
+
+  if (toolName === "preview_consumer_revalidation" || toolName === "submit_consumer_revalidation" && errorText.startsWith("Preview this exact draft")) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "At most one corrected draft under the same source/task/ref and remaining allowance; host, scope, budget and consumed-stage errors remain terminal.",
+      steps: ["Keep the same source/task/ref. Copy scopeHash, requirementIds, currentRevisionHash and original question IDs from the assigned input. Check all reported schema paths and evidence selectors.",
+        "For a missing source ID, use read_consumer_revalidation collection=source query=<literal text> offset=0, copy items[].id into segmentIds and read the exact source. For an artifact miss, use collection=artifacts query=<exact failed ref> offset=0 and copy items[].ref into refs once; stop if absent, never guess.",
+        "Use preview_consumer_revalidation once with the corrected complete draft, then submit exactly that draft in a separate sole-tool response. Preview is not semantic acceptance. Repeated reads or previews never renew progress; stop after the corrected failure."] };
+  }
   if (/offset|surrogate pair|unicode boundary|utf-?8 boundary/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,

@@ -5,6 +5,7 @@ import { identityRequirementDirectory, sameIdentitySet, type IdentityRecord } fr
 import { modelTextSelectorSchema } from "./text-anchors.js";
 import { prerequisiteEvidenceSchema, prerequisiteStop } from "./role-source-prerequisites.js";
 import { initialWorldRevisionFields } from "./initial-world-repair.js";
+import type { LedgerRecord } from "./requirement-ledger.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/), text = z.string().trim().min(1).max(6000);
 const evidence = z.array(modelTextSelectorSchema).min(1).max(24);
@@ -26,8 +27,18 @@ export const consumerRevalidationScopeSchema = z.object({
   priorBudgetFiles: z.array(z.object({ path: text, hash }).strict()).min(1),
   requirementPrefix: z.object({ length: z.number().int().positive(), head: hash }).strict(),
   compilerCorrection: consumerCompilerCorrectionSchema.optional(),
+  executionPolicy: z.literal("consumer-work/v1").optional(),
 }).strict();
 export type ConsumerRevalidationScope = z.infer<typeof consumerRevalidationScopeSchema>;
+/** A stopped review keeps its frozen prefix while sibling read-only reviews
+ * finish. Changes outside this original identity task cannot be folded in. */
+export function assertConsumerRevalidationPrefix(history: readonly LedgerRecord[], scope: ConsumerRevalidationScope, end = history.length) {
+  const prefix = scope.requirementPrefix;
+  if (prefix.length > end || history[prefix.length - 1]?.hash !== prefix.head
+    || history.slice(prefix.length, end).some(entry => entry.payload.kind !== "identity-consumer-revalidation"
+      || entry.payload.record.scope.taskId !== scope.taskId || entry.payload.record.scope.identityIntentHash !== scope.identityIntentHash))
+    throw prerequisiteStop("Consumer revalidation changed its original ledger prefix or unrelated task history. Inspect the same source/task/ref frozen scope and retained journal; preserve all records, no repinning, model replay or unchanged retry");
+}
 export const consumerRevalidationId = (scope: Pick<ConsumerRevalidationScope, "taskId" | "ref" | "receiptFingerprint" | "compilerCorrection">) => contentHash({ taskId: scope.taskId, ref: scope.ref, receiptFingerprint: scope.receiptFingerprint,
   ...(scope.compilerCorrection ? { compilerCorrection: { policy: scope.compilerCorrection.policy, predecessorId: scope.compilerCorrection.predecessorId } } : {}) });
 export const consumerRevalidationDirectory = (root: string, scope: ConsumerRevalidationScope) =>
@@ -55,6 +66,8 @@ export const consumerRevalidationRecordSchema = z.object({ scope: consumerRevali
   sessionId: text, traceRunId: text, sessionCheckpointHash: hash.optional(), refRecoveryHash: hash.optional(),
   continuationHash: hash.optional(),
   budgetAmendmentHash: hash.optional(),
+  hostRecoveryHash: hash.optional(),
+  executionPlanHash: hash.optional(),
   evidence: z.array(prerequisiteEvidenceSchema).min(1).max(24),
 }).strict().refine(r => Boolean(r.sessionCheckpointHash) !== Boolean(r.refRecoveryHash), "Exactly one actual submission checkpoint or explicit rejected-ref recovery proof is required");
 export type ConsumerRevalidationRecord = z.infer<typeof consumerRevalidationRecordSchema>;
@@ -71,6 +84,15 @@ export function validateConsumerRevalidationHistory(records: ConsumerRevalidatio
     || !intent.consumerShards.some(s => s.refs.includes(scope.ref))) throw prerequisiteStop("Consumer revalidation changed the original task, definition, inventory or budget; stop without a replacement scope");
   for (const [i, record] of records.entries()) {
     consumerRevalidationRecordSchema.parse(record);
+    if (scope.executionPolicy && !record.executionPlanHash)
+      throw prerequisiteStop("Consumer scope requires its versioned work plan; no legacy budget fallback or retry");
+    if (record.executionPlanHash && (record.continuationHash || record.hostRecoveryHash || record.budgetAmendmentHash || record.refRecoveryHash))
+      throw prerequisiteStop("Versioned work execution must retain legacy grants through its migration proof, not combine invocation authorities; no retry");
+    if (record.hostRecoveryHash && (record.budgetAmendmentHash || record.refRecoveryHash
+      || (record.continuationHash && record.output.phase !== "consumer-revalidation")))
+      throw prerequisiteStop("Host recovery permits only its proposal's exact quota resumption proof; preserve the original record, no combined grants");
+    if (i && !record.executionPlanHash && record.hostRecoveryHash !== records[0]!.hostRecoveryHash)
+      throw prerequisiteStop("Independent check lost its proposal's host recovery and budget binding");
     if (record.budgetAmendmentHash && !record.continuationHash) throw prerequisiteStop("Call amendment is detached from its original continuation; no registration or retry");
     if (record.refRecoveryHash && (!record.continuationHash || !scope.compilerCorrection || record.output.phase !== "consumer-revalidation"))
       throw prerequisiteStop("Rejected-ref recovery belongs only to the original compiler-correction proposal; no independent-check recovery or new segment");

@@ -220,15 +220,23 @@ requirementsCommand.command("revalidate-identity-consumer").requiredOption("--so
   .requiredOption("--authorization-ref <ref>", "existing user authorization to continue the same repair")
   .option("--compiler-correction <policy>", "single retained-budget continuation for source-local-referent/v1")
   .option("--resume-unsubmitted <mode>", "inspect or run the sole audited continuation; retain failed sessions and subtract their original stage usage")
+  .option("--provider-resumption <path>", "later authorization JSON for a settled first-request quota refusal in the original stage or its bound host recovery; use with --resume-unsubmitted")
   .option("--continuation-budget <path>", "explicit later authorization JSON for one bounded call amendment before the original continuation starts")
+  .option("--host-recovery <path>", "explicit original-task reader/request-size recovery JSON; inspect first, preserve all prior attempts and charges")
   .option("--recover-submitted-ref", "validate the exact saved Pi proposal rejected only for a discovered entity:id spelling; no proposal replay")
+  .option("--execution-policy <policy>", "consumer-work/v1: prepare complete evidence and use validated draft progress; preserves legacy history")
+  .option("--execution-authorization-ref <ref>", "existing explicit authorization to migrate a settled legacy stage to the versioned execution policy")
+  .option("--inspect-execution", "read-only evidence, context and migration preflight; no model calls or state writes")
   .description("Independently revalidate one original consumer after the exact completed identity repair; retain old reviews, budgets and questions")
   .action(async options => {
     const { runIdentityConsumerRevalidation } = await import("./workflow/identity-consumer-revalidation.js");
     console.log(JSON.stringify(await runIdentityConsumerRevalidation({ root: rootFor({}), sourceId: options.source,
       taskId: options.task, ref: options.ref, authorizationRef: options.authorizationRef, compilerCorrection: options.compilerCorrection,
       resumeUnsubmitted: options.resumeUnsubmitted,
+      executionPolicy: options.executionPolicy, executionAuthorizationRef: options.executionAuthorizationRef, inspectExecution: options.inspectExecution,
+      providerResumption: options.providerResumption ? JSON.parse(await fs.readFile(options.providerResumption, "utf8")) : undefined,
       recoverSubmittedRef: options.recoverSubmittedRef,
+      hostRecovery: options.hostRecovery ? JSON.parse(await fs.readFile(options.hostRecovery, "utf8")) : undefined,
       budgetAmendment: options.continuationBudget ? JSON.parse(await fs.readFile(options.continuationBudget, "utf8")) : undefined }), null, 2));
   });
 requirementsCommand.command("plan-bound-upstream-repair").requiredOption("--request <path>", "current binding snapshot and selected findings JSON")

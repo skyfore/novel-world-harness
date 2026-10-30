@@ -5,6 +5,7 @@ import { getAgentDir, ModelRuntime, type ToolDefinition } from "@earendil-works/
 import { PiAgentSession, type PiAgentSessionOptions } from "../agent/pi-session.js";
 import { losslessContextInstructions } from "../agent/lossless-json-context.js";
 import { ModelRequestBudget, type ModelRequestLimits } from "../runtime/model-request-budget.js";
+import { consumerWorkBudgetPolicy, consumerWorkFailure } from "../compiler/consumer-work-plan.js";
 import { withCompilerSignals } from "../util/compiler-signals.js";
 import { TraceStore } from "../trace/store.js";
 import { TraceRecorder } from "../trace/recorder.js";
@@ -33,6 +34,8 @@ export async function runReceiptBoundPiStage<T>(options: {
   priorUsage: { modelCalls: number; totalPayloadBytes: number }; limits: ModelRequestLimits; contract: IdentitySessionContract;
   continuationHash?: string;
   budgetAmendmentHash?: string;
+  hostRecoveryHash?: string;
+  executionPlanHash?: string;
   assertOriginal: () => Promise<void>;
   run: (factory: (args: PiAgentSessionOptions) => Promise<PiAgentSession>, trace: TraceRecorder, budget: ModelRequestBudget, signal: AbortSignal) => Promise<T>;
 }) {
@@ -40,20 +43,24 @@ export async function runReceiptBoundPiStage<T>(options: {
   await options.assertOriginal();
   try { await fs.writeFile(path.join(directory, `${stage}.invocation.json`), JSON.stringify({ scopeHash, stage, pid: process.pid,
     ...(options.continuationHash ? { continuationHash: options.continuationHash } : {}),
+    ...(options.hostRecoveryHash ? { hostRecoveryHash: options.hostRecoveryHash } : {}),
+    ...(options.executionPlanHash ? { executionPlanHash: options.executionPlanHash } : {}),
     ...(options.budgetAmendmentHash ? { budgetAmendmentHash: options.budgetAmendmentHash } : {}) }), { flag: "wx", mode: 0o600 }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw prerequisiteStop("This receipt-bound Pi invocation is consumed; inspect its original checkpoint and failure, never redispatch or rename the stage"); throw error; }
   const budget = new ModelRequestBudget(options.limits, { save: state => {
     const file = path.join(directory, `${stage}.budget.json`);
     writeFileSync(file + ".tmp", JSON.stringify({ scopeHash, stage, originalBudgetHash: options.originalBudgetHash, limits: options.limits,
       ...(options.budgetAmendmentHash ? { budgetAmendmentHash: options.budgetAmendmentHash } : {}),
+      ...(options.hostRecoveryHash ? { hostRecoveryHash: options.hostRecoveryHash } : {}),
+      ...(options.executionPlanHash ? { executionPlanHash: options.executionPlanHash, policy: consumerWorkBudgetPolicy } : {}),
       priorUsage: options.priorUsage, state, cumulative: { modelCalls: options.priorUsage.modelCalls + state.usage.modelCalls,
         totalPayloadBytes: options.priorUsage.totalPayloadBytes + state.usage.totalPayloadBytes } }), { flag: "wx", mode: 0o600 });
     renameSync(file + ".tmp", file);
-  } });
+  } }, options.executionPlanHash ? consumerWorkBudgetPolicy : undefined);
   const requests = path.join(directory, `${stage}.requests.jsonl`), messages = path.join(directory, `${stage}.messages.jsonl`);
   await fs.writeFile(requests, "", { flag: "wx", mode: 0o600 }); await fs.writeFile(messages, "", { flag: "wx", mode: 0o600 });
   const trace = await TraceRecorder.start(new TraceStore(root), { kind: "prepare", sourceId,
-    operationId: `receipt-bound-${scopeHash}-${stage}${options.continuationHash ? "-continuation" : ""}` });
+    operationId: `receipt-bound-${scopeHash}-${stage}${options.executionPlanHash ? "-work-v1" : ""}${options.hostRecoveryHash ? "-host-recovery" : ""}${options.continuationHash ? "-continuation" : ""}` });
   let session: PiAgentSession | undefined, prompt: string | undefined, fatal: unknown, sequence = 0;
   const observe = (phase: string, value: unknown) => fs.appendFile(requests, JSON.stringify({ phase, value }) + "\n");
   try {
@@ -88,7 +95,9 @@ export async function runReceiptBoundPiStage<T>(options: {
     return { value, sessionId: session.id, traceRunId: trace.manifest.id, sessionCheckpointHash: contentHash(checkpoint), inputHash: contentHash(JSON.parse(prompt)) };
   } catch (error) {
     if (!trace.manifest.endedAt) await trace.finish("failed").catch(() => {});
-    await retainPiArtifact(path.join(directory, `${stage}.failure.json`), { reason: String(error), sessionId: session?.id, sessionFile: session?.sessionFile, usage: budget.report() });
+    await retainPiArtifact(path.join(directory, `${stage}.failure.json`), { reason: String(error), sessionId: session?.id, sessionFile: session?.sessionFile, usage: budget.report(),
+      ...(options.executionPlanHash ? { executionPlanHash: options.executionPlanHash,
+        recovery: consumerWorkFailure(String(error), budget.report().failure?.code ?? (error as { reasonCode?: string }).reasonCode) } : {}) });
     throw error;
   } finally { budget.close(); await session?.dispose(); }
 }

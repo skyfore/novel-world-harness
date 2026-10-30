@@ -33,6 +33,50 @@ import { inspectConsumerRevalidationAttempts } from "../src/compiler/identity-co
 import * as revalidationModel from "../src/compiler/identity-consumer-revalidation-model.js";
 import { CompilerFinishReceipts } from "../src/compiler/finish-receipts.js";
 import { UpstreamRepairLedger } from "../src/compiler/upstream-repair-ledger.js";
+import { consumerDependencyCatalog, consumerArtifactPages } from "../src/compiler/identity-consumer-artifacts.js";
+import * as readContract from "../src/compiler/identity-consumer-read-contract.js";
+import { consumerHostRecoveryDirectory, oldSourceSearchError } from "../src/compiler/identity-consumer-host-recovery.js";
+import { assertConsumerRevalidationPrefix } from "../src/compiler/identity-consumer-revalidation-model.js";
+import { consumerWorkDirectory } from "../src/compiler/consumer-work-plan.js";
+
+it("keeps a stopped review's exact journal prefix across sibling reviews but rejects unrelated changes", () => {
+  const { proposal, check } = fixture(), history: any[] = [{ hash: h("original prefix"), payload: { kind: "identity-requirements" } }];
+  const scope = { ...proposal.scope, requirementPrefix: { length: 1, head: history[0].hash } };
+  expect(() => assertConsumerRevalidationPrefix(history, scope)).not.toThrow();
+  for (const record of [proposal, check]) history.push({ hash: h(record), payload: { kind: "identity-consumer-revalidation", record } });
+  const before = h(history);
+  expect(() => assertConsumerRevalidationPrefix(history, scope)).not.toThrow();
+  expect(h(history)).toBe(before);
+  for (const mutate of [
+    (s: typeof scope, _h: any[]) => { s.requirementPrefix.head = h("different prefix"); },
+    (s: typeof scope, _h: any[]) => { s.requirementPrefix.length = 4; },
+    (_s: typeof scope, h: any[]) => { h[1].payload.record.scope.taskId = "f".repeat(64); },
+    (_s: typeof scope, h: any[]) => { h[1].payload.record.scope.identityIntentHash = "f".repeat(64); },
+    (_s: typeof scope, h: any[]) => { h[1].payload.kind = "identity-consumer-repair"; },
+  ]) {
+    const s = structuredClone(scope), records = structuredClone(history); mutate(s, records);
+    expect(() => assertConsumerRevalidationPrefix(records, s)).toThrow(/ledger prefix/);
+  }
+  expect(() => assertConsumerRevalidationPrefix(history, { ...scope, requirementPrefix: { length: 3, head: history[2].hash } }, 2)).toThrow(/ledger prefix/);
+});
+
+it("rejects an invalid prospective review journal before publishing or changing its head", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-consumer-journal-publication-"));
+  try {
+    const f = fixture(), ledger = new RequirementLedger(root, "src");
+    await ledger.registerRoleQuestions([{ questionId: h("question"), planHash: h("plan"), page: 0, text: "Who is Ada?", sourceUnitIds: ["unit"], impact: "critical" }]);
+    const history = await ledger.history(), before = captureRecordTree(workspaceStateDir(root));
+    f.proposal.scope.requirementPrefix = { length: history.length, head: history.at(-1)!.hash };
+    f.proposal.output.scopeHash = h(f.proposal.scope);
+    vi.spyOn(RequirementLedger.prototype, "identityRequirements").mockResolvedValue(f.original);
+    vi.spyOn(revalidation, "verifyConsumerRevalidationRecord").mockResolvedValue();
+    // The proposal/session validator alone cannot establish the journal's
+    // independent definition history. The complete prospective chain must pass.
+    await expect(ledger.recordIdentityConsumerRevalidation(f.proposal)).rejects.toThrow(/original task/);
+    expect(captureRecordTree(workspaceStateDir(root))).toEqual(before);
+    expect(await ledger.history()).toEqual(history);
+  } finally { vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }); }
+});
 
 it("inherits failed and continued review charges once across a typed successor", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-review-charges-"));
@@ -50,8 +94,10 @@ it("inherits failed and continued review charges once across a typed successor",
     await fs.writeFile(path.join(upstream, "start.json"), JSON.stringify({ origin: { originalBudgetHash, priorUsage: { modelCalls: 216, totalPayloadBytes: 21600 }, budgetFiles: files }, order: [{ id: "entity" }, { id: "singleton" }] }));
     for (const stage of ["entity", "singleton", "acceptance"]) await put(path.join(upstream, `${stage}.budget.json`), 2);
     await put(path.join(reviews, "other", "consumer-revalidation-check.budget.json"), 3);
+    await put(path.join(consumerHostRecoveryDirectory(path.join(reviews, "other")), "consumer-revalidation.budget.json"), 2);
+    await put(path.join(consumerStageRecoveryDirectory(consumerHostRecoveryDirectory(path.join(reviews, "other")), "consumer-revalidation"), "consumer-revalidation.budget.json"), 3);
     const result = await revalidation.inheritConsumerRevalidationBudgets(upstream, reviews);
-    expect(result.priorUsage).toEqual({ modelCalls: 225, totalPayloadBytes: 22500 });
+    expect(result.priorUsage).toEqual({ modelCalls: 230, totalPayloadBytes: 23000 });
     expect(result.priorBudgetFiles.filter(f => f.path === files[1]!.path)).toEqual([files[1]]);
     await put(files[0]!.path, 0);
     await expect(revalidation.inheritConsumerRevalidationBudgets(upstream, reviews)).rejects.toThrow(/Inherited Pi budget changed/);
@@ -239,12 +285,16 @@ it("requires exact initial-world field authority and binds state, observations a
   expect(initialWorldRepairReferences(seeded)).toEqual(["entity:actor", "entity:from", "entity:here", "entity:owner", "entity:performer", "entity:place", "entity:subject", "entity:to", "entity:witness", "norm-template:norm-template", "process-template:process-template", "world-rule:active-rule"]);
 });
 
-it.each([false, true])("runs independent Pi reviews with source discovery, requires full reads (%s), and recovers registration without replay", async discoveryOnly => {
+it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: false }, { discoveryOnly: false, work: true },
+  { discoveryOnly: false, work: true, stall: true }, { discoveryOnly: false, work: true, previewLoop: true },
+  { discoveryOnly: false, work: true, quota: true }, { discoveryOnly: false, work: true, oversized: true },
+])("runs independent Pi reviews with full reads ($discoveryOnly), work ($work), stall $stall, preview loop $previewLoop, quota $quota, oversized $oversized, and recovers registration without replay", async ({ discoveryOnly, work, stall, previewLoop, quota, oversized }) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-revalidation-")), providers: Awaited<ReturnType<typeof mockPiProvider>>[] = [];
   try {
     const text = "Ada waits. 女孩等待。", source = await createEvidenceFixture(root, text), f0 = fixture();
     const f: ReturnType<typeof fixture> = JSON.parse(JSON.stringify(f0).replaceAll("src", source.source.id).replaceAll('"seg"', JSON.stringify(source.segmentId)).replaceAll(f0.f.intent.sourceHash, source.source.contentSha256));
     const scope = f.proposal.scope;
+    if (work) scope.executionPolicy = "consumer-work/v1";
     scope.identityIntentHash = h(f.f.intent); scope.definitionHash = h(f.original[0]!.output);
     const originalBudget = path.join(root, "inherited-budget.json"); await fs.writeFile(originalBudget, JSON.stringify({ retainedCalls: 177 }));
     scope.priorBudgetFiles = [{ path: originalBudget, hash: h({ retainedCalls: 177 }) }];
@@ -258,6 +308,11 @@ it.each([false, true])("runs independent Pi reviews with source discovery, requi
       consumer: { ref: scope.ref, revisionHash: scope.originalRevisionHash, payload: {} },
       current: { payload: {}, revisionHash: scope.currentRevisionHash }, acceptance: { output: {} }, prepared: { ...f.f.p, intent: f.f.intent, inventory: f.f.inventory,
         bytes: Buffer.from(text), manifest, review: { scope: { questions: [] } } } };
+    if (work) p.consumer.dependencies = [{ kind: "entity", id: "ada" }];
+    if (oversized) {
+      p.catalog[0].payload.semanticEvidence = "完整语义原文".repeat(60_000);
+      p.catalog[0].revisionHash = h(p.catalog[0].payload);
+    }
     const base = identityRequirementDirectory(root, scope.sourceId, scope.taskId); await fs.mkdir(base, { recursive: true });
     await fs.writeFile(path.join(base, "context.json"), JSON.stringify(p.prepared));
     vi.spyOn(revalidation, "prepareConsumerRevalidation").mockResolvedValue(p);
@@ -280,8 +335,24 @@ it.each([false, true])("runs independent Pi reviews with source discovery, requi
     const dispatch = vi.spyOn(PiAgentSession, "create").mockImplementation(async options => {
       const check = path.basename(options.runtimeDir!) === "consumer-revalidation-check";
       const session = await create({ ...options, model: undefined, piAgentDir: path.join(root, "pi") });
-      providers.push(await mockPiProvider(session, { provider: "openai-codex", modelId: "gpt-6.1-sol", response: (context, index) => {
-        if (index > (discoveryOnly ? 3 : 1)) throw Error("Unexpected model retry");
+      providers.push(await mockPiProvider(session, { provider: "openai-codex", modelId: "gpt-6.1-sol",
+        ...(quota ? { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } : {}),
+        response: (context, index) => {
+        if (!stall && !previewLoop && index > (discoveryOnly ? 3 : 1)) throw Error("Unexpected model retry");
+        if (work) {
+          if (quota) return fauxAssistantMessage([], { stopReason: "error", errorMessage: "Codex error: The usage limit has been reached" });
+          if (stall) return fauxAssistantMessage([fauxToolCall("read_consumer_revalidation", { collection: "consumer", refs: [scope.ref], offset: 0 }, { id: `repeated-read-${index}` })], { stopReason: "toolUse" });
+          const user = context.messages.find(m => m.role === "user")!;
+          const envelope = JSON.parse(typeof user.content === "string" ? user.content : user.content.find(c => c.type === "text")!.text);
+          const input = decodeJsonValues(envelope.dictionary, [envelope.value], envelope.dictionaryProfile)[0] as any;
+          expect(input.evidencePacket.sources[0].text).toBe(text);
+          expect(input.evidencePacket.artifacts[0]).toMatchObject({ ref: "entity:ada", payload: { id: "ada" } });
+          expect(input.denominator.refs).toEqual({ policy: "ordered-inventory/v1", count: f.f.inventory.consumers.length, hash: h(f.f.inventory.consumers.map(c => c.ref)) });
+          const output = check ? { ...f.check.output, scopeHash: h(scope), proposalHash: h(previous[0]!.output) } : f.proposal.output;
+          if (previewLoop) return fauxAssistantMessage([fauxToolCall("preview_consumer_revalidation", { ...output, rationale: `${output.rationale} wording ${index}` }, { id: `preview-loop-${index}` })], { stopReason: "toolUse" });
+          return fauxAssistantMessage([fauxToolCall(index ? "submit_consumer_revalidation" : "preview_consumer_revalidation", output,
+            { id: `work-${check}-${index}` })], { stopReason: "toolUse" });
+        }
         if (index === 1) {
           for (const id of [`discovery-${check}`, `artifact-${check}`]) {
             const read = context.messages.find(m => m.role === "toolResult" && m.toolCallId === id);
@@ -292,12 +363,14 @@ it.each([false, true])("runs independent Pi reviews with source discovery, requi
             ["source-missing", { total: 0, items: [], nextOffset: null }]] as const) {
             const read = context.messages.find(m => m.role === "toolResult" && m.toolCallId === `${name}-${check}`);
             expect(read).toMatchObject({ isError: false });
-            const content = read?.content.find(b => b.type === "text");
+            if (read?.role !== "toolResult") throw Error("Missing source discovery tool result");
+            const content = read.content.find(b => b.type === "text");
             if (content?.type !== "text") throw Error("Missing source discovery receipt");
             const wire = JSON.parse(content.text);
             const user = context.messages.find(m => m.role === "user")!;
             const userText = typeof user.content === "string" ? user.content : user.content.find(b => b.type === "text")!.text;
-            const value = wire.$nwhContext ? decodeJsonValues(JSON.parse(userText).dictionary, [wire.value])[0] as typeof wire : wire;
+            const envelope = JSON.parse(userText);
+            const value = wire.$nwhContext ? decodeJsonValues(envelope.dictionary, [wire.value], envelope.dictionaryProfile)[0] as typeof wire : wire;
             expect(value).toMatchObject(expected);
             expect(value.items.every((item: unknown) => !Object.hasOwn(item as object, "text"))).toBe(true);
           }
@@ -321,6 +394,26 @@ it.each([false, true])("runs independent Pi reviews with source discovery, requi
       } })); return session;
     });
     const args = { root, sourceId: scope.sourceId, taskId: scope.taskId, ref: scope.ref, authorizationRef: scope.authorizationRef };
+    if (work) {
+      const before = captureRecordTree(workspaceStateDir(root));
+      expect(await runIdentityConsumerRevalidation({ ...args, inspectExecution: true })).toMatchObject({ status: oversized ? "context-blocked" : "ready", execution: { minimumModelCalls: 2 } });
+      expect(dispatch).not.toHaveBeenCalled(); expect(captureRecordTree(workspaceStateDir(root))).toEqual(before);
+    }
+    if (oversized) {
+      expect(await runIdentityConsumerRevalidation(args)).toMatchObject({ status: "context-blocked", execution: { modelDispatchAllowed: false } });
+      expect(dispatch).not.toHaveBeenCalled(); expect(previous).toEqual([]); return;
+    }
+    if (stall || previewLoop || quota) {
+      await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(quota ? /usage limit/ : /no new validated progress/);
+      const before = captureRecordTree(workspaceStateDir(root));
+      expect(await runIdentityConsumerRevalidation({ ...args, inspectExecution: true })).toMatchObject({ status: quota ? "external-wait" : "no-progress", execution: { modelDispatchAllowed: false, invocationConsumed: true } });
+      expect(captureRecordTree(workspaceStateDir(root))).toEqual(before);
+      await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(/stage is consumed/);
+      expect(dispatch).toHaveBeenCalledTimes(1); expect(previous).toEqual([]);
+      const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+      expect(attempts[0]!.stages[0]!.execution).toMatchObject({ status: quota ? "external-wait" : "no-progress", usage: { modelCalls: quota ? 1 : previewLoop ? 13 : 12 } });
+      expect(attempts[0]!.cumulative.modelCalls).toBe(177 + (quota ? 1 : previewLoop ? 13 : 12)); return;
+    }
     await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow("injected registration interruption");
     expect(dispatch).toHaveBeenCalledTimes(1);
     const result = await runIdentityConsumerRevalidation(args);
@@ -330,7 +423,19 @@ it.each([false, true])("runs independent Pi reviews with source discovery, requi
     expect(again.cumulative).toEqual(result.cumulative); expect(dispatch).toHaveBeenCalledTimes(2);
     const oldStates = await fs.readdir(path.join(directory, "history"));
     expect((await Promise.all(oldStates.map(n => fs.readFile(path.join(directory, "history", n), "utf8")))).some(s => s.includes("injected registration interruption"))).toBe(true);
-    const checkpoint = JSON.parse(await fs.readFile(path.join(directory, "consumer-revalidation.session-checkpoint.json"), "utf8"));
+    if (work) {
+      const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+      expect(attempts[0]!.cumulative).toEqual(result.cumulative);
+      expect(attempts[0]!.stages[0]!.execution).toMatchObject({ policy: "consumer-work/v1", status: "sealed", draftCount: 1, usage: { modelCalls: 2 } });
+      // A later world repair may make new dispatch preparation unavailable.
+      // Already accepted historical reviews still verify from immutable source,
+      // their exact ledger record and sealed packet, without consulting HEAD.
+      vi.mocked(revalidation.prepareConsumerRevalidation).mockRejectedValue(new Error("later active dependency changed"));
+      await revalidation.verifyConsumerRevalidationRecord(root, previous[0]!);
+      await revalidation.verifyConsumerRevalidationRecord(root, previous[1]!);
+      vi.mocked(revalidation.prepareConsumerRevalidation).mockResolvedValue(p);
+    }
+    const checkpoint = JSON.parse(await fs.readFile(path.join(work ? consumerWorkDirectory(directory) : directory, "consumer-revalidation.session-checkpoint.json"), "utf8"));
     await fs.appendFile(checkpoint.sessionFile, '{"tampered":true}\n');
     await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(/transcript|changed/);
     expect(dispatch).toHaveBeenCalledTimes(2);
@@ -339,7 +444,15 @@ it.each([false, true])("runs independent Pi reviews with source discovery, requi
 
 // The 23-turn case persists real Pi transcripts and repeatedly verifies them;
 // allow disk/CPU contention in the full suite without timing out its cleanup.
-it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCalls: 2, rejectedRef: true }])("continues a never-submitted Pi stage with retained charges $failedCalls and ref recovery $rejectedRef", async ({ failedCalls, rejectedRef }) => {
+it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCalls: 2, rejectedRef: true }, { failedCalls: 1, quotaRefusal: true }, { failedCalls: 2, dependencyRefs: true },
+  { failedCalls: 2, hostRepair: "source-search-contract" as const }, { failedCalls: 2, hostRepair: "request-size" as const },
+  { failedCalls: 2, hostRepair: "source-search-contract" as const, failHost: true },
+  { failedCalls: 2, hostRepair: "source-search-contract" as const, hostQuota: true },
+  { failedCalls: 2, hostRepair: "request-size" as const, hostQuota: true },
+  { failedCalls: 2, hostRepair: "source-search-contract" as const, hostQuota: true, failResumption: true },
+  { failedCalls: 24, migrateWork: true }, { failedCalls: 24, migrateWork: true, exhaust: true },
+  { failedCalls: 2, dependencyRefs: true, migrateWork: true }, { failedCalls: 1, quotaRefusal: true, migrateWork: true },
+])("continues a never-submitted Pi stage with retained charges $failedCalls, ref recovery $rejectedRef, quota refusal $quotaRefusal, dependency handoff $dependencyRefs and host repair $hostRepair (failure $failHost, host quota $hostQuota, resumed failure $failResumption, migration $migrateWork, call stop $exhaust)", async ({ failedCalls, rejectedRef, quotaRefusal, dependencyRefs, hostRepair, failHost, hostQuota, failResumption, migrateWork, exhaust }) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-unsubmitted-consumer-")), providers: Awaited<ReturnType<typeof mockPiProvider>>[] = [];
   try {
     const source = await createEvidenceFixture(root, "Ada waits."), f0 = fixture();
@@ -383,6 +496,28 @@ it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCa
       consumer: { ref: scope.ref, revisionHash: scope.originalRevisionHash, payload: {} }, current: { payload: {}, revisionHash: scope.currentRevisionHash },
       correctionPredecessor, acceptance: { output: {} }, prepared: { ...f.f.p, intent: f.f.intent, inventory: f.f.inventory,
         bytes: Buffer.from("Ada waits."), manifest, review: { scope: { questions: [] } } } };
+    const failedRefs = dependencyRefs ? ["event/arrival", `initial/${scope.sourceId}`, "norm/rule", `roster/${scope.sourceId}`] : ["entity/ada"];
+    let rosterPageCount = 0;
+    if (dependencyRefs) {
+      const roster = { sourceId: scope.sourceId, sourceSha256: scope.sourceHash,
+        unitIds: Array.from({ length: 11000 }, (_, i) => `unit-sentence-${h(i).slice(0, 24)}`), candidates: [{ id: "role-ada" }] };
+      p.prepared.review.priorRoster = roster;
+      for (const [kind, id] of [["initial-world", "singleton"], ["canonical-event", "arrival"], ["norm-template", "rule"]])
+        p.catalog.push({ kind, id, payload: { id }, revisionHash: h({ id }), current: true });
+      for (const ref of failedRefs) {
+        const payload: any = ref.startsWith("roster/") ? roster : { id: ref };
+        f.f.inventory.consumers.push({ ref, payload, revisionHash: h(payload), reason: "typed-consumer", dependencies: [] });
+      }
+      p.consumer.dependencies = failedRefs.map(ref => { const [kind, id] = ref.split("/"); return { kind, id }; });
+      f.f.intent.inventoryHash = h(f.f.inventory);
+      for (const [i, record] of f.original.entries()) {
+        record.intent = f.f.intent; record.output.intentHash = h(f.f.intent);
+        if ("proposalHash" in record.output) record.output.proposalHash = h(f.original[0]!.output);
+        record.predecessorRecordHash = i ? h(f.original[i - 1]) : null;
+      }
+      scope.inventoryHash = h(f.f.inventory); scope.identityIntentHash = h(f.f.intent); scope.definitionHash = h(f.original[0]!.output);
+      f.proposal.output.scopeHash = h(scope);
+    }
     if (rejectedRef) {
       p.catalog.push({ kind: "initial-world", id: "singleton", revisionHash: h({}), payload: {}, current: true });
       p.receipt = { state: "completed", fingerprint: scope.receiptFingerprint, identity: { upstreamRepairIntent: { proposals: [{ artifactKind: "entity", artifactId: "ada", payloadHash: h({ id: "ada" }) }] } } };
@@ -393,6 +528,11 @@ it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCa
     await fs.writeFile(path.join(base, "context.json"), JSON.stringify(p.prepared));
     vi.spyOn(revalidation, "prepareConsumerRevalidation").mockResolvedValue(p);
     const findArtifact = revalidation.findConsumerArtifact;
+    const originalReadMode = readContract.assertConsumerReadMode;
+    vi.spyOn(readContract, "assertConsumerReadMode").mockImplementation(args => {
+      if (hostRepair === "source-search-contract" && providers.length === 1 && args.collection === "source" && args.query) throw Error(oldSourceSearchError);
+      return originalReadMode(args);
+    });
     vi.spyOn(revalidation, "findConsumerArtifact").mockImplementation((catalog, ref) => providers.length === 1 && ref === "entity/ada"
       ? undefined : findArtifact(catalog, ref));
     vi.spyOn(retainedState, "assertConsumerRepairRetainedState").mockResolvedValue();
@@ -413,10 +553,19 @@ it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCa
     const create = PiAgentSession.create.bind(PiAgentSession);
     const dispatch = vi.spyOn(PiAgentSession, "create").mockImplementation(async options => {
       const first = providers.length === 0, check = path.basename(options.runtimeDir!) === "consumer-revalidation-check";
-      const session = await create({ ...options, model: undefined, piAgentDir: path.join(root, "pi") });
-      providers.push(await mockPiProvider(session, { provider: "openai-codex", modelId: "gpt-6.1-sol", response: (_context, index) => {
+      const hostResume = options.runtimeDir!.includes(`consumer-revalidation.host-recovery${path.sep}consumer-revalidation.continuation`);
+      const hostQuotaAttempt = hostQuota && !check && !hostResume && options.runtimeDir!.includes("consumer-revalidation.host-recovery");
+      const session = await create({ ...options, model: undefined, piAgentDir: path.join(root, "pi"),
+        ...(first && dependencyRefs ? { losslessJsonDictionaryProfile: undefined } : {}) });
+      providers.push(await mockPiProvider(session, { provider: "openai-codex", modelId: "gpt-6.1-sol",
+        ...((first && quotaRefusal) || hostQuotaAttempt ? { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } : {}), response: (_context, index) => {
         if (first) {
-          if (index === failedCalls - 1) return fauxAssistantMessage([fauxText("The synthetic review has not submitted yet.")], { stopReason: "stop" });
+          if (hostRepair === "source-search-contract") return fauxAssistantMessage([
+            fauxToolCall("read_consumer_revalidation", { collection: "source", query: index ? "waits" : "Ada", offset: 0 }, { id: `old-source-query-${index}` })
+          ], { stopReason: "toolUse" });
+          if (quotaRefusal) return fauxAssistantMessage([], { stopReason: "error", errorMessage: "Codex error: The usage limit has been reached" });
+          if (!exhaust && index === failedCalls - 1) return fauxAssistantMessage([fauxText("The synthetic review has not submitted yet.")], { stopReason: "stop" });
           if (failedCalls === 3 && index === 1) return fauxAssistantMessage([
             fauxToolCall("read_consumer_revalidation", { collection: "source", segmentIds: [source.segmentId], offset: 0 }, { id: "old-source" }),
             fauxToolCall("read_consumer_revalidation", { collection: "consumer", refs: [scope.ref], offset: 0 }, { id: "old-consumer" }),
@@ -424,25 +573,219 @@ it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCa
           ], { stopReason: "toolUse" });
           // Simulate the former slash-ref reader bug. Its failure allowance remains consumed.
           return fauxAssistantMessage([fauxToolCall("read_consumer_revalidation", index === 0
-            ? { collection: "artifacts", refs: ["entity/ada"], offset: 0 }
+            ? { collection: "artifacts", refs: failedRefs, offset: 0 }
             : { collection: "consumer", refs: [scope.ref], offset: 0 }, { id: `failed-session-read-${index}` })], { stopReason: "toolUse" });
         }
-        if (index > 1) throw Error("Unexpected continuation retry");
         const output = check ? { ...f.check.output, scopeHash: h(scope), proposalHash: h(previous[0]!.output) } : f.proposal.output;
+        if (migrateWork) {
+          if (index > 1) throw Error("Work migration unexpectedly rereads or loops");
+          return fauxAssistantMessage([fauxToolCall(index ? "submit_consumer_revalidation" : "preview_consumer_revalidation", output,
+            { id: `migrated-${check}-${index}` })], { stopReason: "toolUse" });
+        }
+        if (hostQuotaAttempt) return fauxAssistantMessage([], { stopReason: "error", errorMessage: "Codex error: The usage limit has been reached" });
+        if (hostResume && failResumption) return fauxAssistantMessage([fauxText("This one-time provider resumption did not submit.")], { stopReason: "stop" });
+        if (failHost) return fauxAssistantMessage([fauxText("No submission in this single-use recovery.")], { stopReason: "stop" });
+        if (hostRepair === "request-size" && providers.length === 2) return fauxAssistantMessage([
+          fauxToolCall("read_consumer_revalidation", { collection: "artifacts", refs: [`entity:large-${index}`], offset: 0 }, { id: `oversized-read-${index}` })
+        ], { stopReason: "toolUse" });
+        if (dependencyRefs) {
+          if (index > rosterPageCount) throw Error("Unexpected dependency continuation retry");
+          const calls = index === rosterPageCount ? [fauxToolCall("submit_consumer_revalidation", output, { id: `paged-submit-${check}` })]
+            : [fauxToolCall("read_consumer_revalidation", { collection: "artifacts", refs: [`role-roster:${scope.sourceId}`], offset: index }, { id: `roster-page-${index}-${check}` })];
+          if (index === 0) calls.unshift(
+            fauxToolCall("read_consumer_revalidation", { collection: "source", segmentIds: [source.segmentId], offset: 0 }, { id: `fresh-source-${check}` }),
+            fauxToolCall("read_consumer_revalidation", { collection: "consumer", refs: [scope.ref], offset: 0 }, { id: `fresh-consumer-${check}` }),
+            fauxToolCall("read_consumer_revalidation", { collection: "artifacts", refs: ["canonical-event:arrival", "initial-world:singleton", "norm-template:rule"], offset: 0 }, { id: `fresh-dependencies-${check}` }));
+          return fauxAssistantMessage(calls, { stopReason: "toolUse" });
+        }
+        if (index > 1) throw Error("Unexpected continuation retry");
         if (failedCalls === 3) return index === 0
           ? fauxAssistantMessage([fauxToolCall("submit_consumer_revalidation", output, { id: "invalid-reuse-of-old-reads" })], { stopReason: "toolUse" })
           : fauxAssistantMessage([fauxText("No valid fresh submission.")], { stopReason: "stop" });
         return fauxAssistantMessage(index === 0 ? [
+          ...(hostRepair === "request-size" ? [0, 1, 2, 3].map(i => fauxToolCall("read_consumer_revalidation",
+            { collection: "artifacts", refs: [`entity:large-${i}`], offset: 0 }, { id: `recovery-large-${i}-${check}` })) : []),
           fauxToolCall("read_consumer_revalidation", { collection: "source", segmentIds: [source.segmentId], offset: 0 }, { id: `fresh-source-${check}` }),
           fauxToolCall("read_consumer_revalidation", { collection: "consumer", refs: [scope.ref], offset: 0 }, { id: `fresh-consumer-${check}` }),
           fauxToolCall("read_consumer_revalidation", { collection: "artifacts", refs: rejectedRef ? ["entity:ada", "initial-world:singleton"] : ["entity:ada"], offset: 0 }, { id: `fresh-artifact-${check}` }),
         ] : [fauxToolCall("submit_consumer_revalidation", output, { id: `fresh-submit-${check}` })], { stopReason: "toolUse" });
       } })); return session;
     });
-    const args = { root, sourceId: scope.sourceId, taskId: scope.taskId, ref: scope.ref, authorizationRef: scope.authorizationRef };
-    await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(/without a revalidation submission/);
+    const args: Parameters<typeof runIdentityConsumerRevalidation>[0] = { root, sourceId: scope.sourceId, taskId: scope.taskId, ref: scope.ref, authorizationRef: scope.authorizationRef };
+    await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(hostRepair === "source-search-contract" ? /query is for artifacts discovery only/ : quotaRefusal ? /usage limit/ : exhaust ? /model-call limit/ : /without a revalidation submission/);
     expect(dispatch).toHaveBeenCalledTimes(1);
+    if (hostRepair) {
+      if (hostRepair === "request-size") {
+        for (let i = 0; i < 4; i++) {
+          const payload = { id: `large-${i}`, evidence: h(`unique-large-payload-${i}`).repeat(2300) };
+          p.catalog.push({ kind: "entity", id: payload.id, revisionHash: h(payload), payload });
+        }
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" })).rejects.toThrow(/request requires/);
+      }
+      const failedDirectory = hostRepair === "request-size" ? consumerStageRecoveryDirectory(directory, "consumer-revalidation") : directory;
+      const failure = JSON.parse(await fs.readFile(path.join(failedDirectory, "consumer-revalidation.failure.json"), "utf8"));
+      const runs = await new TraceStore(root).peekRunsByOperation(scope.sourceId, `receipt-bound-${h(scope)}-consumer-revalidation${hostRepair === "request-size" ? "-continuation" : ""}`);
+      await new Promise(resolve => setTimeout(resolve, 2));
+      args.hostRecovery = { scopeHash: h(scope), stage: "consumer-revalidation", failedTraceRunId: runs[0]!.id, failureHash: h(failure),
+        cause: hostRepair, authorizationRef: "user:repair-original-reader-and-budget", authorizedAt: new Date().toISOString(),
+        maxRequestBytes: hostRepair === "request-size" ? 1_024_000 : 512_000 };
+      const oldState = captureRecordTree(workspaceStateDir(root)); let oldCalls = dispatch.mock.calls.length;
+      const preview = await runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect" });
+      expect(preview).toMatchObject({ status: "host-recovery-ready", parentResumeAllowed: false, certificationGranted: false });
+      expect(captureRecordTree(workspaceStateDir(root))).toEqual(oldState);
+      expect(dispatch).toHaveBeenCalledTimes(oldCalls);
+      const plan = (preview as any).recovery;
+      expect(plan.proposalLimits.maxModelCalls).toBe(24 - (plan.priorUsage.modelCalls - scope.priorUsage.modelCalls));
+      expect(plan.proposalLimits.maxTotalPayloadBytes).toBe(12_288_000 - (plan.priorUsage.totalPayloadBytes - scope.priorUsage.totalPayloadBytes));
+      expect(plan.repairedReadFailures).toBe(hostRepair === "source-search-contract" ? 2 : 0);
+      await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect", hostRecovery: { ...args.hostRecovery, failureHash: h("wrong") } })).rejects.toThrow(/exact settled failure/);
+      await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect", hostRecovery: { ...args.hostRecovery, authorizedAt: "2020-01-01T00:00:00.000Z" } })).rejects.toThrow(/later user authorization/);
+      if (hostRepair === "request-size") await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect",
+        hostRecovery: { ...args.hostRecovery, maxRequestBytes: 512_000 } })).rejects.toThrow(/bounded increase/);
+      let quotaPlan: any;
+      if (hostQuota) {
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" })).rejects.toThrow(/usage limit/);
+        expect(dispatch).toHaveBeenCalledTimes(++oldCalls);
+        const stopped = captureRecordTree(workspaceStateDir(root));
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect" })).rejects.toThrow(/sole host recovery is consumed/);
+        const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+        const failedTraceRunId = attempts[0]!.stages[0]!.hostRecovery!.traceRunId!;
+        expect(failedTraceRunId).toBeTruthy();
+        await new Promise(resolve => setTimeout(resolve, 2));
+        args.providerResumption = { scopeHash: h(scope), stage: "consumer-revalidation", failedTraceRunId,
+          authorizationRef: "user:continue-after-host-quota-cleared", authorizedAt: new Date().toISOString() };
+        for (const authorizationRef of [scope.authorizationRef, args.hostRecovery.authorizationRef])
+          await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect", providerResumption: { ...args.providerResumption, authorizationRef } })).rejects.toThrow(/later.authoriz|later user authorization/);
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect", providerResumption: { ...args.providerResumption, failedTraceRunId: "another-failure" } })).rejects.toThrow(/settled trace or later authorization/);
+        const preview = await runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect" });
+        expect(preview).toMatchObject({ status: "ready", continuation: { remainingAllowance: { maxModelCalls: plan.proposalLimits.maxModelCalls - 1,
+          maxRequestBytes: plan.proposalLimits.maxRequestBytes } }, cumulative: { modelCalls: plan.priorUsage.modelCalls + 1 } });
+        expect(captureRecordTree(workspaceStateDir(root))).toEqual(stopped);
+        if (failResumption) {
+          await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" })).rejects.toThrow(/without a revalidation submission/);
+          const stoppedAgain = captureRecordTree(workspaceStateDir(root));
+          await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect" })).rejects.toThrow(/sole provider resumption is consumed/);
+          expect(captureRecordTree(workspaceStateDir(root))).toEqual(stoppedAgain);
+          await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" })).rejects.toThrow(/sole provider resumption is consumed/);
+          expect(dispatch).toHaveBeenCalledTimes(oldCalls + 1);
+          expect(previous).toEqual([]);
+          const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+          expect(attempts[0]!.stages[0]!.hostRecovery!.providerResumption).toMatchObject({ status: "BREAK", usage: { modelCalls: 1 } });
+          return;
+        }
+      }
+      // The original proposal seals before ledger registration is interrupted.
+      if (failHost) {
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" })).rejects.toThrow(/without a revalidation submission/);
+        const stopped = captureRecordTree(workspaceStateDir(root));
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect" })).rejects.toThrow(/sole host recovery is consumed/);
+        expect(captureRecordTree(workspaceStateDir(root))).toEqual(stopped);
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" })).rejects.toThrow(/sole host recovery is consumed/);
+        expect(dispatch).toHaveBeenCalledTimes(oldCalls + 1);
+        for (const file of plan.retainedFiles) expect(h(await fs.readFile(path.join(directory, file.path), "utf8"))).toBe(file.hash);
+        return;
+      }
+      await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" })).rejects.toThrow("interrupted continuation registration");
+      expect(dispatch).toHaveBeenCalledTimes(oldCalls + 1);
+      const result = await runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" });
+      expect(result).toMatchObject({ status: f.proposal.output.disposition, parentResumeAllowed: false, certificationGranted: false });
+      expect(dispatch).toHaveBeenCalledTimes(oldCalls + 2);
+      expect(previous).toHaveLength(2);
+      expect(previous[0]!.hostRecoveryHash).toBe(previous[1]!.hostRecoveryHash);
+      if (hostQuota) {
+        const hostDirectory = consumerHostRecoveryDirectory(directory);
+        quotaPlan = JSON.parse(await fs.readFile(path.join(consumerStageRecoveryDirectory(hostDirectory, "consumer-revalidation"), "continuation.json"), "utf8"));
+        expect(previous[0]!.continuationHash).toBe(h(quotaPlan)); expect(previous[1]!.continuationHash).toBeUndefined();
+        expect(quotaPlan.hostRecoveryHash).toBe(previous[0]!.hostRecoveryHash);
+        for (const file of quotaPlan.retainedFiles) expect(h(await fs.readFile(path.join(hostDirectory, file.path), "utf8"))).toBe(file.hash);
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect", providerResumption: { ...args.providerResumption!, authorizationRef: "replace" } })).rejects.toThrow(/no repinning/);
+        delete args.providerResumption;
+      }
+      for (const file of plan.retainedFiles) expect(h(await fs.readFile(path.join(directory, file.path), "utf8"))).toBe(file.hash);
+      await revalidation.verifyConsumerRevalidationRecord(root, previous[0]!);
+      await revalidation.verifyConsumerRevalidationRecord(root, previous[1]!);
+      const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+      expect(attempts[0]!.cumulative).toEqual(result.cumulative);
+      await runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" });
+      expect(dispatch).toHaveBeenCalledTimes(oldCalls + 2);
+      await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run", hostRecovery: { ...args.hostRecovery, authorizationRef: "replace" } })).rejects.toThrow(/replacement grant/);
+      const recoveryFile = path.join(consumerHostRecoveryDirectory(directory), "recovery.json"), text = await fs.readFile(recoveryFile, "utf8"), changed = JSON.parse(text);
+      changed.proposalLimits.maxModelCalls++;
+      await fs.writeFile(recoveryFile, JSON.stringify(changed));
+      await expect(revalidation.verifyConsumerRevalidationRecord(root, previous[0]!)).rejects.toThrow(/missing or changed/);
+      await fs.writeFile(recoveryFile, text);
+      const oldMessages = path.join(failedDirectory, "consumer-revalidation.messages.jsonl");
+      await fs.appendFile(oldMessages, '{"tampered":true}\n');
+      await expect(revalidation.verifyConsumerRevalidationRecord(root, previous[1]!)).rejects.toThrow();
+      expect(dispatch).toHaveBeenCalledTimes(oldCalls + 2);
+      return;
+    }
+    if (dependencyRefs) {
+      p.catalog = consumerDependencyCatalog(p.catalog, scope, p.prepared.inventory, p.prepared.review.priorRoster);
+      rosterPageCount = consumerArtifactPages(p.catalog.find((c: any) => c.kind === "role-roster")!).length;
+      expect(rosterPageCount).toBeGreaterThan(1);
+    }
     const stopped = captureRecordTree(directory), allState = captureRecordTree(workspaceStateDir(root));
+    if (migrateWork) {
+      const migration = { ...args, executionPolicy: "consumer-work/v1" as const, executionAuthorizationRef: "user:upgrade-original-execution-policy" };
+      await expect(runIdentityConsumerRevalidation({ ...args, executionPolicy: "consumer-work/v1", inspectExecution: true })).rejects.toThrow(/explicit execution-policy migration authorization/);
+      const inspected = await runIdentityConsumerRevalidation({ ...migration, inspectExecution: true });
+      expect(inspected).toMatchObject({ status: "ready", migrated: true, cumulative: { modelCalls: 177 + failedCalls } });
+      expect(dispatch).toHaveBeenCalledTimes(1); expect(captureRecordTree(workspaceStateDir(root))).toEqual(allState);
+      await expect(runIdentityConsumerRevalidation(migration)).rejects.toThrow("interrupted continuation registration");
+      expect(dispatch).toHaveBeenCalledTimes(2);
+      const beforeInspect = captureRecordTree(workspaceStateDir(root));
+      expect(await runIdentityConsumerRevalidation({ ...migration, inspectExecution: true })).toMatchObject({ status: "sealed" });
+      expect(captureRecordTree(workspaceStateDir(root))).toEqual(beforeInspect); expect(dispatch).toHaveBeenCalledTimes(2);
+      const result = await runIdentityConsumerRevalidation(migration);
+      expect(result).toMatchObject({ status: "blocked", cumulative: { modelCalls: 177 + failedCalls + 4 }, parentResumeAllowed: false });
+      expect(dispatch).toHaveBeenCalledTimes(3); expect(previous).toHaveLength(2);
+      expect(previous.every(r => r.executionPlanHash && h(r.scope) === h(scope))).toBe(true);
+      const plan = JSON.parse(await fs.readFile(path.join(consumerWorkDirectory(directory), "consumer-revalidation.plan.json"), "utf8"));
+      for (const file of plan.retainedFiles) expect(h(await fs.readFile(file.path, "utf8"))).toBe(file.hash);
+      const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+      expect(attempts[0]!.cumulative).toEqual(result.cumulative);
+      const again = await runIdentityConsumerRevalidation(migration);
+      expect(again.cumulative).toEqual(result.cumulative); expect(dispatch).toHaveBeenCalledTimes(3);
+      await fs.appendFile(path.join(directory, "consumer-revalidation.messages.jsonl"), '{"tampered":true}\n');
+      await expect(runIdentityConsumerRevalidation(migration)).rejects.toThrow(); expect(dispatch).toHaveBeenCalledTimes(3);
+      return;
+    }
+    if (quotaRefusal) {
+      await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect" })).rejects.toThrow(/later explicit host authorization/);
+      const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+      const failedTraceRunId = attempts[0]!.stages[0]!.traceRunId!;
+      expect(failedTraceRunId).toBeTruthy();
+      await new Promise(resolve => setTimeout(resolve, 2));
+      args.providerResumption = { scopeHash: h(scope), stage: "consumer-revalidation", failedTraceRunId,
+        authorizationRef: "user:resume-after-quota-cleared", authorizedAt: new Date().toISOString() };
+      const failure = JSON.parse(await fs.readFile(path.join(directory, "consumer-revalidation.failure.json"), "utf8"));
+      const journalFile = path.join(directory, "consumer-revalidation.messages.jsonl");
+      const transcriptText = await fs.readFile(failure.sessionFile, "utf8"), journalText = await fs.readFile(journalFile, "utf8");
+      // Neither partial output nor a different failure can be relabeled as a
+      // zero-output refusal, even if both message observations agree.
+      const changes = [
+        (m: any) => { m.content = [{ type: "text", text: "partial output" }]; },
+        (m: any) => { m.usage.output = 1; },
+        (m: any) => { m.errorMessage = "connection failed"; },
+        (m: any) => { m.stopReason = "aborted"; },
+        (m: any) => { m.content = [fauxToolCall("submit_consumer_revalidation", f.proposal.output)]; },
+      ];
+      for (const change of changes) {
+        const rewrite = (text: string) => text.trimEnd().split("\n").map(line => {
+          const row = JSON.parse(line); if (row.message?.role === "assistant") change(row.message); return JSON.stringify(row);
+        }).join("\n") + "\n";
+        await fs.writeFile(failure.sessionFile, rewrite(transcriptText)); await fs.writeFile(journalFile, rewrite(journalText));
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect" })).rejects.toThrow(/Quota continuation requires/);
+        await fs.writeFile(failure.sessionFile, transcriptText); await fs.writeFile(journalFile, journalText);
+      }
+      await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect",
+        providerResumption: { ...args.providerResumption, authorizationRef: scope.authorizationRef } })).rejects.toThrow(/later user authorization/);
+      await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect",
+        providerResumption: { ...args.providerResumption, failedTraceRunId: "wrong-trace" } })).rejects.toThrow(/settled trace or later authorization/);
+      await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect",
+        providerResumption: { ...args.providerResumption, authorizedAt: "2020-01-01T00:00:00.000Z" } })).rejects.toThrow(/settled trace or later authorization/);
+    }
     const inspect = await runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "inspect" });
     expect(captureRecordTree(directory)).toEqual(stopped);
     expect(captureRecordTree(workspaceStateDir(root))).toEqual(allState);
@@ -559,14 +902,20 @@ it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCa
       await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" })).rejects.toThrow("interrupted continuation registration");
       expect(dispatch).toHaveBeenCalledTimes(2);
       const result = await runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" });
-      expect(result.status).toBe("blocked"); expect(result.cumulative.modelCalls).toBe(177 + failedCalls + 4);
+      expect(result.status).toBe("blocked"); expect(result.cumulative.modelCalls).toBe(177 + failedCalls + (dependencyRefs ? (rosterPageCount + 1) * 2 : 4));
       expect(dispatch).toHaveBeenCalledTimes(3); expect(previous).toHaveLength(2);
       expect(previous[0]!.continuationHash).toMatch(/^[a-f0-9]{64}$/);
       expect(previous[1]!.sessionId).not.toBe(previous[0]!.sessionId);
       const plan = JSON.parse(await fs.readFile(path.join(recovery, "continuation.json"), "utf8"));
-      expect(plan.priorReadFailures).toBe(1);
-      expect(plan.pendingArtifactRefs).toEqual(["entity:ada"]);
-      expect(plan.limits.maxModelCalls).toBe(22);
+      expect(plan.priorReadFailures).toBe(quotaRefusal ? 0 : 1);
+      expect(plan.pendingArtifactRefs).toEqual(quotaRefusal ? [] : failedRefs.map(ref => ref.replace("/", ":")));
+      expect(plan.limits.maxModelCalls).toBe(24 - failedCalls);
+      if (quotaRefusal) {
+        expect(plan.providerResumption).toEqual(args.providerResumption);
+        await expect(runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run",
+          providerResumption: { ...args.providerResumption!, authorizationRef: "changed-authorization" } })).rejects.toThrow(/no repinning/);
+        delete args.providerResumption;
+      }
       for (const file of plan.retainedFiles) expect(h(await fs.readFile(path.join(directory, file.path), "utf8"))).toBe(file.hash);
       await runIdentityConsumerRevalidation({ ...args, resumeUnsubmitted: "run" });
       expect(dispatch).toHaveBeenCalledTimes(3);

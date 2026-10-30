@@ -20,6 +20,8 @@
     "test/identity-real-chain.test.ts",
     "test/identity-repair-handoff.test.ts",
     "test/identity-session-persistence.test.ts",
+    "test/identity-consumer-revalidation.test.ts",
+    "test/consumer-work-plan.test.ts",
     "test/lossless-json-context.test.ts",
     "test/manual/pi-upgrade-live.ts"
   ]

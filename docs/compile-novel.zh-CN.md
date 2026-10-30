@@ -2,6 +2,12 @@
 
 `nwh compile-novel` 从不可变原文一直执行到独立评估、认证、激活和可玩分支交付。默认继续已有编译进度；`--rebuild` 明确启动全量重编。完成标准遵循[小说编译流程与完整性验收规范](novel-compilation-protocol.zh-CN.md)。
 
+新消费者复核使用 `consumer-work/v1`：宿主一次准备完整必读证据，模型预检草稿后单独提交，再由独立会话验收。`--inspect-execution` 只读显示证据规模、提交预留和是否可执行；`stages[].execution` 显示进展窗口、草稿和实际消耗，旧 `remainingAllowance` 继续描述历史执行段。
+
+已停止的旧消费者须显式选择 `--execution-policy consumer-work/v1`，并以 `--execution-authorization-ref` 引用既有用户对策略迁移的授权。先带 `--inspect-execution`，核验通过后去掉它执行。保留原 `--source`、`--task`、`--ref` 和 `--authorization-ref`；这些值从同作用域 `inspect-identity-repairs` 复制，不猜测或重命名。完整清单、旧失败、预算和会话不变，转换记录追加在原消费者的 `execution-v1` 下。不能与旧续接／额度修订 flags 混用。已有提交恢复登记，不重新生成；无进展、负面语义判断和显式额度修订不能借迁移重开。
+
+大角色表的机械来源 ID 采用可核验的 hash/count 视图，全部角色和其他语义字段仍交给模型。超出上下文的完整工作集在付费调用前停止，不能删证据或减少分母。配额失败保留消耗并等待外部恢复，不自动循环。详细策略和恢复边界见[工具恢复协议](agent-tool-recovery.md#versioned-consumer-work-execution)及[实施计划](plans/2026-10-30-consumer-execution.zh-CN.md)。
+
 ```sh
 # 首次编译：登记原文并执行全流程
 nwh compile-novel fixtures/corpus/longzu_1.txt
@@ -113,6 +119,23 @@ pnpm demo:compilation-completion
 来源审查因已确认的 Codex 用量限制中断后，额度恢复时再次执行同一条 `compile-novel --source …` 即可尝试续跑。宿主先核对原 trace、完整工具结果、原任务和依赖，恢复原草稿并重新读取证据，只消耗原来剩余的会话和无进展额度。未完成写入、工具失败、预算耗尽、会话耗尽或无法验证的旧任务不适用自动恢复，仍按具体诊断停止。`status` 中的 `roleReviewWork[].sourceAuditRepairs` 显示修复提案和独立验证状态；审查和修复成功仍不等于全书认证通过。
 
 ## 独立规格与评估
+
+已确认的消费者原文搜索契约缺陷或请求体超限，使用同一原任务的
+`requirements revalidate-identity-consumer --host-recovery <JSON> --resume-unsubmitted inspect`
+预检，随后按相同 JSON 执行 `run`。授权、失败哈希、真实会话和剩余额度均绑定；
+旧记录不改写；恢复再次失败默认停止，只有可验证的首请求零输出额度拒绝适用下述续接。字段发现与边界见
+[宿主恢复协议](agent-tool-recovery.md#已确认读取缺陷或请求体超限的宿主恢复)。
+
+身份消费者重验若在首个请求即遇到订阅用量上限，用户后续要求继续且同一 Pi 订阅已恢复时，
+宿主可按[消费者续接协议](agent-tool-recovery.md#消费者重验未提交失败的受控续接)使用
+`requirements revalidate-identity-consumer --resume-unsubmitted inspect --provider-resumption <JSON>`
+核验原失败。通过后以 `run` 消耗原阶段剩余额度及唯一续接；已提交、部分输出或已消费续接
+不适用，旧失败与父 loop 的停止状态保留。
+
+首请求额度拒绝若发生在原宿主恢复中，复制同一状态的
+`stages[].hostRecovery.traceRunId`，按相同 `--provider-resumption` 协议检查并续接。
+这是原恢复下唯一的额度续接，保留原失败与所有已用调用／字节；不会再扩大预算或
+重开独立检查。再次失败只能保留现场，有封存提交时仅恢复登记。
 
 入口使用共享的 `entry-capability/v2` 契约。编译校验、审计、入口选择和修复规划投影同一份最终状态：空值、撤销和最终死亡不能保留旧操作的“可行动”结论，增加场外角色也不改变门槛。`character.posture/breathing/sweating/wakefulness` 可表达定性身体状态；每个写入必须绑定原文的精确操作证据。缺失仍为未知，不推导身份、地点、健康数值或行动能力。
 

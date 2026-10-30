@@ -5,7 +5,7 @@ import { contentHash } from "../world/canonical.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
 import { identityRecordDirectory, type IdentityRecord } from "./identity-requirements.js";
 import type { ModelRequestUsage } from "../runtime/model-request-budget.js";
-import { losslessJsonContext } from "../agent/lossless-json-context.js";
+import { jsonDictionaryProfile, losslessJsonContext } from "../agent/lossless-json-context.js";
 import { normalizeContext, type Message } from "@earendil-works/pi-ai";
 import { identityReadTools } from "./identity-context-plan.js";
 
@@ -20,7 +20,8 @@ export function assertIdentitySubmissionTurn(message: Message, terminalTool = "s
  * its header. New identity sessions are linear, uncompacted and single-use. */
 export type IdentitySessionContract = { terminalTool: string; readTools: readonly string[]; receipt: "retained" | "staged"; allowCorrectedSubmission?: boolean };
 const defaultContract: IdentitySessionContract = { terminalTool: "submit_identity_requirements", readTools: identityReadTools, receipt: "retained" };
-function inspectTranscript(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model"> & { output: unknown }, prompt: string, contract = defaultContract, unsubmitted = false, rejectedSubmissionError?: string, settledFailure = false) {
+export const identityQuotaRefusal = "Codex error: The usage limit has been reached";
+function inspectTranscript(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model"> & { output: unknown }, prompt: string, contract = defaultContract, unsubmitted = false, rejectedSubmissionError?: string, settledFailure = false, quotaRefusal = false) {
   if (!text.endsWith("\n")) throw prerequisiteStop("Identity transcript has an incomplete final entry; preserve it, no redispatch");
   const entries = text.trimEnd().split("\n").map(line => JSON.parse(line)) as FileEntry[];
   const header = entries[0];
@@ -50,7 +51,13 @@ function inspectTranscript(text: string, root: string, record: Pick<IdentityReco
     && lastMessage.errorMessage === rejectedSubmissionError && lastMessage.content.every(b => b.type === "text" && b.text === "")
     && Object.values(lastMessage.usage).every(v => typeof v === "number" ? v === 0 : typeof v === "object" && Object.values(v).every(n => n === 0))
     ? lastMessage : undefined;
-  if (!assistants.length || assistants.some(m => m.provider !== record.provider || m.model !== record.model || m !== localStop && ["error", "aborted", "pending"].includes(m.stopReason)))
+  const refused = quotaRefusal && assistants.length === 1 && lastMessage?.role === "assistant"
+    && lastMessage.stopReason === "error" && lastMessage.errorMessage === identityQuotaRefusal
+    && lastMessage.content.length === 0 && messages.every(m => m.role !== "toolResult")
+    && Object.values(lastMessage.usage).every(v => typeof v === "number" ? v === 0 : typeof v === "object" && Object.values(v).every(n => n === 0))
+    ? lastMessage : undefined;
+  if (quotaRefusal && !refused) throw prerequisiteStop("Quota continuation requires exactly one empty, zero-usage provider refusal and no tools; preserve the failure, no retry");
+  if (!assistants.length || assistants.some(m => m.provider !== record.provider || m.model !== record.model || m !== localStop && m !== refused && ["error", "aborted", "pending"].includes(m.stopReason)))
     throw prerequisiteStop("Identity transcript lacks settled provider responses");
   const pending = new Map<string, string>(), callIds = new Set<string>();
   const submissions: { id: string; arguments: unknown }[] = [];
@@ -73,9 +80,9 @@ function inspectTranscript(text: string, root: string, record: Pick<IdentityReco
   }
   const last = messages.at(-1);
   if (unsubmitted) {
-    if (pending.size || submissions.length || last?.role !== "assistant" || last.stopReason !== "stop")
+    if (pending.size || submissions.length || last?.role !== "assistant" || (last.stopReason !== "stop" && last !== refused && last !== localStop))
       throw prerequisiteStop("Unsubmitted continuation requires a settled read-only session with no attempted submission; preserve its original stop, no replay");
-    return { messages, localStop: undefined, summary: { entries: entries.length, lastEntryId: parent, responses: assistants.length,
+    return { messages, localStop, summary: { entries: entries.length, lastEntryId: parent, responses: assistants.length - (localStop ? 1 : 0),
       toolResults: messages.filter(m => m.role === "toolResult").length } };
   }
   const terminal = submissions.at(-1), corrected = contract.allowCorrectedSubmission && submissions.length === 2
@@ -128,6 +135,22 @@ export function verifyUnsubmittedIdentitySession(text: string, root: string, rec
   return verifySessionObservations(inspectTranscript(text, root, { ...record, output: null }, prompt, contract, true), rawRequests, rawMessages, contract);
 }
 
+/** A host-side stop after read-only work is not a provider response or a
+ * submission. The final unsent context can be retained for byte OR call stops;
+ * the caller must separately validate the original stop and budget policy. */
+export function verifyStoppedReadOnlyIdentitySession(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model">,
+  prompt: string, rawRequests: string, rawMessages: string, contract: IdentitySessionContract, error: string, unsentContext: boolean) {
+  return verifySessionObservations(inspectTranscript(text, root, { ...record, output: null }, prompt, contract, true, error),
+    rawRequests, rawMessages, contract, unsentContext);
+}
+
+/** A first-request quota refusal proves no semantic output. Only the explicit
+ * host continuation path may use this evidence; successful receipt checks stay strict. */
+export function verifyQuotaRefusedIdentitySession(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model">,
+  prompt: string, rawRequests: string, rawMessages: string, contract: IdentitySessionContract) {
+  return verifySessionObservations(inspectTranscript(text, root, { ...record, output: null }, prompt, contract, true, undefined, false, true), rawRequests, rawMessages, contract);
+}
+
 /** Evidence of a rejected proposal only. It does not synthesize a successful
  * tool receipt; its caller must revalidate the exact proposal and retain a
  * separate narrowly scoped host recovery proof before independent review. */
@@ -143,7 +166,7 @@ export function verifyFailedIdentitySession(text: string, root: string, record: 
   return verifySessionObservations(inspectTranscript(text, root, record, prompt, contract, false, undefined, true), rawRequests, rawMessages, contract);
 }
 
-function verifySessionObservations({ messages, summary, localStop }: ReturnType<typeof inspectTranscript>, rawRequests: string, rawMessages: string, contract: IdentitySessionContract) {
+function verifySessionObservations({ messages, summary, localStop }: ReturnType<typeof inspectTranscript>, rawRequests: string, rawMessages: string, contract: IdentitySessionContract, requestSizeStop = false) {
   const lines = (raw: string) => {
     if (!raw.endsWith("\n")) throw prerequisiteStop("Identity evidence journal is incomplete; preserve the original, no authority or retry");
     return raw.trimEnd().split("\n").map(line => JSON.parse(line));
@@ -152,12 +175,12 @@ function verifySessionObservations({ messages, summary, localStop }: ReturnType<
   if (observed.some((row, i) => row.sequence !== i + 1) || contentHash(observed.map(row => row.message)) !== contentHash(messages))
     throw prerequisiteStop("Identity persisted transcript differs from its live message evidence; preserve both journals, no registration or retry");
   const journal = lines(rawRequests);
-  if (journal.length !== summary.responses * 3) throw prerequisiteStop("Identity request journal is incomplete");
+  if (journal.length !== summary.responses * 3 + (requestSizeStop ? 1 : 0)) throw prerequisiteStop("Identity request journal is incomplete");
   const originals = [], contexts = [], payloads = [];
-  for (let i = 0; i < journal.length; i += 3) {
+  for (let i = 0; i < summary.responses * 3; i += 3) {
     const [original, context, payload] = journal.slice(i, i + 3);
     if (original.phase !== "original-context" || context.phase !== "context" || payload.phase !== "provider-payload"
-      || contentHash(losslessJsonContext(normalizeContext(original.value), contract.readTools).context) !== contentHash(context.value))
+      || contentHash(losslessJsonContext(normalizeContext(original.value), contract.readTools, jsonDictionaryProfile(context.value)).context) !== contentHash(context.value))
       throw prerequisiteStop("Identity context transport does not losslessly reconstruct the complete request");
     originals.push(original.value); contexts.push(context.value); payloads.push(payload.value);
   }
@@ -177,7 +200,18 @@ function verifySessionObservations({ messages, summary, localStop }: ReturnType<
     }
     prefix.push(message);
   }
-  return { transcript: summary, payloads, contexts, originals, messages };
+  let blockedRequestBytes: number | undefined;
+  if (requestSizeStop) {
+    const blocked = journal.at(-1), actual = blocked?.value?.messages as Message[] | undefined;
+    if (!localStop || blocked?.phase !== "original-context" || !actual || actual[0]?.role !== "system"
+      || contentHash(actual.slice(1)) !== contentHash(messages.filter(m => m.role !== "system" && m !== localStop)))
+      throw prerequisiteStop("Blocked request lost its exact unsent transcript prefix; no recovery or retry");
+    const { timestamp: _, ...system } = actual[0];
+    if (contentHash(system) !== systemHash) throw prerequisiteStop("Blocked request changed its system contract; no recovery");
+    blockedRequestBytes = Buffer.byteLength(JSON.stringify(losslessJsonContext(normalizeContext(blocked.value), contract.readTools,
+      jsonDictionaryProfile(contexts.at(-1)!)).context));
+  }
+  return { transcript: summary, payloads, contexts, originals, messages, blockedRequestBytes };
 }
 
 export async function verifyIdentitySession(root: string, record: IdentityRecord, prompt: string, usage: ModelRequestUsage,

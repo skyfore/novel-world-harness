@@ -51,6 +51,7 @@ export class ModelRequestBudget {
   }
   isBlocked(): boolean { return this.failure !== undefined; }
   report() { return { modelCallsMode: this.policy.modelCallsMode ?? "enforce", requestBytesMode: this.policy.requestBytesMode ?? "enforce", totalBytesMode: this.policy.totalBytesMode ?? "enforce", limits: { ...this.limits }, usage: this.snapshot(),
+    ...(this.failure ? { failure: { code: this.failure.reasonCode, message: this.failure.message } } : {}),
     ...(this.policy.modelCallsMode === "progress" ? { progress: { ...this.progress, milestones: [...this.progress.milestones], callsWithoutProgress: this.usage.modelCalls - this.progress.lastProgressCall, stallWindowCalls: this.limits.maxModelCalls } } : {}),
     providerUsage: { ...this.tokenUsage }, blocked: this.isBlocked(), closed: this.closed }; }
 

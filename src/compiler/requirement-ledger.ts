@@ -5,7 +5,7 @@ import { roleDependencyReviewSchema, type RoleDependencyReview } from "./role-de
 import { semanticScopeRecordSchema, validateSemanticScopeHistory, type SemanticScopeRecord } from "./role-semantic-scope.js";
 import { identityRecordSchema, validateIdentityHistory, type IdentityRecord } from "./identity-requirements.js";
 import { consumerRepairRecordSchema, validateConsumerRepairHistory, type ConsumerRepairRecord } from "./identity-consumer-repair-model.js";
-import { consumerRevalidationRecordSchema, consumerRevalidationId, validateConsumerRevalidationHistory, validateConsumerCorrectionLineage, type ConsumerRevalidationRecord } from "./identity-consumer-revalidation-model.js";
+import { consumerRevalidationRecordSchema, consumerRevalidationId, assertConsumerRevalidationPrefix, validateConsumerRevalidationHistory, validateConsumerCorrectionLineage, type ConsumerRevalidationRecord } from "./identity-consumer-revalidation-model.js";
 import type { IdentityRecoveryPermit } from "../runtime/compile-loop/identity-recovery-host.js";
 import { textAnchorForByteRange } from "./text-anchors.js";
 import { sourceAuditProofSchema, type SourceAuditProof } from "./role-source-audit-model.js";
@@ -328,9 +328,16 @@ export class RequirementLedger {
       && consumerRevalidationId(r.payload.record.scope) === consumerRevalidationId(record.scope) ? [r.payload.record] : []);
     const existing = previous.find(r => r.output.phase === record.output.phase);
     if (existing && contentHash(existing) !== contentHash(record)) throw prerequisiteStop("Consumer revalidation phase was already consumed; preserve its original record, no replacement");
+    if (!existing) assertConsumerRevalidationPrefix(history, record.scope);
     validateConsumerRevalidationHistory(existing ? previous : [...previous, record], await this.identityRequirements(record.scope.taskId));
     await (await import("./identity-consumer-revalidation.js")).verifyConsumerRevalidationRecord(this.root, record);
-    if (!existing) await this.publish({ kind: "identity-consumer-revalidation", record });
+    if (!existing) {
+      const identity = { version: 1 as const, sourceId: this.sourceId, sequence: history.length, predecessorHash: history.at(-1)?.hash ?? null,
+        payload: { kind: "identity-consumer-revalidation" as const, record } };
+      // Validate the complete prospective journal before publishing its head.
+      requirementJournalSchema.parse([...history, { ...identity, hash: contentHash(identity) }]);
+      await this.publish(identity.payload);
+    }
   }
 
   async recordIdentityConsumerRepair(raw: ConsumerRepairRecord): Promise<void> {
@@ -785,8 +792,8 @@ export const requirementJournalSchema = z.array(recordSchema).superRefine((recor
     for (const [index, entry] of records.entries()) if (entry.payload.kind === "identity-consumer-revalidation") {
       const r = entry.payload.record, id = consumerRevalidationId(r.scope), previous = revalidations.get(id) ?? [];
       validateConsumerCorrectionLineage(r.scope, [...revalidations.values()].flat());
-      if (r.scope.sourceId !== sourceId || (!previous.length && (r.scope.requirementPrefix.length !== index
-        || r.scope.requirementPrefix.head !== records[index - 1]?.hash))) throw prerequisiteStop("Consumer revalidation changed its original ledger prefix");
+      if (r.scope.sourceId !== sourceId) throw prerequisiteStop("Consumer revalidation changed its original ledger source");
+      if (!previous.length) assertConsumerRevalidationPrefix(records, r.scope, index);
       validateConsumerRevalidationHistory([...previous, r], identityHistories.get(r.scope.taskId) ?? []);
       revalidations.set(id, [...previous, r]);
     }

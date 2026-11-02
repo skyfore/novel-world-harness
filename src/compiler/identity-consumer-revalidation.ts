@@ -22,8 +22,12 @@ import { inspectConsumerBudgetAmendment, consumerRecoveryLimits } from "./identi
 import { inspectConsumerHostRecovery, consumerHostRecoveryDirectory, consumerHostRecoveryInput } from "./identity-consumer-host-recovery.js";
 import { verifyConsumerRefRecovery } from "./identity-consumer-ref-recovery.js";
 import { consumerArtifactKey, consumerDependencyCatalog, consumerArtifactReadHint, ConsumerArtifactReadTracker } from "./identity-consumer-artifacts.js";
-import { consumerWorkContract, consumerWorkDirectory, consumerWorkInput, consumerWorkBudgetPolicy, verifyConsumerWorkProgress } from "./consumer-work-plan.js";
+import { consumerWorkContract, consumerWorkDirectory, consumerWorkInput, workBudgetPolicy, verifyConsumerWorkProgress } from "./consumer-work-plan.js";
 import { prepareConsumerWorkExecution, prepareConsumerWorkRecord, verifyRecordedConsumerWork } from "./identity-consumer-work.js";
+import { CONSUMER_REVIEW_CORRECTION, deriveConsumerReviewContract, consumerReviewCapability, consumerReviewCorrectionContract } from "./consumer-review-contract.js";
+import { consumerReviewCorrectionHash } from "./identity-consumer-correction.js";
+import { assertBoundPreviewAllowance } from "./consumer-review-binding.js";
+import { prepareConsumerBindingRecovery, verifyRecordedBindingRecovery } from "./consumer-binding-recovery.js";
 
 export const revalidationContract = { terminalTool: "submit_consumer_revalidation", readTools: ["read_consumer_revalidation"], receipt: "retained" as const, allowCorrectedSubmission: true };
 export const consumerRevalidationModelScope = (scope: ConsumerRevalidationScope) => {
@@ -168,6 +172,7 @@ async function prepareOriginalConsumerRevalidation(root: string, sourceId: strin
     receiptFingerprint: receipt.fingerprint, acceptanceHash: contentHash(acceptance), parentStateHash: old.parentStateHash,
     originalBudgetHash: old.originalBudgetHash, authorizationRef, priorUsage, priorBudgetFiles,
     ...(!retained || retained.executionPolicy ? { executionPolicy: "consumer-work/v1" as const } : {}),
+    ...(!retained || retained.reviewContract ? { reviewContract: deriveConsumerReviewContract({ sourceId, ref, current: { payload, revisionHash: contentHash(payload) }, catalog }) } : {}),
     requirementPrefix: retained?.requirementPrefix ?? { length: history.length, head: history.at(-1)!.hash } });
   if ((retained && contentHash(retained) !== contentHash(scope)) || history[scope.requirementPrefix.length - 1]?.hash !== scope.requirementPrefix.head)
     throw prerequisiteStop("Frozen consumer revalidation dependencies changed; preserve both versions, no repinning or redispatch");
@@ -177,6 +182,7 @@ async function prepareOriginalConsumerRevalidation(root: string, sourceId: strin
 
 export async function prepareConsumerRevalidation(root: string, sourceId: string, taskId: string, ref: string, authorizationRef: string, compilerCorrection?: string) {
   if (!compilerCorrection) return prepareOriginalConsumerRevalidation(root, sourceId, taskId, ref, authorizationRef);
+  if (compilerCorrection === CONSUMER_REVIEW_CORRECTION) return prepareConsumerReviewCorrection(root, sourceId, taskId, ref, authorizationRef);
   if (compilerCorrection !== SOURCE_LOCAL_CORRECTION || !authorizationRef.trim()) throw prerequisiteStop("Unsupported compiler correction; inspect the original same-task blocked consumer and supported source-local-referent/v1 correction, no guessed policy or retry");
   const history = await new RequirementLedger(root, sourceId).history(), all = revalidationRecords(history, taskId);
   const prior = all.findLast(r => r.scope.ref === ref && !r.scope.compilerCorrection);
@@ -212,18 +218,69 @@ export function consumerRevalidationInput(p: Awaited<ReturnType<typeof prepareCo
     const dependency = d as { kind?: string; id?: string }, c = findConsumerArtifact(p.catalog, `${dependency.kind}/${dependency.id}`);
     if (c) dependencyKeys.add(`${c.kind}:${c.id}`);
   }
+  const reviewSourceIds = new Set<string>();
+  for (const owner of p.scope.reviewContract?.ownerRefs ?? []) {
+    const artifact = findConsumerArtifact(p.catalog, owner.ref);
+    if (!artifact?.current || artifact.revisionHash !== owner.revisionHash) throw prerequisiteStop("Entry review owner changed; inspect the same source/task/ref owning event and execution, no repinning or unchanged retry");
+    dependencyKeys.add(owner.ref);
+    for (const { span } of (artifact.payload as { evidence?: Array<{ span: { sourceId: string; startByte: number; endByte: number } }> }).evidence ?? []) {
+      const segments = p.prepared.manifest.segments.filter(s => s.startByte < span.endByte && span.startByte < s.endByte);
+      if (span.sourceId !== p.scope.sourceId || !segments.length)
+        throw prerequisiteStop("Entry owner evidence is outside the original source manifest; inspect the exact owning event evidence, no guessed source or retry");
+      segments.forEach(s => reviewSourceIds.add(s.id));
+    }
+  }
   return { scope: consumerRevalidationModelScope(p.scope), scopeHash: contentHash(p.scope), definition: p.original[0]!.output, definitionCheck: p.original[1]!.output,
     originalQuestions: p.prepared.review.scope.questions, originalSemanticScope: p.prepared.semantic[0]!.output,
     originalConsumer: p.consumer, currentConsumer: p.current, acceptedDependency: p.acceptance.output,
     artifactReadRefs: p.catalog.filter(c => dependencyKeys.has(`${c.kind}:${c.id}`)).map(consumerArtifactReadHint),
-    ...(p.scope.compilerCorrection ? { compilerCorrection: sourceLocalConsumerContract, previousCompilerJudgments: p.correctionPredecessor.map(r => r.output) } : {}),
-    requiredSourceSegmentIds: [...new Set([...p.prepared.intent.requiredSourceSegmentIds,
+    ...(p.scope.compilerCorrection ? { compilerCorrection: p.scope.compilerCorrection.policy === CONSUMER_REVIEW_CORRECTION
+      ? consumerReviewCorrectionContract
+      : sourceLocalConsumerContract, previousCompilerJudgments: p.correctionPredecessor.map(r => r.output) } : {}),
+    ...(p.scope.reviewContract ? { reviewContract: p.scope.reviewContract, reviewContractHash: contentHash(p.scope.reviewContract) } : {}),
+    requiredSourceSegmentIds: [...new Set([...p.prepared.intent.requiredSourceSegmentIds, ...reviewSourceIds,
       ...(check && previous[0]!.output.phase === "consumer-revalidation" ? [...previous[0]!.output.initialWorldRepair?.segmentIds ?? [], ...previous[0]!.output.entityRepair?.segmentIds ?? []] : [])])],
     ...(check ? { proposal: previous[0]!.output, proposalHash: contentHash(previous[0]!.output) } : {}),
     denominator: { total: p.prepared.inventory.consumers.length, refs: p.prepared.inventory.consumers.map(c => c.ref),
       candidateIds: p.prepared.inventory.candidateIds, sourcePages: p.prepared.inventory.sourcePages,
       originalQuestionIds: p.prepared.inventory.originalQuestionIds },
   };
+}
+
+/** Explicit correction of a demonstrated host scope ambiguity. This retains the
+ * negative pair and uses only its remaining stage allowance, once per consumer. */
+async function prepareConsumerReviewCorrection(root: string, sourceId: string, taskId: string, ref: string, authorizationRef: string) {
+  const history = await new RequirementLedger(root, sourceId).history(), all = revalidationRecords(history, taskId);
+  const predecessor = all.findLast(r => r.scope.ref === ref && !r.scope.compilerCorrection);
+  if (!predecessor || !authorizationRef.trim() || authorizationRef === predecessor.scope.authorizationRef)
+    throw prerequisiteStop("Review-scope correction needs explicit later authorization and the original blocked entry. Inspect requirements inspect-identity-repairs for this source/task and copy reviews[].ref; no guessed ref or automatic retry");
+  const p = await prepareOriginalConsumerRevalidation(root, sourceId, taskId, ref, predecessor.scope.authorizationRef);
+  if (p.scope.reviewContract || !p.scope.executionPolicy || !ref.startsWith("entry/") || p.previous.length !== 2)
+    throw prerequisiteStop("Only a completed legacy entry review can receive this scope correction; preserve its original stage, no repeated correction or retry");
+  for (const record of p.previous) await verifyConsumerRevalidationRecord(root, record);
+  const correction = { policy: CONSUMER_REVIEW_CORRECTION, predecessorId: consumerRevalidationId(p.scope), predecessorScopeHash: contentHash(p.scope),
+    predecessorRecordHashes: p.previous.map(contentHash) as [string, string], contractHash: await consumerReviewCorrectionHash() };
+  const directory = consumerRevalidationDirectory(root, { ...p.scope, compilerCorrection: correction });
+  const retained = await maybeRecoveryFile(path.join(directory, "scope.json")) as ConsumerRevalidationScope | null;
+  const priorUsage = { ...p.scope.priorUsage }, priorBudgetFiles = [...p.scope.priorBudgetFiles];
+  for (const stage of ["consumer-revalidation", "consumer-revalidation-check"]) {
+    const old = path.join(consumerWorkDirectory(p.directory), `${stage}.input.json`), input = await read(old);
+    if (input.reviewContract || input.capability?.kind !== "initial-world" || input.scope.ref !== ref)
+      throw prerequisiteStop("Retained entry review does not demonstrate the legacy opening-scope ambiguity; no semantic retry or correction grant");
+    for (const d of consumerStageBudgetDirectories(p.directory, stage)) {
+      const file = path.join(d, `${stage}.budget.json`), budget = await maybeRecoveryFile(file);
+      if (!budget) continue;
+      priorUsage.modelCalls += budget.state.usage.modelCalls; priorUsage.totalPayloadBytes += budget.state.usage.totalPayloadBytes;
+      if (!priorBudgetFiles.some(f => f.path === file)) priorBudgetFiles.push({ path: file, hash: contentHash(budget) });
+    }
+  }
+  const scope = consumerRevalidationScopeSchema.parse({ ...p.scope, authorizationRef, compilerCorrection: correction, priorUsage, priorBudgetFiles,
+    reviewContract: deriveConsumerReviewContract({ sourceId, ref, current: p.current, catalog: p.catalog }),
+    requirementPrefix: retained?.requirementPrefix ?? { length: history.length, head: history.at(-1)!.hash } });
+  validateConsumerCorrectionLineage(scope, all);
+  if (retained && contentHash(retained) !== contentHash(scope)) throw prerequisiteStop("Frozen review-scope correction changed; preserve the original authorization, source and dependencies, no repinning or retry");
+  for (const stage of ["consumer-revalidation", "consumer-revalidation-check"]) await consumerRevalidationLimits(root, scope, stage);
+  return { ...p, scope, directory, previous: all.filter(r => consumerRevalidationId(r.scope) === consumerRevalidationId(scope)), correctionPredecessor: p.previous };
 }
 
 /** Verify actual Pi submission/read receipts before ledger registration. */
@@ -241,8 +298,11 @@ export async function verifyConsumerRevalidationRecord(root: string, record: Con
   let work: Awaited<ReturnType<typeof prepareConsumerWorkExecution>> | undefined;
   if (record.executionPlanHash) {
     await read(path.join(consumerWorkDirectory(baseDirectory), `${stage}.plan.json`));
-    work = all.some(accepted => contentHash(accepted) === contentHash(record))
-      ? await verifyRecordedConsumerWork(root, record) : await prepareConsumerWorkRecord(root, s, prior, stage);
+    const historical = all.some(accepted => contentHash(accepted) === contentHash(record));
+    work = record.bindingRecoveryHash
+      ? historical ? await verifyRecordedBindingRecovery(root, record, prior[0]!)
+        : await prepareConsumerBindingRecovery(root, s, await prepareConsumerWorkRecord(root, s, prior, stage), prior[0]!)
+      : historical ? await verifyRecordedConsumerWork(root, record) : await prepareConsumerWorkRecord(root, s, prior, stage);
     if (contentHash(work.plan) !== record.executionPlanHash) throw prerequisiteStop("Work record lost its frozen execution plan; no registration or retry");
   }
   const hostRecovery = record.hostRecoveryHash ? await inspectConsumerHostRecovery(root, s, revalidationContract, undefined, record.hostRecoveryHash) : undefined;
@@ -256,10 +316,12 @@ export async function verifyConsumerRevalidationRecord(root: string, record: Con
   if (work) {
     const invocation = await read(path.join(directory, `${stage}.invocation.json`));
     if (contentHash(input) !== contentHash(consumerWorkInput(work.plan)) || budget.executionPlanHash !== record.executionPlanHash
-      || contentHash(budget.policy) !== contentHash(consumerWorkBudgetPolicy) || invocation.executionPlanHash !== record.executionPlanHash
+      || contentHash(budget.policy) !== contentHash(workBudgetPolicy(work.plan)) || invocation.executionPlanHash !== record.executionPlanHash
+      || work.plan.bindingRecoveryHash !== record.bindingRecoveryHash || budget.bindingRecoveryHash !== record.bindingRecoveryHash || invocation.bindingRecoveryHash !== record.bindingRecoveryHash
       || invocation.scopeHash !== contentHash(s) || invocation.stage !== stage)
       throw prerequisiteStop("Consumer work input, policy or invocation changed; preserve the original execution plan, no registration or retry");
     const messages = (await fs.readFile(path.join(directory, `${stage}.messages.jsonl`), "utf8")).trimEnd().split("\n").map(line => JSON.parse(line).message);
+    if (work.plan.reviewBinding) assertBoundPreviewAllowance(messages, s, input.proposalHash, Boolean(record.bindingRecoveryHash));
     verifyConsumerWorkProgress(work.plan, budget.state, messages);
     const lastPreview = messages.findLast(m => m.role === "toolResult" && !m.isError && m.toolName === "preview_consumer_revalidation");
     const preview = lastPreview?.content.find((c: { type: string }) => c.type === "text");
@@ -297,7 +359,7 @@ export async function verifyConsumerRevalidationRecord(root: string, record: Con
     throw prerequisiteStop("Consumer continuation lost its exact failure lineage or fresh evidence session; no retry");
   if (hostRecovery && run.operationId !== `receipt-bound-${contentHash(s)}-${stage}-host-recovery${continuation ? "-continuation" : ""}`)
     throw prerequisiteStop("Consumer host recovery lost its exact operation; no registration or retry");
-  if (work && run.operationId !== `receipt-bound-${contentHash(s)}-${stage}-work-v1`)
+  if (work && run.operationId !== `receipt-bound-${contentHash(s)}-${stage}-work-v1${record.bindingRecoveryHash ? "-binding-recovery" : ""}`)
     throw prerequisiteStop("Consumer work lost its exact trace operation; no registration or retry");
   const raw = await read(path.join(identityRequirementDirectory(root, s.sourceId, s.taskId), "context.json"));
   const canonicalRef = (ref: string) => {
@@ -333,6 +395,9 @@ export async function verifyConsumerRevalidationRecord(root: string, record: Con
   if (contentHash(raw.intent) !== s.identityIntentHash || contentHash(raw.inventory) !== s.inventoryHash
     || contentHash(record.evidence.map(e => e.selector)) !== contentHash(record.output.evidence)) throw prerequisiteStop("Consumer revalidation changed its original inventory or evidence");
   const criteria = work ? work.plan.baseInput : input;
+  if (s.reviewContract && (contentHash(criteria.reviewContract) !== contentHash(s.reviewContract) || criteria.reviewContractHash !== contentHash(s.reviewContract)
+    || contentHash(criteria.capability) !== contentHash(consumerReviewCapability(s))))
+    throw prerequisiteStop("Consumer review lost its frozen target cut or read-only capability; preserve the original scope, no registration or retry");
   if (contentHash(criteria.definition) !== contentHash(original[0]!.output) || contentHash(criteria.definitionCheck) !== contentHash(original[1]!.output)
     || contentHash(input.originalQuestions) !== contentHash(raw.review.scope.questions)
     || contentHash(input.originalSemanticScope) !== contentHash(raw.semantic[0].output)
@@ -355,11 +420,11 @@ export async function verifyConsumerRevalidationRecord(root: string, record: Con
   }
   if (work) Object.assign(inherited, work.plan.priorUsage);
   const usage = budget.state.usage;
-  if (s.compilerCorrection && (contentHash(input.compilerCorrection) !== contentHash(sourceLocalConsumerContract)
+  if (s.compilerCorrection && (contentHash(input.compilerCorrection) !== contentHash(s.compilerCorrection.policy === CONSUMER_REVIEW_CORRECTION ? consumerReviewCorrectionContract : sourceLocalConsumerContract)
     || contentHash(input.previousCompilerJudgments) !== contentHash(all.filter(r => consumerRevalidationId(r.scope) === s.compilerCorrection!.predecessorId).map(r => r.output))))
     throw prerequisiteStop("Compiler correction omitted its original negative judgments or changed its typed capability contract");
-  if (contentHash(budget.priorUsage) !== contentHash(inherited) || usage.modelCalls < 1 || !work && usage.modelCalls > limits.maxModelCalls
-    || !work && usage.totalPayloadBytes > limits.maxTotalPayloadBytes || usage.largestRequestBytes > limits.maxRequestBytes
+  if (contentHash(budget.priorUsage) !== contentHash(inherited) || usage.modelCalls < 1 || (!work || work.plan.budgetPolicy) && usage.modelCalls > limits.maxModelCalls
+    || (!work || work.plan.budgetPolicy) && usage.totalPayloadBytes > limits.maxTotalPayloadBytes || usage.largestRequestBytes > limits.maxRequestBytes
     || contentHash(budget.cumulative) !== contentHash({ modelCalls: inherited.modelCalls + usage.modelCalls, totalPayloadBytes: inherited.totalPayloadBytes + usage.totalPayloadBytes }))
     throw prerequisiteStop("Consumer revalidation reset or detached inherited usage; retain all original charges");
   if (record.output.phase === "consumer-revalidation" && !sameQuestions(record.output.retainedQuestionIds, raw.inventory.originalQuestionIds)) throw prerequisiteStop("Consumer revalidation omitted an original blocked question");

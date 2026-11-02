@@ -38,6 +38,10 @@ import * as readContract from "../src/compiler/identity-consumer-read-contract.j
 import { consumerHostRecoveryDirectory, oldSourceSearchError } from "../src/compiler/identity-consumer-host-recovery.js";
 import { assertConsumerRevalidationPrefix } from "../src/compiler/identity-consumer-revalidation-model.js";
 import { consumerWorkDirectory } from "../src/compiler/consumer-work-plan.js";
+import * as workPlans from "../src/compiler/consumer-work-plan.js";
+import { bindingRecoveryDirectory } from "../src/compiler/consumer-review-binding.js";
+import { CONSUMER_REVIEW_CORRECTION, deriveConsumerReviewContract } from "../src/compiler/consumer-review-contract.js";
+import { canonicalEventSchema } from "../src/world/model.js";
 
 it("keeps a stopped review's exact journal prefix across sibling reviews but rejects unrelated changes", () => {
   const { proposal, check } = fixture(), history: any[] = [{ hash: h("original prefix"), payload: { kind: "identity-requirements" } }];
@@ -161,6 +165,31 @@ it("reports an independently supported block without replacing original progress
   expect(identityReviewStatus(original, [proposal]).consumerRevalidation).toMatchObject({ recordedReviewedConsumers: 0, recordedClearedConsumers: 0,
     reviews: [{ status: "awaiting-independent-check" }] });
   expect(h({ original, proposal, check })).toBe(before);
+});
+
+it("requires a later authorized, one-time scope correction of an exact independently blocked legacy entry", () => {
+  const { proposal, check } = fixture();
+  if (proposal.output.phase !== "consumer-revalidation" || check.output.phase !== "consumer-revalidation-check") throw Error("fixture");
+  proposal.scope.ref = "entry/ada/later"; proposal.scope.executionPolicy = "consumer-work/v1";
+  proposal.output.disposition = "blocked"; proposal.output.initialWorldRepair = null;
+  const prior = [proposal, check], before = h(prior);
+  const scope = { ...proposal.scope, authorizationRef: "User authorized exact review-scope contract correction", reviewContract: {
+    version: "consumer-review/v2" as const, ref: proposal.scope.ref, currentRevisionHash: proposal.scope.currentRevisionHash,
+    target: { kind: "character-entry" as const, actorId: "ada", beforeEventId: "later", storyTime: { kind: "unknown" as const }, position: "before-event" as const },
+    ownerRefs: [], requiredChecks: ["temporal-boundary" as const], originalRequirements: "consumer-dependency-compatibility" as const, globalIdentityQuestions: "retained" as const },
+    compilerCorrection: { policy: CONSUMER_REVIEW_CORRECTION, predecessorId: consumerRevalidationId(proposal.scope), predecessorScopeHash: h(proposal.scope),
+      predecessorRecordHashes: prior.map(h) as [string, string], contractHash: h("bound implementation") } };
+  expect(() => validateConsumerCorrectionLineage(scope, prior)).not.toThrow();
+  for (const mutate of [
+    (s: typeof scope) => { s.authorizationRef = proposal.scope.authorizationRef; },
+    (s: typeof scope) => { s.currentRevisionHash = h("new evidence"); },
+    (s: typeof scope) => { s.compilerCorrection.predecessorRecordHashes[0] = h("replacement verdict"); },
+    (s: typeof scope) => { s.ref = "initial/src"; },
+    (s: typeof scope) => { s.compilerCorrection.predecessorId = consumerRevalidationId(scope); },
+  ]) { const invalid = structuredClone(scope); mutate(invalid); expect(() => validateConsumerCorrectionLineage(invalid, prior)).toThrow(/correction/i); }
+  const repeated = { ...scope, compilerCorrection: { ...scope.compilerCorrection, predecessorId: consumerRevalidationId(scope) } };
+  expect(() => validateConsumerCorrectionLineage(repeated, [{ ...proposal, scope }, { ...check, scope }])).toThrow(/correction/i);
+  expect(h(prior)).toBe(before);
 });
 
 it("does not substitute a missing or superseded consumer with its frozen original payload", () => {
@@ -288,13 +317,25 @@ it("requires exact initial-world field authority and binds state, observations a
 it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: false }, { discoveryOnly: false, work: true },
   { discoveryOnly: false, work: true, stall: true }, { discoveryOnly: false, work: true, previewLoop: true },
   { discoveryOnly: false, work: true, quota: true }, { discoveryOnly: false, work: true, oversized: true },
-])("runs independent Pi reviews with full reads ($discoveryOnly), work ($work), stall $stall, preview loop $previewLoop, quota $quota, oversized $oversized, and recovers registration without replay", async ({ discoveryOnly, work, stall, previewLoop, quota, oversized }) => {
+  { discoveryOnly: false, work: true, scoped: true }, { discoveryOnly: false, work: true, scoped: true, cleared: true },
+  ...["once", "twice", "scope", "terminal"].map(bindingIssue => ({ discoveryOnly: false, work: true, scoped: true, cleared: true, bindingIssue })),
+  ...["success", "fail", "interrupt"].map(bindingRecovery => ({ discoveryOnly: false, work: true, scoped: true, cleared: true, bindingRecovery })),
+])("runs independent Pi reviews with full reads ($discoveryOnly), work ($work), scoped $scoped, cleared $cleared, stall $stall, preview loop $previewLoop, quota $quota, oversized $oversized, binding $bindingIssue recovery $bindingRecovery, and recovers registration without replay", async ({ discoveryOnly, work, stall, previewLoop, quota, oversized, scoped, cleared, bindingIssue, bindingRecovery }: { discoveryOnly: boolean; work: boolean; stall?: boolean; previewLoop?: boolean; quota?: boolean; oversized?: boolean; scoped?: boolean; cleared?: boolean; bindingIssue?: string; bindingRecovery?: string }) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-revalidation-")), providers: Awaited<ReturnType<typeof mockPiProvider>>[] = [];
   try {
     const text = "Ada waits. 女孩等待。", source = await createEvidenceFixture(root, text), f0 = fixture();
     const f: ReturnType<typeof fixture> = JSON.parse(JSON.stringify(f0).replaceAll("src", source.source.id).replaceAll('"seg"', JSON.stringify(source.segmentId)).replaceAll(f0.f.intent.sourceHash, source.source.contentSha256));
     const scope = f.proposal.scope;
     if (work) scope.executionPolicy = "consumer-work/v1";
+    if (scoped) {
+      scope.ref = "entry/ada/later"; f.f.intent.consumerShards[0]!.refs[0] = scope.ref;
+      for (const [i, record] of f.original.entries()) {
+        record.intent = f.f.intent;
+        record.output.intentHash = h(f.f.intent);
+        if ("proposalHash" in record.output) record.output.proposalHash = h(f.original[0]!.output);
+        record.predecessorRecordHash = i ? h(f.original[i - 1]) : null;
+      }
+    }
     scope.identityIntentHash = h(f.f.intent); scope.definitionHash = h(f.original[0]!.output);
     const originalBudget = path.join(root, "inherited-budget.json"); await fs.writeFile(originalBudget, JSON.stringify({ retainedCalls: 177 }));
     scope.priorBudgetFiles = [{ path: originalBudget, hash: h({ retainedCalls: 177 }) }];
@@ -309,6 +350,21 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
       current: { payload: {}, revisionHash: scope.currentRevisionHash }, acceptance: { output: {} }, prepared: { ...f.f.p, intent: f.f.intent, inventory: f.f.inventory,
         bytes: Buffer.from(text), manifest, review: { scope: { questions: [] } } } };
     if (work) p.consumer.dependencies = [{ kind: "entity", id: "ada" }];
+    if (scoped) {
+      const payload = { actorId: "ada", readerSetup: "Later entry", actorObservation: "You wait.", participantPresence: [{ entityId: "ada", mode: "physical" }], delta: { version: 1, operations: [] } };
+      const event = canonicalEventSchema.parse({ id: "later", title: "Later entry", participants: ["ada"], characterEntryCheckpoints: [payload],
+        storyTime: { kind: "ordinal", label: "later afternoon", orderHint: 30 }, preconditions: [], observedOutcome: { version: 1, operations: [] },
+        causalParents: [], confidence: 1, evidence: source.evidence("Ada waits.") });
+      p.catalog.push({ kind: "canonical-event", id: "later", payload: event, revisionHash: h(event), current: true });
+      p.current = { payload, revisionHash: h(payload) }; scope.currentRevisionHash = h(payload);
+      scope.reviewContract = deriveConsumerReviewContract({ sourceId: scope.sourceId, ref: scope.ref, current: p.current, catalog: p.catalog });
+      Object.assign(f.proposal.output, { ref: scope.ref, currentRevisionHash: scope.currentRevisionHash, scopeHash: h(scope),
+        disposition: cleared ? "revalidated" : "blocked", review: { contractHash: h(scope.reviewContract), globalIdentityQuestions: "retained",
+          checks: scope.reviewContract.requiredChecks.map(id => ({ id, verdict: !cleared && id === "knowledge-isolation" ? "blocked" : "supported",
+            rationale: !cleared && id === "knowledge-isolation" ? "Future knowledge has no acquisition before this later entry." : "Compatible with the exact later entry; global identity remains unresolved." })) } });
+      if (cleared) f.proposal.output.requirements.forEach(r => { r.verdict = "supported"; });
+      if (f.check.output.phase === "consumer-revalidation-check") f.check.output.reviewContractHash = h(scope.reviewContract);
+    }
     if (oversized) {
       p.catalog[0].payload.semanticEvidence = "完整语义原文".repeat(60_000);
       p.catalog[0].revisionHash = h(p.catalog[0].payload);
@@ -322,9 +378,13 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
       { payload: { kind: "identity-consumer-repair", record: { intent: { taskId: scope.taskId } } } },
       ...previous.map(record => ({ payload: { kind: "identity-consumer-revalidation", record } })),
     ] as any);
+    const createPlan = workPlans.createConsumerWorkPlan;
+    const legacyPlans = bindingRecovery ? vi.spyOn(workPlans, "createConsumerWorkPlan").mockImplementation(args => createPlan({ ...args, reviewBinding: undefined })) : undefined;
+    let recovering = false, interruptRecovery = false;
     let interrupt = true;
     vi.spyOn(RequirementLedger.prototype, "recordIdentityConsumerRevalidation").mockImplementation(async record => {
       await revalidation.verifyConsumerRevalidationRecord(root, record);
+      if (interruptRecovery) { interruptRecovery = false; throw Error("recovery registration interruption"); }
       if (interrupt) { interrupt = false; throw Error("injected registration interruption"); }
       if (!previous.some(r => r.output.phase === record.output.phase)) previous.push(record);
     });
@@ -338,7 +398,7 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
       providers.push(await mockPiProvider(session, { provider: "openai-codex", modelId: "gpt-6.1-sol",
         ...(quota ? { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } : {}),
         response: (context, index) => {
-        if (!stall && !previewLoop && index > (discoveryOnly ? 3 : 1)) throw Error("Unexpected model retry");
+        if (!bindingIssue && !bindingRecovery && !stall && !previewLoop && index > (discoveryOnly ? 3 : 1)) throw Error("Unexpected model retry");
         if (work) {
           if (quota) return fauxAssistantMessage([], { stopReason: "error", errorMessage: "Codex error: The usage limit has been reached" });
           if (stall) return fauxAssistantMessage([fauxToolCall("read_consumer_revalidation", { collection: "consumer", refs: [scope.ref], offset: 0 }, { id: `repeated-read-${index}` })], { stopReason: "toolUse" });
@@ -346,9 +406,22 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
           const envelope = JSON.parse(typeof user.content === "string" ? user.content : user.content.find(c => c.type === "text")!.text);
           const input = decodeJsonValues(envelope.dictionary, [envelope.value], envelope.dictionaryProfile)[0] as any;
           expect(input.evidencePacket.sources[0].text).toBe(text);
-          expect(input.evidencePacket.artifacts[0]).toMatchObject({ ref: "entity:ada", payload: { id: "ada" } });
+          expect(input.evidencePacket.artifacts.find((a: any) => a.ref === "entity:ada")).toMatchObject({ payload: { id: "ada" } });
+          if (scoped) {
+            expect(input.reviewContract.target).toMatchObject({ kind: "character-entry", beforeEventId: "later", position: "before-event", storyTime: { orderHint: 30 } });
+            expect(input.capability).toMatchObject({ kind: "read-only-consumer", writableFields: [] });
+            expect(input.evidencePacket.artifacts.some((a: any) => a.ref === "canonical-event:later")).toBe(true);
+          }
           expect(input.denominator.refs).toEqual({ policy: "ordered-inventory/v1", count: f.f.inventory.consumers.length, hash: h(f.f.inventory.consumers.map(c => c.ref)) });
           const output = check ? { ...f.check.output, scopeHash: h(scope), proposalHash: h(previous[0]!.output) } : f.proposal.output;
+          if (check && (bindingIssue || bindingRecovery)) {
+            const badHash = { ...output, reviewContractHash: h("prior subject, not the contract") };
+            const isBad = bindingRecovery ? !recovering || bindingRecovery === "fail" : bindingIssue === "twice" || index === 0;
+            const candidate = isBad ? bindingIssue === "scope" ? { ...output, scopeHash: h("different scope") } : badHash : output;
+            const name = bindingIssue === "terminal" ? "submit_consumer_revalidation"
+              : isBad || index === (bindingRecovery ? 0 : 1) ? "preview_consumer_revalidation" : "submit_consumer_revalidation";
+            return fauxAssistantMessage([fauxToolCall(name, candidate, { id: `binding-${providers.length}-${index}` })], { stopReason: "toolUse" });
+          }
           if (previewLoop) return fauxAssistantMessage([fauxToolCall("preview_consumer_revalidation", { ...output, rationale: `${output.rationale} wording ${index}` }, { id: `preview-loop-${index}` })], { stopReason: "toolUse" });
           return fauxAssistantMessage([fauxToolCall(index ? "submit_consumer_revalidation" : "preview_consumer_revalidation", output,
             { id: `work-${check}-${index}` })], { stopReason: "toolUse" });
@@ -416,9 +489,74 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
     }
     await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow("injected registration interruption");
     expect(dispatch).toHaveBeenCalledTimes(1);
+    if (bindingIssue && bindingIssue !== "once") {
+      await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(/correction allowance exhausted|changed its original scope|terminal submission failed/);
+      expect(previous).toHaveLength(1);
+      expect(await runIdentityConsumerRevalidation({ ...args, inspectExecution: true })).toMatchObject({ execution: { invocationConsumed: true, modelDispatchAllowed: false } });
+      await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(/stage is consumed/);
+      expect(dispatch).toHaveBeenCalledTimes(2); return;
+    }
+    if (bindingRecovery) {
+      await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(/lost the exact consumer time\/scope contract/);
+      expect(previous).toHaveLength(1);
+      legacyPlans!.mockRestore();
+      const originalDirectory = consumerWorkDirectory(directory), retained = captureRecordTree(originalDirectory), proposalHash = h(previous[0]);
+      const failedBudget = JSON.parse(await fs.readFile(path.join(originalDirectory, "consumer-revalidation-check.budget.json"), "utf8"));
+      expect(failedBudget.state.usage.modelCalls).toBe(1);
+      const repair = { ...args, recoverContractBinding: true, bindingRecoveryAuthorizationRef: "user:repair-exact-binding" };
+      const before = captureRecordTree(workspaceStateDir(root));
+      await expect(runIdentityConsumerRevalidation({ ...args, recoverContractBinding: true, inspectExecution: true })).rejects.toThrow(/explicit later repair authorization/);
+      expect(await runIdentityConsumerRevalidation({ ...repair, inspectExecution: true })).toMatchObject({ status: "ready", cumulative: { modelCalls: 180 } });
+      expect(captureRecordTree(workspaceStateDir(root))).toEqual(before);
+      const failurePath = path.join(originalDirectory, "consumer-revalidation-check.failure.json"), oldFailure = await fs.readFile(failurePath, "utf8");
+      await fs.writeFile(failurePath, JSON.stringify({ ...JSON.parse(oldFailure), reason: "different failure" }));
+      await expect(runIdentityConsumerRevalidation({ ...repair, inspectExecution: true })).rejects.toThrow();
+      await fs.writeFile(failurePath, oldFailure);
+      const planPath = path.join(originalDirectory, "consumer-revalidation-check.plan.json"), oldPlan = await fs.readFile(planPath, "utf8");
+      const plan = JSON.parse(oldPlan); plan.limits.maxModelCalls += 1;
+      await fs.writeFile(planPath, JSON.stringify(plan));
+      await expect(runIdentityConsumerRevalidation({ ...repair, inspectExecution: true })).rejects.toThrow();
+      await fs.writeFile(planPath, oldPlan);
+      recovering = true;
+      if (bindingRecovery === "fail") {
+        await expect(runIdentityConsumerRevalidation(repair)).rejects.toThrow(/correction allowance exhausted/);
+        await expect(runIdentityConsumerRevalidation(repair)).rejects.toThrow(/stage is consumed/);
+        expect(previous).toHaveLength(1); expect(dispatch).toHaveBeenCalledTimes(3);
+      } else {
+        interruptRecovery = bindingRecovery === "interrupt";
+        if (interruptRecovery) await expect(runIdentityConsumerRevalidation(repair)).rejects.toThrow("recovery registration interruption");
+        expect((await runIdentityConsumerRevalidation(repair)).status).toBe("revalidated");
+        expect(previous).toHaveLength(2); expect(previous[1]!.bindingRecoveryHash).toMatch(/^[a-f0-9]{64}$/);
+        // Historical verification does not consult a later changed world HEAD.
+        vi.mocked(revalidation.prepareConsumerRevalidation).mockRejectedValue(new Error("later dependency changed"));
+        await revalidation.verifyConsumerRevalidationRecord(root, previous[1]!);
+        vi.mocked(revalidation.prepareConsumerRevalidation).mockResolvedValue(p);
+        const completed = await runIdentityConsumerRevalidation(args);
+        expect(completed.cumulative.modelCalls).toBe(182); expect(dispatch).toHaveBeenCalledTimes(3);
+      }
+      expect(h(previous[0])).toBe(proposalHash);
+      const after = captureRecordTree(originalDirectory);
+      for (const [file, hash] of Object.entries(retained)) expect(after[file]).toEqual(hash);
+      const recoveryDirectory = bindingRecoveryDirectory(originalDirectory), recovery = JSON.parse(await fs.readFile(path.join(recoveryDirectory, "recovery.json"), "utf8"));
+      expect(recovery.limits).toEqual({ ...failedBudget.limits, maxModelCalls: 11, maxTotalPayloadBytes: failedBudget.limits.maxTotalPayloadBytes - failedBudget.state.usage.totalPayloadBytes });
+      expect(recovery.priorUsage).toEqual(failedBudget.cumulative);
+      const budget = JSON.parse(await fs.readFile(path.join(recoveryDirectory, "consumer-revalidation-check.budget.json"), "utf8"));
+      expect(budget.policy).toEqual(workPlans.consumerReviewRecoveryBudgetPolicy); expect(budget.state.progress).toBeUndefined();
+      const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+      expect(attempts[0]!.cumulative.modelCalls).toBe(bindingRecovery === "fail" ? 181 : 182);
+      expect(attempts[0]!.stages[1]!.execution!.status).toBe("host-review");
+      expect(attempts[0]!.stages[1]!.bindingRecovery!.status).toBe(bindingRecovery === "fail" ? "BREAK" : "sealed");
+      return;
+    }
     const result = await runIdentityConsumerRevalidation(args);
-    expect(result.status).toBe("blocked"); expect(result.parentResumeAllowed).toBe(false);
-    expect(result.cumulative.modelCalls).toBe(discoveryOnly ? 185 : 181); expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe(cleared ? "revalidated" : "blocked"); expect(result.parentResumeAllowed).toBe(false);
+    if (scoped) {
+      const status = identityReviewStatus(f.original, previous);
+      expect(status.consumerRevalidation).toMatchObject({ sourceAuditResumeAllowed: false, recordedClearedConsumers: cleared ? 1 : 0,
+        totalConsumers: 2, reviews: [{ retainedQuestionIds: f.f.inventory.originalQuestionIds }] });
+      expect(status.parentResumeAllowed).toBe(false);
+    }
+    expect(result.cumulative.modelCalls).toBe(bindingIssue === "once" ? 182 : discoveryOnly ? 185 : 181); expect(dispatch).toHaveBeenCalledTimes(2);
     const again = await runIdentityConsumerRevalidation(args);
     expect(again.cumulative).toEqual(result.cumulative); expect(dispatch).toHaveBeenCalledTimes(2);
     const oldStates = await fs.readdir(path.join(directory, "history"));

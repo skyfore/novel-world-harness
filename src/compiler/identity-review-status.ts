@@ -26,6 +26,7 @@ export function consumerRevalidationStatus(original: IdentityRecord[], records: 
       rationale: proposal.rationale, independentRationale: independent?.rationale ?? null,
       blockedRequirements: proposal.requirements.filter(r => r.verdict === "blocked"),
       retainedQuestionIds: proposal.retainedQuestionIds, initialWorldRepair: proposal.initialWorldRepair,
+      ...(first.scope.reviewContract ? { reviewContract: first.scope.reviewContract, globalIdentityQuestions: "retained" as const } : {}),
       entityRepair: proposal.entityRepair ?? null, compilerCorrection: first.scope.compilerCorrection ?? null };
   });
   const latest = [...new Map(reviews.map(r => [r.ref, r])).values()];

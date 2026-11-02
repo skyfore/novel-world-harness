@@ -7,12 +7,16 @@ import { artifactRef } from "./identity-consumer-artifacts.js";
 import type { consumerRevalidationInput } from "./identity-consumer-revalidation.js";
 import type { ConsumerRevalidationScope } from "./identity-consumer-revalidation-model.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
+import { CONSUMER_REVIEW_CORRECTION } from "./consumer-review-contract.js";
+import type { CONSUMER_REVIEW_BINDING } from "./consumer-review-binding.js";
 
 export const CONSUMER_WORK_POLICY = "consumer-work/v1" as const;
 export const consumerWorkDirectory = (directory: string) => path.join(directory, "execution-v1");
 export const consumerWorkContract = { terminalTool: "submit_consumer_revalidation",
   readTools: ["read_consumer_revalidation", "preview_consumer_revalidation"], receipt: "retained" as const, allowCorrectedSubmission: true };
 export const consumerWorkBudgetPolicy = { modelCallsMode: "progress", requestBytesMode: "enforce", totalBytesMode: "observe" } as const;
+export const consumerReviewRecoveryBudgetPolicy = { modelCallsMode: "enforce", requestBytesMode: "enforce", totalBytesMode: "enforce" } as const;
+export const workBudgetPolicy = (plan: ConsumerWorkPlan) => plan.budgetPolicy ?? consumerWorkBudgetPolicy;
 export const CONSUMER_WORK_LIMITS: ModelRequestLimits = Object.freeze({ maxModelCalls: 12, maxRequestBytes: 512_000, maxTotalPayloadBytes: 12_288_000 });
 export type ConsumerWorkBaseInput = ReturnType<typeof consumerRevalidationInput> & { capability?: unknown };
 export type RetainedWorkFile = { path: string; hash: string };
@@ -21,8 +25,11 @@ export type ConsumerWorkPlan = {
   version: 1; policy: typeof CONSUMER_WORK_POLICY; scopeHash: string; stage: "consumer-revalidation" | "consumer-revalidation-check";
   workKey: string; scenario: "local-consumer" | "cross-segment" | "shared-dependencies";
   limits: ModelRequestLimits; priorUsage: { modelCalls: number; totalPayloadBytes: number };
+  budgetPolicy?: typeof consumerReviewRecoveryBudgetPolicy;
   retainedFiles: RetainedWorkFile[]; authorizationRef: string;
   priorReadFailures: string[];
+  reviewBinding?: typeof CONSUMER_REVIEW_BINDING;
+  bindingRecoveryHash?: string;
   baseInput: ConsumerWorkBaseInput; artifacts: ConsumerArtifact[];
   sources: Array<WorkSegment & { text: string; textHash: string }>;
 };
@@ -54,7 +61,9 @@ export function consumerWorkInput(plan: ConsumerWorkPlan) {
       current: artifact.current, aliases: artifact.aliases ?? [], delivery: "initial-evidence-packet",
       ...(artifact.evidenceRole ? { evidenceRole: artifact.evidenceRole } : {}) })),
     execution: { policy: plan.policy, workKey: plan.workKey, scenario: plan.scenario, limits: plan.limits,
-      budgetPolicy: consumerWorkBudgetPolicy, priorUsage: plan.priorUsage,
+      ...(plan.reviewBinding ? { reviewBinding: plan.reviewBinding, contractHashField: "input.reviewContractHash", previewCorrectionsRemaining: plan.bindingRecoveryHash ? 0 : 1 } : {}),
+      ...(plan.bindingRecoveryHash ? { bindingRecoveryHash: plan.bindingRecoveryHash, originalFailureRetained: true, progressRenewal: false } : {}),
+      budgetPolicy: workBudgetPolicy(plan), priorUsage: plan.priorUsage,
       readCorrectionAvailable: plan.priorReadFailures.length === 0,
       instructions: "The complete sources and dependencies below are already delivered in this session. Do not reread them for bookkeeping. Inspect originals for meaning; inventory hashes prove coverage, not semantic support. Preview a grounded draft, then submit it in a separate sole-tool turn. Reads and repeated previews never renew the progress window. Keep one response for submission. Unknown original requirements remain blocked." },
     evidencePacket: { sources: plan.sources, artifacts: plan.artifacts.map(artifact => ({ ref: artifactRef(artifact),
@@ -62,11 +71,17 @@ export function consumerWorkInput(plan: ConsumerWorkPlan) {
 }
 
 export function createConsumerWorkPlan(args: {
+  limits?: ModelRequestLimits;
   scope: ConsumerRevalidationScope; stage: ConsumerWorkPlan["stage"]; input: ConsumerWorkBaseInput; catalog: ConsumerArtifact[];
   bytes: Uint8Array; segments: WorkSegment[]; priorUsage: ConsumerWorkPlan["priorUsage"];
   retainedFiles?: RetainedWorkFile[]; authorizationRef?: string; extraSources?: string[]; extraArtifacts?: string[];
   priorReadFailures?: string[];
+  reviewBinding?: typeof CONSUMER_REVIEW_BINDING;
 }): ConsumerWorkPlan {
+  if (args.scope.compilerCorrection?.policy === CONSUMER_REVIEW_CORRECTION && !args.limits)
+    throw prerequisiteStop("Review-scope recovery needs the predecessor's exact remaining allowance; no default budget or retry");
+  if (args.scope.compilerCorrection?.policy !== CONSUMER_REVIEW_CORRECTION && args.limits && contentHash(args.limits) !== contentHash(CONSUMER_WORK_LIMITS))
+    throw prerequisiteStop("Consumer work cannot change its original execution allowance; no new window or retry");
   if (createHash("sha256").update(args.bytes).digest("hex") !== args.scope.sourceHash || args.input.scopeHash !== contentHash(args.scope))
     throw prerequisiteStop("Work plan source or scope changed; inspect the original source/task/ref, no dispatch or retry");
   const sourceIds = new Set([...args.input.requiredSourceSegmentIds, ...args.extraSources ?? []]);
@@ -93,9 +108,12 @@ export function createConsumerWorkPlan(args: {
     return { id, startByte: segment.startByte, endByte: segment.endByte, text, textHash: contentHash(text) };
   });
   return { version: 1, policy: CONSUMER_WORK_POLICY, scopeHash: contentHash(args.scope), stage: args.stage,
+    ...(args.reviewBinding ? { reviewBinding: args.reviewBinding } : {}),
     workKey: contentHash({ scopeHash: contentHash(args.scope), stage: args.stage, policy: CONSUMER_WORK_POLICY }),
     scenario: [...artifacts.values()].some(c => c.evidenceRole === "retained-role-roster") ? "shared-dependencies" : sources.length > 1 ? "cross-segment" : "local-consumer",
-    limits: { ...CONSUMER_WORK_LIMITS }, priorUsage: { ...args.priorUsage }, retainedFiles: args.retainedFiles ?? [],
+    limits: { ...(args.limits ?? CONSUMER_WORK_LIMITS) },
+    ...(args.scope.compilerCorrection?.policy === CONSUMER_REVIEW_CORRECTION ? { budgetPolicy: consumerReviewRecoveryBudgetPolicy } : {}),
+    priorUsage: { ...args.priorUsage }, retainedFiles: args.retainedFiles ?? [],
     priorReadFailures: args.priorReadFailures ?? [],
     authorizationRef: args.authorizationRef ?? args.scope.authorizationRef, baseInput: structuredClone(args.input),
     artifacts: structuredClone([...artifacts.values()].sort((a, b) => artifactRef(a).localeCompare(artifactRef(b)))), sources };
@@ -118,6 +136,12 @@ export function consumerWorkPreflight(plan: ConsumerWorkPlan, prompt: string, to
 /** Reconstruct the finite progress window from sealed live messages, not from
  * model self-reports or the mutable latest draft file. */
 export function verifyConsumerWorkProgress(plan: ConsumerWorkPlan, state: ModelRequestBudgetState, messages: Array<{ role: string; content?: unknown; toolName?: string; isError?: boolean }>) {
+  if (plan.budgetPolicy) {
+    const calls = messages.filter(m => m.role === "assistant").length;
+    if (calls !== state.usage.modelCalls || calls > plan.limits.maxModelCalls || state.progress)
+      throw prerequisiteStop("Review-scope recovery exceeded or reset its remaining call allowance; no renewed progress window or retry");
+    return;
+  }
   let calls = 0, lastProgressCall = 0;
   const milestones: string[] = [];
   for (const message of messages) {

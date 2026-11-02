@@ -10,6 +10,7 @@ import { consumerRevalidationLimits } from "./identity-consumer-correction.js";
 import { consumerRecoveryLimits, inspectConsumerBudgetAmendment, type ConsumerBudgetAmendment } from "./identity-consumer-budget-amendment.js";
 import { consumerHostRecoveryDirectory, consumerHostRecoveryInput, type ConsumerHostRecovery } from "./identity-consumer-host-recovery.js";
 import { consumerWorkDirectory } from "./consumer-work-plan.js";
+import { bindingRecoveryDirectory } from "./consumer-review-binding.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/), count = z.number().int().nonnegative();
 const totals = z.object({ modelCalls: count, totalPayloadBytes: count }).strict();
@@ -32,7 +33,8 @@ export const consumerStageRecoverySchema = z.object({ version: z.literal(1), pol
 export type ConsumerStageRecovery = z.infer<typeof consumerStageRecoverySchema>;
 export const consumerStageRecoveryDirectory = (directory: string, stage: string) => path.join(directory, `${stage}.continuation`);
 export const consumerStageBudgetDirectories = (directory: string, stage: string) => [directory, consumerStageRecoveryDirectory(directory, stage),
-  ...(stage === "consumer-revalidation" ? [consumerHostRecoveryDirectory(directory), consumerStageRecoveryDirectory(consumerHostRecoveryDirectory(directory), stage)] : []), consumerWorkDirectory(directory)];
+  ...(stage === "consumer-revalidation" ? [consumerHostRecoveryDirectory(directory), consumerStageRecoveryDirectory(consumerHostRecoveryDirectory(directory), stage)] : []), consumerWorkDirectory(directory),
+  ...(stage === "consumer-revalidation-check" ? [bindingRecoveryDirectory(consumerWorkDirectory(directory))] : [])];
 const read = async (file: string) => JSON.parse(await fs.readFile(file, "utf8"));
 export const maybeRecoveryFile = async (file: string) => {
   try { return await read(file); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; }

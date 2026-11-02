@@ -1,6 +1,73 @@
 # Agent tool failure recovery
 
+## Consumer review target and time scope
+
+New consumer scopes bind `consumer-review/v2` independently of mutation
+capability. `initial/<source>` retains the singleton opening contract;
+`entry/<actor>/<event>` binds the active owning event, any active execution
+overlay, and the cut immediately **before** that event at its own story time.
+The evidence packet includes the full owning artifacts and their source
+segments. Unknown time remains unknown. The owning event's outcome and later
+knowledge are not entry facts. Other artifacts are assessed for their own
+validity and actual identity dependencies. Only the initial-world consumer can
+request a singleton repair; other consumer reviews remain read-only.
+
+Both sessions receive the same hashed contract. Every original requirement and
+question remains; the requirement verdict expresses this consumer's dependency
+compatibility, never global identity closure. Proposals must assess every bound
+source/identity/time/knowledge check, plus presence, agency and entry state for
+entries. An unresolved check cannot clear a consumer. The independent check must
+bind the same contract hash. Supported local reviews do not grant source-audit
+continuation, an action witness, certification or activation. Legacy sealed
+inputs and receipts retain their original contract and remain verifiable.
+
+`--compiler-correction consumer-review-scope/v1` is a separate, explicit host
+correction for a demonstrated legacy scope ambiguity, not execution-policy
+migration. It requires later user authorization, the exact original entry/ref,
+unchanged source and dependency revisions, an independently supported blocked
+pair, and retained old inputs that supplied singleton capability without an
+entry review contract. Bind both negative records and the corrected code hash;
+never edit or erase the old verdict. Inspect with `--inspect-execution` first.
+Copy the exact `reviews[].ref` from `requirements inspect-identity-repairs` for
+the same source/task; permit at most one corrected ref, never guessing.
+
+This one-time successor uses only each predecessor stage's remaining calls and
+bytes, with hard enforcement and no preview renewal. It retains original
+failures, sessions, requests, drafts, budgets and cumulative usage. A second
+correction, exhausted allowance, changed source/dependency, unsettled session,
+or unsupported new verdict stops the loop; no unchanged retry, allowance reset,
+parent resume or acceptance waiver. A sealed successor can only recover its
+exact registration without new model generation.
+
 ## Versioned consumer work execution
+
+New work plans with a review contract use `consumer-review-binding/v1`: tool
+schemas fix the exact `scopeHash`, checked `proposalHash`, and contract hash.
+Copy `input.reviewContractHash` into `review.contractHash` (proposal) or
+`reviewContractHash` (check); `priorSubjectHash` identifies a different artifact.
+One corrected preview is allowed, including SDK validation failures before the
+tool executes. A second invalid preview, changed scope/proposal, or any failed
+terminal submission stops. The host never substitutes a corrected output.
+
+For the original unbound check's single rejected contract-hash preview only,
+`--recover-contract-binding --binding-recovery-authorization-ref <later-ref>`
+permits one explicitly authorized correction. Inspect with `--inspect-execution`
+first. Discover the same source/task/ref with `inspect-identity-repairs`, copying
+`summary.consumerRevalidation.attempts[].ref`, `scopeHash` and `stages[].stage`;
+an ID miss allows one corrected discovery retry, never guessing. The host proves
+the exact failure from its saved Pi transcript, actual requests, trace, proposal
+and frozen evidence. No submitted check, other error, repeated failed preview,
+changed dependency, circuit stop or exhausted allowance qualifies.
+
+The separate `execution-v1/contract-binding-recovery` retains the old session,
+failure and charges. A fresh independent check receives the full original
+evidence and unchanged proposal; the rejected draft grants no semantic approval.
+Only the original remaining calls and bytes are available, all hard enforced;
+there is no progress renewal, quota reset, budget amendment or second recovery.
+Another invalid preview stops immediately. A sealed result can recover only its
+registration, without generation. Status exposes `stages[].bindingRecovery`
+alongside the original failed execution and counts both segments once. Original
+acceptance, unresolved questions, parent stop and certification remain intact.
 
 New identity-consumer scopes use `consumer-work/v1`. Before dispatch, the host
 freezes exact source ranges, the current consumer, original requirements/questions

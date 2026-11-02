@@ -10,7 +10,9 @@ import { prerequisiteStop } from "./role-source-prerequisites.js";
 import { consumerStageRecoveryDirectory, consumerStageRecoverySchema, consumerRecoveryPreflight } from "./identity-consumer-stage-recovery.js";
 import { inspectConsumerBudgetAmendment, consumerRecoveryLimits } from "./identity-consumer-budget-amendment.js";
 import { consumerHostRecoveryDirectory, oldSourceSearchError, type ConsumerHostRecovery } from "./identity-consumer-host-recovery.js";
-import { consumerWorkDirectory, consumerWorkBudgetPolicy, type ConsumerWorkPlan } from "./consumer-work-plan.js";
+import { consumerWorkDirectory, workBudgetPolicy, type ConsumerWorkPlan } from "./consumer-work-plan.js";
+import { bindingRecoveryDirectory } from "./consumer-review-binding.js";
+import { consumerBindingRecoverySchema, deriveBindingRecoveryPlan } from "./consumer-binding-recovery.js";
 
 export type ConsumerRevalidationAttempt = {
   id: string; ref: string; scopeHash: string; directory: string;
@@ -21,6 +23,8 @@ export type ConsumerRevalidationAttempt = {
     traceRunId?: string | null;
     failure: string | null; usage: { modelCalls: number; totalPayloadBytes: number };
     remainingAllowance: { modelCalls: number; totalPayloadBytes: number };
+    bindingRecovery?: { hash: string; status: string; invocationConsumed: boolean; sealedSubmission: boolean; failure: string | null;
+      usage: { modelCalls: number; totalPayloadBytes: number }; remainingAllowance: { modelCalls: number; totalPayloadBytes: number } };
     execution?: { policy: string; planHash: string; scenario: string; status: string; invocationConsumed: boolean;
       sealedSubmission: boolean; failure: string | null; recovery: unknown; usage: { modelCalls: number; totalPayloadBytes: number };
       callsWithoutProgress: number; stallWindowCalls: number; draftCount: number };
@@ -147,12 +151,13 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
       }
       const workDirectory = consumerWorkDirectory(directory), plan: ConsumerWorkPlan | null = await maybe(path.join(workDirectory, `${stage}.plan.json`));
       let execution: ConsumerRevalidationAttempt["stages"][number]["execution"];
+      let bindingRecovery: ConsumerRevalidationAttempt["stages"][number]["bindingRecovery"];
       if (plan) {
         const [b, i, c, f, preflight] = await Promise.all(["budget", "invocation", "session-checkpoint", "failure", "preflight"]
           .map(suffix => maybe(path.join(workDirectory, `${stage}.${suffix}.json`))));
         const u = { modelCalls: b?.state?.usage?.modelCalls ?? 0, totalPayloadBytes: b?.state?.usage?.totalPayloadBytes ?? 0 };
         if (plan.scopeHash !== scopeHash || plan.stage !== stage || (b && (b.executionPlanHash !== contentHash(plan)
-          || b.originalBudgetHash !== scope.originalBudgetHash || contentHash(b.policy) !== contentHash(consumerWorkBudgetPolicy)
+          || b.originalBudgetHash !== scope.originalBudgetHash || contentHash(b.policy) !== contentHash(workBudgetPolicy(plan))
           || contentHash(b.limits) !== contentHash(plan.limits))) || (i && (i.executionPlanHash !== contentHash(plan) || i.scopeHash !== scopeHash))
           || Object.values(u).some(v => !Number.isSafeInteger(v) || v < 0))
           throw prerequisiteStop("Consumer execution status lost its frozen plan or actual charges; preserve the original history, no retry");
@@ -162,14 +167,31 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
           invocationConsumed: Boolean(i), sealedSubmission: Boolean(c), failure: f?.reason ?? null, recovery: f?.recovery ?? null, usage: u,
           callsWithoutProgress: u.modelCalls - (b?.state?.progress?.lastProgressCall ?? 0), stallWindowCalls: plan.limits.maxModelCalls,
           draftCount: (await fs.readdir(workDirectory)).filter(name => name.startsWith(`${stage}.draft-`)).length };
+        const recoveredDirectory = bindingRecoveryDirectory(workDirectory), recoveryRaw = stage === "consumer-revalidation-check" ? await maybe(path.join(recoveredDirectory, "recovery.json")) : null;
+        if (recoveryRaw) {
+          const recovery = consumerBindingRecoverySchema.parse(recoveryRaw), recoveredPlan = deriveBindingRecoveryPlan(plan, recovery);
+          const [rb, ri, rc, rf] = await Promise.all(["budget", "invocation", "session-checkpoint", "failure"].map(suffix => maybe(path.join(recoveredDirectory, `${stage}.${suffix}.json`))));
+          const ru = { modelCalls: rb?.state?.usage?.modelCalls ?? 0, totalPayloadBytes: rb?.state?.usage?.totalPayloadBytes ?? 0 };
+          if (rb && (rb.bindingRecoveryHash !== contentHash(recovery) || rb.executionPlanHash !== contentHash(recoveredPlan)
+            || contentHash(rb.limits) !== contentHash(recovery.limits) || contentHash(rb.priorUsage) !== contentHash(recovery.priorUsage)
+            || contentHash(rb.policy) !== contentHash(workBudgetPolicy(recoveredPlan)))
+            || ri && (ri.bindingRecoveryHash !== contentHash(recovery) || ri.executionPlanHash !== contentHash(recoveredPlan))
+            || Object.values(ru).some(v => !Number.isSafeInteger(v) || v < 0)) throw prerequisiteStop("Binding recovery status lost its exact proof or retained charges; no retry");
+          cumulative.modelCalls += ru.modelCalls; cumulative.totalPayloadBytes += ru.totalPayloadBytes;
+          bindingRecovery = { hash: contentHash(recovery), status: rc ? "sealed" : rf ? "BREAK" : ri ? "RUNNING" : "prepared",
+            invocationConsumed: Boolean(ri), sealedSubmission: Boolean(rc), failure: rf?.reason ?? null, usage: ru,
+            remainingAllowance: { modelCalls: Math.max(0, recovery.limits.maxModelCalls - ru.modelCalls),
+              totalPayloadBytes: Math.max(0, recovery.limits.maxTotalPayloadBytes - ru.totalPayloadBytes) } };
+        }
       }
       stages.push({ stage, invocationConsumed: Boolean(invocation), sealedSubmission: Boolean(checkpoint),
         ...(failure ? { traceRunId: failedRuns.length === 1 ? failedRuns[0]!.id : null } : {}),
         recorded: retained.some(r => r.output.phase === stage), failure: failure?.reason ?? null, usage,
         ...(continuation ? { continuation } : {}),
         ...(execution ? { execution } : {}),
+        ...(bindingRecovery ? { bindingRecovery } : {}),
         ...(hostRecovery ? { hostRecovery } : {}), ...(hostRecoveryCandidate ? { hostRecoveryCandidate } : {}),
-        remainingAllowance: { modelCalls: Math.max(0, hostRecovery ? hostRecovery.proposalLimits.maxModelCalls - hostRecovery.usage.modelCalls - (hostRecovery.providerResumption?.usage.modelCalls ?? 0)
+        remainingAllowance: bindingRecovery?.remainingAllowance ?? { modelCalls: Math.max(0, hostRecovery ? hostRecovery.proposalLimits.maxModelCalls - hostRecovery.usage.modelCalls - (hostRecovery.providerResumption?.usage.modelCalls ?? 0)
           : (continuation?.preflight.remainingAllowance.maxModelCalls ?? limits.maxModelCalls - usage.modelCalls) - (continuation?.usage.modelCalls ?? 0)),
           totalPayloadBytes: Math.max(0, hostRecovery ? hostRecovery.proposalLimits.maxTotalPayloadBytes - hostRecovery.usage.totalPayloadBytes - (hostRecovery.providerResumption?.usage.totalPayloadBytes ?? 0)
             : limits.maxTotalPayloadBytes - usage.totalPayloadBytes - (continuation?.usage.totalPayloadBytes ?? 0)) } });

@@ -6,7 +6,9 @@ import { prerequisiteStop } from "./role-source-prerequisites.js";
 import type { prepareConsumerRevalidation } from "./identity-consumer-revalidation.js";
 import { revalidationContract, prepareConsumerRevalidation as prepareWorkConsumer, consumerRevalidationInput } from "./identity-consumer-revalidation.js";
 import type { ConsumerRevalidationRecord, ConsumerRevalidationScope } from "./identity-consumer-revalidation-model.js";
-import { initialWorldRevisionFields } from "./initial-world-repair.js";
+import { CONSUMER_REVIEW_CORRECTION, consumerReviewCapability } from "./consumer-review-contract.js";
+import { CONSUMER_REVIEW_BINDING, bindingRecoveryDirectory } from "./consumer-review-binding.js";
+import { consumerRevalidationLimits } from "./identity-consumer-correction.js";
 import { consumerRevalidationDirectory } from "./identity-consumer-revalidation-model.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
@@ -21,7 +23,7 @@ export async function prepareConsumerWorkRecord(root: string, scope: ConsumerRev
   const prepared = await prepareWorkConsumer(root, scope.sourceId, scope.taskId, scope.ref, scope.authorizationRef, scope.compilerCorrection?.policy);
   if (contentHash(prepared.scope) !== contentHash(scope)) throw prerequisiteStop("Work record changed its original scope; no registration or retry");
   return prepareConsumerWorkExecution(root, prepared, { ...consumerRevalidationInput(prepared, prior, stage.endsWith("-check")),
-    capability: { kind: "initial-world", id: "singleton", writableFields: initialWorldRevisionFields, createsEntity: false } }, stage);
+    capability: consumerReviewCapability(scope) }, stage);
 }
 
 /** Only for an exact record already accepted into the verified requirement
@@ -37,6 +39,8 @@ export async function verifyRecordedConsumerWork(root: string, record: ConsumerR
   const source = await (await WorkspaceStore.create(root)).getSource(scope.sourceId);
   if (!source || source.contentSha256 !== scope.sourceHash) throw prerequisiteStop("Recorded consumer source is missing or changed; no historical verification or retry");
   const expected = createConsumerWorkPlan({ scope, stage: plan.stage, input: plan.baseInput, catalog: plan.artifacts,
+    limits: plan.limits,
+    reviewBinding: plan.reviewBinding,
     bytes: await readSourceMaterial(root, source), segments: plan.sources, priorUsage: plan.priorUsage,
     retainedFiles: plan.retainedFiles, authorizationRef: plan.authorizationRef, priorReadFailures: plan.priorReadFailures,
     extraSources: plan.sources.map(s => s.id), extraArtifacts: plan.artifacts.map(a => `${a.kind}:${a.id}`) });
@@ -65,10 +69,22 @@ export async function prepareConsumerWorkExecution(root: string, p: Prepared, in
     if (!retainedFiles.some(r => r.path === file)) retainedFiles.push({ path: file, hash });
   };
   for (const inherited of p.scope.priorBudgetFiles) await remember(inherited.path);
+  if (p.scope.compilerCorrection?.policy === CONSUMER_REVIEW_CORRECTION) {
+    const predecessor = path.join(path.dirname(p.directory), p.scope.compilerCorrection.predecessorId);
+    await remember(path.join(predecessor, "scope.json"));
+    for (const record of p.correctionPredecessor) {
+      const old = consumerWorkDirectory(predecessor), phase = record.output.phase;
+      for (const name of (await fs.readdir(old)).sort())
+        if (name.startsWith(`${phase}.`) && (await fs.stat(path.join(old, name))).isFile()) await remember(path.join(old, name));
+      const checkpoint = await json(path.join(old, `${phase}.session-checkpoint.json`));
+      await remember(checkpoint.sessionFile);
+    }
+  }
   let legacyAttempts = 0;
   for (const priorStage of ["consumer-revalidation", "consumer-revalidation-check"] as const) {
     if (stage === "consumer-revalidation" && priorStage !== stage) continue;
     for (const old of consumerStageBudgetDirectories(p.directory, priorStage)) {
+      if (old === bindingRecoveryDirectory(directory) && priorStage === stage) continue;
       if (old === directory && priorStage === stage) continue;
       const invocation = await maybeRecoveryFile(path.join(old, `${priorStage}.invocation.json`));
       const budget = await maybeRecoveryFile(path.join(old, `${priorStage}.budget.json`));
@@ -146,6 +162,8 @@ export async function prepareConsumerWorkExecution(root: string, p: Prepared, in
     }
   }
   const plan = createConsumerWorkPlan({ scope: p.scope, stage, input, catalog: p.catalog, bytes: p.prepared.bytes,
+    reviewBinding: saved ? saved.reviewBinding : p.scope.reviewContract ? CONSUMER_REVIEW_BINDING : undefined,
+    ...(p.scope.compilerCorrection?.policy === CONSUMER_REVIEW_CORRECTION ? { limits: await consumerRevalidationLimits(root, p.scope, stage) } : {}),
     segments: p.prepared.manifest.segments, priorUsage, retainedFiles,
     authorizationRef: saved?.authorizationRef ?? authorizationRef ?? p.scope.authorizationRef,
     extraSources: [...extraSources], extraArtifacts: [...extraArtifacts], priorReadFailures });

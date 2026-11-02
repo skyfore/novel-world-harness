@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { contentHash as h } from "../src/world/canonical.js";
 import { ModelRequestBudget, type ModelRequestBudgetState } from "../src/runtime/model-request-budget.js";
 import { createConsumerWorkPlan, consumerWorkInput, consumerArtifactView, consumerWorkPreflight,
-  consumerWorkBudgetPolicy, verifyConsumerWorkProgress, consumerWorkFailure, type ConsumerWorkBaseInput } from "../src/compiler/consumer-work-plan.js";
+  consumerWorkBudgetPolicy, workBudgetPolicy, verifyConsumerWorkProgress, consumerWorkFailure, type ConsumerWorkBaseInput } from "../src/compiler/consumer-work-plan.js";
+import { CONSUMER_REVIEW_CORRECTION } from "../src/compiler/consumer-review-contract.js";
 import type { ConsumerRevalidationScope } from "../src/compiler/identity-consumer-revalidation-model.js";
 
 function fixture(withRoster = false, text = "Ada waits. Later, Ada leaves.") {
@@ -87,4 +88,20 @@ it("separates external refusal, context limits and no-progress without inventing
   expect(consumerWorkFailure("Codex error: The usage limit has been reached")).toMatchObject({ kind: "external-wait", retryable: false, preservedUsage: true, semanticVerdict: "not-established" });
   expect(consumerWorkFailure("request too large", "request-size").kind).toBe("context-blocked");
   expect(consumerWorkFailure("no progress", "no-progress").kind).toBe("no-progress");
+});
+
+it("enforces a scope correction's remaining allowance without a renewed preview window", () => {
+  const { args } = fixture();
+  args.scope.compilerCorrection = { policy: CONSUMER_REVIEW_CORRECTION } as ConsumerRevalidationScope["compilerCorrection"];
+  args.input.scopeHash = h(args.scope);
+  expect(() => createConsumerWorkPlan(args)).toThrow(/remaining allowance/);
+  const plan = createConsumerWorkPlan({ ...args, limits: { maxModelCalls: 2, maxRequestBytes: 512000, maxTotalPayloadBytes: 1000000 } });
+  let state: ModelRequestBudgetState | undefined;
+  const budget = new ModelRequestBudget(plan.limits, { save: value => { state = value; } }, workBudgetPolicy(plan));
+  budget.beginCall({}); expect(budget.recordValidatedProgress(`draft:${plan.workKey}`)).toBe(false);
+  budget.beginCall({});
+  expect(() => verifyConsumerWorkProgress(plan, state!, [{ role: "assistant" }, { role: "assistant" }])).not.toThrow();
+  expect(() => budget.beginCall({})).toThrow(/call limit/);
+  expect(() => verifyConsumerWorkProgress(plan, { ...state!, progress: { lastProgressCall: 1, milestones: ["reset"] } }, [{ role: "assistant" }, { role: "assistant" }])).toThrow(/reset/);
+  expect(consumerWorkInput(plan).execution.priorUsage).toEqual(args.priorUsage);
 });

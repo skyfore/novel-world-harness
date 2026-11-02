@@ -6,13 +6,14 @@ import { modelTextSelectorSchema } from "./text-anchors.js";
 import { prerequisiteEvidenceSchema, prerequisiteStop } from "./role-source-prerequisites.js";
 import { initialWorldRevisionFields } from "./initial-world-repair.js";
 import type { LedgerRecord } from "./requirement-ledger.js";
+import { CONSUMER_REVIEW_CORRECTION, consumerReviewContractSchema, consumerReviewAssessmentSchema, validateConsumerReviewAssessment } from "./consumer-review-contract.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/), text = z.string().trim().min(1).max(6000);
 const evidence = z.array(modelTextSelectorSchema).min(1).max(24);
 /** Exact compiler discovery spellings for the same entity ID, never aliases. */
 export const consumerEntityRepairId = (ref: string) => /^entity[:/](.+)$/.exec(ref)?.[1];
 export const consumerEntityScopeError = "Source-local scope changed the original accepted entity; no guessed actor or expanded repair";
-export const consumerCompilerCorrectionSchema = z.object({ policy: z.literal("source-local-referent/v1"),
+export const consumerCompilerCorrectionSchema = z.object({ policy: z.enum(["source-local-referent/v1", CONSUMER_REVIEW_CORRECTION]),
   predecessorId: hash, predecessorScopeHash: hash, predecessorRecordHashes: z.tuple([hash, hash]), contractHash: hash,
 }).strict();
 /** A changed, committed dependency is the reason to revalidate. This is never
@@ -28,6 +29,7 @@ export const consumerRevalidationScopeSchema = z.object({
   requirementPrefix: z.object({ length: z.number().int().positive(), head: hash }).strict(),
   compilerCorrection: consumerCompilerCorrectionSchema.optional(),
   executionPolicy: z.literal("consumer-work/v1").optional(),
+  reviewContract: consumerReviewContractSchema.optional(),
 }).strict();
 export type ConsumerRevalidationScope = z.infer<typeof consumerRevalidationScopeSchema>;
 /** A stopped review keeps its frozen prefix while sibling read-only reviews
@@ -56,9 +58,11 @@ export const consumerRevalidationProposalSchema = z.object({ ...common, phase: z
     segmentIds: z.array(text).min(1).max(128), requiredAction: text,
   }).strict().nullable().optional(),
   retainedQuestionIds: z.array(hash).min(1), parentResumeAllowed: z.literal(false),
+  review: consumerReviewAssessmentSchema.optional(),
 }).strict();
 export const consumerRevalidationCheckSchema = z.object({ ...common, phase: z.literal("consumer-revalidation-check"),
   proposalHash: hash, verdict: z.enum(["supported", "blocked"]), rationale: text,
+  reviewContractHash: hash.optional(),
 }).strict();
 export const consumerRevalidationOutputSchema = z.discriminatedUnion("phase", [consumerRevalidationProposalSchema, consumerRevalidationCheckSchema]);
 export const consumerRevalidationRecordSchema = z.object({ scope: consumerRevalidationScopeSchema, inputHash: hash,
@@ -68,8 +72,12 @@ export const consumerRevalidationRecordSchema = z.object({ scope: consumerRevali
   budgetAmendmentHash: hash.optional(),
   hostRecoveryHash: hash.optional(),
   executionPlanHash: hash.optional(),
+  bindingRecoveryHash: hash.optional(),
   evidence: z.array(prerequisiteEvidenceSchema).min(1).max(24),
-}).strict().refine(r => Boolean(r.sessionCheckpointHash) !== Boolean(r.refRecoveryHash), "Exactly one actual submission checkpoint or explicit rejected-ref recovery proof is required");
+}).strict().refine(r => Boolean(r.sessionCheckpointHash) !== Boolean(r.refRecoveryHash), "Exactly one actual submission checkpoint or explicit rejected-ref recovery proof is required")
+  .refine(r => !r.bindingRecoveryHash || Boolean(r.executionPlanHash) && r.output.phase === "consumer-revalidation-check"
+    && !r.continuationHash && !r.hostRecoveryHash && !r.refRecoveryHash && !r.budgetAmendmentHash,
+  "Binding recovery requires the original work check and cannot combine other recovery authorities");
 export type ConsumerRevalidationRecord = z.infer<typeof consumerRevalidationRecordSchema>;
 
 export function validateConsumerRevalidationHistory(records: ConsumerRevalidationRecord[], original: IdentityRecord[]) {
@@ -103,13 +111,16 @@ export function validateConsumerRevalidationHistory(records: ConsumerRevalidatio
       || [...original, ...records.slice(0, i)].some(r => r.sessionId === record.sessionId || r.traceRunId === record.traceRunId))
       throw prerequisiteStop("Consumer revalidation lost its exact phase, denominator or independent session; no retry");
     const output = record.output;
+    if (scope.reviewContract && (scope.reviewContract.ref !== scope.ref || scope.reviewContract.currentRevisionHash !== scope.currentRevisionHash))
+      throw prerequisiteStop("Review contract changed its exact consumer; inspect the original source/task/ref, no changed cut or retry");
+    validateConsumerReviewAssessment(scope.reviewContract, output);
     if (output.phase === "consumer-revalidation-check") {
       if (output.proposalHash !== contentHash(records[0]!.output)) throw prerequisiteStop("Independent consumer revalidation checked another proposal");
     } else {
       if (output.ref !== scope.ref || output.currentRevisionHash !== scope.currentRevisionHash
         || !sameIdentitySet(output.requirements.map(r => r.id), scope.requirementIds)) throw prerequisiteStop("Consumer revalidation omitted its exact target or original requirements");
       const repair = output.initialWorldRepair;
-      if (output.entityRepair && (!scope.compilerCorrection || output.disposition !== "repair-required"
+      if (output.entityRepair && (scope.compilerCorrection?.policy !== "source-local-referent/v1" || output.disposition !== "repair-required"
         || !consumerEntityRepairId(output.entityRepair.ref) || scope.ref !== `initial/${scope.sourceId}`
         || !repair || new Set(output.entityRepair.segmentIds).size !== output.entityRepair.segmentIds.length
         || new Set(output.entityRepair.readableRefs.map(r => `${r.kind}:${r.id}`)).size !== output.entityRepair.readableRefs.length))
@@ -138,4 +149,8 @@ export function validateConsumerCorrectionLineage(scope: ConsumerRevalidationSco
     || ["taskId", "sourceId", "sourceHash", "ref", "receiptFingerprint", "inventoryHash", "definitionHash", "identityIntentHash", "originalBudgetHash", "parentStateHash", "originalRevisionHash", "currentRevisionHash", "upstreamPlanHash", "acceptanceHash"].some(key =>
       first.scope[key as keyof ConsumerRevalidationScope] !== scope[key as keyof ConsumerRevalidationScope]))
     throw prerequisiteStop("Compiler correction lost its exact independently blocked predecessor or original scope; no new stage, requirement or budget reset");
+  if (correction.policy === CONSUMER_REVIEW_CORRECTION && (first.scope.reviewContract || !first.scope.executionPolicy
+    || !scope.reviewContract || scope.reviewContract.target.kind !== "character-entry" || !scope.ref.startsWith("entry/")
+    || scope.authorizationRef === first.scope.authorizationRef || !scope.executionPolicy))
+    throw prerequisiteStop("Review-scope correction requires an explicitly authorized legacy entry review with unchanged evidence, new exact target contract and retained negative judgments; no renewed correction or automatic retry");
 }

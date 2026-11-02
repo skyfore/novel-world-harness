@@ -218,7 +218,7 @@ requirementsCommand.command("revalidate-identity-consumer").requiredOption("--so
   .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")
   .requiredOption("--ref <ref>", "exact original availableRefs[] consumer")
   .requiredOption("--authorization-ref <ref>", "existing user authorization to continue the same repair")
-  .option("--compiler-correction <policy>", "single retained-budget continuation for source-local-referent/v1")
+  .option("--compiler-correction <policy>", "single retained-budget correction: source-local-referent/v1 or explicitly authorized consumer-review-scope/v1")
   .option("--resume-unsubmitted <mode>", "inspect or run the sole audited continuation; retain failed sessions and subtract their original stage usage")
   .option("--provider-resumption <path>", "later authorization JSON for a settled first-request quota refusal in the original stage or its bound host recovery; use with --resume-unsubmitted")
   .option("--continuation-budget <path>", "explicit later authorization JSON for one bounded call amendment before the original continuation starts")
@@ -227,6 +227,8 @@ requirementsCommand.command("revalidate-identity-consumer").requiredOption("--so
   .option("--execution-policy <policy>", "consumer-work/v1: prepare complete evidence and use validated draft progress; preserves legacy history")
   .option("--execution-authorization-ref <ref>", "existing explicit authorization to migrate a settled legacy stage to the versioned execution policy")
   .option("--inspect-execution", "read-only evidence, context and migration preflight; no model calls or state writes")
+  .option("--recover-contract-binding", "one correction of an original check's isolated rejected contract-hash preview; retain failure and spend only its remaining budget")
+  .option("--binding-recovery-authorization-ref <ref>", "explicit later authorization for this exact contract-binding repair; inspect first")
   .description("Independently revalidate one original consumer after the exact completed identity repair; retain old reviews, budgets and questions")
   .action(async options => {
     const { runIdentityConsumerRevalidation } = await import("./workflow/identity-consumer-revalidation.js");
@@ -234,6 +236,7 @@ requirementsCommand.command("revalidate-identity-consumer").requiredOption("--so
       taskId: options.task, ref: options.ref, authorizationRef: options.authorizationRef, compilerCorrection: options.compilerCorrection,
       resumeUnsubmitted: options.resumeUnsubmitted,
       executionPolicy: options.executionPolicy, executionAuthorizationRef: options.executionAuthorizationRef, inspectExecution: options.inspectExecution,
+      recoverContractBinding: options.recoverContractBinding, bindingRecoveryAuthorizationRef: options.bindingRecoveryAuthorizationRef,
       providerResumption: options.providerResumption ? JSON.parse(await fs.readFile(options.providerResumption, "utf8")) : undefined,
       recoverSubmittedRef: options.recoverSubmittedRef,
       hostRecovery: options.hostRecovery ? JSON.parse(await fs.readFile(options.hostRecovery, "utf8")) : undefined,

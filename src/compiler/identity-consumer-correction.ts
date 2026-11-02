@@ -5,6 +5,7 @@ import { contentHash } from "../world/canonical.js";
 import { IDENTITY_REQUIREMENT_LIMITS } from "./identity-requirements.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
 import { consumerRevalidationDirectory, type ConsumerRevalidationScope } from "./identity-consumer-revalidation-model.js";
+import { CONSUMER_REVIEW_CORRECTION } from "./consumer-review-contract.js";
 
 export const SOURCE_LOCAL_CORRECTION = "source-local-referent/v1" as const;
 export const sourceLocalConsumerContract = {
@@ -28,6 +29,13 @@ export async function sourceLocalContractHash() {
 export async function consumerRevalidationLimits(root: string, scope: ConsumerRevalidationScope, stage: string) {
   if (!scope.compilerCorrection) return IDENTITY_REQUIREMENT_LIMITS;
   const parent = path.join(path.dirname(consumerRevalidationDirectory(root, scope)), scope.compilerCorrection.predecessorId);
+  if (scope.compilerCorrection.policy === CONSUMER_REVIEW_CORRECTION) {
+    const file = path.join(parent, "execution-v1", `${stage}.budget.json`), value = JSON.parse(await fs.readFile(file, "utf8"));
+    if (value.originalBudgetHash !== scope.originalBudgetHash || value.state.blocked || value.state.failure || value.budgetAmendmentHash
+      || !scope.priorBudgetFiles.some(b => b.path === file && b.hash === contentHash(value)))
+      throw prerequisiteStop("Review-scope correction lost the settled predecessor allowance; preserve its stop and budget, no dispatch or reset");
+    return remainingConsumerReviewLimits(value);
+  }
   const file = path.join(parent, `${stage}.budget.json`), value = JSON.parse(await fs.readFile(file, "utf8"));
   if (contentHash(value.limits) !== contentHash(IDENTITY_REQUIREMENT_LIMITS)
     || value.originalBudgetHash !== scope.originalBudgetHash || value.state.blocked || value.state.failure
@@ -42,6 +50,27 @@ export async function consumerRevalidationLimits(root: string, scope: ConsumerRe
 }
 
 export async function assertConsumerCompilerCorrection(scope: ConsumerRevalidationScope) {
-  if (scope.compilerCorrection && scope.compilerCorrection.contractHash !== await sourceLocalContractHash())
+  if (scope.compilerCorrection && scope.compilerCorrection.contractHash !== await (scope.compilerCorrection.policy === CONSUMER_REVIEW_CORRECTION ? consumerReviewCorrectionHash() : sourceLocalContractHash()))
     throw prerequisiteStop("Compiler correction implementation changed after freezing; preserve its original scope and invocation, no repinning or automatic model retry");
+}
+
+export function remainingConsumerReviewLimits(value: { limits: { maxModelCalls: number; maxRequestBytes: number; maxTotalPayloadBytes: number }; state: { usage: { modelCalls: number; totalPayloadBytes: number } } }) {
+  if (Object.values(value.limits).some(v => !Number.isSafeInteger(v) || v <= 0)
+    || [value.state.usage.modelCalls, value.state.usage.totalPayloadBytes].some(v => !Number.isSafeInteger(v) || v < 0))
+    throw prerequisiteStop("Original review allowance or usage is invalid; preserve its accounting, no dispatch or reset");
+  const limits = { ...value.limits, maxModelCalls: value.limits.maxModelCalls - value.state.usage.modelCalls,
+    maxTotalPayloadBytes: value.limits.maxTotalPayloadBytes - value.state.usage.totalPayloadBytes };
+  if (limits.maxModelCalls < 2 || limits.maxTotalPayloadBytes <= 0 || Object.values(limits).some(v => !Number.isSafeInteger(v) || v <= 0))
+    throw prerequisiteStop("Original review has insufficient remaining allowance for preview and submission; preserve its budget, no new window or retry");
+  return limits;
+}
+
+export async function consumerReviewCorrectionHash() {
+  const root = fileURLToPath(new URL("../../", import.meta.url));
+  const files = ["src/compiler/consumer-review-contract.ts", "src/compiler/identity-consumer-revalidation-model.ts",
+    "src/compiler/identity-consumer-revalidation.ts", "src/compiler/identity-consumer-correction.ts", "src/workflow/identity-consumer-revalidation.ts",
+    "src/compiler/consumer-work-plan.ts", "src/compiler/identity-consumer-work.ts", "src/workflow/receipt-bound-pi-stage.ts",
+    "src/compiler/consumer-review-binding.ts", "src/compiler/review-preview-allowance.ts"];
+  return contentHash({ policy: CONSUMER_REVIEW_CORRECTION,
+    files: await Promise.all(files.map(async file => ({ file, hash: contentHash(await fs.readFile(path.join(root, file), "utf8")) }))) });
 }

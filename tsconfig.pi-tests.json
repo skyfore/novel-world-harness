@@ -22,6 +22,7 @@
     "test/identity-session-persistence.test.ts",
     "test/identity-consumer-revalidation.test.ts",
     "test/consumer-work-plan.test.ts",
+    "test/consumer-review-contract.test.ts",
     "test/lossless-json-context.test.ts",
     "test/manual/pi-upgrade-live.ts"
   ]

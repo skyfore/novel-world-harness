@@ -294,7 +294,7 @@ export type NarrativeContext = z.infer<typeof narrativeContextSchema>;
  * cause or receive an event through a letter, memory, report, or remote channel
  * without sharing the actor's scene.
  */
-export const participantPresenceModeSchema = z.enum(["physical", "remote", "mentioned", "represented", "dream", "memory"]);
+export const participantPresenceModeSchema = z.enum(["physical", "remote", "mentioned", "represented", "dream", "memory", "unresolved"]);
 export type ParticipantPresenceMode = z.infer<typeof participantPresenceModeSchema>;
 
 export const participantPresenceSchema = z.object({
@@ -1167,6 +1167,9 @@ export const characterEntryCheckpointSchema = z
     delta: stateDeltaSchema,
     knowledge: knowledgeDeltaSchema.optional(),
     projectionSeed: entryProjectionSeedSchema.optional(),
+    admission: z.object({ status: z.literal("blocked"), reason: z.literal("presence-unresolved"),
+      rationale: z.string().trim().min(1).max(1500), evidence: z.array(evidenceRefSchema).min(1).max(16) }).strict().optional()
+      .describe("A retained source-supported uncertainty, never a playable checkpoint or permission to project state. No assumption of physical, remote or dream presence."),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -1184,7 +1187,11 @@ export const characterEntryCheckpointSchema = z
       seen.add(presence.entityId);
       if (presence.entityId === value.actorId && (presence.mode === "physical" || presence.mode === "remote" && value.projectionSeed)) actorHasEntryPresence = true;
     }
-    if (!actorHasEntryPresence) {
+    if (value.admission) {
+      if (value.participantPresence.find(p => p.entityId === value.actorId)?.mode !== "unresolved"
+        || value.delta.operations.length || value.knowledge?.operations.length || value.projectionSeed)
+        ctx.addIssue({ code: "custom", message: "A presence-unresolved entry must retain unresolved actor presence and no state, knowledge or projection seed", path: ["admission"] });
+    } else if (!actorHasEntryPresence) {
       ctx.addIssue({
         code: "custom",
         message: "An entry checkpoint must establish bodily presence or remote presence with a complete pre-entry projection seed",

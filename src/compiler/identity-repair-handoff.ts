@@ -201,7 +201,11 @@ export async function inspectIdentityRepairHandoff(root: string, sourceId: strin
             : "Only the original verified stage records and checkpoints may resume. Never replay a consumed invocation or use repair convergence as consumer activation." };
     }));
     if (contentHash(await ledger.history()) !== contentHash(history)) throw prerequisiteStop("Identity ledger changed during inspection; inspect its owning task without automatic retry");
-    return { ...result, currentInputs: "original-finding-preserved-live-repair-separate", typedRepairs,
+    const entryPresenceRepairs = history.flatMap(r => r.payload.kind === "entry-presence-repair" && r.payload.record.intent.taskId === intent.taskId
+      && r.payload.record.phase === "entry-presence-applied" ? [{ ref: r.payload.record.intent.ref, recordHash: contentHash(r.payload.record),
+        status: "uncertainty-preserved", executableEntry: false, obligationStatus: "blocked", totalConsumers: r.payload.record.intent.totalConsumers,
+        parentResumeAllowed: false, certificationGranted: false }] : []);
+    return { ...result, currentInputs: "original-finding-preserved-live-repair-separate", typedRepairs, entryPresenceRepairs,
       modelAndHostAcceptance: "not-reverified", ledgerHead: history.at(-1)!.hash };
   }
   const { prepareIdentityRequirements } = await import("./identity-requirement-service.js");

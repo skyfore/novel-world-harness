@@ -141,6 +141,7 @@ export {
   validateKnowledgeAcquisitionProposalTrace,
 } from "./compiler/attribution-trace.js";
 export { CompilerCommitService, CompilerValidator, type CompilerConvergenceProgress, type CompilerValidation } from "./compiler/validator.js";
+export { lowerUnresolvedEntryPresence } from "./compiler/entry-presence.js";
 export {
   evaluateCompilerAgainstGold,
   compilerGoldSchema,

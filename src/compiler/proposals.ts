@@ -260,6 +260,7 @@ export function compilerPayloadEvidence(payload: unknown): EvidenceRef[] {
     nested.relationshipChanges,
     nested.clauses,
     nested.exceptions,
+    ...(Array.isArray(nested.characterEntryCheckpoints) ? nested.characterEntryCheckpoints.map(c => c?.admission ? [c.admission] : []) : []),
   ].flatMap((candidate) => Array.isArray(candidate) ? candidate : []);
   return [record, ...semanticChildren].flatMap((candidate) => {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];

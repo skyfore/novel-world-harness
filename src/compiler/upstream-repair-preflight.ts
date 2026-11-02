@@ -157,6 +157,7 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   // Retained predecessor payloads are readable audit evidence, never active decisions.
   recoverUpstreamResolutionBaselines(plan, payloads, committedOutputs, recoveryBaselines);
   const retainedRevisions = new Map<string, string>();
+  let presenceBaselines = new Map<string, string>();
   if (identityContext) {
     const p = identityContext.prepared;
     const preceding = identityContext.parentCatalog;
@@ -186,7 +187,12 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
         committed: accepted && activeRevisions.get(`${write.kind}:${write.id}`) === proposal.payloadHash,
         assertions: evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []) });
     }
-    const before = originalIdentityCatalog(payloads, originalCatalog, revisions);
+    const presence = await (await import("./entry-presence-repair.js")).entryPresenceCatalogBaselines(root, sourceId, plan.identityRequirements!.taskId, plan.planHash, payloads);
+    const presenceOriginals = presence.flatMap(r => [{ kind: r.kind, id: r.id, payload: r.payload },
+      ...r.originalAssertions.map(a => ({ kind: "evidence-assertion", id: a.id, payload: a }))]);
+    const beforePresence = originalIdentityCatalog(payloads, presenceOriginals, presence);
+    presenceBaselines = new Map([...beforePresence].filter(([key, value]) => !payloads.has(key) || contentHash(payloads.get(key)) !== contentHash(value)).map(([key, value]) => [key, contentHash(value)]));
+    const before = originalIdentityCatalog(beforePresence, originalCatalog, revisions);
     const created = new Set(plan.allowedCreations.map(c => `${c.kind}:${c.id}`));
     const currentCatalog = [...before].filter(([key]) => !key.startsWith("source-segment:") && !key.startsWith("structural-discourse:") && !(created.has(key) && committedOutputs.has(key)))
       .map(([key, payload]) => ({ kind: key.slice(0, key.indexOf(":")), id: key.slice(key.indexOf(":") + 1), payload, revisionHash: contentHash(payload) }))
@@ -200,6 +206,7 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
     if (entries.length !== expected.length || entries.some(e => expected.find(c => c.ref === `staged-role/${e.candidateId}`)?.revisionHash !== contentHash(e))) throw upstreamRepairHostError("Identity consumer entries changed after complete independent review");
   }
   const baselineRevisions = new Map([...payloads].map(([key, value]) => [key, contentHash(value)]));
+  for (const [key, hash] of presenceBaselines) baselineRevisions.set(key, hash);
   for (const ref of plan.baselineRefs) if (baselineRevisions.get(`${ref.kind}:${ref.id}`) !== ref.revisionHash && (!committedOutputs.has(`${ref.kind}:${ref.id}`) || activeRevisions.get(`${ref.kind}:${ref.id}`) !== committedOutputs.get(`${ref.kind}:${ref.id}`))) throw upstreamRepairHostError(`Active dependency changed: ${ref.kind}:${ref.id}`);
   for (const ref of plan.readableRefs) if (!baselineRevisions.has(`${ref.kind}:${ref.id}`)) throw upstreamRepairHostError(`Readable dependency is missing: ${ref.kind}:${ref.id}`);
   const annotationKinds = ["entity-mention", "event-mention", "quotation", "discourse-segment"];

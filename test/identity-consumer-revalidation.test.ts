@@ -95,13 +95,16 @@ it("inherits failed and continued review charges once across a typed successor",
     };
     files.push(await put(path.join(old, "consumer-revalidation.budget.json"), 16));
     files.push(await put(path.join(consumerStageRecoveryDirectory(old, "consumer-revalidation"), "consumer-revalidation.budget.json"), 4));
+    files.push(await put(path.join(old, "presence-repair", "entry-presence-proposal.budget.json"), 2));
     await fs.writeFile(path.join(upstream, "start.json"), JSON.stringify({ origin: { originalBudgetHash, priorUsage: { modelCalls: 216, totalPayloadBytes: 21600 }, budgetFiles: files }, order: [{ id: "entity" }, { id: "singleton" }] }));
     for (const stage of ["entity", "singleton", "acceptance"]) await put(path.join(upstream, `${stage}.budget.json`), 2);
     await put(path.join(reviews, "other", "consumer-revalidation-check.budget.json"), 3);
     await put(path.join(consumerHostRecoveryDirectory(path.join(reviews, "other")), "consumer-revalidation.budget.json"), 2);
     await put(path.join(consumerStageRecoveryDirectory(consumerHostRecoveryDirectory(path.join(reviews, "other")), "consumer-revalidation"), "consumer-revalidation.budget.json"), 3);
+    await put(path.join(reviews, "other", "presence-repair", "entry-presence-check.budget.json"), 3);
     const result = await revalidation.inheritConsumerRevalidationBudgets(upstream, reviews);
-    expect(result.priorUsage).toEqual({ modelCalls: 230, totalPayloadBytes: 23000 });
+    expect(result.priorUsage).toEqual({ modelCalls: 233, totalPayloadBytes: 23300 });
+    expect(result.priorBudgetFiles.filter(f => f.path === files[2]!.path)).toEqual([files[2]]);
     expect(result.priorBudgetFiles.filter(f => f.path === files[1]!.path)).toEqual([files[1]]);
     await put(files[0]!.path, 0);
     await expect(revalidation.inheritConsumerRevalidationBudgets(upstream, reviews)).rejects.toThrow(/Inherited Pi budget changed/);

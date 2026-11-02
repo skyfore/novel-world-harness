@@ -120,6 +120,10 @@ export async function inheritConsumerRevalidationBudgets(upstreamDirectory: stri
   const names = await fs.readdir(reviewsDirectory, { withFileTypes: true }).catch((e: NodeJS.ErrnoException) => { if (e.code === "ENOENT") return []; throw e; });
   for (const entry of names.filter(e => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
     const directory = path.join(reviewsDirectory, entry.name);
+    for (const stage of ["entry-presence-proposal", "entry-presence-check"]) {
+      const file = path.join(directory, "presence-repair", `${stage}.budget.json`);
+      if (await maybeRecoveryFile(file)) await remember(file, undefined, true);
+    }
     for (const stage of ["consumer-revalidation", "consumer-revalidation-check"]) for (const dir of consumerStageBudgetDirectories(directory, stage)) {
       const file = path.join(dir, `${stage}.budget.json`);
       if (await maybeRecoveryFile(file)) await remember(file, undefined, true);

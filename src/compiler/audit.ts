@@ -1128,6 +1128,11 @@ export async function auditCompiler(
     || left.id.localeCompare(right.id));
   const firstLiveEventByActor = new Map<string, CanonicalEvent>();
   for (const event of eventsByDiscourse) {
+    // An explicitly unresolved former entry keeps its audit obligation. It
+    // cannot disappear from the denominator when physical presence is removed.
+    for (const checkpoint of event.characterEntryCheckpoints ?? []) if (checkpoint.admission
+      && !openingActorIds.has(checkpoint.actorId) && !firstLiveEventByActor.has(checkpoint.actorId))
+      firstLiveEventByActor.set(checkpoint.actorId, event);
     if (event.narrativeContext?.mode && event.narrativeContext.mode !== "scene") continue;
     for (const presence of event.participantPresence ?? []) {
       if (openingActorIds.has(presence.entityId) || !(presence.mode === "physical" || presence.mode === "remote" && entityCatalog.get(presence.entityId)?.agencyProfile?.agency === "autonomous")) continue;
@@ -1351,7 +1356,7 @@ export async function auditCompiler(
       events.filter((event) => !event.readerSummary?.trim()).forEach((event) => semanticRepairEventIds.add(event.id));
     }
     if (laterEntryActors.length && characterEntryCheckpointCoverage !== 1) {
-      semanticIssues.push(`Only ${formatRatio(characterEntryCheckpointCoverage)} of later embodied or autonomous remote characters have a complete pre-event entry checkpoint (required 100%).`);
+      semanticIssues.push(`Only ${formatRatio(characterEntryCheckpointCoverage)} of later embodied, autonomous remote, or explicitly unresolved entry characters have a complete pre-event entry checkpoint (required 100%).`);
       incompleteEntryActors.forEach((actorId) => {
         const event = firstLiveEventByActor.get(actorId);
         if (event) semanticRepairEventIds.add(event.id);

@@ -250,7 +250,9 @@ export function experiencedCanonicalEvents(
   const actorParticipates = (participants: readonly string[], presence: readonly { entityId: string; mode: string }[] | undefined) => {
     if (!participants.includes(actorId)) return false;
     const mode = presence?.find((item) => item.entityId === actorId)?.mode;
-    return mode ? mode !== "mentioned" && mode !== "represented" : true;
+    // Unknown presence is not evidence of experience. In particular it may
+    // still be a depiction or mention, so it cannot activate actor development.
+    return mode ? ["physical", "remote", "dream", "memory"].includes(mode) : true;
   };
   for (const { event } of history) {
     for (const canonicalEventId of event.realizesCanonicalEventIds ?? []) {

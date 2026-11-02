@@ -558,6 +558,16 @@ export class CompilerValidator {
         errors.push(issue("DUPLICATE_CHARACTER_ENTRY", `Event ${event.id} has multiple entry checkpoints for ${checkpoint.actorId}`, `${prefix}.actorId`));
       }
       entryActors.add(checkpoint.actorId);
+      if (checkpoint.admission) {
+        for (const presence of checkpoint.participantPresence) if (!event.participants.includes(presence.entityId) || entities.get(presence.entityId)?.kind !== "character")
+          errors.push(issue("INVALID_ENTRY_PRESENCE", `Blocked entry presence ${presence.entityId} is not an event character`, `${prefix}.participantPresence`));
+        if (event.participantPresence?.find(p => p.entityId === checkpoint.actorId)?.mode !== "unresolved")
+          errors.push(issue("ENTRY_UNCERTAINTY_CONFLICT", "A blocked entry must retain unresolved presence in its owning occurrence too", `${prefix}.admission`));
+        // This is an explicit source gap, not a runnable checkpoint. Schema
+        // validation forbids state/knowledge projection; runtime and closure
+        // continue to require grounded entry agency.
+        continue;
+      }
       errors.push(...entryAgencyIssues(checkpoint.actorId, checkpoint, { ...catalog, sourceId: event.evidence[0]?.span.sourceId }).map(issue => ({ ...issue, path: `${prefix}.${issue.path}` })));
       errors.push(...remoteEntryOccurrenceIssues(checkpoint.actorId, checkpoint, event, catalog.eventParticipations.values()).map(issue => ({ ...issue, path: `${prefix}.${issue.path}` })));
       if (!checkpoint.projectionSeed && checkpoint.delta.operations.length > 16) {

@@ -69,7 +69,9 @@ export async function assertConsumerRepairRetainedState(root: string, intent: Co
   }
   const history = await new RequirementLedger(root, intent.sourceId).history();
   if (history[intent.requirementPrefix.length - 1]?.hash !== intent.requirementPrefix.head
-    || history.slice(intent.requirementPrefix.length).some(r => r.payload.kind === "identity-consumer-revalidation"
+    || history.slice(intent.requirementPrefix.length).some(r => r.payload.kind === "entry-presence-repair"
+      ? r.payload.record.intent.taskId !== intent.taskId || r.payload.record.intent.identityIntentHash !== intent.identityIntentHash
+      : r.payload.kind === "identity-consumer-revalidation"
       ? r.payload.record.scope.taskId !== intent.taskId || r.payload.record.scope.identityIntentHash !== intent.identityIntentHash
       : r.payload.kind !== "identity-consumer-repair" || contentHash(r.payload.record.intent) !== contentHash(intent)))
     throw prerequisiteStop("Consumer repair requirement prefix changed outside this exact finding; stop without repinning");

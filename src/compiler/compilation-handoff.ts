@@ -43,7 +43,7 @@ export function compilationHandoff(root: string, source: SourceStatus, run: Nove
     const revalidate = task.shards.reduce((n, s) => n + s.dispositions["revalidate-required"], 0);
     const receiptReviews = task.consumerRevalidation;
     const pendingCorrections = receiptReviews.attempts.filter(a => a.compilerCorrection && a.semanticJudgmentPending);
-    const latestReviews = [...new Map(receiptReviews.reviews.map(r => [r.ref, r])).values()];
+    const latestReviews = [...new Map((receiptReviews.currentReviews ?? receiptReviews.reviews).map(r => [r.ref, r])).values()];
     const blockedReviews = latestReviews.filter(r => r.status === "blocked" && !pendingCorrections.some(a => a.ref === r.ref));
     tasks.push({ id, kind: "identity-consumers", state: "blocked", dependsOn: [],
       refs: [task.taskId, task.intentHash, task.inventoryHash, ...blockedReviews.flatMap(r => [r.ref, r.scopeHash, r.receiptFingerprint]),

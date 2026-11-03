@@ -54,6 +54,11 @@ export const entryPresenceStop = (message: string) => prerequisiteStop(`${messag
 
 export function validateEntryPresenceIntent(s: EntryPresenceIntent, parents: ConsumerRevalidationRecord[]) {
   entryPresenceIntentSchema.parse(s);
+  return validateEntryRepairParent(s, parents, entryPresenceStop);
+}
+
+/** Common authority boundary for a versioned, narrowly typed entry repair. */
+export function validateEntryRepairParent(s: Omit<EntryPresenceIntent, "policy">, parents: ConsumerRevalidationRecord[], stop: typeof entryPresenceStop) {
   const parent = parents.filter(r => consumerRevalidationId(r.scope) === s.parentReviewId);
   const p = parent[0], c = parent[1];
   if (parent.length !== 2 || p?.output.phase !== "consumer-revalidation" || p.output.disposition !== "blocked"
@@ -64,7 +69,7 @@ export function validateEntryPresenceIntent(s: EntryPresenceIntent, parents: Con
     || s.parentReceiptFingerprint !== p.scope.receiptFingerprint || s.upstreamPlanHash !== p.scope.upstreamPlanHash
     || contentHash(parent.map(contentHash)) !== contentHash(s.parentRecordHashes)
     || contentHash(s.requirementIds) !== contentHash(p.scope.requirementIds)
-    || contentHash(s.retainedQuestionIds) !== contentHash(p.output.retainedQuestionIds)) throw entryPresenceStop("Presence repair lost its exact supported negative review or original criteria");
+    || contentHash(s.retainedQuestionIds) !== contentHash(p.output.retainedQuestionIds)) throw stop("Entry repair lost its exact supported negative review or original criteria");
   const events = s.baselines.filter(b => b.kind === "canonical-event");
   const event = events.length === 1 ? canonicalEventSchema.safeParse(events[0]!.payload) : null;
   if (!event?.success || events[0]!.id !== s.eventId || event.data.id !== s.eventId
@@ -73,10 +78,10 @@ export function validateEntryPresenceIntent(s: EntryPresenceIntent, parents: Con
     || p.scope.reviewContract.ownerRefs.some(r => r.ref.startsWith("event-execution:"))
     || s.baselines.some(b => contentHash(b.payload) !== b.revisionHash)
     || new Set(s.baselines.map(b => `${b.kind}:${b.id}`)).size !== s.baselines.length)
-    throw entryPresenceStop("Presence baseline changed the exact reviewed event/entry or revision denominator");
+    throw stop("Entry baseline changed the exact reviewed event/entry or revision denominator");
   for (const b of s.baselines) if (b.kind === "event-participation") {
     const v = eventParticipationSchema.parse(b.payload);
-    if (v.id !== b.id || v.entityId !== s.actorId || v.eventId !== s.eventId) throw entryPresenceStop("Participation escaped the reviewed actor/occurrence");
+    if (v.id !== b.id || v.entityId !== s.actorId || v.eventId !== s.eventId) throw stop("Participation escaped the reviewed actor/occurrence");
   }
   return parent;
 }

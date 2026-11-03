@@ -25,6 +25,8 @@
     "test/consumer-review-contract.test.ts",
     "test/entry-presence-repair.test.ts",
     "test/entry-presence-ledger.test.ts",
+    "test/entry-state-repair.test.ts",
+    "test/entry-state-ledger.test.ts",
     "test/scene-presence.test.ts",
     "test/lossless-json-context.test.ts",
     "test/manual/pi-upgrade-live.ts"

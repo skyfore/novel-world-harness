@@ -37,7 +37,7 @@ export type ConsumerRevalidationScope = z.infer<typeof consumerRevalidationScope
 export function assertConsumerRevalidationPrefix(history: readonly LedgerRecord[], scope: ConsumerRevalidationScope, end = history.length) {
   const prefix = scope.requirementPrefix;
   if (prefix.length > end || history[prefix.length - 1]?.hash !== prefix.head
-    || history.slice(prefix.length, end).some(entry => entry.payload.kind === "entry-presence-repair"
+    || history.slice(prefix.length, end).some(entry => (entry.payload.kind === "entry-presence-repair" || entry.payload.kind === "entry-state-repair")
       ? entry.payload.record.intent.taskId !== scope.taskId || entry.payload.record.intent.identityIntentHash !== scope.identityIntentHash
       : entry.payload.kind !== "identity-consumer-revalidation" || entry.payload.record.scope.taskId !== scope.taskId || entry.payload.record.scope.identityIntentHash !== scope.identityIntentHash))
     throw prerequisiteStop("Consumer revalidation changed its original ledger prefix or unrelated task history. Inspect the same source/task/ref frozen scope and retained journal; preserve all records, no repinning, model replay or unchanged retry");

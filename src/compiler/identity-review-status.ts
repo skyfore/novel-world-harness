@@ -4,10 +4,11 @@ import { identityConsumerShardReady, identityDefinitionGaps, identityRequirement
 import { prerequisiteStop } from "./role-source-prerequisites.js";
 import { consumerRevalidationId, validateConsumerRevalidationHistory, type ConsumerRevalidationRecord } from "./identity-consumer-revalidation-model.js";
 import type { ConsumerRevalidationAttempt } from "./identity-consumer-attempt-status.js";
+import { entryStateRepairId, lowerEntryStateRepair, validateEntryStateHistory, type EntryStateRecord } from "./entry-state-repair-model.js";
 
 /** Receipt-bound reviews are additional evidence. They never replace the old
  * shard denominator or turn support for a blocked decision into clearance. */
-export function consumerRevalidationStatus(original: IdentityRecord[], records: ConsumerRevalidationRecord[]) {
+export function consumerRevalidationStatus(original: IdentityRecord[], records: ConsumerRevalidationRecord[], stateRepairs: EntryStateRecord[] = []) {
   const groups = new Map<string, ConsumerRevalidationRecord[]>();
   for (const record of records) {
     const id = consumerRevalidationId(record.scope), group = groups.get(id) ?? [];
@@ -29,14 +30,31 @@ export function consumerRevalidationStatus(original: IdentityRecord[], records: 
       ...(first.scope.reviewContract ? { reviewContract: first.scope.reviewContract, globalIdentityQuestions: "retained" as const } : {}),
       entityRepair: proposal.entityRepair ?? null, compilerCorrection: first.scope.compilerCorrection ?? null };
   });
-  const latest = [...new Map(reviews.map(r => [r.ref, r])).values()];
+  const latest = [...new Map(reviews.map(r => [r.ref, r])).values()].map(review => {
+    const applied = stateRepairs.findLast(r => r.phase === "entry-state-applied" && r.intent.parentReviewId === review.id);
+    if (!applied) return { ...review, entryStateRepair: null as string | null };
+    const group = stateRepairs.filter(r => entryStateRepairId(r.intent) === entryStateRepairId(applied.intent));
+    validateEntryStateHistory(group, records);
+    const proposal = group[0], check = group[1];
+    if (proposal?.phase !== "entry-state-proposal" || check?.phase !== "entry-state-check") throw prerequisiteStop("Applied entry repair lost its independently checked proposal");
+    const lowered = lowerEntryStateRepair(applied.intent, proposal)[0]!;
+    if (applied.phase !== "entry-state-applied" || applied.artifacts[0]?.afterHash !== contentHash(lowered.payload))
+      throw prerequisiteStop("Applied entry repair changed its checked consumer revision");
+    const revisionHash = contentHash(lowered.payload.characterEntryCheckpoints!.find(e => e.actorId === applied.intent.actorId));
+    return { ...review, id: entryStateRepairId(applied.intent), scopeHash: contentHash(applied.intent),
+      proposalRecordHash: contentHash(proposal), checkRecordHash: contentHash(check), disposition: "revalidated" as const, status: "revalidated" as const,
+      currentRevisionHash: revisionHash, blockedRequirements: [],
+      reviewContract: review.reviewContract ? { ...review.reviewContract, currentRevisionHash: revisionHash,
+        ownerRefs: [{ ref: `canonical-event:${applied.intent.eventId}`, revisionHash: contentHash(lowered.payload) }] } : undefined,
+      rationale: proposal.output.rationale, independentRationale: check.output.rationale, entryStateRepair: contentHash(applied) };
+  });
   const total = original[0]?.intent.consumerShards.reduce((n, s) => n + s.refs.length, 0) ?? 0;
   return { totalConsumers: total, recordedConsumers: latest.length,
     recordedReviewedConsumers: latest.filter(r => r.independentVerdict !== null).length,
     recordedClearedConsumers: latest.filter(r => ["unaffected", "revalidated"].includes(r.status)).length,
     unrecordedConsumers: total - latest.length,
     blockedRefs: latest.filter(r => r.status === "blocked").map(r => r.ref),
-    repairRequiredRefs: latest.filter(r => r.status === "repair-required").map(r => r.ref), reviews,
+    repairRequiredRefs: latest.filter(r => r.status === "repair-required").map(r => r.ref), reviews, currentReviews: latest,
     attempts: [] as ConsumerRevalidationAttempt[],
     verification: "ledger-snapshot-only" as const, sourceAuditResumeAllowed: false as const,
     interpretation: "Receipt-bound records retain the original denominator. Independent support approves the recorded disposition, including blocked. Current dependency verification, original questions and source-audit continuation remain separate; no execution or resume authority." };
@@ -44,7 +62,7 @@ export function consumerRevalidationStatus(original: IdentityRecord[], records: 
 
 /** A projection of retained ledger records, never a replacement acceptance gate.
  * A supported check can support a decision to keep a consumer blocked. */
-export function identityReviewStatus(records: IdentityRecord[], revalidations: ConsumerRevalidationRecord[] = []) {
+export function identityReviewStatus(records: IdentityRecord[], revalidations: ConsumerRevalidationRecord[] = [], stateRepairs: EntryStateRecord[] = []) {
   validateIdentityHistory(records);
   const first = records[0];
   if (!first) throw prerequisiteStop("Identity review has no retained records; inspect requirements inspect-identity-repairs for this source and copy tasks[].taskId once; do not guess or retry unchanged");
@@ -90,7 +108,7 @@ export function identityReviewStatus(records: IdentityRecord[], revalidations: C
     // shrink the full denominator to those target bindings.
     targetQuestionIds: [...new Set(intent.targets.flatMap(t => t.questionIds))],
     originalQuestionIds: firstConsumers?.phase === "identity-consumers" ? firstConsumers.originalQuestionIds : null,
-    priorUsage: intent.priorUsage, shards, consumerRevalidation: consumerRevalidationStatus(records, revalidations),
+    priorUsage: intent.priorUsage, shards, consumerRevalidation: consumerRevalidationStatus(records, revalidations, stateRepairs),
     verification: "ledger-snapshot-only" as const,
     executionAuthority: false as const, parentResumeAllowed: false as const, certificationGranted: false as const,
   };

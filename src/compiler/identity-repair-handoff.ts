@@ -28,7 +28,8 @@ export function identityReviewStatuses(history: LedgerRecord[]) {
     records.push(record); tasks.set(record.intent.taskId, records);
   }
   return [...tasks.entries()].map(([taskId, records]) => identityReviewStatus(records, history.flatMap(r =>
-    r.payload.kind === "identity-consumer-revalidation" && r.payload.record.scope.taskId === taskId ? [r.payload.record] : [])));
+    r.payload.kind === "identity-consumer-revalidation" && r.payload.record.scope.taskId === taskId ? [r.payload.record] : []), history.flatMap(r =>
+    r.payload.kind === "entry-state-repair" && r.payload.record.intent.taskId === taskId ? [r.payload.record] : [])));
 }
 
 export async function inspectIdentityReviewStatuses(root: string, sourceId: string, history: LedgerRecord[]) {
@@ -155,7 +156,7 @@ export async function inspectIdentityRepairHandoff(root: string, sourceId: strin
       || contentHash(prepared.review) !== contentHash(review.payload.review) || source.contentSha256 !== intent.sourceHash)
       throw prerequisiteStop("Original identity inspection context changed; preserve it and inspect the same task, no repinning or retry");
     const result = buildIdentityRepairHandoff(prepared, records, options, revalidations), canonical = new CanonicalModelStore(root);
-    result.summary.consumerRevalidation.attempts = tasks.find(t => t.taskId === intent.taskId)!.consumerRevalidation.attempts;
+    result.summary.consumerRevalidation = tasks.find(t => t.taskId === intent.taskId)!.consumerRevalidation;
     const typedRepairs = await Promise.all(repairs.map(async repair => {
       const authority = repair.plan.identityRequirements!, consumer = authority.consumerRepair!;
       const successor = repairs.find(p => p.plan.identityRequirements?.consumerRevalidation?.parentPlanHash === repair.plan.planHash);
@@ -205,7 +206,11 @@ export async function inspectIdentityRepairHandoff(root: string, sourceId: strin
       && r.payload.record.phase === "entry-presence-applied" ? [{ ref: r.payload.record.intent.ref, recordHash: contentHash(r.payload.record),
         status: "uncertainty-preserved", executableEntry: false, obligationStatus: "blocked", totalConsumers: r.payload.record.intent.totalConsumers,
         parentResumeAllowed: false, certificationGranted: false }] : []);
-    return { ...result, currentInputs: "original-finding-preserved-live-repair-separate", typedRepairs, entryPresenceRepairs,
+    const entryStateRepairs = history.flatMap(r => r.payload.kind === "entry-state-repair" && r.payload.record.intent.taskId === intent.taskId
+      && r.payload.record.phase === "entry-state-applied" ? [{ ref: r.payload.record.intent.ref, recordHash: contentHash(r.payload.record),
+        status: "repaired", executableEntry: false, obligationStatus: "revalidated", totalConsumers: r.payload.record.intent.totalConsumers,
+        parentResumeAllowed: false, certificationGranted: false }] : []);
+    return { ...result, currentInputs: "original-finding-preserved-live-repair-separate", typedRepairs, entryPresenceRepairs, entryStateRepairs,
       modelAndHostAcceptance: "not-reverified", ledgerHead: history.at(-1)!.hash };
   }
   const { prepareIdentityRequirements } = await import("./identity-requirement-service.js");
@@ -213,7 +218,7 @@ export async function inspectIdentityRepairHandoff(root: string, sourceId: strin
   const prepared = await prepareIdentityRequirements(root, { scope: dependency.scope, upstreamPlanHash: dependency.upstream.planHash,
     authorizationRef: dependency.authorizationRef }, intent.authorizationRef, intent.priorUsage);
   const result = buildIdentityRepairHandoff(prepared, records, options, revalidations);
-  result.summary.consumerRevalidation.attempts = tasks.find(t => t.taskId === intent.taskId)!.consumerRevalidation.attempts;
+  result.summary.consumerRevalidation = tasks.find(t => t.taskId === intent.taskId)!.consumerRevalidation;
   if (contentHash(await ledger.history()) !== contentHash(history)) throw prerequisiteStop("Identity ledger changed during inspection; preserve both snapshots, inspect the owning task before planning, no mutation or automatic retry");
   return { ...result, currentInputs: "verified", modelAndHostAcceptance: "not-reverified", ledgerHead: history.at(-1)!.hash };
 }

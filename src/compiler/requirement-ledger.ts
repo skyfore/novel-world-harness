@@ -8,6 +8,7 @@ import { consumerRepairRecordSchema, validateConsumerRepairHistory, type Consume
 import { consumerRevalidationRecordSchema, consumerRevalidationId, assertConsumerRevalidationPrefix, validateConsumerRevalidationHistory, validateConsumerCorrectionLineage, type ConsumerRevalidationRecord } from "./identity-consumer-revalidation-model.js";
 import type { IdentityRecoveryPermit } from "../runtime/compile-loop/identity-recovery-host.js";
 import { entryPresenceRecordSchema, entryPresenceRepairId, validateEntryPresenceHistory, type EntryPresenceRecord } from "./entry-presence-repair-model.js";
+import { entryStateRecordSchema, entryStateRepairId, validateEntryStateHistory, type EntryStateRecord } from "./entry-state-repair-model.js";
 import { textAnchorForByteRange } from "./text-anchors.js";
 import { sourceAuditProofSchema, type SourceAuditProof } from "./role-source-audit-model.js";
 import { roleQuestionSchema, roleQuestionDispositionSchema, type RoleQuestion, type RoleQuestionDisposition, roleQuestions, roleEvidenceNeedSchema, type RoleEvidenceNeed } from "./role-review-verification.js";
@@ -45,6 +46,7 @@ export const requirementSetSchema = z.object({
 export type RequirementSet = z.infer<typeof requirementSetSchema>;
 const payloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("entry-presence-repair"), record: entryPresenceRecordSchema }).strict(),
+  z.object({ kind: z.literal("entry-state-repair"), record: entryStateRecordSchema }).strict(),
   z.object({ kind: z.literal("identity-consumer-revalidation"), record: consumerRevalidationRecordSchema }).strict(),
   z.object({ kind: z.literal("identity-consumer-repair"), record: consumerRepairRecordSchema }).strict(),
   z.object({ kind: z.literal("identity-requirements"), record: identityRecordSchema }).strict(),
@@ -242,7 +244,7 @@ export class RequirementLedger {
     if (incoming.some(record => record.sourceId !== this.sourceId)) throw new Error("Requirement journal restore source mismatch; stop for host review");
     if (incoming.length && !bytes) throw new Error("Requirement journal restore needs immutable source bytes; stop for host storage review");
     for (const record of incoming) {
-      if (record.payload.kind === "entry-presence-repair") {
+      if (record.payload.kind === "entry-presence-repair" || record.payload.kind === "entry-state-repair") {
         const r = record.payload.record;
         if (r.intent.sourceHash !== crypto.createHash("sha256").update(bytes!).digest("hex") || "evidence" in r && r.evidence.some(e =>
           contentHash(e.anchor) !== contentHash(textAnchorForByteRange(this.sourceId, bytes!, e.anchor.startByte, e.anchor.endByte))
@@ -340,6 +342,20 @@ export class RequirementLedger {
     if (!existing) {
       const identity = { version: 1 as const, sourceId: this.sourceId, sequence: history.length, predecessorHash: history.at(-1)?.hash ?? null,
         payload: { kind: "entry-presence-repair" as const, record } };
+      requirementJournalSchema.parse([...history, { ...identity, hash: contentHash(identity) }]);
+      await this.publish(identity.payload);
+    }
+  }
+  async recordEntryStateRepair(raw: EntryStateRecord): Promise<void> {
+    const record = entryStateRecordSchema.parse(raw), history = await this.history();
+    const existing = history.find(r => r.payload.kind === "entry-state-repair"
+      && entryStateRepairId(r.payload.record.intent) === entryStateRepairId(record.intent) && r.payload.record.phase === record.phase);
+    if (existing && (existing.payload.kind !== "entry-state-repair" || contentHash(existing.payload.record) !== contentHash(record)))
+      throw prerequisiteStop("State repair phase already consumed; preserve exact original proof, no replacement or retry");
+    await (await import("./entry-state-repair.js")).verifyEntryStateRecord(this.root, record, history);
+    if (!existing) {
+      const identity = { version: 1 as const, sourceId: this.sourceId, sequence: history.length, predecessorHash: history.at(-1)?.hash ?? null,
+        payload: { kind: "entry-state-repair" as const, record } };
       requirementJournalSchema.parse([...history, { ...identity, hash: contentHash(identity) }]);
       await this.publish(identity.payload);
     }
@@ -826,17 +842,30 @@ export const requirementJournalSchema = z.array(recordSchema).superRefine((recor
       if (s.totalConsumers !== identityHistories.get(s.taskId)?.[0]?.intent.consumerShards.reduce((n, shard) => n + shard.refs.length, 0))
         throw prerequisiteStop("Presence repair changed the original consumer denominator");
       if (s.sourceId !== sourceId || s.requirementPrefix.length > index || records[s.requirementPrefix.length - 1]?.hash !== s.requirementPrefix.head
-        || records.slice(s.requirementPrefix.length, index).some(e => e.payload.kind === "entry-presence-repair"
+        || records.slice(s.requirementPrefix.length, index).some(e => (e.payload.kind === "entry-presence-repair" || e.payload.kind === "entry-state-repair")
           ? e.payload.record.intent.taskId !== s.taskId || e.payload.record.intent.identityIntentHash !== s.identityIntentHash
           : e.payload.kind !== "identity-consumer-revalidation" || e.payload.record.scope.taskId !== s.taskId || e.payload.record.scope.identityIntentHash !== s.identityIntentHash))
         throw prerequisiteStop("Presence repair changed its original source, prefix or task");
       validateEntryPresenceHistory([...previous, r], records.slice(0, index).flatMap(e => e.payload.kind === "identity-consumer-revalidation" ? [e.payload.record] : []));
       presenceRepairs.set(id, [...previous, r]);
     }
+    const stateRepairs = new Map<string, EntryStateRecord[]>();
+    for (const [index, entry] of records.entries()) if (entry.payload.kind === "entry-state-repair") {
+      const r = entry.payload.record, s = r.intent, id = entryStateRepairId(s), previous = stateRepairs.get(id) ?? [];
+      if (s.totalConsumers !== identityHistories.get(s.taskId)?.[0]?.intent.consumerShards.reduce((n, shard) => n + shard.refs.length, 0))
+        throw prerequisiteStop("State repair changed the original consumer denominator");
+      if (s.sourceId !== sourceId || s.requirementPrefix.length > index || records[s.requirementPrefix.length - 1]?.hash !== s.requirementPrefix.head
+        || records.slice(s.requirementPrefix.length, index).some(e => (e.payload.kind === "entry-presence-repair" || e.payload.kind === "entry-state-repair")
+          ? e.payload.record.intent.taskId !== s.taskId || e.payload.record.intent.identityIntentHash !== s.identityIntentHash
+          : e.payload.kind !== "identity-consumer-revalidation" || e.payload.record.scope.taskId !== s.taskId || e.payload.record.scope.identityIntentHash !== s.identityIntentHash))
+        throw prerequisiteStop("State repair changed its original source, prefix or task");
+      validateEntryStateHistory([...previous, r], records.slice(0, index).flatMap(e => e.payload.kind === "identity-consumer-revalidation" ? [e.payload.record] : []));
+      stateRepairs.set(id, [...previous, r]);
+    }
     const prerequisites = new Map<string, PrerequisiteRecord[]>();
     const representations = new Map<string, RepresentationRecord[]>();
     for (const record of records) {
-      if (record.payload.kind === "entry-presence-repair" || record.payload.kind === "identity-consumer-revalidation" || record.payload.kind === "identity-consumer-repair" || record.payload.kind === "role-dependency-review" || record.payload.kind === "role-semantic-scope" || record.payload.kind === "identity-requirements") continue; // Validated above; original question dispositions never change here.
+      if (record.payload.kind === "entry-presence-repair" || record.payload.kind === "entry-state-repair" || record.payload.kind === "identity-consumer-revalidation" || record.payload.kind === "identity-consumer-repair" || record.payload.kind === "role-dependency-review" || record.payload.kind === "role-semantic-scope" || record.payload.kind === "identity-requirements") continue; // Validated above; original question dispositions never change here.
       const roster = record.payload.kind === "core-role-definition" ? record.payload.definition.roster : record.payload.kind === "core-role-review-revision" ? record.payload.revision.priorRoster : record.payload.kind === "core-role-review-snapshot" ? record.payload.roster : undefined;
       for (const review of roster?.reviews ?? []) {
         if (retainedReviews.has(review.runId) && retainedReviews.get(review.runId) !== contentHash(review)) throw new Error("Retained role review run was rewritten");

@@ -4079,6 +4079,33 @@ Entry capability contract recovery 入口核验旧会话并登记一次契约转
 登记领域解除证据，再让编译器重新校验当前输入；不凭一句 resolution、换 run
 或删掉失败历史启动工作，也不为已经解除的领域条件启动无关工程修复。
 
+### 入口状态修复（entry-checkpoint-state/v1）
+
+`requirements repair-entry-state --source <id> --task <hash> --ref <ref> --authorization-ref <ref>`
+处理已有独立支持的 blocked 入口复验，先用 `--inspect` 验证范围；该检查只读且不调用模型。
+范围发现使用同一 source/task 的 `requirements inspect-identity-repairs`，复制
+`summary.consumerRevalidation.reviews[].ref`，不得猜测角色或事件。原负面判断、完整来源包、
+原问题、要求、分母、账本前缀、费用和失败历史都绑定在修复意图中。
+
+`preview_entry_state_repair` 和 `submit_entry_state_repair` 只保存提案或独立检查。
+从输入 `stateOperations[]` 复制 `index`、`operationHash`，从
+`context.originalInput.evidencePacket.sources[]` 复制原文段 ID 和 exact。
+删除仅限该角色的意图或定性身体状态操作；新增仅限既有 `character.plan` 和定性身体字段，
+每项都须有精确证据、支持强度及解释。字段／选择器错误最多一次实质纠正；有效 preview
+之后在独立的一轮中单独提交原样草稿。SDK 参数拒绝同样计数。范围、宿主、预算、已消耗阶段
+或第二次错误必须停止，不重命名、不换授权重跑；已封存结果只能零生成恢复登记。
+
+独立会话逐项检查来源、身份依赖、事件之前的时间边界、知识隔离、在场与能动性、入口状态、
+写入范围以及全部原要求的兼容性。只有完整支持的提案才能通过原提案库提交。
+`lowerEntryState` 是不依赖小说或身份任务的纯转换，不授予写权限。它只修改目标入口的
+角色状态操作，不能改动知识、在场、原文叙述、其他角色、事件结果或执行覆盖层。
+原文不能支持可操作上下文时仍为 blocked，不从后续结果反推动机。
+
+四阶段回执追加到原 RequirementLedger。`reviews` 保留原负面判断，`currentReviews`
+另行投影已接受修订的复验状态。该状态不解决全局身份问题，不恢复角色来源审计，也不授予
+行动证明、全书认证或激活。入口状态与在场修复按同一账本顺序逆向验证，不能分开回退后
+掩盖中间修订。后续消费者继承全部已消耗调用；版本或证据漂移必须停止。
+
 ### 未决在场入口修复（entry-presence-uncertainty/v1）
 
 `requirements repair-entry-presence` 只处理同一 source/task 下已有独立支持的

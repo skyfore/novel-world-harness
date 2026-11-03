@@ -180,32 +180,4 @@ export async function verifyEntryPresenceRecord(root: string, record: EntryPrese
   }
 }
 
-/** Only exact accepted outputs may explain catalog drift. Return comparison
- * baselines; active world payloads and unresolved obligations stay untouched. */
-export async function entryPresenceCatalogBaselines(root: string, sourceId: string, taskId: string, planHash: string, current: ReadonlyMap<string, unknown>) {
-  const history = await new RequirementLedger(root, sourceId).history(), records = entryPresenceRecords(history, taskId);
-  const appliedRecords = records.filter(r => r.phase === "entry-presence-applied" && r.intent.upstreamPlanHash === planHash);
-  if (!appliedRecords.length) return [];
-  const actual = (await loadCompilerArtifactRecords(root, sourceId)).filter(r => r.status === "canonical");
-  const payloads = new Map(current), assertions = new Map(actual.map(r => [`${r.kind}:${r.logicalId}`, r.evidenceAssertions]));
-  const sorted = (items: EntryPresenceIntent["baselines"][number]["evidenceAssertions"]) => [...items].sort((a, b) => a.id.localeCompare(b.id));
-  const revisions = new Map<string, { kind: EntryPresenceIntent["baselines"][number]["kind"]; id: string; payload: unknown; committed: boolean;
-    assertions: EntryPresenceIntent["baselines"][number]["evidenceAssertions"]; originalAssertions: EntryPresenceIntent["baselines"][number]["evidenceAssertions"] }>();
-  // Rewind exact accepted revisions in reverse ledger order. An older receipt
-  // is immutable evidence, not a requirement that it stay the active head.
-  for (const applied of appliedRecords.reverse()) {
-    const group = records.filter(r => entryPresenceRepairId(r.intent) === entryPresenceRepairId(applied.intent));
-    for (const r of group) await verifyEntryPresenceRecord(root, r, history);
-    const envelopes = presenceEnvelopes(applied.intent, group[0] as Extract<EntryPresenceRecord, { phase: "entry-presence-proposal" }>);
-    for (const [index, b] of applied.intent.baselines.entries()) {
-      const key = `${b.kind}:${b.id}`, envelope = envelopes[index]!, later = revisions.get(key);
-      if (contentHash(payloads.get(key)) !== contentHash(envelope.payload)
-        || contentHash(sorted(assertions.get(key) ?? [])) !== contentHash(sorted(envelope.evidenceAssertions)))
-        throw entryPresenceStop("Applied presence revision changed outside its receipt chain");
-      payloads.set(key, b.payload); assertions.set(key, b.evidenceAssertions);
-      revisions.set(key, { kind: b.kind, id: b.id, payload: b.payload, committed: true,
-        assertions: later?.assertions ?? envelope.evidenceAssertions, originalAssertions: b.evidenceAssertions });
-    }
-  }
-  return [...revisions.values()];
-}
+export { entryRepairCatalogBaselines as entryPresenceCatalogBaselines } from "./entry-repair-catalog.js";

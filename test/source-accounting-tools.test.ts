@@ -23,6 +23,44 @@ afterEach(async () => {
 });
 
 describe("source-unit accounting tools", () => {
+  it("keeps a blocked unit discoverable after partial coverage and retains its explicit refinement", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-overlap-blocker-")); roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero waits for a signal.\n");
+    const batch = (await prepareCompilerBatches(root, fixture.source)).find(item => item.semanticStage === "executable")!;
+    const batchId = batch.id;
+    let toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch(batch.segmentIds, batchId, fixture.source.id);
+    const call = (name: string, input: unknown) => toolset.tools.find(t => t.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
+    const discover = async () => JSON.parse(((await call("find_source_accounting_units", { status: "unresolved", offset: 0 })).content[0] as { text: string }).text);
+    const first = await discover();
+    await call("account_source_units", { proposal_id: "signal-gap", page_token: first.pageToken,
+      page_default: { status: "intentionally-deferred", reason: "The signal's effect still needs semantic review." } });
+    const observations = createCompilerProposalToolset(root), observationId = batchId.replace("-executable-", "-observation-");
+    await observations.beginBatch(batch.segmentIds, observationId, fixture.source.id);
+    await observations.tools.find(t => t.name === "propose_entity_mention")!.execute("mention", { proposal_id: "hero-mention-proposal", annotation_id: "hero-mention",
+      selector: { segment_id: fixture.segmentId, exact: "Hero" }, surface: "Hero", form: "proper", kind_candidates: ["character"], confidence: 1 } as never, undefined, undefined, {} as never);
+    await observations.tools.find(t => t.name === "finish_compiler_batch")!.execute("finish", { outcome: "complete",
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Partial identity annotation." }], summary: "Partial identity annotation." } as never, undefined, undefined, {} as never);
+    await new CompilerBatchStore(root).markComplete(fixture.source.id, observationId);
+    toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch(batch.segmentIds, batchId, fixture.source.id);
+    const blocked = await discover();
+    expect(blocked.units).toHaveLength(first.units.length);
+    expect(blocked.units[0]).toMatchObject({ status: "intentionally-deferred", pending: { proposalId: "signal-gap" } });
+    await call("account_source_units", { proposal_id: "signal-review", page_token: blocked.pageToken,
+      page_default: { status: "background-only", reason: "Reviewed: this sentence states waiting, with no assertion that a signal occurs or changes the world." } });
+    expect((await discover()).units).toEqual([]);
+    await expect(call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [{ segment_id: fixture.segmentId,
+      disposition: "proposed", summary: "Mention plus an explicit review of the retained signal gap." }], summary: "Reviewed the original blocker." }))
+      .resolves.toMatchObject({ details: { compilerBatchFinished: true } });
+    const store = new SourceAccountingStore(root);
+    expect((await store.readProposal(fixture.source.id, "accepted", "signal-review")).refinements)
+      .toEqual([expect.objectContaining({ proposalId: "signal-gap", unitIds: first.units.map((u: { unitId: string }) => u.unitId) })]);
+    const manifest = (await store.read(fixture.source.id))!;
+    expect(manifest.records.find(r => r.unitId === first.units[0].unitId)?.status).toBe("represented");
+    expect(manifest.batchReviews[0]!.unitDecisions[0]!.proposalId).toBe("signal-review");
+    expect((await store.readProposal(fixture.source.id, "accepted", "signal-gap")).decisions[0]!.status).toBe("intentionally-deferred");
+  });
   it("preserves a 20-unit failed page across sessions and permits one same-ID correction after a 19+1 rebase", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-rebase-")); roots.push(root);
     const ruleText = "Entry requires day zero or later.";

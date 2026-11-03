@@ -78,6 +78,8 @@ import {
   SourceAccountingStore,
   isBlockingSourceAccountingStatus,
   projectSourceAccountingProposalDecisions,
+  sourceAccountingRefinedUnitIds,
+  retainedSourceAccountingDecisions,
   sourceUnitReviewRange,
   sourceUnitAccountingDecisionSchema,
   type ActiveSourceAccountingProposal,
@@ -1777,21 +1779,23 @@ export function createCompilerProposalToolset(
       ...semanticCoverage.annotations.flatMap((annotation) => annotation.anchors),
     ];
     const proposalStatus = new Map(activeProposals.map((item) => [item.proposal.id, item.proposalStatus]));
+    const refinedUnitIds = sourceAccountingRefinedUnitIds(activeProposals);
     return projectSourceAccountingProposalDecisions(activeProposals).flatMap((decision) => {
         const unit = units.get(decision.unitId);
         const nowRepresented = unit !== undefined && unit.kind !== "non-scene" && semanticSpans.some((span) =>
           span.sourceId === structure.sourceId
           && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
         // Accepted dispositions were valid under their original finish. On a
-        // later recovery, newly available exact semantics deterministically
-        // supersede only the overlapping decisions; the immutable proposal
-        // remains history and every still-unrepresented decision is replayed.
+        // later recovery, new coverage can replace nonblocking classifications.
+        // Explicit blockers and their reviewed successors remain in the receipt;
+        // overlapping text is not proof that a semantic obligation was resolved.
         const inheritedRepresentation = unit !== undefined && semanticCoverage.inheritedSpans.some((span) =>
           span.sourceId === structure.sourceId && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
         // A migrated, interrupted batch can still have pending classifications
         // from before cross-stage coverage existed. Preserve those immutable
         // drafts but project the verified prior evidence over their decisions.
-        if (nowRepresented && (proposalStatus.get(decision.proposalId!) === "accepted" || inheritedRepresentation)) return [];
+        if (nowRepresented && !isBlockingSourceAccountingStatus(decision.status) && !refinedUnitIds.has(decision.unitId)
+          && (proposalStatus.get(decision.proposalId!) === "accepted" || inheritedRepresentation)) return [];
         return [decision];
       });
   };
@@ -1870,6 +1874,7 @@ export function createCompilerProposalToolset(
       "For read-only inspection, page only through exact returned nextOffset values until null; never estimate an offset.",
       "Units marked represented are host-derived from exact evidence or annotations and must not be dispositioned by the model.",
       "Same-slice checkpointed observation/semantic evidence contributes source coverage only. You must still review executable mechanisms; represented is not proof of an action, rule, or playable world.",
+      "Explicit unresolved/intentionally-deferred reviews survive overlapping evidence. A same-batch nonblocking refinement must address the original reason and retain its predecessor; overlap alone is not a resolution.",
       "A prior field reports the materialized parent/current manifest only as review context; it never satisfies this active batch's fresh accounting requirement.",
       "A non-empty status=unresolved result returns a pageToken and one-based unit indexes. Review every unit, then pass that token to account_source_units with one page_default plus only genuinely different page_overrides.",
       "After a successful page accounting proposal, refetch status=unresolved at offset=0. Blocking unresolved/intentionally-deferred decisions remain discoverable; resolve them under a fresh proposal ID when later review supports a nonblocking disposition.",
@@ -1902,6 +1907,7 @@ export function createCompilerProposalToolset(
         ? boundedSliceSegments.filter((segment) => segment.id === input.segment_id)
         : boundedSliceSegments;
       const currentByUnit = new Map((manifest?.records ?? []).map((record) => [record.unitId, record]));
+      const retainedDecisions = manifest ? retainedSourceAccountingDecisions(manifest) : new Map();
       const pendingByUnit = new Map(projectActiveAccountingDecisions(activeAccounting, structure, semanticCoverage).map((decision) => [
         decision.unitId,
         { proposalId: decision.proposalId!, status: decision.status, reason: decision.reason },
@@ -1922,11 +1928,14 @@ export function createCompilerProposalToolset(
             && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
           const pending = pendingByUnit.get(unit.id);
           const current = currentByUnit.get(unit.id);
+          const review = pending ?? retainedDecisions.get(unit.id);
           const status: SourceAccountingStatus = unit.kind === "non-scene"
             ? "background-only"
-            : represented
-              ? "represented"
-              : pending?.status ?? "unresolved";
+            : review && isBlockingSourceAccountingStatus(review.status)
+              ? review.status
+              : represented
+                ? "represented"
+                : pending?.status ?? "unresolved";
           return {
             unitId: unit.id,
             kind: unit.kind,
@@ -2092,11 +2101,13 @@ export function createCompilerProposalToolset(
         if (unit.kind === "non-scene") {
           throw new Error(`Source unit ${decision.unitId} is deterministic non-scene content and cannot receive a model disposition.`);
         }
-        if (semanticSpans.some((span) => span.sourceId === source.id
+        const priorDecision = alreadyDecided.get(decision.unitId);
+        const refinesBlocker = priorDecision?.proposalId && priorDecision.proposalId !== input.proposal_id
+          && isBlockingSourceAccountingStatus(priorDecision.status) && !isBlockingSourceAccountingStatus(decision.status);
+        if (!refinesBlocker && semanticSpans.some((span) => span.sourceId === source.id
           && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte))) {
           representedUnitIds.push(decision.unitId);
         }
-        const priorDecision = alreadyDecided.get(decision.unitId);
         if (priorDecision?.proposalId && priorDecision.proposalId !== input.proposal_id) {
           if (isBlockingSourceAccountingStatus(priorDecision.status)
             && !isBlockingSourceAccountingStatus(decision.status)) {
@@ -3173,6 +3184,7 @@ export function createCompilerProposalToolset(
           evidenceAssertions: prospectiveCoverage.assertions,
           annotations: prospectiveCoverage.annotations,
           unitDecisions: activeAccountingDecisions,
+          refinedUnitIds: sourceAccountingRefinedUnitIds(activeAccountingProposals),
           requireExplicitSemanticDisposition: accountingSource.bytes >= EXPLICIT_SOURCE_ACCOUNTING_MIN_SOURCE_BYTES
             && compilerBatchId.startsWith(`batch-${activeSourceId}-`)
             && !activeBoundaryCalibration,

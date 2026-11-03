@@ -173,6 +173,8 @@ describe("compiler audit", () => {
     expect(report.canonical.entities).toBe(1);
     expect(report.evidence.invalidReferences).toBe(0);
     expect(report.evidence.validBindingRatio).toBe(1);
+    expect(report.evidence.missingExactBindings).toEqual(["entity:hero"]);
+    expect(report.readiness.blockingIssues).toContainEqual(expect.stringContaining("entity:hero: exact field evidence has not been recorded"));
     expect(report.coverage.entityResolution).toBeNull();
     expect(report.coverage.majorEventResolution).toBeNull();
     expect(report.coverage.epistemicCoverage).toBeNull();
@@ -236,6 +238,7 @@ describe("compiler audit", () => {
       artifactsWithExactEvidence: 1,
       invalidAssertions: 0,
       exactBindingRatio: 1,
+      missingExactBindings: [],
     });
     expect(report.readiness.evidence).toBe("ready");
   });

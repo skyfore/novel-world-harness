@@ -102,10 +102,15 @@ it("100% accounting and zero execution obligations cannot close missing resoluti
   audit.readiness.resolution = "not-ready";
   audit.resolutions.missingMentionIds = ["unresolved-mention"];
   audit.readiness.evidence = "unknown";
+  audit.evidence.missingExactBindings = ["entity:unbound-character"];
+  audit.readiness.blockingIssues.push("Unrelated event resolution failure");
   const result = compilationClosureReport(input);
   expect(result.gates.find(g => g.dimension === "accounting")).toMatchObject({ state: "blocked", refs: ["critical-deferred-unit"] });
   expect(result.gates.find(g => g.dimension === "resolution")).toMatchObject({ state: "blocked", refs: ["unresolved-mention"] });
-  expect(result.gates.find(g => g.dimension === "evidence")!.state).toBe("unknown");
+  expect(result.gates.find(g => g.dimension === "evidence")).toMatchObject({ state: "unknown", refs: ["entity:unbound-character"] });
+  expect(result.gates.find(g => g.dimension === "evidence")!.reasons.join(" ")).toContain("exact field evidence is missing");
+  expect(result.gates.find(g => g.dimension === "evidence")!.reasons.join(" ")).not.toContain("Unrelated event resolution failure");
+  expect(result.gates.find(g => g.dimension === "accounting")!.reasons.join(" ")).toContain("1 retain unresolved or deferred work");
   expect(() => assertCompilationClosure(result)).toThrow("COMPILATION_CLOSURE_BLOCKED");
   const previousHash = result.auditHash;
   audit.resolutions.missingMentionIds.push("changed-consumer");

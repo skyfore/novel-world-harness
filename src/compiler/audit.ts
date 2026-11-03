@@ -332,6 +332,7 @@ export type CompilerAuditReport = {
     artifactsWithExactEvidence: number;
     invalidAssertions: number;
     exactBindingRatio: number | null;
+    missingExactBindings: string[];
     errors: Array<{ artifact: string; code: string; message: string }>;
   };
   consistency: {
@@ -684,6 +685,7 @@ export async function auditCompiler(
   let artifactsWithExactEvidence = 0;
   let invalidAssertions = 0;
   let validExactBindings = 0;
+  const missingExactBindings: string[] = [];
   let worldRuleExactEvidenceIssues = 0;
   for (const artifact of evidenceArtifacts) {
     referencesChecked += artifact.evidence.length;
@@ -692,6 +694,7 @@ export async function auditCompiler(
     for (const issue of result.issues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
     const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
     if (!binding?.assertions.length) {
+      missingExactBindings.push(`${artifact.kind}:${artifact.id}`);
       const entryIssues = entryArtifactEvidenceIssues(artifact.kind, artifact.payload, []);
       invalidAssertions += entryIssues.length;
       evidenceErrors.push(...entryIssues.map(issue => ({ artifact: artifact.name, code: issue.code, message: issue.message })));
@@ -1498,6 +1501,7 @@ export async function auditCompiler(
     : "not-ready";
   const readinessBlockingIssues = [
     ...changedSinceIngest.map((sourceId) => `Source ${sourceId} changed or failed immutable-source verification.`),
+    ...missingExactBindings.map(ref => `${ref}: exact field evidence has not been recorded; source-span overlap alone does not verify its assertions.`),
     ...evidenceErrors.map((error) => `${error.artifact}: ${error.code}: ${error.message}`),
     ...observationErrors.map((error) => `${error.observation}: ${error.code}: ${error.message}`),
     ...resolutionErrors.map((error) => `Identity resolution ${error.sourceId}: ${error.message}`),
@@ -1758,6 +1762,7 @@ export async function auditCompiler(
       artifactsWithExactEvidence,
       invalidAssertions,
       exactBindingRatio,
+      missingExactBindings,
       errors: evidenceErrors,
     },
     consistency: {

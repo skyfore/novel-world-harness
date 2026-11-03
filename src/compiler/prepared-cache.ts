@@ -1709,7 +1709,8 @@ async function assertPreparedCompilerSnapshotEvidence(
 ): Promise<void> {
   const accountingReferenceIssues = validateFrozenAccounting(bundle).filter(issue =>
     issue.code === "SOURCE_REPRESENTATION_REFERENCE_INVALID"
-    || issue.code === "SOURCE_REPRESENTATION_UNSUPPORTED");
+    || issue.code === "SOURCE_REPRESENTATION_UNSUPPORTED"
+    || issue.code === "SOURCE_ACCOUNTING_BLOCKER_SUPPRESSED");
   if (accountingReferenceIssues.length) {
     throw new Error(`Prepared source-accounting representation is not bound to current snapshot evidence: ${accountingReferenceIssues
       .map(issue => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)

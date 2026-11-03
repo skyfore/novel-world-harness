@@ -75,10 +75,20 @@ export function compilationClosureReport(input: {
     : input.handoffBlockers.length || input.upstreamIssues?.length ? "blocked" : "passed", "repair", input.handoffBlockers, input.upstreamIssues);
   for (const dimension of ["structural", "evidence", "accounting", "resolution", "semantic"] as const) {
     const state = audit.readiness[dimension];
+    const missingBindings = audit.evidence.missingExactBindings ?? [];
+    const reasons = dimension === "evidence"
+      ? [...audit.evidence.errors.map(e => `${e.artifact}: ${e.code}: ${e.message}`),
+        ...missingBindings.map(ref => `${ref}: exact field evidence is missing; inspect the artifact and its source before proposing evidence bindings.`),
+        ...(state === "unknown" && !missingBindings.length ? ["Exact evidence coverage is not established for the current canonical inventory."] : [])]
+      : dimension === "accounting"
+        ? [`${audit.observations.accountedUnits}/${audit.observations.baseUnits} source units have accounting records; ${audit.observations.blockingUnits} retain unresolved or deferred work.`,
+          ...(audit.observations.unaccountedUnits ? [`${audit.observations.unaccountedUnits} source units have no accounting record.`] : [])]
+        : audit.readiness.blockingIssues;
     gate(dimension, state === "ready" ? "passed" : state === "not-ready" ? "blocked" : "unknown", "repair",
       dimension === "accounting" ? input.blockedUnitIds
-        : dimension === "resolution" ? [...audit.resolutions.missingMentionIds, ...audit.eventResolutions.missingMentionIds] : [],
-      state === "ready" ? [] : audit.readiness.blockingIssues);
+        : dimension === "resolution" ? [...audit.resolutions.missingMentionIds, ...audit.eventResolutions.missingMentionIds]
+          : dimension === "evidence" ? [...new Set([...missingBindings, ...audit.evidence.errors.map(e => e.artifact)])] : [],
+      state === "ready" ? [] : reasons);
   }
   gate("registered-requirements", input.requirementIssues.length ? "blocked" : "passed", "requirements", [], input.requirementIssues);
   return compilationClosureSchema.parse({ version: 1, policy: "compilation-closure/v1", sourceId: source.sourceId, sourceSha256: source.sourceSha256,

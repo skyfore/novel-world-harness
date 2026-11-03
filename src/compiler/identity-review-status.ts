@@ -4,6 +4,8 @@ import { identityConsumerShardReady, identityDefinitionGaps, identityRequirement
 import { prerequisiteStop } from "./role-source-prerequisites.js";
 import { consumerRevalidationId, validateConsumerRevalidationHistory, type ConsumerRevalidationRecord } from "./identity-consumer-revalidation-model.js";
 import type { ConsumerRevalidationAttempt } from "./identity-consumer-attempt-status.js";
+import { canonicalEventSchema } from "../world/model.js";
+import { eventExecutionSchema } from "../world/event-execution.js";
 import { entryStateRepairId, lowerEntryStateRepair, validateEntryStateHistory, type EntryStateRecord } from "./entry-state-repair-model.js";
 
 /** Receipt-bound reviews are additional evidence. They never replace the old
@@ -40,12 +42,15 @@ export function consumerRevalidationStatus(original: IdentityRecord[], records: 
     const lowered = lowerEntryStateRepair(applied.intent, proposal)[0]!;
     if (applied.phase !== "entry-state-applied" || applied.artifacts[0]?.afterHash !== contentHash(lowered.payload))
       throw prerequisiteStop("Applied entry repair changed its checked consumer revision");
-    const revisionHash = contentHash(lowered.payload.characterEntryCheckpoints!.find(e => e.actorId === applied.intent.actorId));
+    const entry = lowered.kind === "event-execution" ? eventExecutionSchema.parse(lowered.payload).entryCheckpoint
+      : canonicalEventSchema.parse(lowered.payload).characterEntryCheckpoints!.find(e => e.actorId === applied.intent.actorId);
+    const revisionHash = contentHash(entry);
+    const ownerRefs = applied.intent.baselines.map(b => ({ ref: `${b.kind}:${b.id}`, revisionHash: b.kind === lowered.kind && b.id === lowered.id ? contentHash(lowered.payload) : b.revisionHash }));
     return { ...review, id: entryStateRepairId(applied.intent), scopeHash: contentHash(applied.intent),
       proposalRecordHash: contentHash(proposal), checkRecordHash: contentHash(check), disposition: "revalidated" as const, status: "revalidated" as const,
       currentRevisionHash: revisionHash, blockedRequirements: [],
       reviewContract: review.reviewContract ? { ...review.reviewContract, currentRevisionHash: revisionHash,
-        ownerRefs: [{ ref: `canonical-event:${applied.intent.eventId}`, revisionHash: contentHash(lowered.payload) }] } : undefined,
+        ownerRefs } : undefined,
       rationale: proposal.output.rationale, independentRationale: check.output.rationale, entryStateRepair: contentHash(applied) };
   });
   const total = original[0]?.intent.consumerShards.reduce((n, s) => n + s.refs.length, 0) ?? 0;

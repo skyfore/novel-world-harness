@@ -15,17 +15,17 @@ import { consumerRevalidationId, consumerRevalidationScopeSchema, type ConsumerR
 import { deriveConsumerReviewContract } from "../src/compiler/consumer-review-contract.js";
 import { loadCompilerArtifactRecords } from "../src/compiler/artifact-retrieval.js";
 import { originalIdentityCatalog } from "../src/compiler/upstream-repair-preflight.js";
-import { ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR, entryStateIntentSchema, entryStateRepairDirectory, entryStateCriteria, type EntryStateRecord } from "../src/compiler/entry-state-repair-model.js";
+import { ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR, ENTRY_DELTA_BINDING_REPAIR, entryStateIntentSchema, entryStateRepairDirectory, entryStateCriteria, type EntryStateRecord } from "../src/compiler/entry-state-repair-model.js";
 import * as stateRepair from "../src/compiler/entry-state-repair.js";
 import { runEntryStateRepair } from "../src/workflow/entry-state-repair.js";
 import { consumerRevalidationStatus } from "../src/compiler/identity-review-status.js";
 import { realIdentityFixture } from "./helpers/identity-real-fixture.js";
 import { mockPiProvider } from "./helpers/pi-provider.js";
 
-it.each([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR])("rewinds consecutive entry repairs including %s without invalidating historical receipts", async secondPolicy => {
+it.each([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR, ENTRY_DELTA_BINDING_REPAIR])("rewinds consecutive entry repairs including %s without invalidating historical receipts", async secondPolicy => {
   const refs = ["entity/ada", "entry/ada/encounter", "entry/bea/encounter"];
   const f = await realIdentityFixture(false, false, 3, { consumerRefs: refs,
-    additionalSource: "Ada and Bea climbed to the platform. Both are sitting beside their observer before the bell rings.\n" });
+    additionalSource: "Ada and Bea climbed to the platform. Both are sitting beside their observer before the bell rings. Bea intends to wait for the bell.\n" });
   const { root, p } = f;
   try {
     f.outputs[2].consumers[0].disposition = "additional-repair-required";
@@ -77,9 +77,12 @@ it.each([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR])("rewinds consecutive entry r
       participants: ["ada", "bea", "observer"], participantPresence: ["ada", "bea", "observer"].map(entityId => ({ entityId, mode: "physical" })),
       storyTime: { kind: "ordinal", label: "later", orderHint: 3 }, preconditions: [], observedOutcome: { version: 1, operations: [] }, causalParents: [],
       characterEntryCheckpoints: ["ada", "bea"].map(actorId => ({ actorId, readerSetup: "Before the encounter", actorObservation: "You wait.",
-        participantPresence: [{ entityId: actorId, mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: actorId, field: "character.plan", value: actorId === "bea" && secondPolicy === ENTRY_WORDING_REPAIR ? "wait for the bell" : "climb onto the platform" }] } })),
+        participantPresence: [{ entityId: actorId, mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: actorId, field: "character.plan", value: actorId === "bea" && secondPolicy !== ENTRY_STATE_REPAIR ? "wait for the bell" : "climb onto the platform" }] } })),
       evidence: refsEvidence, confidence: 1 });
     await canon.putEvent(originalEvent);
+    if (secondPolicy === ENTRY_DELTA_BINDING_REPAIR) await canon.putEventExecution({ id: "bea-entry", canonicalEventId: "encounter", actorId: "bea", evidence: refsEvidence,
+      entryCheckpoint: { ...originalEvent.characterEntryCheckpoints![1]!, delta: { version: 1, operations: [{ op: "set", entityId: "bea", field: "character.momentum", value: 1 }] },
+        knowledge: { version: 1, operations: [] }, projectionSeed: { version: 1, semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] }, activeRuleIds: [], elapsedDays: 0 } } });
     for (const entityId of originalEvent.participants) await canon.putEventParticipation(eventParticipationSchema.parse({
       id: `${entityId}-encounter`, eventId: "encounter", entityId, role: "experiencer", presence: "physical", confidence: 1, evidence: refsEvidence }));
     await new InitialWorldStore(root).put({ version: 1, participantPresence: [{ entityId: "observer", mode: "physical" }],
@@ -93,7 +96,10 @@ it.each([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR])("rewinds consecutive entry r
       const { intent } = prepared;
       const output: Extract<EntryStateRecord, { phase: "entry-state-proposal" }>["output"] = { phase: "entry-state-proposal" as const, scopeHash: h(intent), evidence: [selector], retainedQuestionIds: intent.retainedQuestionIds,
         playable: false as const, parentResumeAllowed: false as const, disposition: "repaired" as const,
-        edit: intent.policy === ENTRY_WORDING_REPAIR ? { fields: [{ field: "readerSetup" as const, value: "Bea sits beside the observer before the bell rings.",
+        edit: intent.policy === ENTRY_DELTA_BINDING_REPAIR ? { canonicalDeltaHash: h(canonicalEventSchema.parse(intent.baselines.find(b => b.kind === "canonical-event")!.payload).characterEntryCheckpoints!.find(e => e.actorId === intent.actorId)!.delta),
+          executionDeltaHash: h((intent.baselines.find(b => b.kind === "event-execution")!.payload as any).entryCheckpoint.delta),
+          bindings: [{ index: 0, evidence: [selector], strength: "explicit" as const, rationale: "Bea intends to wait for the bell, without numeric pressure." }] }
+          : intent.policy === ENTRY_WORDING_REPAIR ? { fields: [{ field: "readerSetup" as const, value: "Bea sits beside the observer before the bell rings.",
           strength: "explicit" as const, evidence: [selector], rationale: "Keep the entry description before the bell." }] } : { remove: [{ index: 0, operationHash: h(canonicalEventSchema.parse(intent.baselines[0]!.payload).characterEntryCheckpoints!.find(e => e.actorId === intent.actorId)!.delta.operations[0]) }],
           set: [{ field: "character.posture", value: "sitting", strength: "explicit" as const, evidence: [selector], rationale: "Both actors are seated before the event." }] },
         rationale: "Completed climbing is not a current plan; retain evidenced bodily context." };
@@ -107,16 +113,20 @@ it.each([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR])("rewinds consecutive entry r
       return session;
     });
     const publish = RequirementLedger.prototype.recordEntryStateRepair;
-    let interrupt = true;
+    let interrupt = true, bindingCommitInterrupt = true;
     vi.spyOn(RequirementLedger.prototype, "recordEntryStateRepair").mockImplementation(async function (this: RequirementLedger, record) {
       await publish.call(this, record);
       if (interrupt) { interrupt = false; throw Error("interrupted after durable journal publication"); }
+      if (record.intent.policy === ENTRY_DELTA_BINDING_REPAIR && record.phase === "entry-state-commit" && bindingCommitInterrupt) {
+        bindingCommitInterrupt = false; throw Error("interrupted after binding commit intent");
+      }
     });
     const preparations: typeof prepared[] = [];
     for (const actorId of ["ada", "bea"]) {
       const catalog = (await loadCompilerArtifactRecords(root, p.intent.sourceId)).filter(r => r.status === "canonical");
       const event = canonicalEventSchema.parse(catalog.find(r => r.kind === "canonical-event" && r.logicalId === "encounter")!.payload);
-      const entry = event.characterEntryCheckpoints!.find(c => c.actorId === actorId)!, ref = `entry/${actorId}/encounter`;
+      const overlay = secondPolicy === ENTRY_DELTA_BINDING_REPAIR && actorId === "bea" ? await canon.getEventExecution("bea-entry") : null;
+      const entry = overlay?.entryCheckpoint ?? event.characterEntryCheckpoints!.find(c => c.actorId === actorId)!, ref = `entry/${actorId}/encounter`;
       const prefix = await ledger.history();
       const scope = consumerRevalidationScopeSchema.parse({ version: 1, sourceId: p.intent.sourceId, sourceHash: p.intent.sourceHash,
         taskId: p.intent.taskId, identityIntentHash: h(p.intent), inventoryHash: p.intent.inventoryHash, definitionHash: h(definition), requirementIds, ref,
@@ -124,7 +134,7 @@ it.each([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR])("rewinds consecutive entry r
         parentStateHash: p.intent.parentStateHash, originalBudgetHash: p.intent.originalBudgetHash, authorizationRef: "original review", priorUsage: { modelCalls: 0, totalPayloadBytes: 0 },
         priorBudgetFiles: [{ path: f.priorBudgetFile, hash: h(JSON.parse(await fs.readFile(f.priorBudgetFile, "utf8"))) }],
         requirementPrefix: { length: prefix.length, head: prefix.at(-1)!.hash }, reviewContract: deriveConsumerReviewContract({ sourceId: p.intent.sourceId, ref,
-          current: { payload: entry, revisionHash: h(entry) }, catalog: [{ kind: "canonical-event", id: event.id, payload: event, revisionHash: h(event), current: true }] }) });
+          current: { payload: entry, revisionHash: h(entry) }, catalog: catalog.map(r => ({ kind: r.kind, id: r.logicalId, payload: r.payload, revisionHash: h(r.payload), current: true })) }) });
       const originalInput = { requiredSourceSegmentIds: p.intent.requiredSourceSegmentIds,
         evidencePacket: { sources: p.manifest.segments.map((s: { id: string; startByte: number; endByte: number }) => ({ id: s.id, text: Buffer.from(p.bytes).subarray(s.startByte, s.endByte).toString() })) } };
       const proposal: ConsumerRevalidationRecord = { scope, inputHash: h(originalInput), predecessorRecordHash: null, sessionId: `prior-${actorId}-proposal`, traceRunId: `prior-${actorId}-proposal-trace`,
@@ -142,11 +152,19 @@ it.each([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR])("rewinds consecutive entry r
         authorizationRef: "repair exact source-supported state", createdAt: new Date().toISOString(), implementationHash: await stateRepair.entryStateImplementationHash(), contextHash: h(context),
         requirementIds, retainedQuestionIds: p.inventory.originalQuestionIds, totalConsumers: refs.length,
         requirementPrefix: { length: journal.length, head: journal.at(-1)!.hash }, priorUsage: scope.priorUsage, priorBudgetFiles: scope.priorBudgetFiles,
-        baselines: catalog.filter(r => r.kind === "canonical-event" && r.logicalId === "encounter")
+        baselines: catalog.filter(r => r.kind === "canonical-event" && r.logicalId === "encounter" || overlay && r.kind === "event-execution" && r.logicalId === overlay.id)
           .map(r => ({ kind: r.kind, id: r.logicalId, payload: r.payload, revisionHash: h(r.payload), evidenceAssertions: r.evidenceAssertions })) });
       prepared = { intent, context, parents: [proposal, checked], directory: entryStateRepairDirectory(root, intent) }; preparations.push(prepared);
       const args = { root, sourceId: scope.sourceId, taskId: scope.taskId, ref, policy: intent.policy, authorizationRef: intent.authorizationRef };
       if (actorId === "ada") await expect(runEntryStateRepair(args)).rejects.toThrow(/after durable journal/);
+      if (intent.policy === ENTRY_DELTA_BINDING_REPAIR) {
+        await expect(runEntryStateRepair(args)).rejects.toThrow(/after binding commit intent/);
+        expect(sessions).toHaveLength(4);
+        await canon.putEvent({ ...event, title: "Unreviewed owner drift" });
+        await expect(runEntryStateRepair(args)).rejects.toThrow(/baseline or evidence changed|stale exact-evidence binding/);
+        expect(sessions).toHaveLength(4);
+        await canon.putEvent(event);
+      }
       expect(await runEntryStateRepair(args)).toMatchObject({ status: "repaired", obligationStatus: "revalidated" });
     }
     expect(sessions).toHaveLength(4);
@@ -158,6 +176,12 @@ it.each([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR])("rewinds consecutive entry r
     expect(status.currentReviews.every(r => r.status === "revalidated" && r.entryStateRepair)).toBe(true);
     expect(() => consumerRevalidationStatus(identity, reviewRecords, repairRecords.map(r => r.phase === "entry-state-applied" ? { ...r, artifacts: r.artifacts.map(a => ({ ...a, afterHash: h("forged") })) } : r))).toThrow();
     expect(repairRecords).toHaveLength(8);
+    if (secondPolicy === ENTRY_DELTA_BINDING_REPAIR) {
+      const bound = await canon.getEventExecution("bea-entry"), event = await canon.getEvent("encounter");
+      expect(bound.entryCheckpoint!.delta).toEqual(event.characterEntryCheckpoints!.find(e => e.actorId === "bea")!.delta);
+      expect(bound.entryCheckpoint!.projectionSeed.elapsedDays).toBe(0);
+      expect(status.currentReviews.find(r => r.ref === "entry/bea/encounter")!.reviewContract!.ownerRefs).toHaveLength(2);
+    }
     for (const record of repairRecords) await stateRepair.verifyEntryStateRecord(root, record);
     const active = (await loadCompilerArtifactRecords(root, p.intent.sourceId)).filter(r => r.status === "canonical");
     const current = new Map(active.map(r => [`${r.kind}:${r.logicalId}`, r.payload]));

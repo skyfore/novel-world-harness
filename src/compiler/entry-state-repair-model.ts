@@ -1,8 +1,9 @@
 import path from "node:path";
 import { z } from "zod";
 import { lowerEntryState, entryStateEditSchema } from "./entry-state.js";
+import { entryDeltaBindingContext, entryDeltaBindingEditSchema, lowerEntryDeltaBinding } from "./entry-delta-binding.js";
 import { lowerEntryWording, entryWordingEditSchema } from "./entry-wording.js";
-import { entryPresenceIntentSchema, validateEntryRepairParent } from "./entry-presence-repair-model.js";
+import { entryPresenceIntentSchema, validateEntryRepairParent, validateEntryRepairAuthority } from "./entry-presence-repair-model.js";
 import { consumerReviewCheckSchema } from "./consumer-review-contract.js";
 import { contentHash } from "../world/canonical.js";
 import { canonicalEventSchema } from "../world/model.js";
@@ -13,12 +14,13 @@ import { consumerRevalidationId, type ConsumerRevalidationRecord } from "./ident
 
 export const ENTRY_STATE_REPAIR = "entry-checkpoint-state/v1" as const;
 export const ENTRY_WORDING_REPAIR = "entry-checkpoint-wording/v1" as const;
-export const entryRepairPolicySchema = z.enum([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR]);
+export const ENTRY_DELTA_BINDING_REPAIR = "entry-delta-binding/v1" as const;
+export const entryRepairPolicySchema = z.enum([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR, ENTRY_DELTA_BINDING_REPAIR]);
 export type EntryRepairPolicy = z.infer<typeof entryRepairPolicySchema>;
-export const entryRepairFolder = (policy: EntryRepairPolicy) => policy === ENTRY_STATE_REPAIR ? "state-repair" : "wording-repair";
+export const entryRepairFolder = (policy: EntryRepairPolicy) => policy === ENTRY_STATE_REPAIR ? "state-repair" : policy === ENTRY_WORDING_REPAIR ? "wording-repair" : "delta-binding-repair";
 const hash = z.string().regex(/^[a-f0-9]{64}$/), text = z.string().trim().min(1).max(6000);
 export const entryStateIntentSchema = entryPresenceIntentSchema.extend({ policy: entryRepairPolicySchema,
-  baselines: entryPresenceIntentSchema.shape.baselines.length(1) });
+  baselines: z.array(entryPresenceIntentSchema.shape.baselines.element.extend({ kind: z.enum(["canonical-event", "event-execution"]) })).min(1).max(2) });
 export type EntryStateIntent = z.infer<typeof entryStateIntentSchema>;
 export const entryStateRepairId = (s: Pick<EntryStateIntent, "policy" | "taskId" | "ref" | "parentReviewId">) => contentHash({ policy: s.policy, taskId: s.taskId, ref: s.ref, parentReviewId: s.parentReviewId });
 export const entryStateRepairDirectory = (root: string, s: EntryStateIntent) => path.join(identityRequirementDirectory(root, s.sourceId, s.taskId),
@@ -29,8 +31,9 @@ const commonOutput = { scopeHash: hash, evidence: z.array(modelTextSelectorSchem
 export const entryStateProposalSchema = z.object({ ...commonOutput, phase: z.literal("entry-state-proposal"),
   disposition: z.enum(["repaired", "blocked"]), edit: entryStateEditSchema, rationale: text.max(1000) }).strict();
 export const entryWordingProposalSchema = entryStateProposalSchema.extend({ edit: entryWordingEditSchema });
-export const entryRepairProposalSchema = entryStateProposalSchema.extend({ edit: z.union([entryStateEditSchema, entryWordingEditSchema]) });
-export const entryProposalSchemaFor = (policy: EntryRepairPolicy) => policy === ENTRY_STATE_REPAIR ? entryStateProposalSchema : entryWordingProposalSchema;
+export const entryDeltaBindingProposalSchema = entryStateProposalSchema.extend({ edit: entryDeltaBindingEditSchema });
+export const entryRepairProposalSchema = entryStateProposalSchema.extend({ edit: z.union([entryStateEditSchema, entryWordingEditSchema, entryDeltaBindingEditSchema]) });
+export const entryProposalSchemaFor = (policy: EntryRepairPolicy) => policy === ENTRY_STATE_REPAIR ? entryStateProposalSchema : policy === ENTRY_WORDING_REPAIR ? entryWordingProposalSchema : entryDeltaBindingProposalSchema;
 export const entryStateCheckSchema = z.object({ ...commonOutput, phase: z.literal("entry-state-check"), proposalHash: hash,
   verdict: z.enum(["supported", "blocked"]), rationale: text,
   requirements: z.array(z.object({ id: text, verdict: z.enum(["supported", "blocked"]), rationale: text }).strict()).min(1),
@@ -39,7 +42,7 @@ export const entryStateOutputSchema = z.discriminatedUnion("phase", [entryRepair
 export type EntryStateOutput = z.infer<typeof entryStateOutputSchema>;
 const record = { intent: entryStateIntentSchema, predecessorRecordHash: hash.nullable() };
 const proof = { inputHash: hash, sessionId: text, traceRunId: text, sessionCheckpointHash: hash, evidence: z.array(prerequisiteEvidenceSchema).min(1).max(80) };
-export const entryStateArtifactSchema = z.object({ kind: z.literal("canonical-event"), id: text, proposalId: text,
+export const entryStateArtifactSchema = z.object({ kind: z.enum(["canonical-event", "event-execution"]), id: text, proposalId: text,
   beforeHash: hash, afterHash: hash, envelopeHash: hash }).strict();
 export const entryStateRecordSchema = z.discriminatedUnion("phase", [
   z.object({ ...record, ...proof, phase: z.literal("entry-state-proposal"), output: entryRepairProposalSchema }).strict(),
@@ -56,9 +59,20 @@ export const entryStateStop = (message: string) => prerequisiteStop(`${message}.
 
 export function validateEntryStateIntent(s: EntryStateIntent, parents: ConsumerRevalidationRecord[]) {
   entryStateIntentSchema.parse(s);
-  if (s.baselines[0]?.kind !== "canonical-event") throw entryStateStop("State repair requires exactly one owning canonical event");
-  const parent = validateEntryRepairParent(s, parents, entryStateStop), contract = parent[0]!.scope.reviewContract!;
-  const event = canonicalEventSchema.parse(s.baselines[0]!.payload), target = contract.target;
+  const parent = validateEntryRepairAuthority(s, parents, entryStateStop), contract = parent[0]!.scope.reviewContract!;
+  let event;
+  if (s.policy === ENTRY_DELTA_BINDING_REPAIR) {
+    const binding = entryDeltaBindingContext(s); event = binding.event;
+    if (contentHash(binding.binding.entryCheckpoint) !== parent[0]!.scope.currentRevisionHash
+      || contentHash(contract.ownerRefs.map(r => [r.ref, r.revisionHash]).sort()) !== contentHash(s.baselines.map(b => [`${b.kind}:${b.id}`, b.revisionHash]).sort()))
+      throw entryStateStop("Entry binding lost its exact reviewed overlay or owner revisions");
+  } else {
+    const b = s.baselines[0];
+    if (s.baselines.length !== 1 || b?.kind !== "canonical-event") throw entryStateStop("State or wording repair requires exactly one owning canonical event");
+    validateEntryRepairParent({ ...s, baselines: [{ ...b, kind: "canonical-event" }] }, parents, entryStateStop);
+    event = canonicalEventSchema.parse(b.payload);
+  }
+  const target = contract.target;
   if (target.kind !== "character-entry" || target.actorId !== s.actorId || target.beforeEventId !== s.eventId || target.position !== "before-event"
     || contentHash(target.storyTime) !== contentHash(event.storyTime)
     || contentHash([...contract.requiredChecks].sort()) !== contentHash([...consumerReviewCheckSchema.options].sort()))
@@ -88,7 +102,7 @@ export function validateEntryStateHistory(records: EntryStateRecord[], parents: 
     } else {
       if (records[0]?.phase !== "entry-state-proposal" || records[0].output.disposition !== "repaired"
         || records[1]?.phase !== "entry-state-check" || records[1].output.verdict !== "supported") throw entryStateStop("No independently supported state repair exists");
-      if (contentHash(r.artifacts.map(a => [a.kind, a.id, a.beforeHash])) !== contentHash(s.baselines.map(b => [b.kind, b.id, b.revisionHash])))
+      if (contentHash(r.artifacts.map(a => [a.kind, a.id, a.beforeHash])) !== contentHash(entryStateWritableBaselines(s).map(b => [b.kind, b.id, b.revisionHash])))
         throw entryStateStop("State commit changed its exact artifact denominator");
       if (i === 3 && (records[2]?.phase !== "entry-state-commit" || contentHash(r.artifacts) !== contentHash(records[2].artifacts)))
         throw entryStateStop("Applied state receipt changed its frozen commit");
@@ -100,6 +114,9 @@ export function validateEntryStateHistory(records: EntryStateRecord[], parents: 
  * depend on identity tasks, review lineage, provider or a particular novel. */
 export function lowerEntryStateRepair(intent: EntryStateIntent, proposal: Extract<EntryStateRecord, { phase: "entry-state-proposal" }>) {
   if (proposal.output.disposition !== "repaired") throw entryStateStop("Blocked proposal grants no mutation");
+  if (intent.policy === ENTRY_DELTA_BINDING_REPAIR) return lowerEntryDeltaBinding(intent, entryDeltaBindingEditSchema.parse(proposal.output.edit));
   return intent.policy === ENTRY_STATE_REPAIR ? lowerEntryState(intent, entryStateEditSchema.parse(proposal.output.edit))
     : lowerEntryWording(intent, entryWordingEditSchema.parse(proposal.output.edit));
 }
+
+export const entryStateWritableBaselines = (s: EntryStateIntent) => s.baselines.filter(b => s.policy !== ENTRY_DELTA_BINDING_REPAIR || b.kind === "event-execution");

@@ -58,7 +58,7 @@ export function validateEntryPresenceIntent(s: EntryPresenceIntent, parents: Con
 }
 
 /** Common authority boundary for a versioned, narrowly typed entry repair. */
-export function validateEntryRepairParent(s: Omit<EntryPresenceIntent, "policy">, parents: ConsumerRevalidationRecord[], stop: typeof entryPresenceStop) {
+export function validateEntryRepairAuthority(s: Omit<EntryPresenceIntent, "policy" | "baselines">, parents: ConsumerRevalidationRecord[], stop: typeof entryPresenceStop) {
   const parent = parents.filter(r => consumerRevalidationId(r.scope) === s.parentReviewId);
   const p = parent[0], c = parent[1];
   if (parent.length !== 2 || p?.output.phase !== "consumer-revalidation" || p.output.disposition !== "blocked"
@@ -70,12 +70,17 @@ export function validateEntryRepairParent(s: Omit<EntryPresenceIntent, "policy">
     || contentHash(parent.map(contentHash)) !== contentHash(s.parentRecordHashes)
     || contentHash(s.requirementIds) !== contentHash(p.scope.requirementIds)
     || contentHash(s.retainedQuestionIds) !== contentHash(p.output.retainedQuestionIds)) throw stop("Entry repair lost its exact supported negative review or original criteria");
+  return parent;
+}
+
+export function validateEntryRepairParent(s: Omit<EntryPresenceIntent, "policy">, parents: ConsumerRevalidationRecord[], stop: typeof entryPresenceStop) {
+  const parent = validateEntryRepairAuthority(s, parents, stop), p = parent[0]!;
   const events = s.baselines.filter(b => b.kind === "canonical-event");
   const event = events.length === 1 ? canonicalEventSchema.safeParse(events[0]!.payload) : null;
   if (!event?.success || events[0]!.id !== s.eventId || event.data.id !== s.eventId
     || contentHash(event.data.characterEntryCheckpoints?.find(e => e.actorId === s.actorId)) !== p.scope.currentRevisionHash
-    || !p.scope.reviewContract.ownerRefs.some(r => r.ref === `canonical-event:${s.eventId}` && r.revisionHash === events[0]!.revisionHash)
-    || p.scope.reviewContract.ownerRefs.some(r => r.ref.startsWith("event-execution:"))
+    || !p.scope.reviewContract!.ownerRefs.some(r => r.ref === `canonical-event:${s.eventId}` && r.revisionHash === events[0]!.revisionHash)
+    || p.scope.reviewContract!.ownerRefs.some(r => r.ref.startsWith("event-execution:"))
     || s.baselines.some(b => contentHash(b.payload) !== b.revisionHash)
     || new Set(s.baselines.map(b => `${b.kind}:${b.id}`)).size !== s.baselines.length)
     throw stop("Entry baseline changed the exact reviewed event/entry or revision denominator");

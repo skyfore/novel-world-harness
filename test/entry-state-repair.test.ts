@@ -8,7 +8,7 @@ import { PiAgentSession } from "../src/agent/pi-session.js";
 import { mockPiProvider } from "./helpers/pi-provider.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { contentHash as h } from "../src/world/canonical.js";
-import { canonicalEventSchema, eventParticipationSchema } from "../src/world/model.js";
+import { artifactProposalSchema, canonicalEventSchema, eventParticipationSchema } from "../src/world/model.js";
 import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
 import { entryArtifactEvidenceIssues } from "../src/world/entry-agency.js";
 import { InitialWorldStore } from "../src/world/initial.js";
@@ -18,10 +18,12 @@ import { RequirementLedger } from "../src/compiler/requirement-ledger.js";
 import { consumerRevalidationId, type ConsumerRevalidationRecord } from "../src/compiler/identity-consumer-revalidation-model.js";
 import * as repair from "../src/compiler/entry-state-repair.js";
 import * as retained from "../src/compiler/identity-consumer-repair.js";
-import { ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR, entryStateIntentSchema, entryStateRepairDirectory, entryStateCriteria, validateEntryStateHistory,
+import { ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR, ENTRY_DELTA_BINDING_REPAIR, entryStateIntentSchema, entryStateRepairDirectory, entryStateCriteria, validateEntryStateHistory,
   lowerEntryStateRepair, type EntryStateRecord } from "../src/compiler/entry-state-repair-model.js";
 import { runEntryStateRepair } from "../src/workflow/entry-state-repair.js";
 import { originalIdentityCatalog } from "../src/compiler/upstream-repair-preflight.js";
+import { lowerEntryDeltaBinding } from "../src/compiler/entry-delta-binding.js";
+import { eventExecutionSchema } from "../src/world/event-execution.js";
 import { lowerEntryWording } from "../src/compiler/entry-wording.js";
 import { entryStateEditSchema, lowerEntryState } from "../src/compiler/entry-state.js";
 import { assessEntryState } from "../src/world/entry-contract.js";
@@ -89,7 +91,7 @@ it("repairs only the exact actor delta, grounds context, and binds each new bodi
   expect(assessEntryState("traveler", entry, { entities: new Map((await f.canon.listEntities()).map(e => [e.id, e])) })).toMatchObject({ state: "grounded", actionProof: "required" });
   expect(entryArtifactEvidenceIssues("canonical-event", event, envelopes[0]!.evidenceAssertions)).toEqual([]);
   expect(entryArtifactEvidenceIssues("canonical-event", event, [])).toEqual(expect.arrayContaining([expect.objectContaining({ code: "BODILY_STATE_EVIDENCE_REQUIRED" })]));
-  await new ProposalStore(f.root).writePending(envelopes[0]!, canonicalEventSchema);
+  await new ProposalStore(f.root).writePending(artifactProposalSchema(canonicalEventSchema).parse(envelopes[0]!), canonicalEventSchema);
   const service = new CompilerCommitService(f.root);
   expect(await service.validatePendingStructure(f.f.source.id)).toEqual([]);
   expect((await service.acceptAllValid(f.f.source.id)).accepted).toHaveLength(1);
@@ -218,4 +220,53 @@ it("repairs source-bound before-event wording without changing state or granting
     expect(() => lowerEntryWording(intent, invalid as typeof edit)).toThrow();
   expect(() => lowerEntryWording({ ...intent, actorId: "unknown" }, edit)).toThrow();
   expect(() => lowerEntryWording({ ...intent, baselines: [{ ...intent.baselines[0]!, revisionHash: h("changed") }] }, edit)).toThrow();
+});
+
+
+it("binds only an execution entry delta to its reviewed canonical intention or bodily state", async () => {
+  const f = await fixture(), sourceEnvelope = repair.stateEnvelopes(f.intent, f.proposal)[0]!;
+  const event = canonicalEventSchema.parse(sourceEnvelope.payload), sourceEntry = event.characterEntryCheckpoints![0]!;
+  const binding = eventExecutionSchema.parse({ id: "traveler-entry", canonicalEventId: event.id, actorId: "traveler", evidence: event.evidence,
+    entryCheckpoint: { ...sourceEntry, delta: { version: 1, operations: [{ op: "set", entityId: "traveler", field: "character.momentum", value: 1 }] },
+      knowledge: { version: 1, operations: [] }, projectionSeed: { version: 1, elapsedDays: 0, activeRuleIds: [], semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] } } } });
+  const retainedAssertion = { ...sourceEnvelope.evidenceAssertions[0]!, id: "retained-entry-wording", target: { artifactKind: "event-execution", artifactId: binding.id, jsonPointer: "/entryCheckpoint/readerSetup" } };
+  const parents = structuredClone(f.parents);
+  for (const p of parents) { p.scope.currentRevisionHash = h(binding.entryCheckpoint); p.scope.reviewContract!.ownerRefs = [
+    { ref: `canonical-event:${event.id}`, revisionHash: h(event) }, { ref: `event-execution:${binding.id}`, revisionHash: h(binding) } ]; }
+  const intent = entryStateIntentSchema.parse({ ...f.intent, policy: ENTRY_DELTA_BINDING_REPAIR, parentReviewId: consumerRevalidationId(parents[0]!.scope), parentRecordHashes: parents.map(h),
+    baselines: [{ kind: "canonical-event", id: event.id, payload: event, revisionHash: h(event), evidenceAssertions: sourceEnvelope.evidenceAssertions },
+      { kind: "event-execution", id: binding.id, payload: binding, revisionHash: h(binding), evidenceAssertions: [retainedAssertion] }] });
+  const edit = { canonicalDeltaHash: h(sourceEntry.delta), executionDeltaHash: h(binding.entryCheckpoint!.delta),
+    bindings: [{ index: 0, evidence: f.proposal.output.evidence, strength: "explicit" as const, rationale: "The actor is seated before the event." }] };
+  const proposal = { ...f.proposal, intent, output: { ...f.proposal.output, scopeHash: h(intent), edit } };
+  expect(() => validateEntryStateHistory([proposal], parents)).not.toThrow();
+  const lowered = lowerEntryDeltaBinding(intent, edit)[0]!, before = h(intent.baselines);
+  expect({ ...lowered.payload, entryCheckpoint: { ...lowered.payload.entryCheckpoint!, delta: binding.entryCheckpoint!.delta } }).toEqual(binding);
+  expect(lowered.payload.entryCheckpoint!.delta).toEqual(sourceEntry.delta);
+  expect(h(intent.baselines)).toBe(before);
+  const envelope = repair.stateEnvelopes(intent, proposal)[0]!;
+  expect(envelope.kind).toBe("event-execution");
+  expect(envelope.evidenceAssertions).toContainEqual(retainedAssertion);
+  expect(entryArtifactEvidenceIssues("event-execution", envelope.payload, envelope.evidenceAssertions)).toEqual([]);
+  const store = new ProposalStore(f.root), service = new CompilerCommitService(f.root);
+  await store.writePending(artifactProposalSchema(canonicalEventSchema).parse(sourceEnvelope), canonicalEventSchema); expect((await service.acceptAllValid(f.f.source.id)).accepted).toHaveLength(1);
+  await f.canon.putEventExecution(binding);
+  await store.writePending(artifactProposalSchema(eventExecutionSchema).parse(envelope), eventExecutionSchema);
+  expect(await service.validatePendingStructure(f.f.source.id)).toEqual([]);
+  expect((await service.acceptAllValid(f.f.source.id)).accepted).toHaveLength(1);
+  expect(await f.canon.getEvent(event.id)).toEqual(event);
+  expect((await f.canon.getEventExecution(binding.id)).entryCheckpoint).toEqual(lowered.payload.entryCheckpoint);
+  for (const change of [
+    (s: any, _e: any) => { s.baselines.pop(); },
+    (s: any, _e: any) => { s.actorId = "guide"; },
+    (s: any, _e: any) => { s.baselines[0].payload.storyTime.orderHint++; },
+    (_s: any, e: any) => { e.canonicalDeltaHash = h("other"); },
+    (_s: any, e: any) => { e.executionDeltaHash = h("other"); },
+    (_s: any, e: any) => { e.bindings = []; },
+    (_s: any, e: any) => { e.bindings.push(e.bindings[0]); },
+    (s: any, e: any) => { const b = s.baselines[0]; b.payload.characterEntryCheckpoints[0].delta.operations[0].field = "character.health"; b.payload.characterEntryCheckpoints[0].delta.operations[0].value = 100; b.revisionHash = h(b.payload); e.canonicalDeltaHash = h(b.payload.characterEntryCheckpoints[0].delta); },
+  ]) { const s = structuredClone(intent), e = structuredClone(edit); change(s, e); expect(() => lowerEntryDeltaBinding(s, e)).toThrow(); }
+  expect(() => lowerEntryStateRepair({ ...intent, policy: ENTRY_STATE_REPAIR }, proposal)).toThrow();
+  const wrongOwner = structuredClone(parents); wrongOwner[0]!.scope.reviewContract!.ownerRefs.pop();
+  expect(() => validateEntryStateHistory([proposal], wrongOwner)).toThrow();
 });

@@ -4,7 +4,7 @@ import { loadCompilerArtifactRecords } from "./artifact-retrieval.js";
 import { entryPresenceRepairId, entryPresenceStop, type EntryPresenceIntent, type EntryPresenceRecord } from "./entry-presence-repair-model.js";
 import { entryPresenceRecords, presenceEnvelopes, verifyEntryPresenceRecord } from "./entry-presence-repair.js";
 import { entryStateRecords, stateEnvelopes, verifyEntryStateRecord } from "./entry-state-repair.js";
-import { entryStateRepairId, type EntryStateRecord } from "./entry-state-repair-model.js";
+import { entryStateRepairId, entryStateWritableBaselines, type EntryStateIntent, type EntryStateRecord } from "./entry-state-repair-model.js";
 
 /** Rewind all typed entry repairs in ledger order. Neither a stale receipt nor
  * independently rewinding each repair kind may hide an intervening revision. */
@@ -19,7 +19,7 @@ export async function entryRepairCatalogBaselines(root: string, sourceId: string
   const payloads = new Map(current), assertions = new Map(actual.map(r => [`${r.kind}:${r.logicalId}`, r.evidenceAssertions]));
   type Assertions = EntryPresenceIntent["baselines"][number]["evidenceAssertions"];
   const sorted = (items: Assertions) => [...items].sort((a, b) => a.id.localeCompare(b.id));
-  const revisions = new Map<string, { kind: EntryPresenceIntent["baselines"][number]["kind"]; id: string; payload: unknown; committed: boolean;
+  const revisions = new Map<string, { kind: EntryPresenceIntent["baselines"][number]["kind"] | EntryStateIntent["baselines"][number]["kind"]; id: string; payload: unknown; committed: boolean;
     assertions: Assertions; originalAssertions: Assertions }>();
   for (const record of applied.reverse()) {
     let envelopes;
@@ -32,7 +32,13 @@ export async function entryRepairCatalogBaselines(root: string, sourceId: string
       for (const r of group) await verifyEntryStateRecord(root, r, history);
       envelopes = stateEnvelopes(record.intent, group[0] as Extract<EntryStateRecord, { phase: "entry-state-proposal" }>);
     }
-    for (const [index, b] of record.intent.baselines.entries()) {
+    const writable = record.phase === "entry-presence-applied" ? record.intent.baselines : entryStateWritableBaselines(record.intent);
+    for (const b of record.intent.baselines.filter(b => !writable.some(w => w.kind === b.kind && w.id === b.id))) {
+      const key = `${b.kind}:${b.id}`;
+      if (contentHash(payloads.get(key)) !== b.revisionHash || contentHash(sorted(assertions.get(key) ?? [])) !== contentHash(sorted(b.evidenceAssertions)))
+        throw entryPresenceStop("Read-only entry owner changed outside its receipt chain");
+    }
+    for (const [index, b] of writable.entries()) {
       const key = `${b.kind}:${b.id}`, envelope = envelopes[index]!, later = revisions.get(key);
       if (contentHash(payloads.get(key)) !== contentHash(envelope.payload)
         || contentHash(sorted(assertions.get(key) ?? [])) !== contentHash(sorted(envelope.evidenceAssertions)))

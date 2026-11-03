@@ -4127,6 +4127,29 @@ Entry capability contract recovery 入口核验旧会话并登记一次契约转
 已完成修复允许在代码升级后零生成核验，但必须通过完整原回执、证据和接受链校验。
 未完成修复仍绑定原实现指纹；源码变化不得重新打开单次模型授权。
 
+### 入口状态绑定校正（entry-delta-binding/v1）
+
+`requirements repair-entry-binding --source <id> --task <hash> --ref <ref> --authorization-ref <ref>`
+处理已有独立支持的 blocked 入口复验。先以 `--inspect` 只读核对；从同一 source/task 的
+`requirements inspect-identity-repairs` 复制 `summary.consumerRevalidation.reviews[].ref`，
+并检查其两个 `reviewContract.ownerRefs`。必须恰好有一个规范事件和一个该角色的执行入口，
+两者修订、原负面判断、切点、来源包和预算都不能改变。多重、缺失或漂移的所有权必须停止。
+
+纯转换 `lowerEntryDeltaBinding` 只把规范事件中该角色已有的 `delta` 复制到执行入口。
+只允许角色自己的意图或定性身体状态 set；不能创作值、用无映射数值代替意图、改变事件、
+执行动作、恢复机制、入口文字、在场、知识或投影种子。规范事件是只读依据，不自动构成
+语义正确性的证明；无法支持其状态或保留字段时仍为 blocked。
+
+复用原 preview/submit 和四阶段账本协议，冻结独立 policy 与 `delta-binding-repair` 目录。
+从 `bindingDeltas` 复制两个 delta 哈希及 `requiredBindingIndices`；每个复制操作恰有一条
+证据绑定，选择器须来自完整原来源包。字段或引用错误最多一次实质纠正；宿主、范围、预算、
+已消耗阶段或第二次错误停止，不猜值、换范围或重试原样输入。封存结果只能零生成恢复登记。
+
+独立会话检查完整修订入口、全部八项标准及原要求，不能仅证明两份 delta 相等。
+提交仅生成一个 event-execution 提案；事件基线在模型调用及提交恢复时保持冻结。
+回溯接受链时同时核对只读事件与改动绑定，旧回执、失败、费用和原身份问题继续保留。
+该校正不授予行动机制、父审计恢复、完整性认证或激活权限。
+
 ### 未决在场入口修复（entry-presence-uncertainty/v1）
 
 `requirements repair-entry-presence` 只处理同一 source/task 下已有独立支持的

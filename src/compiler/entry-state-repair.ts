@@ -17,8 +17,10 @@ import { revalidatedConsumerBudgetOrigin } from "./identity-consumer-revalidated
 import { verifyIdentityUpstreamSession } from "./identity-upstream-session.js";
 import { resolveTextSelectorAnchor } from "./text-anchors.js";
 import { compilerPayloadEvidence } from "./proposals.js";
+import { entryDeltaBindingContext } from "./entry-delta-binding.js";
+import { entryDeltaBindingEnvelopes } from "./entry-delta-binding-repair.js";
 import { assertReviewPreviewAllowance } from "./review-preview-allowance.js";
-import { ENTRY_STATE_REPAIR, ENTRY_STATE_LIMITS, entryStateCriteria, entryStateIntentSchema, entryStateRepairId,
+import { ENTRY_STATE_REPAIR, ENTRY_DELTA_BINDING_REPAIR, entryStateWritableBaselines, ENTRY_STATE_LIMITS, entryStateCriteria, entryStateIntentSchema, entryStateRepairId,
   entryStateRepairDirectory, entryStateModelContract, entryStateStop, lowerEntryStateRepair, validateEntryStateHistory, validateEntryStateIntent,
   entryRepairFolder, type EntryRepairPolicy, type EntryStateIntent, type EntryStateRecord } from "./entry-state-repair-model.js";
 
@@ -26,7 +28,7 @@ export const readStateFile = async (file: string) => JSON.parse(await fs.readFil
 export const maybeStateFile = async (file: string) => { try { return await readStateFile(file); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; } };
 export const entryStateRecords = (history: readonly LedgerRecord[], taskId: string) => history.flatMap(r =>
   r.payload.kind === "entry-state-repair" && r.payload.record.intent.taskId === taskId ? [r.payload.record] : []);
-const implementationFiles = ["./entry-state-repair-model.ts", "./entry-state-repair.ts", "./entry-state.ts", "./entry-wording.ts", "./entry-presence-repair-model.ts", "./entry-repair-catalog.ts", "../world/entry-contract.ts", "../world/bodily-state.ts", "../workflow/entry-state-repair.ts",
+const implementationFiles = ["./entry-state-repair-model.ts", "./entry-state-repair.ts", "./entry-state.ts", "./entry-wording.ts", "./entry-delta-binding.ts", "./entry-delta-binding-repair.ts", "../world/event-execution.ts", "./entry-presence-repair-model.ts", "./entry-repair-catalog.ts", "../world/entry-contract.ts", "../world/bodily-state.ts", "../workflow/entry-state-repair.ts",
   "../world/model.ts", "../world/entry-agency.ts", "./validator.ts", "./proposals.ts", "./requirement-ledger.ts", "./review-preview-allowance.ts"];
 export async function entryStateImplementationHash() {
   // Both src/ and dist/ entry points bind the same retained source implementation.
@@ -70,9 +72,10 @@ export async function prepareEntryStateRepair(root: string, sourceId: string, ta
   const [, actorId, eventId] = ref.split("/");
   if (!actorId || !eventId || ref !== `entry/${actorId}/${eventId}`) throw entryStateStop("Exact actor/event ref required");
   const catalog = (await loadCompilerArtifactRecords(root, sourceId)).filter(r => r.status === "canonical");
-  if (catalog.some(r => r.kind === "event-execution" && (r.payload as any).canonicalEventId === eventId && (r.payload as any).entryCheckpoint?.actorId === actorId))
+  if (policy !== ENTRY_DELTA_BINDING_REPAIR && catalog.some(r => r.kind === "event-execution" && (r.payload as any).canonicalEventId === eventId && (r.payload as any).entryCheckpoint?.actorId === actorId))
     throw entryStateStop("Execution-owned checkpoint needs its owning typed repair; this contract cannot change it");
-  const baselines = catalog.filter(r => r.kind === "canonical-event" && r.logicalId === eventId)
+  const baselines = catalog.filter(r => r.kind === "canonical-event" && r.logicalId === eventId
+    || policy === ENTRY_DELTA_BINDING_REPAIR && r.kind === "event-execution" && (r.payload as any).canonicalEventId === eventId && (r.payload as any).entryCheckpoint?.actorId === actorId)
     .map(r => ({ kind: r.kind, id: r.logicalId, revisionHash: contentHash(r.payload), payload: r.payload, evidenceAssertions: r.evidenceAssertions }))
     .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
   const parentInput = await readStateFile(path.join(consumerRevalidationDirectory(root, parent.scope), "execution-v1", "consumer-revalidation.input.json"));
@@ -112,9 +115,13 @@ export async function stateEvidence(root: string, intent: EntryStateIntent, sele
 
 export function entryStateInput(intent: EntryStateIntent, context: unknown, previous: EntryStateRecord[]) {
   const { priorBudgetFiles: _, ...scope } = intent;
-  const entry = canonicalEventSchema.parse(intent.baselines[0]!.payload).characterEntryCheckpoints!.find(e => e.actorId === intent.actorId)!;
+  const entry = canonicalEventSchema.parse(intent.baselines.find(b => b.kind === "canonical-event")!.payload).characterEntryCheckpoints!.find(e => e.actorId === intent.actorId)!;
   return { policy: intent.policy, scope, scopeHash: contentHash(intent), context, criteria: entryStateCriteria,
-    ...(intent.policy === ENTRY_STATE_REPAIR
+    ...(intent.policy === ENTRY_DELTA_BINDING_REPAIR ? { bindingDeltas: (() => {
+      const { sourceEntry, binding } = entryDeltaBindingContext(intent);
+      return { canonicalDelta: sourceEntry.delta, canonicalDeltaHash: contentHash(sourceEntry.delta), executionDelta: binding.entryCheckpoint!.delta,
+        executionDeltaHash: contentHash(binding.entryCheckpoint!.delta), requiredBindingIndices: sourceEntry.delta.operations.map((_, i) => i) };
+    })() } : intent.policy === ENTRY_STATE_REPAIR
       ? { stateOperations: entry.delta.operations.map((operation, index) => ({ index, operation, operationHash: contentHash(operation) })) }
       : { entryWordingFields: { readerSetup: entry.readerSetup, actorObservation: entry.actorObservation } }),
     phase: previous.length ? "entry-state-check" : "entry-state-proposal", proposalHash: previous.length ? contentHash((previous[0] as any).output) : null,
@@ -125,17 +132,19 @@ export function entryStateInput(intent: EntryStateIntent, context: unknown, prev
 }
 
 export function entryStateSelectors(output: import("./entry-state-repair-model.js").EntryStateOutput) {
-  const all = [...output.evidence, ...(output.phase === "entry-state-proposal" ? ("set" in output.edit ? output.edit.set : output.edit.fields).flatMap(s => s.evidence) : [])];
+  const all = [...output.evidence, ...(output.phase === "entry-state-proposal" ? ("set" in output.edit ? output.edit.set : "fields" in output.edit ? output.edit.fields : output.edit.bindings).flatMap(s => s.evidence) : [])];
   return [...new Map(all.map(s => [contentHash(s), s])).values()];
 }
 
 export function stateEnvelopes(intent: EntryStateIntent, proposal: Extract<EntryStateRecord, { phase: "entry-state-proposal" }>) {
+  if (intent.policy === ENTRY_DELTA_BINDING_REPAIR) return entryDeltaBindingEnvelopes(intent, proposal);
   return lowerEntryStateRepair(intent, proposal).map((b, index) => {
-    const old = intent.baselines[index]!, event = b.payload;
+    const old = intent.baselines[index]!, event = canonicalEventSchema.parse(b.payload);
     const entryIndex = event.characterEntryCheckpoints!.findIndex(c => c.actorId === intent.actorId);
     const entryPrefix = `/characterEntryCheckpoints/${entryIndex}`;
     const prefix = `${entryPrefix}/delta`, operations = `${prefix}/operations/`;
     const edit = proposal.output.edit;
+    if ("bindings" in edit) throw entryStateStop("Binding edits require their frozen binding policy");
     const wording = "fields" in edit;
     const worker = wording ? "entry-wording-repair" : "entry-state-repair", idPrefix = wording ? "wording" : "state";
     const changedFields = wording ? edit.fields.map(f => `${entryPrefix}/${f.field}`) : [];
@@ -197,14 +206,26 @@ export async function verifyEntryStateRecord(root: string, record: EntryStateRec
       throw entryStateStop("State actual submission or original allowance changed");
   } else {
     const proposal = records[0] as Extract<EntryStateRecord, { phase: "entry-state-proposal" }>;
-    const envelopes = stateEnvelopes(s, proposal);
-    if (contentHash(record.artifacts) !== contentHash(envelopes.map((e, i) => ({ kind: e.kind, id: s.baselines[i]!.id, proposalId: e.id,
-      beforeHash: s.baselines[i]!.revisionHash, afterHash: contentHash(e.payload), envelopeHash: contentHash(e) })))) throw entryStateStop("Commit intent changed deterministic typed proposals");
+    const envelopes = stateEnvelopes(s, proposal), writable = entryStateWritableBaselines(s);
+    if (!existing.some(r => contentHash(r) === contentHash(record))) {
+      const readonly = s.baselines.filter(b => !writable.some(w => w.kind === b.kind && w.id === b.id));
+      if (readonly.length) {
+        const actual = (await loadCompilerArtifactRecords(root, s.sourceId)).filter(r => r.status === "canonical");
+        for (const b of readonly) {
+          const current = actual.find(r => r.kind === b.kind && r.logicalId === b.id);
+          if (contentHash(current?.payload) !== b.revisionHash
+            || contentHash(current?.evidenceAssertions.slice().sort((a, b) => a.id.localeCompare(b.id))) !== contentHash(b.evidenceAssertions.slice().sort((a, b) => a.id.localeCompare(b.id))))
+            throw entryStateStop("Read-only entry owner changed before the sealed commit or acceptance");
+        }
+      }
+    }
+    if (contentHash(record.artifacts) !== contentHash(envelopes.map((e, i) => ({ kind: e.kind, id: writable[i]!.id, proposalId: e.id,
+      beforeHash: writable[i]!.revisionHash, afterHash: contentHash(e.payload), envelopeHash: contentHash(e) })))) throw entryStateStop("Commit intent changed deterministic typed proposals");
     if (record.phase === "entry-state-applied") {
       const actual = (await loadCompilerArtifactRecords(root, s.sourceId)).filter(r => r.status === "canonical");
       const historical = existing.some(r => contentHash(r) === contentHash(record));
       for (const [i, e] of envelopes.entries()) {
-        const current = actual.find(r => r.kind === e.kind && r.logicalId === s.baselines[i]!.id);
+        const current = actual.find(r => r.kind === e.kind && r.logicalId === writable[i]!.id);
         if (contentHash(await new ProposalStore(root).readEnvelope("accepted", e.id)) !== contentHash(e)
           || !historical && (contentHash(current?.payload) !== contentHash(e.payload)
             || contentHash(current?.evidenceAssertions.slice().sort((a, b) => a.id.localeCompare(b.id))) !== contentHash(e.evidenceAssertions.slice().sort((a, b) => a.id.localeCompare(b.id)))))

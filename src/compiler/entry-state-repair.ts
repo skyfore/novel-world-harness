@@ -20,13 +20,13 @@ import { compilerPayloadEvidence } from "./proposals.js";
 import { assertReviewPreviewAllowance } from "./review-preview-allowance.js";
 import { ENTRY_STATE_REPAIR, ENTRY_STATE_LIMITS, entryStateCriteria, entryStateIntentSchema, entryStateRepairId,
   entryStateRepairDirectory, entryStateModelContract, entryStateStop, lowerEntryStateRepair, validateEntryStateHistory, validateEntryStateIntent,
-  type EntryStateIntent, type EntryStateRecord } from "./entry-state-repair-model.js";
+  entryRepairFolder, type EntryRepairPolicy, type EntryStateIntent, type EntryStateRecord } from "./entry-state-repair-model.js";
 
 export const readStateFile = async (file: string) => JSON.parse(await fs.readFile(file, "utf8"));
 export const maybeStateFile = async (file: string) => { try { return await readStateFile(file); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; } };
 export const entryStateRecords = (history: readonly LedgerRecord[], taskId: string) => history.flatMap(r =>
   r.payload.kind === "entry-state-repair" && r.payload.record.intent.taskId === taskId ? [r.payload.record] : []);
-const implementationFiles = ["./entry-state-repair-model.ts", "./entry-state-repair.ts", "./entry-state.ts", "./entry-presence-repair-model.ts", "./entry-repair-catalog.ts", "../world/entry-contract.ts", "../world/bodily-state.ts", "../workflow/entry-state-repair.ts",
+const implementationFiles = ["./entry-state-repair-model.ts", "./entry-state-repair.ts", "./entry-state.ts", "./entry-wording.ts", "./entry-presence-repair-model.ts", "./entry-repair-catalog.ts", "../world/entry-contract.ts", "../world/bodily-state.ts", "../workflow/entry-state-repair.ts",
   "../world/model.ts", "../world/entry-agency.ts", "./validator.ts", "./proposals.ts", "./requirement-ledger.ts", "./review-preview-allowance.ts"];
 export async function entryStateImplementationHash() {
   // Both src/ and dist/ entry points bind the same retained source implementation.
@@ -46,16 +46,16 @@ export async function assertEntryStatePreviewAllowance(directory: string, stage:
 }
 
 /** Freeze the exact supported negative review, not a replacement of its result. */
-export async function prepareEntryStateRepair(root: string, sourceId: string, taskId: string, ref: string, authorizationRef: string) {
+export async function prepareEntryStateRepair(root: string, sourceId: string, taskId: string, ref: string, authorizationRef: string, policy: EntryRepairPolicy = ENTRY_STATE_REPAIR) {
   const history = await new RequirementLedger(root, sourceId).history(), all = revalidationRecords(history, taskId);
   const parent = all.findLast(r => r.scope.ref === ref);
   if (!parent || !authorizationRef.trim()) throw entryStateStop("An authorized original negative entry review is required");
   const parents = all.filter(r => consumerRevalidationId(r.scope) === consumerRevalidationId(parent.scope));
-  const directory = path.join(consumerRevalidationDirectory(root, parent.scope), "state-repair");
+  const directory = path.join(consumerRevalidationDirectory(root, parent.scope), entryRepairFolder(policy));
   const saved = await maybeStateFile(path.join(directory, "intent.json"));
   if (saved) {
     const intent = entryStateIntentSchema.parse(saved);
-    if (intent.authorizationRef !== authorizationRef || intent.ref !== ref || intent.taskId !== taskId || intent.sourceId !== sourceId)
+    if (intent.policy !== policy || intent.authorizationRef !== authorizationRef || intent.ref !== ref || intent.taskId !== taskId || intent.sourceId !== sourceId)
       throw entryStateStop("Frozen state repair authority changed");
     const context = await readStateFile(path.join(directory, "context.json"));
     if (contentHash(context) !== intent.contextHash) throw entryStateStop("Frozen state context changed");
@@ -85,7 +85,7 @@ export async function prepareEntryStateRepair(root: string, sourceId: string, ta
   if (origin.budgetFiles.some(f => !cumulative.priorBudgetFiles.some(current => current.path === f.path && current.hash === f.hash))
     || cumulative.priorUsage.modelCalls < origin.priorUsage.modelCalls || cumulative.priorUsage.totalPayloadBytes < origin.priorUsage.totalPayloadBytes)
     throw entryStateStop("Current task charges lost part of the original negative review history");
-  const intent = entryStateIntentSchema.parse({ version: 1, policy: ENTRY_STATE_REPAIR, sourceId, sourceHash: parent.scope.sourceHash,
+  const intent = entryStateIntentSchema.parse({ version: 1, policy, sourceId, sourceHash: parent.scope.sourceHash,
     taskId, ref, actorId, eventId, identityIntentHash: parent.scope.identityIntentHash, originalBudgetHash: parent.scope.originalBudgetHash,
     parentReviewId: consumerRevalidationId(parent.scope), parentRecordHashes: parents.map(contentHash), parentReceiptFingerprint: parent.scope.receiptFingerprint,
     upstreamPlanHash: parent.scope.upstreamPlanHash, authorizationRef, createdAt: new Date().toISOString(), implementationHash: await entryStateImplementationHash(),
@@ -112,8 +112,11 @@ export async function stateEvidence(root: string, intent: EntryStateIntent, sele
 
 export function entryStateInput(intent: EntryStateIntent, context: unknown, previous: EntryStateRecord[]) {
   const { priorBudgetFiles: _, ...scope } = intent;
-  return { policy: ENTRY_STATE_REPAIR, scope, scopeHash: contentHash(intent), context, criteria: entryStateCriteria,
-    stateOperations: canonicalEventSchema.parse(intent.baselines[0]!.payload).characterEntryCheckpoints!.find(e => e.actorId === intent.actorId)!.delta.operations.map((operation, index) => ({ index, operation, operationHash: contentHash(operation) })),
+  const entry = canonicalEventSchema.parse(intent.baselines[0]!.payload).characterEntryCheckpoints!.find(e => e.actorId === intent.actorId)!;
+  return { policy: intent.policy, scope, scopeHash: contentHash(intent), context, criteria: entryStateCriteria,
+    ...(intent.policy === ENTRY_STATE_REPAIR
+      ? { stateOperations: entry.delta.operations.map((operation, index) => ({ index, operation, operationHash: contentHash(operation) })) }
+      : { entryWordingFields: { readerSetup: entry.readerSetup, actorObservation: entry.actorObservation } }),
     phase: previous.length ? "entry-state-check" : "entry-state-proposal", proposalHash: previous.length ? contentHash((previous[0] as any).output) : null,
     proposal: previous.length ? (previous[0] as any).output : null,
     proposedArtifacts: previous[0]?.phase === "entry-state-proposal" && previous[0].output.disposition === "repaired"
@@ -122,7 +125,7 @@ export function entryStateInput(intent: EntryStateIntent, context: unknown, prev
 }
 
 export function entryStateSelectors(output: import("./entry-state-repair-model.js").EntryStateOutput) {
-  const all = [...output.evidence, ...(output.phase === "entry-state-proposal" ? output.edit.set.flatMap(s => s.evidence) : [])];
+  const all = [...output.evidence, ...(output.phase === "entry-state-proposal" ? ("set" in output.edit ? output.edit.set : output.edit.fields).flatMap(s => s.evidence) : [])];
   return [...new Map(all.map(s => [contentHash(s), s])).values()];
 }
 
@@ -130,32 +133,39 @@ export function stateEnvelopes(intent: EntryStateIntent, proposal: Extract<Entry
   return lowerEntryStateRepair(intent, proposal).map((b, index) => {
     const old = intent.baselines[index]!, event = b.payload;
     const entryIndex = event.characterEntryCheckpoints!.findIndex(c => c.actorId === intent.actorId);
-    const prefix = `/characterEntryCheckpoints/${entryIndex}/delta`, operations = `${prefix}/operations/`;
+    const entryPrefix = `/characterEntryCheckpoints/${entryIndex}`;
+    const prefix = `${entryPrefix}/delta`, operations = `${prefix}/operations/`;
+    const edit = proposal.output.edit;
+    const wording = "fields" in edit;
+    const worker = wording ? "entry-wording-repair" : "entry-state-repair", idPrefix = wording ? "wording" : "state";
+    const changedFields = wording ? edit.fields.map(f => `${entryPrefix}/${f.field}`) : [];
     const original = canonicalEventSchema.parse(old.payload).characterEntryCheckpoints![entryIndex]!;
-    const removed = new Set(proposal.output.edit.remove.map(r => r.index));
+    const removed = new Set(wording ? [] : edit.remove.map(r => r.index));
     const oldIndices = original.delta.operations.flatMap((_, i) => removed.has(i) ? [] : [i]);
     const assertions = old.evidenceAssertions.flatMap(a => {
       const p = a.target.jsonPointer;
+      if (wording) return changedFields.some(f => f === p || f.startsWith(p + "/") || p.startsWith(f + "/")) ? [] : [a];
       if (prefix === p || prefix.startsWith(p + "/")) return [];
       if (!p.startsWith(operations)) return p === prefix + "/operations" ? [] : [a];
       const [part, ...rest] = p.slice(operations.length).split("/"), i = Number(part), next = oldIndices.indexOf(i);
       if (!Number.isInteger(i) || next < 0) return [];
       return [{ ...a, target: { ...a.target, jsonPointer: operations + next + (rest.length ? "/" + rest.join("/") : "") } }];
     });
-    const bindings = [{ jsonPointer: prefix, selectors: proposal.output.evidence, strength: "strong-inference" as const, interpretation: proposal.output.rationale },
-      ...proposal.output.edit.set.map((s, i) => ({ jsonPointer: operations + (oldIndices.length + i), selectors: s.evidence, strength: s.strength, interpretation: s.rationale }))];
+    const bindings = wording ? edit.fields.map(f => ({ jsonPointer: `${entryPrefix}/${f.field}`, selectors: f.evidence, strength: f.strength, interpretation: f.rationale }))
+      : [{ jsonPointer: prefix, selectors: proposal.output.evidence, strength: "strong-inference" as const, interpretation: proposal.output.rationale },
+      ...edit.set.map((s, i) => ({ jsonPointer: operations + (oldIndices.length + i), selectors: s.evidence, strength: s.strength, interpretation: s.rationale }))];
     assertions.push(...bindings.map((binding, j) => evidenceAssertionSchema.parse({ version: 1,
-      id: `state-${entryStateRepairId(intent).slice(0, 32)}-${index}-${j}`, target: { artifactKind: b.kind, artifactId: b.id, jsonPointer: binding.jsonPointer },
+      id: `${idPrefix}-${entryStateRepairId(intent).slice(0, 32)}-${index}-${j}`, target: { artifactKind: b.kind, artifactId: b.id, jsonPointer: binding.jsonPointer },
       anchors: binding.selectors.map(selector => {
         const found = proposal.evidence.find(e => contentHash(e.selector) === contentHash(selector));
         if (!found) throw entryStateStop("State field lacks its exact resolved source selector");
         return found.anchor;
       }), relation: "supports", strength: binding.strength, interpretation: binding.interpretation,
-      derivation: { runId: proposal.traceRunId, worker: "entry-state-repair", provider: "openai-codex", model: "gpt-6.1-sol", promptHash: proposal.inputHash, ontologyVersion: "evidence-v1" } })));
+      derivation: { runId: proposal.traceRunId, worker, provider: "openai-codex", model: "gpt-6.1-sol", promptHash: proposal.inputHash, ontologyVersion: "evidence-v1" } })));
     return artifactProposalSchema(canonicalEventSchema).parse({
-      id: `state-${entryStateRepairId(intent).slice(0, 32)}-${index}`, kind: b.kind, schemaVersion: 1, payload: b.payload,
+      id: `${idPrefix}-${entryStateRepairId(intent).slice(0, 32)}-${index}`, kind: b.kind, schemaVersion: 1, payload: b.payload,
       evidence: compilerPayloadEvidence(b.payload), evidenceAssertions: assertions, createdAt: intent.createdAt,
-      generatedBy: { worker: "entry-state-repair", provider: "openai-codex", model: "gpt-6.1-sol", promptHash: proposal.inputHash } });
+      generatedBy: { worker, provider: "openai-codex", model: "gpt-6.1-sol", promptHash: proposal.inputHash } });
   });
 }
 

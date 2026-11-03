@@ -4106,6 +4106,27 @@ Entry capability contract recovery 入口核验旧会话并登记一次契约转
 行动证明、全书认证或激活。入口状态与在场修复按同一账本顺序逆向验证，不能分开回退后
 掩盖中间修订。后续消费者继承全部已消耗调用；版本或证据漂移必须停止。
 
+### 入口文字修复（entry-checkpoint-wording/v1）
+
+`requirements repair-entry-wording --source <id> --task <hash> --ref <ref> --authorization-ref <ref>`
+沿用上述独立负面复验、原文包、原问题、分母及预算，先以 `--inspect` 只读确认。
+范围发现同样使用 `requirements inspect-identity-repairs`，只复制同一 source/task 的
+`summary.consumerRevalidation.reviews[].ref`；不得猜测、变更父判断或重新执行已消费阶段。
+
+纯转换 `lowerEntryWording` 只允许修改目标角色入口的 `readerSetup` 和 `actorObservation`。
+模型从 `entryWordingFields` 复制字段名，并为每个字段提供精确原文选择器、支持强度和理由。
+事件后的距离、伤势、站位不能倒填到事件前。状态、知识、在场、身份、时间、其他角色和事件
+结果保持不变。原文不足或其他入口义务未满足时保留 blocked。
+
+该策略复用 `preview_entry_state_repair` / `submit_entry_state_repair` 和原四阶段账本格式，
+但冻结不同 policy，使用独立 `wording-repair` 目录和严格字段 schema，不能跨策略扩大写入面。
+预览／终结规则、一次实质纠错、宿主／范围／预算／已消费失败即停均与状态修复相同。
+独立会话必须重验全部标准和原要求。更新改动字段的证据，保留不受改动影响的断言；接受链按原账本
+顺序统一逆向核验。全部模型费用继承并去重，负面历史不被覆盖，父任务和认证不因此恢复。
+
+已完成修复允许在代码升级后零生成核验，但必须通过完整原回执、证据和接受链校验。
+未完成修复仍绑定原实现指纹；源码变化不得重新打开单次模型授权。
+
 ### 未决在场入口修复（entry-presence-uncertainty/v1）
 
 `requirements repair-entry-presence` 只处理同一 source/task 下已有独立支持的

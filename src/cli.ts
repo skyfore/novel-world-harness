@@ -264,6 +264,18 @@ requirementsCommand.command("repair-entry-state").requiredOption("--source <id>"
     console.log(JSON.stringify(await runEntryStateRepair({ root: rootFor({}), sourceId: options.source, taskId: options.task,
       ref: options.ref, authorizationRef: options.authorizationRef, inspect: options.inspect }), null, 2));
   });
+requirementsCommand.command("repair-entry-wording").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")
+  .requiredOption("--ref <ref>", "exact blocked entry ref from consumerRevalidation.reviews[]")
+  .requiredOption("--authorization-ref <ref>", "user authorization to repair source-supported entry wording")
+  .option("--inspect", "read-only exact negative review and repair preflight; no model calls or writes")
+  .description("Propose, independently check and commit before-event entry wording; preserve state, history and obligations")
+  .action(async options => {
+    const { runEntryStateRepair } = await import("./workflow/entry-state-repair.js");
+    const { ENTRY_WORDING_REPAIR } = await import("./compiler/entry-state-repair-model.js");
+    console.log(JSON.stringify(await runEntryStateRepair({ root: rootFor({}), sourceId: options.source, taskId: options.task,
+      ref: options.ref, authorizationRef: options.authorizationRef, inspect: options.inspect, policy: ENTRY_WORDING_REPAIR }), null, 2));
+  });
 requirementsCommand.command("plan-bound-upstream-repair").requiredOption("--request <path>", "current binding snapshot and selected findings JSON")
   .description("Derive original scene requirement IDs and freeze every supported dependency path before host authorization")
   .action(async options => {

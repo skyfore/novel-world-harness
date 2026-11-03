@@ -124,8 +124,8 @@ export async function inheritConsumerRevalidationBudgets(upstreamDirectory: stri
       const file = path.join(directory, "presence-repair", `${stage}.budget.json`);
       if (await maybeRecoveryFile(file)) await remember(file, undefined, true);
     }
-    for (const stage of ["entry-state-proposal", "entry-state-check"]) {
-      const file = path.join(directory, "state-repair", `${stage}.budget.json`);
+    for (const folder of ["state-repair", "wording-repair"]) for (const stage of ["entry-state-proposal", "entry-state-check"]) {
+      const file = path.join(directory, folder, `${stage}.budget.json`);
       if (await maybeRecoveryFile(file)) await remember(file, undefined, true);
     }
     for (const stage of ["consumer-revalidation", "consumer-revalidation-check"]) for (const dir of consumerStageBudgetDirectories(directory, stage)) {

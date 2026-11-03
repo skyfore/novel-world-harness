@@ -18,11 +18,12 @@ import { RequirementLedger } from "../src/compiler/requirement-ledger.js";
 import { consumerRevalidationId, type ConsumerRevalidationRecord } from "../src/compiler/identity-consumer-revalidation-model.js";
 import * as repair from "../src/compiler/entry-state-repair.js";
 import * as retained from "../src/compiler/identity-consumer-repair.js";
-import { ENTRY_STATE_REPAIR, entryStateIntentSchema, entryStateRepairDirectory, entryStateCriteria, validateEntryStateHistory,
+import { ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR, entryStateIntentSchema, entryStateRepairDirectory, entryStateCriteria, validateEntryStateHistory,
   lowerEntryStateRepair, type EntryStateRecord } from "../src/compiler/entry-state-repair-model.js";
 import { runEntryStateRepair } from "../src/workflow/entry-state-repair.js";
 import { originalIdentityCatalog } from "../src/compiler/upstream-repair-preflight.js";
-import { lowerEntryState } from "../src/compiler/entry-state.js";
+import { lowerEntryWording } from "../src/compiler/entry-wording.js";
+import { entryStateEditSchema, lowerEntryState } from "../src/compiler/entry-state.js";
 import { assessEntryState } from "../src/world/entry-contract.js";
 
 const roots: string[] = [];
@@ -104,7 +105,7 @@ it("rejects scope drift, arbitrary fields, fake values, unbound removals and los
     (_s: any, e: any) => { e.set[0].value = "flying"; },
     (_s: any, e: any) => { e.set = []; },
     (_s: any, e: any) => { e.remove.push(e.remove[0]); },
-  ]) { const s = structuredClone(f.intent), edit = structuredClone(f.proposal.output.edit); mutate(s, edit); expect(() => lowerEntryState(s, edit)).toThrow(); }
+  ]) { const s = structuredClone(f.intent), edit = structuredClone(f.proposal.output.edit); mutate(s, edit); expect(() => lowerEntryState(s, entryStateEditSchema.parse(edit))).toThrow(); }
 });
 
 it("retains negative lineage and rejects independent-session reuse, missing checks and changed scope", async () => {
@@ -167,6 +168,9 @@ it.each([0, 1, 2])("bounds %i SDK-rejected previews, recovers sealed registratio
   }
   await expect(runEntryStateRepair(args)).rejects.toThrow(/registration interrupted/);
   expect(sessions).toHaveLength(1); expect(h(await f.canon.getEvent(f.event.id))).toBe(h(f.event));
+  vi.spyOn(repair, "entryStateImplementationHash").mockResolvedValueOnce(h("changed before completion"));
+  await expect(runEntryStateRepair(args)).rejects.toThrow(/implementation changed/);
+  expect(sessions).toHaveLength(1);
   const result = await runEntryStateRepair(args);
   expect(result.status).toBe("repaired"); expect(sessions).toHaveLength(2); expect(new Set(sessions).size).toBe(2);
   expect(result.cumulative.modelCalls).toBe(456 + invalidPreviews); expect(result.executableEntry).toBe(false); expect(result.obligationStatus).toBe("revalidated");
@@ -179,6 +183,39 @@ it.each([0, 1, 2])("bounds %i SDK-rejected previews, recovers sealed registratio
   const restored = originalIdentityCatalog(catalog, f.intent.baselines, baselines);
   expect(h(restored.get("canonical-event:encounter"))).toBe(h(f.event));
   expect(await runEntryStateRepair(args)).toMatchObject({ status: "repaired" }); expect(sessions).toHaveLength(2);
+  vi.spyOn(repair, "entryStateImplementationHash").mockResolvedValue(h("new implementation"));
+  expect(await runEntryStateRepair({ ...args, inspect: true })).toMatchObject({ status: "repaired", modelDispatchAllowed: false });
+  expect(sessions).toHaveLength(2);
+  vi.mocked(repair.prepareEntryStateRepair).mockResolvedValue({ intent: { ...f.intent, upstreamPlanHash: h("different plan") }, context: f.context, parents: f.parents, directory: f.directory });
+  await expect(runEntryStateRepair({ ...args, inspect: true })).rejects.toThrow(/intent differs from its retained ledger/);
+  expect(sessions).toHaveLength(2);
   current.set("canonical-event:encounter", f.event);
   await expect(repair.entryStateCatalogBaselines(f.root, f.f.source.id, f.intent.taskId, f.intent.upstreamPlanHash, current)).rejects.toThrow(/outside its receipt/);
 }, 30000);
+
+
+it("repairs source-bound before-event wording without changing state or granting another repair surface", async () => {
+  const f = await fixture(), intent = { ...f.intent, policy: ENTRY_WORDING_REPAIR };
+  const field = { field: "readerSetup" as const, value: "The traveler sits and speaks to the guide before the gate opens.",
+    evidence: f.proposal.output.evidence, strength: "explicit" as const, rationale: "Only pre-event actions are described." };
+  const edit = { fields: [field] };
+  const proposal = { ...f.proposal, intent, output: { ...f.proposal.output, scopeHash: h(intent), edit } };
+  const event = canonicalEventSchema.parse(lowerEntryWording(intent, edit)[0]!.payload);
+  const entry = event.characterEntryCheckpoints![0]!;
+  expect({ ...entry, readerSetup: f.event.characterEntryCheckpoints![0]!.readerSetup }).toEqual(f.event.characterEntryCheckpoints![0]);
+  expect({ ...event, characterEntryCheckpoints: f.event.characterEntryCheckpoints }).toEqual(f.event);
+  expect(repair.entryStateInput(intent, f.context, [])).toMatchObject({ policy: ENTRY_WORDING_REPAIR, entryWordingFields: { readerSetup: f.event.characterEntryCheckpoints![0]!.readerSetup } });
+  expect(repair.entryStateInput(intent, f.context, [])).not.toHaveProperty("stateOperations");
+  expect(() => validateEntryStateHistory([proposal], f.parents)).not.toThrow();
+  expect(() => validateEntryStateHistory([{ ...proposal, intent: f.intent, output: { ...proposal.output, scopeHash: h(f.intent) } }], f.parents)).toThrow();
+  expect(() => lowerEntryStateRepair(f.intent, proposal)).toThrow();
+  expect(() => lowerEntryStateRepair(intent, f.proposal)).toThrow();
+  const envelope = repair.stateEnvelopes(intent, proposal)[0]!;
+  expect(envelope.evidenceAssertions).toHaveLength(1);
+  expect(envelope.evidenceAssertions[0]).toMatchObject({ target: { jsonPointer: "/characterEntryCheckpoints/0/readerSetup" }, anchors: [f.proposal.evidence[0]!.anchor], strength: "explicit" });
+  for (const invalid of [ { fields: [] }, { fields: [field, field] }, { fields: [{ ...field, value: f.event.characterEntryCheckpoints![0]!.readerSetup }] },
+    { fields: [{ ...field, field: "delta", value: "mutate truth" }] }, { fields: [{ ...field, field: "actorObservation", value: "x".repeat(1001) }] } ])
+    expect(() => lowerEntryWording(intent, invalid as typeof edit)).toThrow();
+  expect(() => lowerEntryWording({ ...intent, actorId: "unknown" }, edit)).toThrow();
+  expect(() => lowerEntryWording({ ...intent, baselines: [{ ...intent.baselines[0]!, revisionHash: h("changed") }] }, edit)).toThrow();
+});

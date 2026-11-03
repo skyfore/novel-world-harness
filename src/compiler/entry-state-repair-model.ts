@@ -1,6 +1,7 @@
 import path from "node:path";
 import { z } from "zod";
 import { lowerEntryState, entryStateEditSchema } from "./entry-state.js";
+import { lowerEntryWording, entryWordingEditSchema } from "./entry-wording.js";
 import { entryPresenceIntentSchema, validateEntryRepairParent } from "./entry-presence-repair-model.js";
 import { consumerReviewCheckSchema } from "./consumer-review-contract.js";
 import { contentHash } from "../world/canonical.js";
@@ -11,30 +12,37 @@ import { identityRequirementDirectory } from "./identity-requirements.js";
 import { consumerRevalidationId, type ConsumerRevalidationRecord } from "./identity-consumer-revalidation-model.js";
 
 export const ENTRY_STATE_REPAIR = "entry-checkpoint-state/v1" as const;
+export const ENTRY_WORDING_REPAIR = "entry-checkpoint-wording/v1" as const;
+export const entryRepairPolicySchema = z.enum([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR]);
+export type EntryRepairPolicy = z.infer<typeof entryRepairPolicySchema>;
+export const entryRepairFolder = (policy: EntryRepairPolicy) => policy === ENTRY_STATE_REPAIR ? "state-repair" : "wording-repair";
 const hash = z.string().regex(/^[a-f0-9]{64}$/), text = z.string().trim().min(1).max(6000);
-export const entryStateIntentSchema = entryPresenceIntentSchema.extend({ policy: z.literal(ENTRY_STATE_REPAIR),
+export const entryStateIntentSchema = entryPresenceIntentSchema.extend({ policy: entryRepairPolicySchema,
   baselines: entryPresenceIntentSchema.shape.baselines.length(1) });
 export type EntryStateIntent = z.infer<typeof entryStateIntentSchema>;
-export const entryStateRepairId = (s: Pick<EntryStateIntent, "taskId" | "ref" | "parentReviewId">) => contentHash({ policy: ENTRY_STATE_REPAIR, taskId: s.taskId, ref: s.ref, parentReviewId: s.parentReviewId });
+export const entryStateRepairId = (s: Pick<EntryStateIntent, "policy" | "taskId" | "ref" | "parentReviewId">) => contentHash({ policy: s.policy, taskId: s.taskId, ref: s.ref, parentReviewId: s.parentReviewId });
 export const entryStateRepairDirectory = (root: string, s: EntryStateIntent) => path.join(identityRequirementDirectory(root, s.sourceId, s.taskId),
-  "consumer-revalidation", s.parentReviewId, "state-repair");
+  "consumer-revalidation", s.parentReviewId, entryRepairFolder(s.policy));
 export const entryStateCriteria = [...consumerReviewCheckSchema.options, "unchanged-scope", "retained-obligations"] as const;
 const commonOutput = { scopeHash: hash, evidence: z.array(modelTextSelectorSchema).min(1).max(8), retainedQuestionIds: z.array(hash).min(1),
   playable: z.literal(false), parentResumeAllowed: z.literal(false) };
 export const entryStateProposalSchema = z.object({ ...commonOutput, phase: z.literal("entry-state-proposal"),
   disposition: z.enum(["repaired", "blocked"]), edit: entryStateEditSchema, rationale: text.max(1000) }).strict();
+export const entryWordingProposalSchema = entryStateProposalSchema.extend({ edit: entryWordingEditSchema });
+export const entryRepairProposalSchema = entryStateProposalSchema.extend({ edit: z.union([entryStateEditSchema, entryWordingEditSchema]) });
+export const entryProposalSchemaFor = (policy: EntryRepairPolicy) => policy === ENTRY_STATE_REPAIR ? entryStateProposalSchema : entryWordingProposalSchema;
 export const entryStateCheckSchema = z.object({ ...commonOutput, phase: z.literal("entry-state-check"), proposalHash: hash,
   verdict: z.enum(["supported", "blocked"]), rationale: text,
   requirements: z.array(z.object({ id: text, verdict: z.enum(["supported", "blocked"]), rationale: text }).strict()).min(1),
   criteria: z.array(z.object({ id: z.enum(entryStateCriteria), verdict: z.enum(["supported", "blocked"]), rationale: text }).strict()).length(entryStateCriteria.length) }).strict();
-export const entryStateOutputSchema = z.discriminatedUnion("phase", [entryStateProposalSchema, entryStateCheckSchema]);
+export const entryStateOutputSchema = z.discriminatedUnion("phase", [entryRepairProposalSchema, entryStateCheckSchema]);
 export type EntryStateOutput = z.infer<typeof entryStateOutputSchema>;
 const record = { intent: entryStateIntentSchema, predecessorRecordHash: hash.nullable() };
 const proof = { inputHash: hash, sessionId: text, traceRunId: text, sessionCheckpointHash: hash, evidence: z.array(prerequisiteEvidenceSchema).min(1).max(80) };
 export const entryStateArtifactSchema = z.object({ kind: z.literal("canonical-event"), id: text, proposalId: text,
   beforeHash: hash, afterHash: hash, envelopeHash: hash }).strict();
 export const entryStateRecordSchema = z.discriminatedUnion("phase", [
-  z.object({ ...record, ...proof, phase: z.literal("entry-state-proposal"), output: entryStateProposalSchema }).strict(),
+  z.object({ ...record, ...proof, phase: z.literal("entry-state-proposal"), output: entryRepairProposalSchema }).strict(),
   z.object({ ...record, ...proof, phase: z.literal("entry-state-check"), output: entryStateCheckSchema }).strict(),
   z.object({ ...record, phase: z.literal("entry-state-commit"), artifacts: z.array(entryStateArtifactSchema).min(1) }).strict(),
   z.object({ ...record, phase: z.literal("entry-state-applied"), artifacts: z.array(entryStateArtifactSchema).min(1),
@@ -44,7 +52,7 @@ export const entryStateRecordSchema = z.discriminatedUnion("phase", [
 export type EntryStateRecord = z.infer<typeof entryStateRecordSchema>;
 export const entryStateModelContract = { terminalTool: "submit_entry_state_repair", readTools: ["preview_entry_state_repair"], receipt: "retained" as const };
 export const ENTRY_STATE_LIMITS = { maxModelCalls: 12, maxRequestBytes: 512000, maxTotalPayloadBytes: 12288000 } as const;
-export const entryStateStop = (message: string) => prerequisiteStop(`${message}. Inspect requirements inspect-identity-repairs for the same source/task and copy summary.consumerRevalidation.reviews[].id and ref once. Preserve the exact state-repair intent, source, drafts, failures and charges; no guessed IDs, changed scope, fresh attempt or unchanged retry. Recover a sealed result without model generation only.`);
+export const entryStateStop = (message: string) => prerequisiteStop(`${message}. Inspect requirements inspect-identity-repairs for the same source/task and copy summary.consumerRevalidation.reviews[].id and ref once. Preserve the exact entry repair intent, source, drafts, failures and charges; no guessed IDs, changed scope, fresh attempt or unchanged retry. Recover a sealed result without model generation only.`);
 
 export function validateEntryStateIntent(s: EntryStateIntent, parents: ConsumerRevalidationRecord[]) {
   entryStateIntentSchema.parse(s);
@@ -68,6 +76,7 @@ export function validateEntryStateHistory(records: EntryStateRecord[], parents: 
     if (r.phase !== phases[i] || contentHash(r.intent) !== contentHash(s) || r.predecessorRecordHash !== (i ? contentHash(records[i - 1]) : null))
       throw entryStateStop("State repair changed its one-time phase or predecessor");
     if ("output" in r) {
+      if (r.phase === "entry-state-proposal") entryProposalSchemaFor(s.policy).parse(r.output);
       if (r.output.scopeHash !== contentHash(s) || contentHash(r.output.retainedQuestionIds) !== contentHash(s.retainedQuestionIds)
         || [...parent, ...records.slice(0, i)].some(old => "sessionId" in old && (old.sessionId === r.sessionId || old.traceRunId === r.traceRunId)))
         throw entryStateStop("State review changed its original questions or independent session");
@@ -91,5 +100,6 @@ export function validateEntryStateHistory(records: EntryStateRecord[], parents: 
  * depend on identity tasks, review lineage, provider or a particular novel. */
 export function lowerEntryStateRepair(intent: EntryStateIntent, proposal: Extract<EntryStateRecord, { phase: "entry-state-proposal" }>) {
   if (proposal.output.disposition !== "repaired") throw entryStateStop("Blocked proposal grants no mutation");
-  return lowerEntryState(intent, proposal.output.edit);
+  return intent.policy === ENTRY_STATE_REPAIR ? lowerEntryState(intent, entryStateEditSchema.parse(proposal.output.edit))
+    : lowerEntryWording(intent, entryWordingEditSchema.parse(proposal.output.edit));
 }

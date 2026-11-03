@@ -15,14 +15,14 @@ import { consumerRevalidationId, consumerRevalidationScopeSchema, type ConsumerR
 import { deriveConsumerReviewContract } from "../src/compiler/consumer-review-contract.js";
 import { loadCompilerArtifactRecords } from "../src/compiler/artifact-retrieval.js";
 import { originalIdentityCatalog } from "../src/compiler/upstream-repair-preflight.js";
-import { entryStateIntentSchema, entryStateRepairDirectory, entryStateCriteria, type EntryStateRecord } from "../src/compiler/entry-state-repair-model.js";
+import { ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR, entryStateIntentSchema, entryStateRepairDirectory, entryStateCriteria, type EntryStateRecord } from "../src/compiler/entry-state-repair-model.js";
 import * as stateRepair from "../src/compiler/entry-state-repair.js";
 import { runEntryStateRepair } from "../src/workflow/entry-state-repair.js";
 import { consumerRevalidationStatus } from "../src/compiler/identity-review-status.js";
 import { realIdentityFixture } from "./helpers/identity-real-fixture.js";
 import { mockPiProvider } from "./helpers/pi-provider.js";
 
-it("publishes real repair journals and rewinds consecutive actors in one event without invalidating historical receipts", async () => {
+it.each([ENTRY_STATE_REPAIR, ENTRY_WORDING_REPAIR])("rewinds consecutive entry repairs including %s without invalidating historical receipts", async secondPolicy => {
   const refs = ["entity/ada", "entry/ada/encounter", "entry/bea/encounter"];
   const f = await realIdentityFixture(false, false, 3, { consumerRefs: refs,
     additionalSource: "Ada and Bea climbed to the platform. Both are sitting beside their observer before the bell rings.\n" });
@@ -77,7 +77,7 @@ it("publishes real repair journals and rewinds consecutive actors in one event w
       participants: ["ada", "bea", "observer"], participantPresence: ["ada", "bea", "observer"].map(entityId => ({ entityId, mode: "physical" })),
       storyTime: { kind: "ordinal", label: "later", orderHint: 3 }, preconditions: [], observedOutcome: { version: 1, operations: [] }, causalParents: [],
       characterEntryCheckpoints: ["ada", "bea"].map(actorId => ({ actorId, readerSetup: "Before the encounter", actorObservation: "You wait.",
-        participantPresence: [{ entityId: actorId, mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: actorId, field: "character.plan", value: "climb onto the platform" }] } })),
+        participantPresence: [{ entityId: actorId, mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: actorId, field: "character.plan", value: actorId === "bea" && secondPolicy === ENTRY_WORDING_REPAIR ? "wait for the bell" : "climb onto the platform" }] } })),
       evidence: refsEvidence, confidence: 1 });
     await canon.putEvent(originalEvent);
     for (const entityId of originalEvent.participants) await canon.putEventParticipation(eventParticipationSchema.parse({
@@ -91,9 +91,10 @@ it("publishes real repair journals and rewinds consecutive actors in one event w
       const check = path.basename(options.runtimeDir!) === "entry-state-check";
       const session = await create({ ...options, model: undefined, piAgentDir: path.join(root, "pi-entry-state") }); sessions.push(session.id);
       const { intent } = prepared;
-      const output = { phase: "entry-state-proposal" as const, scopeHash: h(intent), evidence: [selector], retainedQuestionIds: intent.retainedQuestionIds,
+      const output: Extract<EntryStateRecord, { phase: "entry-state-proposal" }>["output"] = { phase: "entry-state-proposal" as const, scopeHash: h(intent), evidence: [selector], retainedQuestionIds: intent.retainedQuestionIds,
         playable: false as const, parentResumeAllowed: false as const, disposition: "repaired" as const,
-        edit: { remove: [{ index: 0, operationHash: h(canonicalEventSchema.parse(intent.baselines[0]!.payload).characterEntryCheckpoints!.find(e => e.actorId === intent.actorId)!.delta.operations[0]) }],
+        edit: intent.policy === ENTRY_WORDING_REPAIR ? { fields: [{ field: "readerSetup" as const, value: "Bea sits beside the observer before the bell rings.",
+          strength: "explicit" as const, evidence: [selector], rationale: "Keep the entry description before the bell." }] } : { remove: [{ index: 0, operationHash: h(canonicalEventSchema.parse(intent.baselines[0]!.payload).characterEntryCheckpoints!.find(e => e.actorId === intent.actorId)!.delta.operations[0]) }],
           set: [{ field: "character.posture", value: "sitting", strength: "explicit" as const, evidence: [selector], rationale: "Both actors are seated before the event." }] },
         rationale: "Completed climbing is not a current plan; retain evidenced bodily context." };
       const checked = { phase: "entry-state-check", scopeHash: h(intent), evidence: [selector], retainedQuestionIds: intent.retainedQuestionIds,
@@ -135,7 +136,7 @@ it("publishes real repair journals and rewinds consecutive actors in one event w
         output: { phase: "consumer-revalidation-check", scopeHash: h(scope), requirementIds, evidence: [selector], proposalHash: h(proposal.output), reviewContractHash: h(scope.reviewContract), verdict: "supported", rationale: "The entry remains blocked." } };
       await appendImportedHistory([proposal, checked].map(record => ({ kind: "identity-consumer-revalidation", record })));
       const journal = await ledger.history(), context = { originalInput, negativeJudgments: [proposal.output, checked.output] };
-      const intent = entryStateIntentSchema.parse({ version: 1, policy: "entry-checkpoint-state/v1", sourceId: scope.sourceId, sourceHash: scope.sourceHash,
+      const intent = entryStateIntentSchema.parse({ version: 1, policy: actorId === "bea" ? secondPolicy : ENTRY_STATE_REPAIR, sourceId: scope.sourceId, sourceHash: scope.sourceHash,
         taskId: scope.taskId, identityIntentHash: scope.identityIntentHash, originalBudgetHash: scope.originalBudgetHash, ref, actorId, eventId: "encounter",
         parentReviewId: consumerRevalidationId(scope), parentRecordHashes: [h(proposal), h(checked)], parentReceiptFingerprint: scope.receiptFingerprint, upstreamPlanHash: scope.upstreamPlanHash,
         authorizationRef: "repair exact source-supported state", createdAt: new Date().toISOString(), implementationHash: await stateRepair.entryStateImplementationHash(), contextHash: h(context),
@@ -144,7 +145,7 @@ it("publishes real repair journals and rewinds consecutive actors in one event w
         baselines: catalog.filter(r => r.kind === "canonical-event" && r.logicalId === "encounter")
           .map(r => ({ kind: r.kind, id: r.logicalId, payload: r.payload, revisionHash: h(r.payload), evidenceAssertions: r.evidenceAssertions })) });
       prepared = { intent, context, parents: [proposal, checked], directory: entryStateRepairDirectory(root, intent) }; preparations.push(prepared);
-      const args = { root, sourceId: scope.sourceId, taskId: scope.taskId, ref, authorizationRef: intent.authorizationRef };
+      const args = { root, sourceId: scope.sourceId, taskId: scope.taskId, ref, policy: intent.policy, authorizationRef: intent.authorizationRef };
       if (actorId === "ada") await expect(runEntryStateRepair(args)).rejects.toThrow(/after durable journal/);
       expect(await runEntryStateRepair(args)).toMatchObject({ status: "repaired", obligationStatus: "revalidated" });
     }
@@ -164,6 +165,7 @@ it("publishes real repair journals and rewinds consecutive actors in one event w
     const baselines = await stateRepair.entryStateCatalogBaselines(root, p.intent.sourceId, p.intent.taskId, h("upstream-plan"), current);
     const originals = baselines.flatMap(r => [{ kind: r.kind, id: r.id, payload: r.payload }, ...r.originalAssertions.map(a => ({ kind: "evidence-assertion", id: a.id, payload: a }))]);
     expect(originalIdentityCatalog(current, originals, baselines).get("canonical-event:encounter")).toEqual(originalEvent);
+    vi.spyOn(stateRepair, "entryStateImplementationHash").mockResolvedValue(h("later compiler implementation"));
     prepared = preparations[0]!;
     expect(await runEntryStateRepair({ root, sourceId: p.intent.sourceId, taskId: p.intent.taskId, ref: prepared.intent.ref, authorizationRef: prepared.intent.authorizationRef, inspect: true }))
       .toMatchObject({ status: "repaired", modelDispatchAllowed: false });

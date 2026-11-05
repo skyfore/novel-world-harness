@@ -19,6 +19,7 @@ import { applyEventExecutions, eventExecutionSchema, validateEventExecutions, ty
 import type { z } from "zod";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
+import { predicatesEntail } from "../world/predicate-implication.js";
 import { CanonicalCompiler, CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import {
   InitialWorldStore,
@@ -915,8 +916,9 @@ export class CompilerValidator {
       ["expiry", goal.expiry ?? []],
     ] as const) {
       predicates.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
-      if (predicates.length && predicates.some((predicate) => (goal.activation?.preconditions ?? []).some((activation) => canonicalJson(activation) === canonicalJson(predicate)))) {
-        errors.push(issue("GOAL_ACTIVE_AND_COMPLETE", `Goal ${goal.id} uses the same predicate for activation and ${path}`, path));
+      const entailed = predicates.map(predicate => predicatesEntail(goal.activation?.preconditions ?? [], predicate));
+      if (entailed.length && (path === "completion" ? entailed.every(Boolean) : entailed.some(Boolean))) {
+        errors.push(issue("GOAL_ACTIVE_AND_COMPLETE", `Goal ${goal.id} activation already entails ${path}. Use find_compiler_artifacts for this same source and goal, copy results[].logicalId, and read its exact source evidence. Correct the goal once only when the existing typed scope permits distinct source-supported completion/expiry; otherwise stop for host semantic review. Do not invent a replacement predicate, widen scope or retry unchanged.`, path));
       }
     }
     for (let milestoneIndex = 0; milestoneIndex < (goal.milestones?.length ?? 0); milestoneIndex += 1) {

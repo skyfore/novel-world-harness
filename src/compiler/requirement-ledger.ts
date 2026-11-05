@@ -27,7 +27,7 @@ import { z } from "zod";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { idSchema } from "../world/model.js";
 import { worldStorageRoot } from "../world/paths.js";
-import { evaluateSceneCapabilities, evaluateReviewedSceneCapabilities, sceneCapabilitySpecSchema, type SceneReviewCatalog } from "../eval/scene-capabilities.js";
+import { evaluateSceneCapabilities, evaluateReviewedSceneCapabilities, sceneCapabilitySpecSchema, type SceneReviewCatalog, type SceneCapabilitySpec } from "../eval/scene-capabilities.js";
 import { SCENE_REQUIREMENT_EVALUATOR_VERSION } from "../eval/scene-requirements.js";
 import { coreRoleRequirementDefinitionSchema, coreRoleRequirementHistorySchema, coreRoleDefinitions, assertCoreRoleDefinitionEvidence, type CoreRoleRequirementDefinition } from "./core-role-requirement-records.js";
 import { validateRoleRoster, roleRosterSchema, type RoleRoster } from "./role-roster.js";
@@ -132,13 +132,14 @@ export function activeRequirementSets(history: readonly RequirementSet[]): Requi
   return [...active.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export function sceneCatalogHash(catalog: SceneReviewCatalog): string {
+export function sceneCatalogHash(catalog: SceneReviewCatalog, spec?: SceneCapabilitySpec): string {
   // Fix the vocabulary; callers with a larger validator catalog must hash the
   // exact same consumer inputs as a frozen bundle, not unrelated Map fields.
-  return contentHash(Object.fromEntries(sceneCatalogKeys.map(key =>
+  const keys = sceneCatalogKeys.filter(key => key !== "goals" || spec?.cases.some(c => c.kind === "goal-lifecycle"));
+  return contentHash(Object.fromEntries(keys.map(key =>
     [key, [...(catalog[key]?.values() ?? [])].sort((a, b) => a.id.localeCompare(b.id))])));
 }
-export const sceneCatalogKeys = ["entities", "events", "eventParticipations", "actionSchemas", "eventExecutions", "normTemplates", "processTemplates", "rules", "claims", "propositions", "attributions", "utteranceExpressions", "perceptionObservations", "acquisitions"] as const;
+export const sceneCatalogKeys = ["entities", "events", "eventParticipations", "actionSchemas", "eventExecutions", "normTemplates", "processTemplates", "rules", "claims", "propositions", "attributions", "utteranceExpressions", "perceptionObservations", "acquisitions", "goals"] as const;
 
 export function evaluateRequirementSet(setInput: RequirementSet, bytes: Uint8Array, catalog: SceneReviewCatalog): RequirementResult {
   const set = requirementSetSchema.parse(setInput);
@@ -147,7 +148,7 @@ export function evaluateRequirementSet(setInput: RequirementSet, bytes: Uint8Arr
 }
 export function resultFromReport(set: RequirementSet, report: ReturnType<typeof evaluateReviewedSceneCapabilities>, catalog: SceneReviewCatalog): RequirementResult {
   return requirementResultSchema.parse({ setId: set.id, revisionHash: set.revisionHash,
-    catalogHash: sceneCatalogHash(catalog), evaluatorVersion: SCENE_REQUIREMENT_EVALUATOR_VERSION,
+    catalogHash: sceneCatalogHash(catalog, set.spec), evaluatorVersion: SCENE_REQUIREMENT_EVALUATOR_VERSION,
     requirements: report.requirements.requirements.map(({ state, ownState: _own, diagnostics, blockedBy, ...definition }) => ({
       id: definition.id, definitionHash: contentHash(definition), state, diagnostics, blockedBy,
     })),
@@ -157,12 +158,12 @@ export function resultFromReport(set: RequirementSet, report: ReturnType<typeof 
 /** Fail closed on stale inputs and partial success; proposed is not a state. */
 export function requirementResultIssues(setsInput: readonly RequirementSet[], results: readonly RequirementResult[], catalog: SceneReviewCatalog): string[] {
   const sets = frozenRequirementSetsSchema.parse(setsInput), issues: string[] = [];
-  const catalogHash = sceneCatalogHash(catalog);
   for (const result of results) {
     requirementResultSchema.parse(result);
     if (!sets.some(set => set.id === result.setId)) issues.push(`REQUIREMENT_RESULT_OUTSIDE_SCOPE: ${result.setId}`);
   }
   for (const set of sets) {
+    const catalogHash = sceneCatalogHash(catalog, set.spec);
     const found = results.filter(result => result.setId === set.id);
     if (found.length !== 1) { issues.push(`REQUIREMENT_NOT_EVALUATED: ${set.id} must have exactly one result`); continue; }
     const result = found[0]!;

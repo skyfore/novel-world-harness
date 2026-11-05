@@ -3,11 +3,13 @@ import { sourceAuditAuthorities, sourceAuditRepairState } from "./role-source-au
 import { sourceAuditBlocked } from "./role-source-audit-model.js";
 import { contentHash } from "../world/canonical.js";
 import { isDeepStrictEqual } from "node:util";
-import { ProposalStore } from "../world/canonical-model.js";
+import { ProposalStore, CanonicalModelStore } from "../world/canonical-model.js";
+import { ActorModelStore } from "../world/actors.js";
+import { inspectSemanticCoverage } from "./semantic-coverage.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
 import { TraceStore } from "../trace/store.js";
-import { WorkspaceOperationLock } from "../util/workspace-lock.js";
+import { WorkspaceOperationLock, inspectProcessLiveness } from "../util/workspace-lock.js";
 import { CompilerBatchStore } from "./batch-progress.js";
 import { compilerScopePlan, type CompilerPlanStage } from "./batch-plan.js";
 import { ChapterSplitPlanStore } from "./chapter-split.js";
@@ -28,8 +30,8 @@ export async function inspectCompilerStatus(root: string, sourceId?: string) {
   const lock = await WorkspaceOperationLock.inspect(root);
   return { version: 1, capturedAt: new Date().toISOString(), workspace: workspace.root, stateDirectory: workspace.stateDir,
     compilerFingerprint: currentCompilerFingerprint(),
-    compilerLock: lock.owner ? { present: true, pid: lock.owner.pid, startedAt: lock.owner.startedAt, processLiveness: "not-checked" }
-      : { present: false, processLiveness: "not-checked" },
+    compilerLock: lock.owner ? { present: true, pid: lock.owner.pid, startedAt: lock.owner.startedAt, processLiveness: await inspectProcessLiveness(lock.owner) }
+      : { present: false, processLiveness: "unknown" },
     sources: await Promise.all(sources.map((source) => inspectSource(root, source))),
     interpretation: "Batch checkpoints are review progress. Candidate archival, recorded closure, full-novel readiness and executable capability are separate results. This snapshot runs no new evaluation." };
 }
@@ -142,7 +144,24 @@ async function inspectSource(root: string, source: SourceDocument) {
     identityReviews = await inspectIdentityReviewStatuses(root, source.id, history);
   }
   catch (error) { identityReviewInspection = "unknown"; diagnostics.push(`Identity review inspection: ${String(error)}`); }
+  let semanticCoverage: ReturnType<typeof inspectSemanticCoverage> | null = null;
+  try {
+    const [events, goals, sets] = await Promise.all([new CanonicalModelStore(root).listEvents(), new ActorModelStore(root).listGoals(), new RequirementLedger(root, source.id).definitions()]);
+    semanticCoverage = inspectSemanticCoverage(source.id, { events: new Map(events.map(e => [e.id, e])), goals: new Map(goals.map(g => [g.id, g])) },
+      sets.filter(s => s.spec.sourceSha256 === source.contentSha256).map(s => s.spec));
+  } catch (error) { diagnostics.push(`Semantic coverage inspection: ${String(error)}`); }
+  const latestActivity = identityReviews.flatMap(t => t.consumerRevalidation.attempts.flatMap(a => a.stages.map(s => s.execution?.activity)))
+    .find(a => a?.traceRunId === latestRun?.id);
   return {
+    semanticCoverage,
+    progress: { batchExecution: { completed: completed.size, total: planAvailable ? plan.length : null },
+      sourceClosure: roleReviewWork.filter(w => w.current).map(w => ({ planHash: w.planHash, audited: w.auditedSources, total: w.sourceWorks, openQuestions: w.openQuestions })),
+      consumerClosure: identityReviews.map(t => ({ taskId: t.taskId, inventoryHash: t.inventoryHash, total: t.totalConsumers,
+        reviewed: t.consumerRevalidation.recordedReviewedConsumers, cleared: t.consumerRevalidation.recordedClearedConsumers })),
+      semanticReview: semanticCoverage ? { events: semanticCoverage.events.length, goals: semanticCoverage.goals.length, missing: semanticCoverage.missingReviewRefs.length,
+        activationEntailsCompletion: semanticCoverage.goals.filter(g => g.activationEntailsCompletion).length } : null,
+      delivery: { archived: revisions.length, active: revisions.filter(r => r.active).map(r => r.bundleHash), currentCertification: "not-reverified" },
+      interpretation: "Compare source/plan/inventory hashes before computing net changes. Batch execution, verified requirement closure and delivery are separate; calls, code changes and artifacts do not measure semantic completion." },
     identityReviews: { inspection: identityReviewInspection, tasks: identityReviews },
     roleReviewWork, roleReviewInspection, sourceId: source.id, sourcePath: source.sourcePath, sourceSha256: source.contentSha256, bytes: source.bytes, sourceIntegrity,
     persistedPipelineVersion: persisted?.pipelineVersion ?? null, effectivePipelineVersion: progress.pipelineVersion,
@@ -159,7 +178,10 @@ async function inspectSource(root: string, source: SourceDocument) {
       requiresHostReview: obligations.some(item => item.batchId === id && item.requiresHostReview) })),
     nextUncheckpointedBatch: plan.find((batch) => !completed.has(batch.id))?.id ?? null,
     obligations, finish: { inspection: finishInspection, receipts: finishReceipts, interpretation: "Receipt checksums only; host recovery revalidates dependencies and the original finish before checkpointing." }, worldProposalInventory: Object.fromEntries(inventory),
-    latestRun: latestRun ? { id: latestRun.id, operationId: latestRun.operationId ?? null, startedAt: latestRun.startedAt, endedAt: latestRun.endedAt ?? null, status: latestRun.status,
+    latestRun: latestRun ? { id: latestRun.id, operationId: latestRun.operationId ?? null, startedAt: latestRun.startedAt, endedAt: latestRun.endedAt ?? null,
+      status: latestRun.status === "running" && latestActivity && latestActivity.state !== "RUNNING" ? latestActivity.state : latestRun.status, recordedStatus: latestRun.status,
+      lastActivityAt: events.at(-1)?.observedAt ?? latestRun.startedAt,
+      processLiveness: latestRun.status === "running" ? latestActivity?.processLiveness ?? await inspectProcessLiveness(events.findLast(e => e.type === "stage.started" && e.data?.owner)?.data?.owner as Parameters<typeof inspectProcessLiveness>[0]) : "not-applicable",
       counts: latestRun.counts, usage: latestRun.usage, model: model ? { provider: model.providerId, id: model.modelId, thinking: model.thinkingLevel } : null,
       error: latestRun.error ?? null, lastToolFailure } : null,
     candidates: { inspection: candidateInspection, archived: revisions.length > 0, revisions }, diagnostics,

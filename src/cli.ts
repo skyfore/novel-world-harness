@@ -220,7 +220,7 @@ requirementsCommand.command("revalidate-identity-consumer").requiredOption("--so
   .requiredOption("--authorization-ref <ref>", "existing user authorization to continue the same repair")
   .option("--compiler-correction <policy>", "single retained-budget correction: source-local-referent/v1, consumer-review-scope/v1 or proven consumer-evidence-coverage/v1; inspect first")
   .option("--resume-unsubmitted <mode>", "inspect or run the sole audited continuation; retain failed sessions and subtract their original stage usage")
-  .option("--provider-resumption <path>", "later authorization JSON for a settled read-only work quota refusal, or a legacy first-request refusal; use with --resume-unsubmitted inspect before run")
+  .option("--provider-resumption <path>", "later authorization JSON for a settled quota refusal or proven work owner-exit; use with --resume-unsubmitted inspect before run")
   .option("--continuation-budget <path>", "explicit later authorization JSON for one bounded call amendment before the original continuation starts")
   .option("--host-recovery <path>", "explicit original-task reader/request-size recovery JSON; inspect first, preserve all prior attempts and charges")
   .option("--recover-submitted-ref", "validate the exact saved Pi proposal rejected only for a discovered entity:id spelling; no proposal replay")
@@ -243,6 +243,47 @@ requirementsCommand.command("revalidate-identity-consumer").requiredOption("--so
       recoverSubmittedRef: options.recoverSubmittedRef,
       hostRecovery: options.hostRecovery ? JSON.parse(await fs.readFile(options.hostRecovery, "utf8")) : undefined,
       budgetAmendment: options.continuationBudget ? JSON.parse(await fs.readFile(options.continuationBudget, "utf8")) : undefined }), null, 2));
+  });
+requirementsCommand.command("semantic-review-plan").requiredOption("--source <id>", "registered source ID")
+  .description("Read-only complete event/goal source-review inventory; never derives expected semantics from current drafts")
+  .action(async options => {
+    const { requirementInputs } = await import("./compiler/requirement-service.js");
+    const { inspectSemanticCoverage } = await import("./compiler/semantic-coverage.js");
+    const { RequirementLedger } = await import("./compiler/requirement-ledger.js");
+    const { source, catalog } = await requirementInputs(rootFor({}), options.source);
+    const definitions = await new RequirementLedger(rootFor({}), options.source).definitions();
+    console.log(JSON.stringify({ sourceId: source.id, sourceSha256: source.contentSha256,
+      coverage: inspectSemanticCoverage(source.id, catalog, definitions.map(d => d.spec)), definitions,
+      events: [...catalog.events.values()], goals: [...catalog.goals?.values() ?? []],
+      nextAction: "Read the original evidence spans, independently define event-effects and goal-lifecycle cases, then review-scenes --spec <file> --register <stable set ID>. Copy an existing predecessorRevision for changes. Current artifacts are subjects under test, never expected results. Keep unknown/unmapped outcomes blocked; no world writes or certification are granted." }, null, 2));
+  });
+requirementsCommand.command("consumer-queue")
+  .requiredOption("--source <id>", "original registered source")
+  .requiredOption("--task <hash>", "tasks[].taskId from inspect-identity-repairs")
+  .option("--authorization-ref <ref>", "original user authorization for this queue; required for execution")
+  .option("--shard <index>", "original shard index; omitted means the complete inventory", Number)
+  .option("--limit <count>", "maximum new consumers this invocation, without removing the queue tail", Number)
+  .option("--provider-resumption <path>", "exact inspected continuation JSON for one retained consumer")
+  .option("--inspect", "read-only durable queue state and process liveness")
+  .action(async options => {
+    const { inspectConsumerQueue, runIdentityConsumerQueue } = await import("./workflow/identity-consumer-queue.js");
+    if (options.inspect) return console.log(JSON.stringify(await inspectConsumerQueue(rootFor({}), options.source, options.task, options.shard), null, 2));
+    if (!options.authorizationRef) throw new Error("consumer-queue execution requires --authorization-ref from the user's original loop instruction; inspection does not authorize execution.");
+    const result = await runIdentityConsumerQueue({ root: rootFor({}), sourceId: options.source, taskId: options.task, shard: options.shard, limit: options.limit,
+      authorizationRef: options.authorizationRef, providerResumption: options.providerResumption ? JSON.parse(await fs.readFile(options.providerResumption, "utf8")) : undefined,
+      onProgress: event => process.stderr.write(JSON.stringify(event) + "\n") });
+    console.log(JSON.stringify(result, null, 2));
+  });
+requirementsCommand.command("settle-interrupted-consumer")
+  .requiredOption("--directory <path>", "exact attempts[].directory from inspect-identity-repairs")
+  .requiredOption("--stage <name>", "exact stages[].stage of the interrupted work")
+  .requiredOption("--lock-recovery <path>", "archivePath returned by compiler-lock recover on the owning host")
+  .requiredOption("--authorization-ref <ref>", "user authorization to settle and continue the interrupted loop")
+  .option("--inspect", "verify all evidence without settling or dispatching")
+  .action(async options => {
+    if (!["consumer-revalidation", "consumer-revalidation-check"].includes(options.stage)) throw new Error("Copy stages[].stage from requirements inspect-identity-repairs; correct once, do not guess or retry unchanged.");
+    const { settleInterruptedConsumerWork } = await import("./compiler/consumer-work-interruption.js");
+    console.log(JSON.stringify(await settleInterruptedConsumerWork({ root: rootFor({}), ...options }), null, 2));
   });
 requirementsCommand.command("repair-entry-presence").requiredOption("--source <id>", "registered source ID")
   .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")

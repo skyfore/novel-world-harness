@@ -9,7 +9,7 @@ type SourceStatus = Awaited<ReturnType<typeof inspectCompilerStatus>>["sources"]
 type UpstreamState = Awaited<ReturnType<UpstreamRepairLedger["inspect"]>>;
 export type CompilationHandoffTask = {
   id: string;
-  kind: "identity-consumers" | "source-audit" | "upstream-repair" | "inspection" | "phase";
+  kind: "identity-consumers" | "source-audit" | "upstream-repair" | "semantic-review" | "inspection" | "phase";
   state: "blocked" | "available" | "pending" | "recorded";
   dependsOn: string[];
   refs: string[];
@@ -28,6 +28,11 @@ export function compilationHandoff(root: string, source: SourceStatus, run: Nove
   const currentWork = source.roleReviewWork.filter(p => p.current);
   const openPlans = new Set(currentWork.filter(p => p.openQuestions || p.blockedAudits).map(p => p.planHash));
   const roleDependencies: string[] = [];
+  if (!source.semanticCoverage || source.semanticCoverage.issues.length) tasks.push({ id: "inspection:semantic-source-review", kind: "semantic-review", state: "blocked",
+    dependsOn: [], refs: source.semanticCoverage?.missingReviewRefs ?? [], execution: "inspect-only",
+    reason: source.semanticCoverage?.issues.join("; ") ?? "Current semantic review coverage is unknown.",
+    command: command("requirements", "semantic-review-plan"),
+    resumeCondition: "Read exact source anchors and review expected event effects and distinct active/completed goal cuts independently of current empty deltas. Register through review-scenes --register; preserve original set IDs and predecessor revisions. Unknown evidence and unmapped semantics stay blocked. No model retry, requirement deletion or guessed fields." });
   if (source.roleReviewInspection === "unknown" || source.identityReviews.inspection === "unknown") {
     const id = "inspection:role-dependencies";
     roleDependencies.push(id);
@@ -101,6 +106,7 @@ export function compilationHandoff(root: string, source: SourceStatus, run: Nove
     const id = `phase:${phase}`, receipt = run?.history.findLast(r => r.phase === phase);
     const dependencies = previous ? [previous] : [];
     if (phase === "roles") dependencies.push(...roleDependencies);
+    if (phase === "requirements" && tasks.some(t => t.id === "inspection:semantic-source-review")) dependencies.push("inspection:semantic-source-review");
     if (phase === "recover") dependencies.push(...tasks.filter(t => t.kind === "upstream-repair" && t.state === "blocked").map(t => t.id));
     const blocked = dependencies.some(id => tasks.find(t => t.id === id)?.state === "blocked");
     tasks.push({ id, kind: "phase", state: blocked || receipt?.status === "blocked" ? "blocked"

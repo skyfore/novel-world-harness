@@ -23,7 +23,7 @@ const defaultContract: IdentitySessionContract = { terminalTool: "submit_identit
 export const identityQuotaRefusal = "Codex error: The usage limit has been reached";
 type IdentityTranscriptSummary = { entries: number; lastEntryId: string | null; responses: number; toolResults: number;
   transportRetries?: Array<{ policy: "pi-websocket-retry/v1"; editId: string; targetId: string; messageIndex: number; responseIndex: number; messageHash: string }> };
-function inspectTranscript(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model"> & { output: unknown }, prompt: string, contract = defaultContract, unsubmitted = false, rejectedSubmissionError?: string, settledFailure = false, quotaRefusal = false, verifyTransportRetry = false, readOnlyQuota = false): { messages: Message[]; localStop: Message | undefined; summary: IdentityTranscriptSummary } {
+function inspectTranscript(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model"> & { output: unknown }, prompt: string, contract = defaultContract, unsubmitted = false, rejectedSubmissionError?: string, settledFailure = false, quotaRefusal = false, verifyTransportRetry = false, readOnlyQuota = false, interruptedFirstRequest = false): { messages: Message[]; localStop: Message | undefined; summary: IdentityTranscriptSummary } {
   if (!text.endsWith("\n")) throw prerequisiteStop("Identity transcript has an incomplete final entry; preserve it, no redispatch");
   const entries = text.trimEnd().split("\n").map(line => JSON.parse(line)) as FileEntry[];
   const header = entries[0];
@@ -64,6 +64,11 @@ function inspectTranscript(text: string, root: string, record: Pick<IdentityReco
   if (users.length !== 1 || (typeof userText === "string" ? userText : userText?.filter(b => b.type === "text").map(b => b.text).join("")) !== prompt)
     throw prerequisiteStop("Identity transcript lost its exact initial input");
   const assistants = messages.filter(m => m.role === "assistant");
+  if (interruptedFirstRequest) {
+    if (assistants.length || messages.some(m => !["system", "user"].includes(m.role)) || messages.at(-1)?.role !== "user")
+      throw prerequisiteStop("Interrupted first request has output or tools; preserve its original submission protocol, no continuation");
+    return { messages, localStop: undefined, summary: { entries: entries.length, lastEntryId: parent, responses: 0, toolResults: 0 } };
+  }
   const lastMessage = messages.at(-1);
   // Pi persists the host beforeModelRequest stop as an empty, zero-usage error
   // message. It is retained verbatim but is not another provider response.
@@ -205,7 +210,12 @@ export function verifyFailedIdentitySession(text: string, root: string, record: 
   return verifySessionObservations(inspectTranscript(text, root, record, prompt, contract, false, undefined, true), rawRequests, rawMessages, contract);
 }
 
-function verifySessionObservations({ messages, summary, localStop }: ReturnType<typeof inspectTranscript>, rawRequests: string, rawMessages: string, contract: IdentitySessionContract, requestSizeStop = false) {
+export function verifyInterruptedFirstRequest(text: string, root: string, sessionId: string, prompt: string, rawRequests: string, rawMessages: string, contract: IdentitySessionContract) {
+  return verifySessionObservations(inspectTranscript(text, root, { sessionId, provider: "openai-codex", model: "gpt-6.1-sol", output: null },
+    prompt, contract, false, undefined, false, false, false, false, true), rawRequests, rawMessages, contract, false, true);
+}
+
+function verifySessionObservations({ messages, summary, localStop }: ReturnType<typeof inspectTranscript>, rawRequests: string, rawMessages: string, contract: IdentitySessionContract, requestSizeStop = false, interruptedFirstRequest = false) {
   const lines = (raw: string) => {
     if (!raw.endsWith("\n")) throw prerequisiteStop("Identity evidence journal is incomplete; preserve the original, no authority or retry");
     return raw.trimEnd().split("\n").map(line => JSON.parse(line));
@@ -214,14 +224,21 @@ function verifySessionObservations({ messages, summary, localStop }: ReturnType<
   if (observed.some((row, i) => row.sequence !== i + 1) || contentHash(observed.map(row => row.message)) !== contentHash(messages))
     throw prerequisiteStop("Identity persisted transcript differs from its live message evidence; preserve both journals, no registration or retry");
   const journal = lines(rawRequests);
-  if (journal.length !== summary.responses * 3 + (requestSizeStop ? 1 : 0)) throw prerequisiteStop("Identity request journal is incomplete");
+  const requests = summary.responses + (interruptedFirstRequest ? 1 : 0);
+  if (journal.length !== requests * 3 + (requestSizeStop ? 1 : 0)) throw prerequisiteStop("Identity request journal is incomplete");
   const originals = [], contexts = [], payloads = [];
-  for (let i = 0; i < summary.responses * 3; i += 3) {
+  for (let i = 0; i < requests * 3; i += 3) {
     const [original, context, payload] = journal.slice(i, i + 3);
     if (original.phase !== "original-context" || context.phase !== "context" || payload.phase !== "provider-payload"
       || contentHash(losslessJsonContext(normalizeContext(original.value), contract.readTools, jsonDictionaryProfile(context.value)).context) !== contentHash(context.value))
       throw prerequisiteStop("Identity context transport does not losslessly reconstruct the complete request");
     originals.push(original.value); contexts.push(context.value); payloads.push(payload.value);
+  }
+  if (interruptedFirstRequest) {
+    const actual = originals[0]?.messages as Message[] | undefined;
+    if (!actual || actual[0]?.role !== "system" || actual.slice(1).some(m => m.role === "system")
+      || contentHash(actual.slice(1)) !== contentHash(messages.filter(m => m.role !== "system")))
+      throw prerequisiteStop("Interrupted request changed its complete transcript prefix; no continuation");
   }
   let response = 0, systemHash: string | undefined;
   const prefix: Message[] = [];

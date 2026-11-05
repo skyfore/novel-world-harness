@@ -17,6 +17,7 @@ const totals = z.object({ modelCalls: count, totalPayloadBytes: count }).strict(
 export const consumerProviderResumptionSchema = z.object({
   scopeHash: hash, stage: z.enum(["consumer-revalidation", "consumer-revalidation-check"]),
   failedTraceRunId: z.string().min(1), authorizationRef: z.string().min(1), authorizedAt: z.iso.datetime(),
+  cause: z.literal("owner-exited").optional(),
 }).strict();
 export type ConsumerProviderResumption = z.infer<typeof consumerProviderResumptionSchema>;
 export const consumerStageRecoverySchema = z.object({ version: z.literal(1), policy: z.literal("consumer-unsubmitted-continuation/v1"),
@@ -58,6 +59,7 @@ const canonicalRef = (ref: string) => ref.includes(":") ? ref : ref.replace("/",
  * Two calls is a lower bound (read, then sole submission), never a promise of completion. */
 export async function prepareConsumerStageRecovery(root: string, scope: ConsumerRevalidationScope,
   stage: ConsumerStageRecovery["stage"], contract: IdentitySessionContract, requestedProviderResumption?: ConsumerProviderResumption, hostRecovery?: ConsumerHostRecovery) {
+  if (requestedProviderResumption?.cause) throw prerequisiteStop("Owner-exit continuation requires the original consumer-work/v1 plan and settled interruption proof; legacy scopes cannot use it. Inspect the same source/task/ref, no retry or policy reset");
   const baseDirectory = consumerRevalidationDirectory(root, scope), scopeHash = contentHash(scope);
   const directory = hostRecovery ? consumerHostRecoveryDirectory(baseDirectory) : baseDirectory;
   const get = (suffix: string) => read(path.join(directory, `${stage}.${suffix}`));

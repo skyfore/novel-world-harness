@@ -7,7 +7,8 @@ import { prerequisiteStop } from "./role-source-prerequisites.js";
 import { consumerWorkContract, consumerWorkInput, consumerWorkProviderDirectory,
   consumerReviewRecoveryBudgetPolicy, workBudgetPolicy, verifyConsumerWorkProgress, type ConsumerWorkPlan } from "./consumer-work-plan.js";
 import { consumerProviderResumptionSchema, maybeRecoveryFile, type ConsumerProviderResumption } from "./identity-consumer-stage-recovery.js";
-import { identityQuotaRefusal, verifyWorkQuotaRefusedSession } from "./identity-session-integrity.js";
+import { identityQuotaRefusal, verifyWorkQuotaRefusedSession, verifyInterruptedFirstRequest } from "./identity-session-integrity.js";
+import { consumerWorkOwnerExited, verifyConsumerWorkInterruption } from "./consumer-work-interruption.js";
 import { assertConsumerWorkRetained, verifyRecordedConsumerWork } from "./identity-consumer-work.js";
 import type { ConsumerRevalidationRecord, ConsumerRevalidationScope } from "./identity-consumer-revalidation-model.js";
 import { consumerEvidenceReads } from "./consumer-evidence-coverage.js";
@@ -15,7 +16,7 @@ import { consumerWorkRecordDirectory } from "./consumer-work-evidence.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/), count = z.number().int().nonnegative();
 export const consumerWorkProviderRecoverySchema = z.object({
-  version: z.literal(1), policy: z.literal("consumer-work-provider-resumption/v1"),
+  version: z.literal(1), policy: z.enum(["consumer-work-provider-resumption/v1", "consumer-work-interruption-resumption/v1"]),
   request: consumerProviderResumptionSchema, originalPlanHash: hash, originalInputHash: hash,
   originalSessionId: z.string().min(1), traceHash: hash,
   retainedFiles: z.array(z.object({ path: z.string().min(1), hash }).strict()).min(8),
@@ -24,16 +25,17 @@ export const consumerWorkProviderRecoverySchema = z.object({
   draft: z.unknown().optional(), requiredSourceSegmentIds: z.array(z.string()), requiredArtifactRefs: z.array(z.string()),
   requiredArtifactRevisions: z.array(z.object({ ref: z.string(), revisionHash: hash }).strict()).optional(),
   parentResumeAllowed: z.literal(false),
-}).strict();
+}).strict().refine(value => (value.policy === "consumer-work-interruption-resumption/v1") === (value.request.cause === "owner-exited"), "Continuation policy must preserve its original failure cause");
 export type ConsumerWorkProviderRecovery = z.infer<typeof consumerWorkProviderRecoverySchema>;
 const read = async (file: string) => JSON.parse(await fs.readFile(file, "utf8"));
-export const workProviderStop = (reason: string) => prerequisiteStop(`${reason}. Inspect requirements inspect-identity-repairs in the same source/task/ref; copy execution.providerResumptionCandidate scopeHash, stage and failedTraceRunId into --provider-resumption JSON with later authorizationRef and authorizedAt. Use --resume-unsubmitted inspect before run. Correct an ID once from discovery; never guess, reset usage or retry unchanged. A submitted, unsettled, hard-stopped, changed or already resumed stage must not be restarted`);
+export const workProviderStop = (reason: string) => prerequisiteStop(`${reason}. Inspect requirements inspect-identity-repairs in the same source/task/ref; copy stages[].execution.providerResumptionCandidate scopeHash, stage, failedTraceRunId and cause (when present) into --provider-resumption JSON with later authorizationRef and authorizedAt. Use --resume-unsubmitted inspect before run. Correct an ID once from discovery; never guess, reset usage or retry unchanged. A submitted, unsettled, hard-stopped, changed or already resumed stage must not be restarted`);
 
 export async function inspectWorkProviderCandidate(root: string, sourceId: string, scopeHash: string, directory: string, stage: string, failure: any) {
-  if (failure?.reason !== `Error: ${identityQuotaRefusal}` || await maybeRecoveryFile(path.join(directory, `${stage}.session-checkpoint.json`))) return undefined;
+  const interrupted = failure?.reason === `Error: ${consumerWorkOwnerExited}`;
+  if ((!interrupted && failure?.reason !== `Error: ${identityQuotaRefusal}`) || await maybeRecoveryFile(path.join(directory, `${stage}.session-checkpoint.json`))) return undefined;
   const runs = await new TraceStore(root).peekRunsByOperation(sourceId, `receipt-bound-${scopeHash}-${stage}-work-v1`);
-  if (runs.length !== 1 || runs[0]!.status !== "failed" || !runs[0]!.endedAt) return undefined;
-  return { scopeHash, stage, failedTraceRunId: runs[0]!.id, failureHash: contentHash(failure), inspectionRequired: true };
+  if (runs.length !== 1 || runs[0]!.status !== (interrupted ? "interrupted" : "failed") || !runs[0]!.endedAt) return undefined;
+  return { scopeHash, stage, failedTraceRunId: runs[0]!.id, failureHash: contentHash(failure), inspectionRequired: true, ...(interrupted ? { cause: "owner-exited" as const } : {}) };
 }
 
 export function deriveWorkProviderPlan(original: ConsumerWorkPlan, recovery: ConsumerWorkProviderRecovery): ConsumerWorkPlan {
@@ -41,7 +43,7 @@ export function deriveWorkProviderPlan(original: ConsumerWorkPlan, recovery: Con
     || original.scopeHash !== recovery.request.scopeHash || original.stage !== recovery.request.stage)
     throw workProviderStop("Provider continuation changed its original work plan");
   return { ...original, providerResumptionHash: contentHash(recovery),
-    providerResumption: { originalSessionId: recovery.originalSessionId, ...(recovery.draft === undefined ? {} : { draft: recovery.draft }),
+    providerResumption: { originalSessionId: recovery.originalSessionId, ...(recovery.request.cause ? { cause: recovery.request.cause } : {}), ...(recovery.draft === undefined ? {} : { draft: recovery.draft }),
       requiredSourceSegmentIds: recovery.requiredSourceSegmentIds, requiredArtifactRefs: recovery.requiredArtifactRefs,
       ...(recovery.requiredArtifactRevisions ? { requiredArtifactRevisions: recovery.requiredArtifactRevisions } : {}) },
     limits: recovery.limits, priorUsage: recovery.priorUsage, budgetPolicy: consumerReviewRecoveryBudgetPolicy,
@@ -57,6 +59,8 @@ export async function prepareWorkProviderResumption(root: string, scope: Consume
   const directory = consumerWorkProviderDirectory(old, stage), savedRaw = await maybeRecoveryFile(path.join(directory, "recovery.json"));
   const saved = savedRaw ? consumerWorkProviderRecoverySchema.parse(savedRaw) : undefined;
   const request = consumerProviderResumptionSchema.parse(requested ?? saved?.request);
+  const interrupted = request.cause === "owner-exited";
+  if (saved && (saved.policy === "consumer-work-interruption-resumption/v1") !== interrupted) throw workProviderStop("Continuation changed its original stop cause");
   if (request.scopeHash !== scopeHash || request.stage !== stage || request.authorizationRef === scope.authorizationRef
     || plan.scopeHash !== scopeHash || plan.bindingRecoveryHash || plan.providerResumptionHash
     || saved && contentHash(request) !== contentHash(saved.request))
@@ -67,7 +71,7 @@ export async function prepareWorkProviderResumption(root: string, scope: Consume
   const get = (suffix: string) => read(path.join(old, `${stage}.${suffix}.json`));
   const [input, invocation, budget, failure] = await Promise.all(["input", "invocation", "budget", "failure"].map(get));
   const planHash = contentHash(plan);
-  if (failure.reason !== `Error: ${identityQuotaRefusal}` || contentHash(input) !== contentHash(consumerWorkInput(plan))
+  if (failure.reason !== `Error: ${interrupted ? consumerWorkOwnerExited : identityQuotaRefusal}` || contentHash(input) !== contentHash(consumerWorkInput(plan))
     || invocation.scopeHash !== scopeHash || invocation.stage !== stage || invocation.executionPlanHash !== planHash
     || !Number.isSafeInteger(invocation.pid) || invocation.pid <= 0
     || budget.scopeHash !== scopeHash || budget.stage !== stage || budget.executionPlanHash !== planHash
@@ -80,27 +84,28 @@ export async function prepareWorkProviderResumption(root: string, scope: Consume
     || await fs.realpath(failure.sessionFile) !== failure.sessionFile) throw workProviderStop("Original session ownership changed");
   const [transcript, requests, messages] = await Promise.all([fs.readFile(failure.sessionFile, "utf8"),
     fs.readFile(path.join(old, `${stage}.requests.jsonl`), "utf8"), fs.readFile(path.join(old, `${stage}.messages.jsonl`), "utf8")]);
-  const proof = verifyWorkQuotaRefusedSession(transcript, root, { sessionId: failure.sessionId, provider: "openai-codex", model: "gpt-6.1-sol" },
-    JSON.stringify(input), requests, messages, consumerWorkContract);
-  verifyConsumerWorkProgress(plan, budget.state, proof.messages);
+  if (interrupted) await verifyConsumerWorkInterruption(root, old, plan, failure);
+  const proof = interrupted ? verifyInterruptedFirstRequest(transcript, root, failure.sessionId, JSON.stringify(input), requests, messages, consumerWorkContract)
+    : verifyWorkQuotaRefusedSession(transcript, root, { sessionId: failure.sessionId, provider: "openai-codex", model: "gpt-6.1-sol" }, JSON.stringify(input), requests, messages, consumerWorkContract);
+  if (!interrupted) verifyConsumerWorkProgress(plan, budget.state, proof.messages);
   const usage = budget.state.usage, sizes = proof.payloads.map(p => Buffer.byteLength(JSON.stringify(p)));
   const priorUsage = { modelCalls: plan.priorUsage.modelCalls + usage.modelCalls, totalPayloadBytes: plan.priorUsage.totalPayloadBytes + usage.totalPayloadBytes };
-  if (sizes.length !== usage.payloads || proof.transcript.responses !== usage.modelCalls
+  if (sizes.length !== usage.payloads || proof.transcript.responses + (interrupted ? 1 : 0) !== usage.modelCalls
     || sizes.reduce((a, b) => a + b, 0) !== usage.totalPayloadBytes
     || Math.max(...sizes, ...proof.contexts.map(c => Buffer.byteLength(JSON.stringify(c)))) !== usage.largestRequestBytes
     || contentHash(priorUsage) !== contentHash(budget.cumulative) || usage.largestRequestBytes > plan.limits.maxRequestBytes)
     throw workProviderStop("Original charges differ from the actual Pi requests");
   const traces = new TraceStore(root), runs = await traces.peekRunsByOperation(scope.sourceId, `receipt-bound-${scopeHash}-${stage}-work-v1`);
   const run = runs[0];
-  if (runs.length !== 1 || !run || run.id !== request.failedTraceRunId || run.status !== "failed" || !run.endedAt
-    || !(Date.parse(request.authorizedAt) > Date.parse(run.endedAt) && Date.parse(request.authorizedAt) <= Date.now()))
+  if (runs.length !== 1 || !run || run.id !== request.failedTraceRunId || run.status !== (interrupted ? "interrupted" : "failed") || !run.endedAt
+    || !(Date.parse(request.authorizedAt) >= Date.parse(run.endedAt) + (interrupted ? 0 : 1) && Date.parse(request.authorizedAt) <= Date.now()))
     throw workProviderStop("Original trace is unsettled or lacks later authorization");
   const events = await traces.peekEvents(run.id), starts = events.filter(e => e.type === "llm.request.started");
   const replies = events.filter(e => e.type === "llm.response.completed" || e.type === "llm.response.failed");
   const errors = events.filter(e => e.type === "llm.response.failed"), failed = errors[0];
   const bindings = events.filter(e => e.type === "stage.started" && e.data?.phase === stage && e.data?.scopeHash === scopeHash);
   const zero = (v: any) => v && ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"].every(k => v[k] === 0);
-  if (bindings.length !== 1 || bindings[0]!.data?.sessionId !== failure.sessionId || bindings[0]!.data?.inputHash !== contentHash(input)
+  if (!interrupted && (bindings.length !== 1 || bindings[0]!.data?.sessionId !== failure.sessionId || bindings[0]!.data?.inputHash !== contentHash(input)
     || starts.length !== usage.modelCalls || replies.length !== starts.length || errors.length !== 1
     || !failed || failed !== replies.at(-1) || failed.callId !== starts.at(-1)?.callId || failed.data?.errorMessage !== identityQuotaRefusal
     || failed.data?.stopReason !== "error" || !zero(failed.data?.usage)
@@ -108,7 +113,7 @@ export async function prepareWorkProviderResumption(root: string, scope: Consume
     || replies.some((e, i) => e.callId !== starts[i]?.callId || e.seq <= starts[i]!.seq || starts[i + 1] && e.seq >= starts[i + 1]!.seq)
     || run.counts.llmRequests !== usage.modelCalls || run.counts.toolCalls !== proof.transcript.toolResults || run.counts.retries !== 0
     || events.some(e => e.type === "llm.retry" || e.type === "tool.call.failed" || e.type.startsWith("tool.") && (e.callId === failed.callId || e.seq > starts.at(-1)!.seq))
-    || events.at(-1)?.type !== "run.failed") throw workProviderStop("Original quota refusal lost its complete request/tool trace");
+    || events.at(-1)?.type !== "run.failed")) throw workProviderStop("Original quota refusal lost its complete request/tool trace");
   const previews = proof.messages.filter(m => m.role === "toolResult" && m.toolName === "preview_consumer_revalidation");
   let draft: unknown;
   for (const preview of previews) {
@@ -129,7 +134,7 @@ export async function prepareWorkProviderResumption(root: string, scope: Consume
   const files = [path.join(path.dirname(old), "scope.json"), failure.sessionFile];
   for (const name of (await fs.readdir(old)).sort()) if (name.startsWith(stage + ".") && (await fs.stat(path.join(old, name))).isFile()) files.push(path.join(old, name));
   const retainedFiles = await Promise.all(files.map(async file => ({ path: file, hash: contentHash(await fs.readFile(file, "utf8")) })));
-  const recovery = consumerWorkProviderRecoverySchema.parse({ version: 1, policy: "consumer-work-provider-resumption/v1", request,
+  const recovery = consumerWorkProviderRecoverySchema.parse({ version: 1, policy: interrupted ? "consumer-work-interruption-resumption/v1" : "consumer-work-provider-resumption/v1", request,
     originalPlanHash: planHash, originalInputHash: contentHash(input), originalSessionId: failure.sessionId,
     traceHash: contentHash({ run, events }), retainedFiles, priorUsage, limits, ...(draft === undefined ? {} : { draft }),
     requiredSourceSegmentIds: [...reads.sourceIds].sort(), requiredArtifactRefs: [...reads.artifacts.completed].sort(),

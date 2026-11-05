@@ -12,6 +12,7 @@ import { assertBoundPreviewAllowance, assertConsumerReviewBinding, bindingRecove
 import { prepareConsumerBindingRecovery } from "../compiler/consumer-binding-recovery.js";
 import { prepareWorkProviderResumption, workProviderStop } from "../compiler/consumer-work-provider-resumption.js";
 import { consumerWorkProviderDirectory } from "../compiler/consumer-work-plan.js";
+import { inspectReceiptStageActivity } from "../compiler/receipt-stage-status.js";
 import { consumerTransportRecoveryRequestSchema, prepareConsumerTransportRecovery, transportRecoveryFile, transportRecoveryStop,
   type ConsumerTransportRecoveryRequest } from "../compiler/consumer-transport-recovery.js";
 import { CONSUMER_EVIDENCE_COVERAGE, consumerEvidenceCoverage, assertConsumerEvidenceRead, additionalConsumerEvidenceSubjects,
@@ -109,7 +110,7 @@ After required reads, call preview_consumer_revalidation with a complete grounde
 }
 
 export async function runIdentityConsumerRevalidation(options: { root: string; sourceId: string; taskId: string; ref: string; authorizationRef: string; compilerCorrection?: string; resumeUnsubmitted?: "inspect" | "run"; budgetAmendment?: ConsumerBudgetAmendmentRequest; recoverSubmittedRef?: boolean; providerResumption?: ConsumerProviderResumption; hostRecovery?: ConsumerHostRecoveryRequest;
-  executionPolicy?: typeof CONSUMER_WORK_POLICY; executionAuthorizationRef?: string; inspectExecution?: boolean;
+  executionPolicy?: typeof CONSUMER_WORK_POLICY; executionAuthorizationRef?: string; inspectExecution?: boolean; acquireLock?: boolean;
   recoverContractBinding?: boolean; bindingRecoveryAuthorizationRef?: string; recoverTransportRetry?: ConsumerTransportRecoveryRequest }) {
   if (options.executionPolicy && options.executionPolicy !== CONSUMER_WORK_POLICY)
     throw prerequisiteStop("Unknown execution policy; use consumer-work/v1 and --inspect-execution for the same source/task/ref, no guessed policy or retry");
@@ -207,7 +208,10 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
             }
             systemPrompt = systemPrompt.replace("Only the first valid draft preview renews the bounded no-progress window; repeated previews, reads and wording changes earn nothing.",
               "This provider continuation uses only the original remaining allowance. No preview renews its budget.")
-              + "\nFollow input.providerResumption: confirm the retained draft unchanged after reading the complete original packet and any required additional evidence. If unable to confirm it, stop. A draft remains a proposal until the normal successful submission and independent review gates pass.";
+              + (work.plan.providerResumption?.draft === undefined
+                ? "\nFollow input.providerResumption: no original draft was submitted. Independently assess the complete original packet and any additional required evidence, preview a grounded draft, then submit it in a separate response."
+                : "\nFollow input.providerResumption: confirm the retained draft unchanged after reading the complete original packet and any required additional evidence. If unable to confirm it, stop.")
+              + " A draft remains a proposal until the normal successful submission and independent review gates pass.";
           }
           if (check && (options.recoverContractBinding || await maybe(path.join(bindingRecoveryDirectory(work.directory), "recovery.json")))) {
             const recovered = await prepareConsumerBindingRecovery(root, scope, work, records[0]!, options.bindingRecoveryAuthorizationRef);
@@ -417,8 +421,11 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
         }
         if (work && await maybe(path.join(stageDirectory, `${stage}.invocation.json`))) {
           const failure = await maybe(path.join(stageDirectory, `${stage}.failure.json`));
-          if (inspectOnly) return { status: failure?.recovery?.kind ?? (failure ? "BREAK" : "RUNNING"), ref: scope.ref, directory, records,
-            executionPlanHash: contentHash(work.plan), execution: { modelDispatchAllowed: false, invocationConsumed: true, recovery: failure?.recovery ?? null },
+          const activity = !failure ? await inspectReceiptStageActivity(root, sourceId,
+            `receipt-bound-${contentHash(scope)}-${stage}-work-v1${work.plan.bindingRecoveryHash ? "-binding-recovery" : ""}${work.plan.providerResumptionHash ? "-provider-resumption" : ""}`,
+            await read(path.join(stageDirectory, `${stage}.invocation.json`))) : undefined;
+          if (inspectOnly) return { status: failure?.recovery?.kind ?? (failure ? "BREAK" : activity?.state ?? "liveness-unknown"), ref: scope.ref, directory, records,
+            executionPlanHash: contentHash(work.plan), execution: { modelDispatchAllowed: false, invocationConsumed: true, recovery: failure?.recovery ?? null, activity },
             cumulative: await cumulative(), parentResumeAllowed: false, certificationGranted: false };
           throw prerequisiteStop("This work-policy stage is consumed without a sealed submission. Inspect the same source/task/ref with --inspect-execution and retain its draft, failure and usage; no unchanged retry, new session or policy reset");
         }
@@ -567,5 +574,5 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
       return { status, ref: scope.ref, directory, records, cumulative: await cumulative(), parentResumeAllowed: false, certificationGranted: false };
     } catch (error) { if (!inspectOnly) await publish("BREAK", { reason: String(error) }); throw error; }
   });
-  return options.inspectExecution || options.resumeUnsubmitted === "inspect" ? run() : withWorkspaceOperationLock(root, "compiler", run);
+  return options.acquireLock === false || options.inspectExecution || options.resumeUnsubmitted === "inspect" ? run() : withWorkspaceOperationLock(root, "compiler", run);
 }

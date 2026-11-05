@@ -150,10 +150,10 @@ async function checkLockedCompilationClosure(root: string, sourceId: string): Pr
     }
   }
   return compilationClosureReport({ source, fingerprint: status.compilerFingerprint, audit, unverifiedBatchIds, receiptErrors,
-    requirementIssues: [...requirements.issues, ...reconciliationObligationIssues(obligations, sourceId, source.sourceSha256)],
+    requirementIssues: [...requirements.issues, ...requirements.coverage.issues, ...reconciliationObligationIssues(obligations, sourceId, source.sourceSha256)],
     requirementHead: history.at(-1)?.hash ?? null, roleIssues,
     blockedUnitIds: accounting?.records.filter(r => isBlockingSourceAccountingStatus(r.status)).map(r => r.unitId) ?? [],
-    handoffBlockers: handoff.tasks.filter(t => t.kind !== "phase").map(t => t.id), upstreamIssues });
+    handoffBlockers: handoff.tasks.filter(t => t.kind !== "phase" && t.kind !== "semantic-review").map(t => t.id), upstreamIssues });
 }
 
 export function assertCompilationClosure(report: CompilationClosure) {

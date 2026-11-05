@@ -165,8 +165,18 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
-async function linuxHostIdentity(): Promise<NonNullable<WorkspaceLockOwner["host"]>> {
+export async function linuxHostIdentity(): Promise<NonNullable<WorkspaceLockOwner["host"]>> {
   return { hostname: os.hostname(), bootId: (await fs.readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim(), pidNamespace: await fs.readlink("/proc/self/ns/pid") };
+}
+
+/** Absence only proves death in the original host, boot and PID namespace. */
+export async function inspectProcessLiveness(owner: Pick<WorkspaceLockOwner, "pid" | "host"> | undefined): Promise<"alive" | "exited" | "unknown"> {
+  if (!owner?.host || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 || process.platform !== "linux") return "unknown";
+  try {
+    const host = await linuxHostIdentity();
+    if (host.hostname !== owner.host.hostname || host.bootId !== owner.host.bootId || host.pidNamespace !== owner.host.pidNamespace) return "unknown";
+    return processIsAlive(owner.pid) ? "alive" : "exited";
+  } catch { return "unknown"; }
 }
 
 async function withRecoveryMutex<T>(file: string, run: () => Promise<T>): Promise<T> {

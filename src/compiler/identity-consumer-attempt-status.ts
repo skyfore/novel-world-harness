@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentHash } from "../world/canonical.js";
+import { inspectReceiptStageActivity } from "./receipt-stage-status.js";
 import { TraceStore } from "../trace/store.js";
 import { identityRequirementDirectory, type IdentityRecord } from "./identity-requirements.js";
 import { consumerRevalidationId, consumerRevalidationScopeSchema, validateConsumerCorrectionLineage,
@@ -10,7 +11,7 @@ import { prerequisiteStop } from "./role-source-prerequisites.js";
 import { consumerStageRecoveryDirectory, consumerStageRecoverySchema, consumerRecoveryPreflight } from "./identity-consumer-stage-recovery.js";
 import { inspectConsumerBudgetAmendment, consumerRecoveryLimits } from "./identity-consumer-budget-amendment.js";
 import { consumerHostRecoveryDirectory, oldSourceSearchError, type ConsumerHostRecovery } from "./identity-consumer-host-recovery.js";
-import { consumerWorkDirectory, workBudgetPolicy, type ConsumerWorkPlan } from "./consumer-work-plan.js";
+import { consumerWorkDirectory, workBudgetPolicy, CONSUMER_WORK_LIMITS, type ConsumerWorkPlan } from "./consumer-work-plan.js";
 import { bindingRecoveryDirectory } from "./consumer-review-binding.js";
 import { consumerBindingRecoverySchema, deriveBindingRecoveryPlan } from "./consumer-binding-recovery.js";
 import { inspectConsumerTransportRecoveryCandidate } from "./consumer-transport-recovery.js";
@@ -31,6 +32,9 @@ export type ConsumerRevalidationAttempt = {
     bindingRecovery?: { hash: string; status: string; invocationConsumed: boolean; sealedSubmission: boolean; failure: string | null;
       usage: { modelCalls: number; totalPayloadBytes: number }; remainingAllowance: { modelCalls: number; totalPayloadBytes: number } };
     execution?: { policy: string; planHash: string; scenario: string; status: string; invocationConsumed: boolean;
+      activity?: Awaited<ReturnType<typeof inspectReceiptStageActivity>>;
+      budgetPolicy?: ReturnType<typeof workBudgetPolicy>;
+      remainingAllowance?: { modelCalls: number; totalPayloadBytes: number };
       sealedSubmission: boolean; failure: string | null; recovery: unknown; usage: { modelCalls: number; totalPayloadBytes: number };
       callsWithoutProgress: number; stallWindowCalls: number; draftCount: number;
       transportRecoveryCandidate?: Awaited<ReturnType<typeof inspectConsumerTransportRecoveryCandidate>>;
@@ -175,8 +179,11 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
           || Object.values(u).some(v => !Number.isSafeInteger(v) || v < 0))
           throw prerequisiteStop("Consumer execution status lost its frozen plan or actual charges; preserve the original history, no retry");
         cumulative.modelCalls += u.modelCalls; cumulative.totalPayloadBytes += u.totalPayloadBytes;
-        execution = { policy: plan.policy, planHash: contentHash(plan), scenario: plan.scenario,
-          status: c ? "sealed" : f ? f.recovery?.kind ?? "BREAK" : i ? "RUNNING" : preflight?.status ?? "prepared",
+        const activity = !c && !f ? await inspectReceiptStageActivity(root, sourceId, `receipt-bound-${scopeHash}-${stage}-work-v1`, i) : undefined;
+        execution = { policy: plan.policy, planHash: contentHash(plan), scenario: plan.scenario, ...(activity ? { activity } : {}),
+          budgetPolicy: workBudgetPolicy(plan), remainingAllowance: { modelCalls: Math.max(0, plan.limits.maxModelCalls - u.modelCalls + (b?.state?.progress?.lastProgressCall ?? 0)),
+            totalPayloadBytes: Math.max(0, plan.limits.maxTotalPayloadBytes - u.totalPayloadBytes) },
+          status: c ? "sealed" : f ? f.recovery?.kind ?? "BREAK" : activity?.state ?? preflight?.status ?? "prepared",
           invocationConsumed: Boolean(i), sealedSubmission: Boolean(c), failure: f?.reason ?? null, recovery: f?.recovery ?? null, usage: u,
           callsWithoutProgress: u.modelCalls - (b?.state?.progress?.lastProgressCall ?? 0), stallWindowCalls: plan.limits.maxModelCalls,
           draftCount: (await fs.readdir(workDirectory)).filter(name => name.startsWith(`${stage}.draft-`)).length,
@@ -194,7 +201,8 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
             || ri && (ri.providerResumptionHash !== contentHash(recovery) || ri.executionPlanHash !== contentHash(resumedPlan))
             || Object.values(ru).some(v => !Number.isSafeInteger(v) || v < 0)) throw prerequisiteStop("Provider continuation status lost its exact proof or charges; no retry");
           cumulative.modelCalls += ru.modelCalls; cumulative.totalPayloadBytes += ru.totalPayloadBytes;
-          execution.providerResumption = { hash: contentHash(recovery), status: rc ? "sealed" : rf ? "BREAK" : ri ? "RUNNING" : "prepared",
+          const activity = !rc && !rf ? await inspectReceiptStageActivity(root, sourceId, `receipt-bound-${scopeHash}-${stage}-work-v1-provider-resumption`, ri) : undefined;
+          execution.providerResumption = { hash: contentHash(recovery), status: rc ? "sealed" : rf ? "BREAK" : activity?.state ?? "prepared",
             invocationConsumed: Boolean(ri), sealedSubmission: Boolean(rc), failure: rf?.reason ?? null, usage: ru,
             remainingAllowance: { modelCalls: Math.max(0, recovery.limits.maxModelCalls - ru.modelCalls), totalPayloadBytes: Math.max(0, recovery.limits.maxTotalPayloadBytes - ru.totalPayloadBytes) } };
         }
@@ -209,7 +217,8 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
             || ri && (ri.bindingRecoveryHash !== contentHash(recovery) || ri.executionPlanHash !== contentHash(recoveredPlan))
             || Object.values(ru).some(v => !Number.isSafeInteger(v) || v < 0)) throw prerequisiteStop("Binding recovery status lost its exact proof or retained charges; no retry");
           cumulative.modelCalls += ru.modelCalls; cumulative.totalPayloadBytes += ru.totalPayloadBytes;
-          bindingRecovery = { hash: contentHash(recovery), status: rc ? "sealed" : rf ? "BREAK" : ri ? "RUNNING" : "prepared",
+          const activity = !rc && !rf ? await inspectReceiptStageActivity(root, sourceId, `receipt-bound-${scopeHash}-${stage}-work-v1-binding-recovery`, ri) : undefined;
+          bindingRecovery = { hash: contentHash(recovery), status: rc ? "sealed" : rf ? "BREAK" : activity?.state ?? "prepared",
             invocationConsumed: Boolean(ri), sealedSubmission: Boolean(rc), failure: rf?.reason ?? null, usage: ru,
             remainingAllowance: { modelCalls: Math.max(0, recovery.limits.maxModelCalls - ru.modelCalls),
               totalPayloadBytes: Math.max(0, recovery.limits.maxTotalPayloadBytes - ru.totalPayloadBytes) } };
@@ -222,16 +231,19 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
         ...(execution ? { execution } : {}),
         ...(bindingRecovery ? { bindingRecovery } : {}),
         ...(hostRecovery ? { hostRecovery } : {}), ...(hostRecoveryCandidate ? { hostRecoveryCandidate } : {}),
-        remainingAllowance: bindingRecovery?.remainingAllowance ?? { modelCalls: Math.max(0, hostRecovery ? hostRecovery.proposalLimits.maxModelCalls - hostRecovery.usage.modelCalls - (hostRecovery.providerResumption?.usage.modelCalls ?? 0)
+        remainingAllowance: execution?.providerResumption?.remainingAllowance ?? bindingRecovery?.remainingAllowance ?? execution?.remainingAllowance
+          ?? (scope.executionPolicy && !scope.compilerCorrection && !invocation ? { modelCalls: CONSUMER_WORK_LIMITS.maxModelCalls, totalPayloadBytes: CONSUMER_WORK_LIMITS.maxTotalPayloadBytes } : undefined)
+          ?? { modelCalls: Math.max(0, hostRecovery ? hostRecovery.proposalLimits.maxModelCalls - hostRecovery.usage.modelCalls - (hostRecovery.providerResumption?.usage.modelCalls ?? 0)
           : (continuation?.preflight.remainingAllowance.maxModelCalls ?? limits.maxModelCalls - usage.modelCalls) - (continuation?.usage.modelCalls ?? 0)),
           totalPayloadBytes: Math.max(0, hostRecovery ? hostRecovery.proposalLimits.maxTotalPayloadBytes - hostRecovery.usage.totalPayloadBytes - (hostRecovery.providerResumption?.usage.totalPayloadBytes ?? 0)
             : limits.maxTotalPayloadBytes - usage.totalPayloadBytes - (continuation?.usage.totalPayloadBytes ?? 0)) } });
     }
     const gap = await inspectConsumerEvidenceGap(root, scope, retained);
+    const activity = stages.map(s => s.execution?.providerResumption?.status ?? s.bindingRecovery?.status ?? s.execution?.status).find(s => s === "orphaned" || s === "liveness-unknown");
     attempts.push({ id: entry.name, ref: scope.ref, scopeHash, directory, compilerCorrection: scope.compilerCorrection ?? null,
       ...(gap ? { evidenceCorrection: { policy: gap.policy, evidenceGapHash: contentHash(gap),
         missingSegmentIds: [...new Set(gap.stages.flatMap(s => s.missingSegmentIds))].sort() } } : {}),
-      status: state?.status ?? "FROZEN", reason: state?.reason ?? null, recordedStages: retained.length,
+      status: retained.length < 2 && activity ? activity : state?.status ?? "FROZEN", reason: state?.reason ?? null, recordedStages: retained.length,
       semanticJudgmentPending: retained.length < 2, cumulative, stages,
       verification: "host-snapshot-only", executionAuthority: false, parentResumeAllowed: false });
   }

@@ -5,6 +5,7 @@ import { roleReviewFinishIssues } from "./role-review-finish.js";
 import { coreRoleAttemptHistoryIssues, requirementJournalBindingIssues, requirementSnapshotInputs } from "./requirement-ledger.js";
 import fs from "node:fs/promises";
 import { activeRequirementSets, evaluateRequirementSet, requirementResultSchema, requirementResultIssues } from "./requirement-ledger.js";
+import { inspectSemanticCoverage } from "./semantic-coverage.js";
 import { reconciliationObligationIssues } from "./reconciliation-review-ledger.js";
 import { frozenSceneCatalog } from "./requirement-service.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
@@ -64,6 +65,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   const snapshot = bundle.compilerSnapshot;
   issues.push(...roleReviewFinishIssues(snapshot.reconciliationObligations ?? [], snapshot.roleRoster, bundle.source.id).map(message => ({ code: "ROLE_REVIEW_FINISH_NOT_CERTIFIED", message })));
   const requirementSets = activeRequirementSets(snapshot.requirementDefinitions ?? []);
+  issues.push(...inspectSemanticCoverage(bundle.source.id, frozenSceneCatalog(bundle), requirementSets.map(s => s.spec)).issues.map(message => ({ code: "SEMANTIC_REVIEW_NOT_CERTIFIED", message })));
   const coreDefinitions = snapshot.coreRoleRequirementDefinitions ?? [];
   const requirementResults: z.infer<typeof requirementResultSchema>[] = [];
   if (requirementSets.length || coreDefinitions.length) {

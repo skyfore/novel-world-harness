@@ -158,6 +158,73 @@ separately from legacy allowances. Only a sealed successful session permits
 registration recovery without new generation. Neither a draft nor a completed
 consumer resumes the parent, shrinks coverage, certifies or activates a world.
 
+### Interrupted consumer work and durable queue
+
+`requirements consumer-queue --source <id> --task <taskId>` persists its plan,
+states and prior state hashes below the original identity task, rather than in
+`/tmp`. Copy `tasks[].taskId` from `requirements inspect-identity-repairs` and
+retain the original source, intent/inventory hashes and complete denominator.
+`--shard` selects an original shard without removing the other consumers;
+`--limit` yields with the undispatched tail preserved. `--inspect` is read-only.
+For a resumed queue copy `plan.authorizationRef`; a new invocation cannot
+replace it. A missing ID permits one same-scope discovery correction, never
+guessing or unchanged retries.
+
+The queue invokes the existing consumer proposal and independent-check stages
+under the compiler lock. Supported blocked/repair-required dispositions remain
+blocked while other independent consumers can proceed. An unsettled call,
+scope/revision change, failed preflight or consumed failed attempt stops the
+queue. Partial proposals still require their independent check. Historical
+scheduling receipts never authorize clearance, parent resume or certification.
+
+Status reports host/boot/PID-namespace liveness and last trace activity. Missing
+processes in another namespace are `unknown`, not dead. A retained RUNNING
+receipt whose verified owner exited is `orphaned`; status never changes its files.
+To settle an orphan, first use `compiler-lock inspect` on the owning host and
+recover its exact `owner.token`. Copy the resulting `archivePath` to
+`requirements settle-interrupted-consumer --lock-recovery`, together with
+`summary.consumerRevalidation.attempts[].directory` and its `stages[].stage`.
+Use `--inspect` before settlement. Live/unknown owners, partial journals,
+responses, tools or submissions must stop without replay.
+
+`consumer-work-interruption/v1` currently supports exactly one fully recorded
+first request with no returned response or executed tool. It verifies the same
+host's recovered lock, original plan/input, actual Pi transcript, live messages,
+request payload and trace. Original files remain unchanged; the trace settles as
+interrupted, and a separate proof records provider usage as unknown. The sent
+request remains fully charged. Copy the returned `providerResumption` JSON
+(including `cause: owner-exited`) into the original `revalidate-identity-consumer`
+command's `--provider-resumption`; retain its original authorization, inspect
+with `--resume-unsubmitted inspect`, then use `run` only when ready. The durable
+queue can retain that same JSON with `--provider-resumption`.
+
+This uses the one existing stage-specific continuation slot with hard remaining
+call/byte limits and no progress renewal. It is not a quota refusal and grants no
+second continuation. A sealed submission recovers registration, never model
+generation. All source, evidence, independent acceptance and question gates
+remain mandatory.
+
+### Independent event effects and goal lifecycle
+
+`requirements semantic-review-plan --source <id>` discovers all source-scoped
+event/goal IDs, immutable revisions, evidence spans and registered requirements.
+Copy `events[].id` or `goals[].id` and independently read the original source;
+allow one corrected ID from this same discovery, never guess. Use the existing
+`review-scenes --spec <file> --register <stable set ID>` path and its exact
+predecessor revision for changes. This is available before candidate archival
+and does not depend on an identity-failure chain.
+
+Event cases distinguish a supported nonempty delta, justified `no-change`,
+`no-state-change` (knowledge may change), `unknown` evidence and `unmapped`
+semantics. Empty outcomes alone never establish no change. Goal lifecycle cases
+must include an active unfinished cut and a distinct completed cut, both derived
+from independent source expectations. Activation that entails completion is
+rejected, including a fact equality that already proves a completion existence
+check; a single shared conjunct is not enough to prove an entire conjunction.
+Unknown/unmapped checks remain unresolved. Missing event/goal specifications
+block current global closure and certification. Coverage and successful probes
+still do not certify the entire novel or automatically grant any artifact write.
+
 ### Work-policy provider continuation
 
 After later user authorization and a successful availability check of the same

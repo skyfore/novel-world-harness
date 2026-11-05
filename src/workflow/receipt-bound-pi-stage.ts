@@ -10,6 +10,7 @@ import { withCompilerSignals } from "../util/compiler-signals.js";
 import { TraceStore } from "../trace/store.js";
 import { TraceRecorder } from "../trace/recorder.js";
 import { contentHash } from "../world/canonical.js";
+import { linuxHostIdentity } from "../util/workspace-lock.js";
 import { prerequisiteStop } from "../compiler/role-source-prerequisites.js";
 import { assertIdentitySubmissionTurn, type IdentitySessionContract } from "../compiler/identity-session-integrity.js";
 import { sealIdentityUpstreamSession } from "../compiler/identity-upstream-session.js";
@@ -44,7 +45,8 @@ export async function runReceiptBoundPiStage<T>(options: {
 }) {
   const { root, sourceId, directory, stage, scopeHash, contract } = options;
   await options.assertOriginal();
-  try { await fs.writeFile(path.join(directory, `${stage}.invocation.json`), JSON.stringify({ scopeHash, stage, pid: process.pid,
+  const owner = { pid: process.pid, startedAt: new Date().toISOString(), ...(process.platform === "linux" ? { host: await linuxHostIdentity() } : {}) };
+  try { await fs.writeFile(path.join(directory, `${stage}.invocation.json`), JSON.stringify({ scopeHash, stage, ...owner,
     ...(options.continuationHash ? { continuationHash: options.continuationHash } : {}),
     ...(options.hostRecoveryHash ? { hostRecoveryHash: options.hostRecoveryHash } : {}),
     ...(options.executionPlanHash ? { executionPlanHash: options.executionPlanHash } : {}),
@@ -88,7 +90,7 @@ export async function runReceiptBoundPiStage<T>(options: {
       session.promptWithReport = async (text, config) => {
         prompt = text;
         await fs.writeFile(path.join(directory, `${stage}.input.json`), JSON.stringify(JSON.parse(text), null, 2), { flag: "wx", mode: 0o600 });
-        await trace.record("stage.started", { phase: stage, scopeHash, inputHash: contentHash(JSON.parse(text)), sessionId: session!.id, subscription: true });
+        await trace.record("stage.started", { phase: stage, scopeHash, inputHash: contentHash(JSON.parse(text)), sessionId: session!.id, subscription: true, owner });
         return actual(text, config);
       };
       return session;

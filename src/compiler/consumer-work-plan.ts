@@ -36,7 +36,7 @@ export type ConsumerWorkPlan = {
   reviewBinding?: typeof CONSUMER_REVIEW_BINDING;
   bindingRecoveryHash?: string;
   providerResumptionHash?: string;
-  providerResumption?: { originalSessionId: string; draft?: unknown; requiredSourceSegmentIds: string[]; requiredArtifactRefs: string[];
+  providerResumption?: { originalSessionId: string; cause?: "owner-exited"; draft?: unknown; requiredSourceSegmentIds: string[]; requiredArtifactRefs: string[];
     requiredArtifactRevisions?: Array<{ ref: string; revisionHash: string }> };
   evidenceCoverage?: ConsumerEvidenceCoverage;
   baseInput: ConsumerWorkBaseInput; artifacts: ConsumerArtifact[];
@@ -68,7 +68,8 @@ export function consumerWorkInput(plan: ConsumerWorkPlan) {
     originalQuestionIds: denominator.originalQuestionIds },
     ...(plan.evidenceCoverage ? { requiredSourceSegmentIds: plan.sources.map(s => s.id), evidenceCoverage: plan.evidenceCoverage } : {}),
     ...(plan.providerResumptionHash ? { providerResumption: { ...plan.providerResumption, hash: plan.providerResumptionHash,
-      instructions: "The original read-only stage ended in a provider quota refusal. Re-read any listed evidence not in this packet. If a draft is supplied, independently confirm and preview that exact draft, then submit it unchanged in a separate response; stop if it cannot be confirmed. Historical draft/read receipts do not grant semantic support. No progress renewal or second continuation." } } : {}),
+      instructions: (plan.providerResumption?.cause === "owner-exited" ? "The original host exited before any response or tool execution. The sent request remains charged; provider usage is unknown. " : "The original read-only stage ended in a provider quota refusal. ")
+        + "Re-read any listed evidence not in this packet. If a draft is supplied, independently confirm and preview that exact draft, then submit it unchanged in a separate response; stop if it cannot be confirmed. Historical draft/read receipts do not grant semantic support. No progress renewal or second continuation." } } : {}),
     artifactReadRefs: plan.artifacts.map(artifact => ({ ref: artifactRef(artifact), revisionHash: artifact.revisionHash,
       current: artifact.current, aliases: artifact.aliases ?? [], delivery: "initial-evidence-packet",
       ...(artifact.evidenceRole ? { evidenceRole: artifact.evidenceRole } : {}) })),

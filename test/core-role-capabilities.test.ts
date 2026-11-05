@@ -11,6 +11,7 @@ import { contentHash } from "../src/world/canonical.js";
 import { evaluateCoreRoleCapabilities, coreRoleResultIssues } from "../src/compiler/core-role-capabilities.js";
 import { probeMajorRoleEntries } from "../src/compiler/playability.js";
 import type { PreparedNovelBundle } from "../src/compiler/prepared-cache.js";
+import { selfActionFixture } from "./helpers/entry-action.js";
 
 const roots: string[] = [];
 const subject = "f".repeat(64);
@@ -55,6 +56,7 @@ async function fixture() {
       },
     },
   } as unknown as PreparedNovelBundle;
+  bundle.canonical.actionSchemas = [selfActionFixture("character.plan", "stay safe", "keep distance")];
   const bind = () => {
     bundle.compilerSnapshot.evidenceBindings = [{ artifactKind: "character-model", artifactId: model.actorId, artifactHash: contentHash(model),
       assertions: (["dispositions", "developmentEpisodes"] as const).flatMap(field => (model[field] ?? []).map((record, index) => ({ version: 1 as const,

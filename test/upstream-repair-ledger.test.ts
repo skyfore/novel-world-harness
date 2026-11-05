@@ -9,7 +9,7 @@ import { SourceAnnotationStore, quotationSchema } from "../src/compiler/annotati
 import { contentHash } from "../src/world/canonical.js";
 import { freezeUpstreamRepairPlan } from "../src/compiler/upstream-repair-plan.js";
 import { UpstreamRepairLedger } from "../src/compiler/upstream-repair-ledger.js";
-import { verifyUpstreamRepairPlan } from "../src/compiler/upstream-repair-preflight.js";
+import { verifyUpstreamRepairPlan, verifyUpstreamRepairContinuation, originalIdentityCatalog } from "../src/compiler/upstream-repair-preflight.js";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -56,6 +56,104 @@ it("retains authorization and reserves attempts before effects across restart", 
   expect((await restarted.history()).filter(record => record.payload.kind === "authorized")).toHaveLength(1);
 });
 
+it("repairs the original initial-world singleton through typed staging, finish and convergence, retaining the previous revision", async () => {
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const f = await fixture(), store = new InitialWorldStore(f.root);
+  const evidence = f.source.evidence('Ada said, "Wait." Nothing changes.');
+  const entity = { id: "ada", kind: "character" as const, canonicalName: "Ada", aliases: [], evidence };
+  const { CanonicalModelStore } = await import("../src/world/canonical-model.js");
+  await new CanonicalModelStore(f.root).putEntity(entity);
+  const initial = { version: 1 as const, delta: { version: 1 as const, operations: [{ op: "set" as const, entityId: entity.id, field: "character.alive", value: true }] }, evidence };
+  await store.put(initial);
+  const plan = freezeUpstreamRepairPlan({ ...f.identity, baselineRefs: [{ kind: "initial-world", id: "singleton", revisionHash: contentHash(initial) }, { kind: "entity", id: entity.id, revisionHash: contentHash(entity) }],
+    readableRefs: [{ kind: "initial-world", id: "singleton" }, { kind: "entity", id: entity.id }], allowedWrites: [{ kind: "initial-world", id: "singleton", pointers: ["/readerSetup"] }] });
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "initial-world", id: "singleton" }, { proposal_id: "initial-repair",
+    payload: { version: 1, delta: initial.delta, readerSetup: "Ada asks to wait; nothing changes." }, evidence_segment_ids: [f.source.segmentId] });
+  await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Original opening requirement retained" }], summary: "Exact singleton revision" });
+  await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
+  const convergence = await convergeWorldProposals(f.root, f.sourceId);
+  expect(convergence.upstreamRepairIssues ?? []).toEqual([]);
+  expect((await store.get())?.readerSetup).toContain("Ada");
+  expect(await store.getRevision(contentHash(initial))).toEqual(initial);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("converged");
+});
+
+it.each(["entity", "initial-world"] as const)("ports pending and accepted %s repairs with their exact logical identity", async kind => {
+  const { CanonicalModelStore, ProposalStore } = await import("../src/world/canonical-model.js");
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { PreparedNovelCache } = await import("../src/compiler/prepared-cache.js");
+  const { CompilerBatchStore, prepareCompilerBatches } = await import("../src/compiler/batches.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const { captureUpstreamRepairCheckpoint, restoreUpstreamRepairCheckpoint } = await import("../src/compiler/upstream-repair-checkpoint.js");
+  for (const status of ["pending", "accepted"] as const) {
+    const f = await fixture(), evidence = f.source.evidence('Ada said, "Wait." Nothing changes.');
+    const entity = { id: "ada", kind: "character" as const, canonicalName: "Ada", aliases: [], evidence };
+    const initial = { version: 1 as const, evidence, participantPresence: [{ entityId: "ada", mode: "physical" as const }],
+      delta: { version: 1 as const, operations: [{ op: "set" as const, entityId: "ada", field: "character.alive", value: true },
+        { op: "set" as const, entityId: "ada", field: "character.plan", value: "wait" }] } };
+    await new CanonicalModelStore(f.root).putEntity(entity); await new InitialWorldStore(f.root).put(initial);
+    const target = { kind, id: kind === "entity" ? entity.id : "singleton" };
+    const baselineRefs = [{ kind: "entity" as const, id: entity.id, revisionHash: contentHash(entity) },
+      { kind: "initial-world" as const, id: "singleton", revisionHash: contentHash(initial) }];
+    const plan = freezeUpstreamRepairPlan({ ...f.identity, baselineRefs, readableRefs: baselineRefs.map(({ revisionHash: _, ...ref }) => ref),
+      allowedWrites: [{ ...target, pointers: kind === "entity" ? ["/aliases"] : ["/readerSetup"] }] });
+    await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+    const { evidence: _, ...payload } = kind === "entity" ? { ...entity, aliases: ["Ada"] } : { ...initial, readerSetup: "Ada waits." };
+    await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, target, { proposal_id: "typed-repair", payload, evidence_segment_ids: [f.source.segmentId] });
+    const finish = { outcome: "complete" as const, reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed" as const,
+      summary: "Retained source reviewed" }], summary: "Exact typed revision" };
+    if (status === "accepted") {
+      await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, finish);
+      await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
+      expect((await convergeWorldProposals(f.root, f.sourceId)).upstreamRepairIssues ?? []).toEqual([]);
+      await expect(verifyUpstreamRepairPlan(f.root, plan)).rejects.toThrow("Active dependency changed");
+    }
+    await verifyUpstreamRepairContinuation(f.root, plan);
+    if (status === "pending") {
+      const checkpoint = (await captureUpstreamRepairCheckpoint(f.root, f.sourceId))!;
+      expect(checkpoint.drafts[0]).toMatchObject({ store: "world", status, envelope: { kind, id: "typed-repair" } });
+      const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pending-checkpoint-")); roots.push(cloneRoot);
+      await createEvidenceFixture(cloneRoot, 'Ada said, "Wait." Nothing changes.');
+      await new CanonicalModelStore(cloneRoot).putEntity(entity); await new InitialWorldStore(cloneRoot).put(initial);
+      await new UpstreamRepairLedger(cloneRoot, f.sourceId).restore(await f.ledger.history(), Buffer.from('Ada said, "Wait." Nothing changes.'));
+      await restoreUpstreamRepairCheckpoint(cloneRoot, f.sourceId, checkpoint);
+      await restoreUpstreamRepairCheckpoint(cloneRoot, f.sourceId, checkpoint);
+      expect(await new ProposalStore(cloneRoot).readEnvelope("pending", "typed-repair")).toEqual(checkpoint.drafts[0]!.envelope);
+      expect(await new CanonicalModelStore(cloneRoot).listEntities()).toEqual([entity]);
+      expect(await new InitialWorldStore(cloneRoot).get()).toEqual(initial);
+      continue;
+    }
+    const batches = await prepareCompilerBatches(f.root, f.source.source);
+    await new CompilerBatchStore(f.root).replaceCompleted(f.sourceId, batches.map(batch => batch.id));
+    const cacheRoot = path.join(f.root, "portable-cache"), cache = new PreparedNovelCache(f.root, cacheRoot);
+    const bundle = await cache.candidateSnapshot(f.source.source), draft = bundle.compilerSnapshot.upstreamRepairCheckpoint!.drafts[0]!;
+    expect(draft).toMatchObject({ store: "world", status, envelope: { kind, id: "typed-repair" } });
+    const archived = await cache.archiveCandidate(f.source.source);
+    const cloneRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-typed-checkpoint-")); roots.push(cloneRoot);
+    const clone = await createEvidenceFixture(cloneRoot, 'Ada said, "Wait." Nothing changes.');
+    const cloneCache = new PreparedNovelCache(cloneRoot, cacheRoot);
+    await cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!);
+    await cloneCache.restoreCompilerCheckpoint(clone.source, archived.bundleHash!);
+    expect(await new ProposalStore(cloneRoot).readEnvelope(status, "typed-repair")).toEqual(draft.envelope);
+    expect(await new UpstreamRepairLedger(cloneRoot, f.sourceId).history()).toEqual(await f.ledger.history());
+    await executeUpstreamRepairFinish(cloneRoot, f.sourceId, plan.planHash);
+    expect((await convergeWorldProposals(cloneRoot, f.sourceId)).upstreamRepairIssues ?? []).toEqual([]);
+    expect(await new ProposalStore(cloneRoot).readEnvelope("accepted", "typed-repair")).toEqual(draft.envelope);
+    const history = await f.ledger.history();
+    await new CanonicalModelStore(f.root).putEntity({ ...entity, canonicalName: "Unrelated later revision" });
+    // A later external revision is never legitimized by this receipt, even
+    // when its exact-evidence binding rejects it before the baseline check.
+    await expect(verifyUpstreamRepairContinuation(f.root, plan)).rejects.toThrow();
+    expect(await f.ledger.history()).toEqual(history);
+  }
+}, 30_000);
+
 it("cannot reset budgets with a new namespace, reordered baseline or a linked revised plan", async () => {
   const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
   for (const inputHash of [contentHash("one"), contentHash("two")]) {
@@ -71,6 +169,115 @@ it("cannot reset budgets with a new namespace, reordered baseline or a linked re
   await f.ledger.register(next, f.plan.planHash); await f.ledger.authorize(next.planHash);
   await expect(f.ledger.startAttempt(next.planHash, { ...f.input, inputHash: contentHash("fresh-session") })).rejects.toThrow("budget exhausted");
   expect((await f.ledger.inspect()).plans).toHaveLength(2);
+});
+
+it("corrects the original failed initial-world proposal through host validation without resetting model failures or proposal identity", async () => {
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { CanonicalModelStore } = await import("../src/world/canonical-model.js");
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const f = await fixture(), evidence = f.source.evidence('Ada said, "Wait." Nothing changes.');
+  const entity = { id: "ada", kind: "character" as const, canonicalName: "Ada", aliases: [], evidence };
+  const world = new CanonicalModelStore(f.root); await world.putEntity(entity);
+  const initial = { version: 1 as const, delta: { version: 1 as const, operations: [{ op: "set" as const, entityId: entity.id, field: "character.alive", value: true }] }, evidence };
+  const store = new InitialWorldStore(f.root); await store.put(initial);
+  const plan = freezeUpstreamRepairPlan({ ...f.identity, baselineRefs: [{ kind: "initial-world", id: "singleton", revisionHash: contentHash(initial) }, { kind: "entity", id: entity.id, revisionHash: contentHash(entity) }],
+    readableRefs: [{ kind: "initial-world", id: "singleton" }, { kind: "entity", id: entity.id }], allowedWrites: [{ kind: "initial-world", id: "singleton", pointers: ["/readerSetup"] }] });
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  const target = { kind: "initial-world" as const, id: "singleton" }, proposal = { proposal_id: "retained-initial-proposal", payload: { version: 1, delta: initial.delta, readerSetup: "Ada asks to wait." },
+    evidence_segment_ids: [f.source.segmentId], evidence_selectors: [{ segment_id: f.source.segmentId, exact: 'Ada said, "Wait."', target_path: "/readerSetup", relation: "supports", strength: "explicit" }] };
+  const sessionRef = await f.ledger.startModelSession(plan.planHash, { artifactKind: target.kind, artifactId: target.id, proposalId: proposal.proposal_id, promptHash: contentHash("original Pi prompt") });
+  for (const exact of ["Absent first quote", "Absent corrected quote"]) await expect(stageUpstreamRepair(f.root, f.sourceId, plan.planHash, target,
+    { ...proposal, evidence_selectors: [{ ...proposal.evidence_selectors[0], exact }] }, { proposalId: proposal.proposal_id, modelSessionRef: sessionRef })).rejects.toThrow();
+  await f.ledger.endModelSession(plan.planHash, sessionRef, null, "Original evidence attempts failed");
+  const stopped = await f.ledger.inspect(), failedAttemptRef = stopped.attempts.at(-1)!.attemptRef, prefix = stopped.records.map(r => r.hash);
+  expect(stopped.plans[0]!.state).toBe("needs-host-review");
+  await f.ledger.authorizeHostCorrection(plan.planHash, { failedAttemptRef, inputHash: contentHash(proposal), auditRef: "synthetic-sealed-Pi-proof", reason: "Correct exact evidence under existing authority" });
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, target, proposal);
+  await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Same opening evidence" }], summary: "Original validated correction" });
+  await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash); await convergeWorldProposals(f.root, f.sourceId);
+  const after = await f.ledger.inspect();
+  expect(after.records.slice(0, prefix.length).map(r => r.hash)).toEqual(prefix); expect(after.attempts.filter(a => a.failed)).toHaveLength(2);
+  expect(after.attempts.filter(a => a.staged)).toHaveLength(1); expect(new Set(after.attempts.map(a => a.started.proposalId))).toEqual(new Set([proposal.proposal_id]));
+  expect(after.modelSessions).toHaveLength(1); expect((await store.get())?.readerSetup).toBe(proposal.payload.readerSetup);
+  expect(await store.getRevision(contentHash(initial))).toEqual(initial); expect(await world.getEntity(entity.id)).toEqual(entity);
+});
+
+it("rejects an inactionable pending opening before spending independent acceptance while preserving its staged draft", async () => {
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { CanonicalModelStore, ProposalStore } = await import("../src/world/canonical-model.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { preflightIdentityUpstreamCommit } = await import("../src/workflow/identity-consumer-upstream.js");
+  const f = await fixture('Ada waits. Bryn leaves.', 'waits'), evidence = f.source.evidence('Ada waits. Bryn leaves.');
+  const world = new CanonicalModelStore(f.root), entities = ["ada", "bryn"].map(id => ({ id, kind: "character" as const, canonicalName: id, aliases: [], evidence }));
+  for (const entity of entities) await world.putEntity(entity);
+  const initial = { version: 1 as const, participantPresence: [{ entityId: "ada", mode: "physical" as const }],
+    delta: { version: 1 as const, operations: [{ op: "set" as const, entityId: "ada", field: "character.alive", value: true }] }, evidence };
+  const store = new InitialWorldStore(f.root); await store.put(initial);
+  const baselineRefs = [{ kind: "initial-world" as const, id: "singleton", revisionHash: contentHash(initial) },
+    ...entities.map(entity => ({ kind: "entity" as const, id: entity.id, revisionHash: contentHash(entity) }))];
+  const plan = freezeUpstreamRepairPlan({ ...f.identity, baselineRefs, readableRefs: baselineRefs.map(({ revisionHash: _, ...ref }) => ref),
+    allowedWrites: [{ kind: "initial-world", id: "singleton", pointers: ["/readerSetup"] }] });
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  const { evidence: _, ...payload } = initial;
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "initial-world", id: "singleton" },
+    { proposal_id: "same-opening-draft", payload: { ...payload, readerSetup: "Ada waits." }, evidence_segment_ids: [f.source.segmentId] });
+  const proposals = new ProposalStore(f.root), before = await proposals.readEnvelope("pending", "same-opening-draft");
+  await expect(preflightIdentityUpstreamCommit(f.root, plan, f.root, contentHash("exact staged graph"))).rejects.toThrow(/INACTIONABLE_INITIAL_WORLD/);
+  expect(await proposals.readEnvelope("pending", "same-opening-draft")).toEqual(before); expect(await store.get()).toEqual(initial);
+  const state = await f.ledger.inspect(); expect(state.plans[0]!.state).toBe("needs-host-review"); expect(state.modelSessions).toHaveLength(0);
+  expect(state.attempts.filter(a => a.staged)).toHaveLength(1); expect(state.plans[0]!.finishIntent).toBeUndefined();
+  expect((await fs.readdir(f.root)).some(n => n.startsWith("commit-preflight-") && n.endsWith(".json"))).toBe(true);
+});
+
+it("revises a stopped pre-receipt opening through the original typed protocol and commits an actionable source-grounded state", async () => {
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const { CanonicalModelStore, ProposalStore } = await import("../src/world/canonical-model.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { inspectUpstreamRepairFinishRevisionAuthority, authorizeUpstreamRepairFinishRevision, continueUpstreamRepairFinishRevision } = await import("../src/compiler/upstream-repair-finish-revision.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const text = "Ada plans to wait. Bryn leaves.", f = await fixture(text, "wait"), evidence = f.source.evidence(text);
+  const world = new CanonicalModelStore(f.root), entities = ["ada", "bryn"].map(id => ({ id, kind: "character" as const, canonicalName: id, aliases: [], evidence }));
+  for (const entity of entities) await world.putEntity(entity);
+  const initial = { version: 1 as const, participantPresence: [{ entityId: "ada", mode: "physical" as const }],
+    delta: { version: 1 as const, operations: [{ op: "set" as const, entityId: "ada", field: "character.alive", value: true }] }, evidence };
+  const store = new InitialWorldStore(f.root); await store.put(initial);
+  const baselineRefs = [{ kind: "initial-world" as const, id: "singleton", revisionHash: contentHash(initial) },
+    ...entities.map(entity => ({ kind: "entity" as const, id: entity.id, revisionHash: contentHash(entity) }))];
+  const plan = freezeUpstreamRepairPlan({ ...f.identity, baselineRefs, readableRefs: baselineRefs.map(({ revisionHash: _, ...ref }) => ref),
+    allowedWrites: [{ kind: "initial-world", id: "singleton", pointers: ["/delta"] }],
+    dependencyEdges: [{ from: `requirement:${f.identity.requirementIds[0]}`, to: "initial-world:singleton", purpose: "requirement" }] });
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  const { evidence: _, ...payload } = initial, target = { kind: "initial-world" as const, id: "singleton" };
+  const original = { proposal_id: "inactionable-opening", payload, evidence_segment_ids: [f.source.segmentId] };
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, target, original);
+  const originalIntent = await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, { outcome: "complete",
+    reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Original opening" }], summary: "Original graph" });
+  await expect(executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash)).rejects.toThrow(/INACTIONABLE_INITIAL_WORLD/);
+  const stopped = await f.ledger.inspect(), proposals = new ProposalStore(f.root), oldDraft = await proposals.readEnvelope("pending", original.proposal_id);
+  expect(await store.get()).toEqual(initial); expect(stopped.plans[0]!.finishedReceipt).toBeUndefined();
+  const authority = await inspectUpstreamRepairFinishRevisionAuthority(f.root, f.sourceId, plan.planHash), slot = authority.slots[0]!;
+  const replacement = { ...original, proposal_id: "source-grounded-opening", payload: { ...payload,
+    delta: { ...payload.delta, operations: [...payload.delta.operations, { op: "set", entityId: "ada", field: "character.plan", value: "wait" }] } } };
+  const revision = await authorizeUpstreamRepairFinishRevision(f.root, f.sourceId, plan.planHash, {
+    version: 1, sourceId: f.sourceId, planHash: plan.planHash, failedFinishRef: authority.failedFinishRef,
+    originalIntentHash: authority.originalIntentHash, originalGraphHash: authority.originalGraphHash,
+    auditRef: "fixture:source-grounded-opening", reason: "The same source explicitly establishes Ada's plan to wait.",
+    corrections: [{ artifactKind: target.kind, artifactId: target.id, originalAttemptRef: slot.originalAttemptRef,
+      originalProposalId: slot.originalProposalId, originalInputHash: slot.originalInputHash,
+      replacementProposalId: replacement.proposal_id, inputHash: contentHash(replacement), toolInput: replacement }] });
+  await continueUpstreamRepairFinishRevision(f.root, f.sourceId, plan.planHash, revision.revisionHash);
+  await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
+  expect((await convergeWorldProposals(f.root, f.sourceId)).upstreamRepairIssues ?? []).toEqual([]);
+  expect((await store.get())?.delta.operations).toContainEqual({ op: "set", entityId: "ada", field: "character.plan", value: "wait" });
+  expect(await store.getRevision(contentHash(initial))).toEqual(initial);
+  expect(await proposals.readEnvelope("rejected", original.proposal_id)).toEqual(oldDraft);
+  const after = await f.ledger.inspect();
+  expect(after.records.slice(0, stopped.records.length)).toEqual(stopped.records);
+  expect(after.plans[0]).toMatchObject({ state: "converged", originalFinishIntent: originalIntent, finishRevision: { completed: true } });
+  await expect(inspectUpstreamRepairFinishRevisionAuthority(f.root, f.sourceId, plan.planHash)).rejects.toThrow(/no prior revision/);
 });
 
 it("rechecks real dependencies before authorization and every reservation, preserving stopped plans", async () => {
@@ -102,6 +309,70 @@ it("fails closed on false requirement, segment and receipt claims, corrupt histo
   await expect(new UpstreamRepairLedger(f.root, f.sourceId).history()).rejects.toThrow("do not initialize a fresh budget");
 });
 
+it("restores only receipt-bound entity evidence when checking the original consumer catalog", () => {
+  const old = { id: "entity", identityConsumption: undefined }, updated = { id: "entity", identityConsumption: { mode: "quarantined" } };
+  const originalAssertion = { id: "name", target: { artifactKind: "entity", artifactId: "entity" }, pointer: "/canonicalName" };
+  const addedAssertion = { id: "marker", target: { artifactKind: "entity", artifactId: "entity" }, pointer: "/identityConsumption" };
+  const catalog = [{ kind: "entity", id: "entity", payload: old }, { kind: "evidence-assertion", id: "name", payload: originalAssertion }];
+  const current = new Map<string, unknown>([["entity:entity", updated], ["evidence-assertion:name", originalAssertion], ["evidence-assertion:marker", addedAssertion], ["unrelated:changed", { retained: true }]]);
+  const revisions = [{ kind: "entity", id: "entity", payload: old, assertions: [originalAssertion, addedAssertion] }];
+  const before = originalIdentityCatalog(current, catalog, revisions);
+  expect(before.get("entity:entity")).toEqual(old); expect(before.has("evidence-assertion:marker")).toBe(false);
+  expect(before.get("evidence-assertion:name")).toEqual(originalAssertion); expect(before.get("unrelated:changed")).toEqual({ retained: true });
+  expect(current.get("entity:entity")).toEqual(updated);
+  expect(originalIdentityCatalog(current, catalog, [{ ...revisions[0]!, committed: true }])).toEqual(before);
+  const missing = new Map(current); missing.delete("evidence-assertion:marker");
+  expect(() => originalIdentityCatalog(missing, catalog, [{ ...revisions[0]!, committed: true }])).toThrow(/lost its exact receipt-backed evidence/);
+  current.set("evidence-assertion:marker", { ...addedAssertion, pointer: "/unauthorized" });
+  expect(() => originalIdentityCatalog(current, catalog, revisions)).toThrow(/outside its accepted envelope/);
+  expect(() => originalIdentityCatalog(new Map(), catalog, [{ ...revisions[0]!, assertions: [{ ...addedAssertion, target: { ...addedAssertion.target, artifactId: "other" } }] }])).toThrow(/another artifact/);
+});
+
+it("restores singleton opening evidence by its canonical artifact ID without accepting another artifact or missing committed evidence", () => {
+  const old = { delta: { operations: [] } }, updated = { delta: { operations: [{ field: "character.posture", value: "sitting" }] } };
+  const target = { artifactKind: "initial-world", artifactId: "initial-world" };
+  const originalAssertion = { id: "opening-before", target, pointer: "/readerSetup" };
+  const addedAssertion = { id: "opening-after", target, pointer: "/delta/operations/0" };
+  const unrelated = { id: "other", target: { artifactKind: "entity", artifactId: "other" } };
+  const catalog = [{ kind: "initial-world", id: "singleton", payload: old },
+    { kind: "evidence-assertion", id: originalAssertion.id, payload: originalAssertion }];
+  const current = new Map<string, unknown>([["initial-world:singleton", updated],
+    ["evidence-assertion:opening-after", addedAssertion], ["evidence-assertion:other", unrelated]]);
+  const revision = { kind: "initial-world", id: "singleton", payload: old, committed: true, assertions: [addedAssertion] };
+  const restored = originalIdentityCatalog(current, catalog, [revision]);
+  expect(restored.get("initial-world:singleton")).toEqual(old);
+  expect(restored.get("evidence-assertion:opening-before")).toEqual(originalAssertion);
+  expect(restored.has("evidence-assertion:opening-after")).toBe(false);
+  expect(restored.get("evidence-assertion:other")).toEqual(unrelated);
+  expect(current.get("initial-world:singleton")).toEqual(updated);
+  for (const wrong of [{ artifactKind: "entity", artifactId: "initial-world" }, { artifactKind: "initial-world", artifactId: "other" }])
+    expect(() => originalIdentityCatalog(current, catalog, [{ ...revision, assertions: [{ ...addedAssertion, target: wrong }] }])).toThrow(/another artifact/);
+  expect(() => originalIdentityCatalog(new Map(), catalog, [revision])).toThrow(/lost its exact receipt-backed evidence/);
+});
+
+it("revalidates a completed host-stop receipt without renewing attempts or removing failures", async () => {
+  const { withWorkspaceOperationLock } = await import("../src/util/workspace-lock.js");
+  const { executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const f = await frozenQuotationFinish();
+  await executeUpstreamRepairFinish(f.root, f.sourceId, f.plan.planHash);
+  await f.ledger.stop(f.plan.planHash, "Retained host checker failure after completed original finish");
+  const before = await f.ledger.history(), attempts = (await f.ledger.inspect()).attempts;
+  await expect(verifyUpstreamRepairPlan(f.root, f.plan)).rejects.toThrow("Active dependency changed");
+  await verifyUpstreamRepairContinuation(f.root, f.plan);
+  expect(await f.ledger.history()).toEqual(before);
+  await expect(f.ledger.recoverCompletedConvergence(f.plan.planHash)).rejects.toThrow(/owning compiler lock/);
+  await withWorkspaceOperationLock(f.root, "compiler", () => f.ledger.recoverCompletedConvergence(f.plan.planHash));
+  const after = await f.ledger.history();
+  expect(after.slice(0, before.length)).toEqual(before);
+  expect(after.at(-1)?.payload).toMatchObject({ kind: "converged", recoveredStopRef: before.at(-1)!.hash });
+  expect((await f.ledger.inspect()).attempts).toEqual(attempts);
+  await f.ledger.recordConverged(f.plan.planHash); expect(await f.ledger.history()).toEqual(after);
+  await expect(f.ledger.authorize(f.plan.planHash)).rejects.toThrow(/already frozen/);
+  const incomplete = await fixture(); await incomplete.ledger.register(incomplete.plan); await incomplete.ledger.authorize(incomplete.plan.planHash);
+  await incomplete.ledger.stop(incomplete.plan.planHash, "No completed original receipt");
+  await expect(withWorkspaceOperationLock(incomplete.root, "compiler", () => incomplete.ledger.recoverCompletedConvergence(incomplete.plan.planHash))).rejects.toThrow(/exact completed receipt/);
+});
+
 it("stages an authorized quotation through the real narrow tool without committing or permitting ordinary finish", async () => {
   const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
   const { createCompilerProposalToolset } = await import("../src/compiler/proposal-tools.js");
@@ -122,9 +393,111 @@ it("stages an authorized quotation through the real narrow tool without committi
   await expect(ordinary.tools.find(tool => tool.name === "finish_compiler_batch")!.execute("bypass", { outcome: "complete", reviewed_segments: [], summary: "bypass" } as never, undefined, undefined, {} as never)).rejects.toThrow("initialization did not complete");
   const managed = createCompilerProposalToolset(f.root, {}, { upstreamRepair: { planHash: f.plan.planHash, beforeStage: async () => {} } });
   await managed.beginBatch([f.source.segmentId], f.plan.batchId, f.sourceId);
-  for (const name of ["finish_compiler_batch", "propose_entity", "propose_novel_title"]) {
+  for (const name of ["finish_compiler_batch", "propose_character_goal", "propose_novel_title"]) {
     await expect(managed.tools.find(tool => tool.name === name)!.execute("bypass", {} as never, undefined, undefined, {} as never)).rejects.toThrow("only host-guarded staging");
   }
+});
+
+it("stages an exact entity revision and recovers its frozen finish before convergence, preserving history without proposal replay", async () => {
+  const { CanonicalModelStore, ProposalStore } = await import("../src/world/canonical-model.js");
+  const { stageUpstreamRepair, recoverUpstreamRepairStage } = await import("../src/compiler/upstream-repair-staging.js");
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { CompilerFinishReceipts } = await import("../src/compiler/finish-receipts.js");
+  const f = await fixture(), canon = new CanonicalModelStore(f.root);
+  const entity = { id: "ada", kind: "character" as const, canonicalName: "A.", aliases: [], evidence: f.source.evidence('Ada said, "Wait." Nothing changes.') };
+  await canon.putEntity(entity);
+  const plan = freezeUpstreamRepairPlan({ ...f.identity, baselineRefs: [{ kind: "entity", id: entity.id, revisionHash: contentHash(entity) }],
+    allowedWrites: [{ kind: "entity", id: entity.id, pointers: ["/canonicalName"] }], readableRefs: [{ kind: "entity", id: entity.id }] });
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  const { evidence: _, ...payload } = entity;
+  const staged = await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "entity", id: entity.id }, {
+    proposal_id: "entity-repair-draft", payload: { ...payload, canonicalName: "Ada" }, evidence_segment_ids: [f.source.segmentId],
+  });
+  expect(await canon.getEntity(entity.id)).toEqual(entity);
+  expect((await new ProposalStore(f.root).readEnvelope("pending", "entity-repair-draft")).payload).toMatchObject({ id: "ada", canonicalName: "Ada" });
+  await recoverUpstreamRepairStage(f.root, f.sourceId, plan.planHash, staged.attemptRef);
+  await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Existing evidence checked" }], summary: "Exact entity metadata fixture" });
+  vi.spyOn(CompilerFinishReceipts.prototype, "complete").mockRejectedValueOnce(new Error("entity finish interrupted before convergence"));
+  await expect(executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash)).rejects.toThrow("interrupted before convergence");
+  expect(await canon.getEntity(entity.id)).toEqual(entity);
+  const intent = (await new CompilerFinishReceipts(f.root, f.sourceId, plan.batchId).read())!.identity.upstreamRepairIntent!;
+  expect(intent.baselines.find(b => b.kind === "entity" && b.id === entity.id)?.payload).toEqual(entity);
+  const before = (await f.ledger.inspect()).attempts.length;
+  await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
+  expect((await f.ledger.inspect()).attempts).toHaveLength(before);
+  expect((await new CompilerFinishReceipts(f.root, f.sourceId, plan.batchId).read())?.state).toBe("completed");
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("finished");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const converged = await convergeWorldProposals(f.root, f.sourceId);
+  expect(converged.canonical.blocked).toEqual([]); expect(converged.upstreamRepairIssues ?? []).toEqual([]);
+  expect((await canon.getEntity(entity.id)).canonicalName).toBe("Ada");
+  expect(await canon.getEntityRevision(entity.id, contentHash(entity))).toEqual(entity);
+  expect((await f.ledger.inspect()).plans[0]!.state).toBe("converged");
+});
+
+it("commits an exact unresolved identity successor and entity quarantine together while retaining the prior creation and entity revision", async () => {
+  const { CanonicalModelStore, ProposalStore } = await import("../src/world/canonical-model.js");
+  const { EntityResolutionStore } = await import("../src/compiler/entity-resolution.js");
+  const { entityMentionSchema } = await import("../src/compiler/annotations.js");
+  const { stageUpstreamRepair } = await import("../src/compiler/upstream-repair-staging.js");
+  const { prepareUpstreamRepairFinish, executeUpstreamRepairFinish } = await import("../src/compiler/upstream-repair-finish.js");
+  const { convergeWorldProposals } = await import("../src/compiler/converge.js");
+  const text = 'Someone said, "Wait." Nothing changes.', f = await fixture(text), canon = new CanonicalModelStore(f.root);
+  const entity = { id: "unknown", kind: "character" as const, canonicalName: "Someone", aliases: [], evidence: f.source.evidence(text) };
+  await canon.putEntity(entity);
+  const { InitialWorldStore } = await import("../src/world/initial.js");
+  const opening = { version: 1 as const, evidence: f.source.evidence(text), participantPresence: [{ entityId: entity.id, mode: "physical" as const }],
+    delta: { version: 1 as const, operations: [{ op: "set" as const, entityId: entity.id, field: "character.alive", value: true }] } };
+  await new InitialWorldStore(f.root).put(opening);
+  const mention = entityMentionSchema.parse({ version: 1, id: "someone", sourceId: f.sourceId, annotationType: "entity-mention", surface: "Someone", form: "nominal",
+    anchor: textAnchorForByteRange(f.sourceId, Buffer.from(text), 0, 7), kindCandidates: ["character"], confidence: 1, derivation: f.annotation.derivation });
+  const annotations = new SourceAnnotationStore(f.root), resolutions = new EntityResolutionStore(f.root);
+  await annotations.stage(f.sourceId, { version: 1, id: "old-mention", annotationType: "entity-mention", payload: mention, generatedBy: { worker: "fixture" }, createdAt: "2026-10-24T00:00:00Z" });
+  await annotations.commitProposals(f.sourceId, ["old-mention"]);
+  const prior = { version: 1 as const, id: "old-creation", sourceId: f.sourceId, mentionId: mention.id, status: "new-entity" as const, entityId: entity.id,
+    candidates: [{ entityId: entity.id, confidence: 1, basisMentionIds: [mention.id], evidenceAssertionIds: [], rationale: "Original candidate" }], rationale: "Original creation",
+    derivation: { runId: "original", worker: "fixture", ontologyVersion: "entity-resolution-v1" as const } };
+  await resolutions.stage(f.sourceId, { version: 1, id: "old-decision", payload: prior, generatedBy: { worker: "fixture" }, createdAt: "2026-10-24T00:00:00Z" });
+  await resolutions.commitProposals(f.sourceId, ["old-decision"]);
+  const refs = [{ kind: "entity" as const, id: entity.id, revisionHash: contentHash(entity) }, { kind: "entity-mention" as const, id: mention.id, revisionHash: contentHash(mention) },
+    { kind: "entity-resolution" as const, id: prior.id, revisionHash: contentHash(prior) }];
+  const plan = freezeUpstreamRepairPlan({ ...f.identity, baselineRefs: refs, readableRefs: refs.map(({ revisionHash: _, ...ref }) => ref),
+    allowedWrites: [{ kind: "entity", id: entity.id, pointers: ["/identityConsumption"] }],
+    allowedCreations: [{ kind: "entity-resolution", id: "uncertain", maxCount: 1, dependencyOf: f.identity.requirementIds[0]! }],
+    resolutionRevisions: [{ kind: "entity-resolution", id: "uncertain", predecessorId: prior.id, mentionIds: [mention.id] }],
+    dependencyEdges: [{ from: `requirement:${f.identity.requirementIds[0]}`, to: "entity-resolution:uncertain", purpose: "requirement" },
+      { from: "entity:unknown", to: "entity-resolution:uncertain", purpose: "identity" },
+      ...["entity:unknown", "entity-resolution:uncertain"].flatMap(from => [{ from, to: "entity-mention:someone", purpose: "identity" as const }, { from, to: "entity-resolution:old-creation", purpose: "identity" as const }])] });
+  await f.ledger.register(plan); await f.ledger.authorize(plan.planHash);
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "entity-resolution", id: "uncertain" }, {
+    proposal_id: "uncertain-draft", resolution_id: "uncertain", mention_id: mention.id, status: "unresolved", candidates: [], supersedes_resolution_id: prior.id, rationale: "Preserve uncertainty" });
+  const current = (await resolutions.readProposal(f.sourceId, "pending", "uncertain-draft")).payload;
+  const { evidence: _, ...body } = entity;
+  await stageUpstreamRepair(f.root, f.sourceId, plan.planHash, { kind: "entity", id: entity.id }, {
+    proposal_id: "quarantine-draft", payload: { ...body, identityConsumption: { version: 1, status: "unresolved", mode: "quarantined", sourceId: f.sourceId,
+      mentionId: mention.id, resolutionId: current.id, resolutionRevisionHash: contentHash(current), supersedesResolutionIds: [prior.id], rationale: "Keep historical identity without actor authority" } }, evidence_segment_ids: [f.source.segmentId] });
+  await prepareUpstreamRepairFinish(f.root, f.sourceId, plan.planHash, { outcome: "complete", reviewed_segments: [{ segment_id: f.source.segmentId, disposition: "proposed", summary: "Fixture reviewed" }], summary: "Preserve original uncertainty and history" });
+  await executeUpstreamRepairFinish(f.root, f.sourceId, plan.planHash);
+  const convergence = await convergeWorldProposals(f.root, f.sourceId);
+  expect(convergence.canonical.blocked).toEqual([]); expect(convergence.upstreamRepairIssues ?? []).toEqual([]);
+  expect((await canon.getEntity(entity.id)).identityConsumption?.resolutionRevisionHash).toBe(contentHash(current));
+  expect(await canon.getEntityRevision(entity.id, contentHash(entity))).toEqual(entity);
+  expect((await resolutions.readProposal(f.sourceId, "accepted", "old-decision")).payload).toEqual(prior);
+  expect((await resolutions.list(f.sourceId)).map(r => r.id)).toEqual([current.id]);
+  expect((await new ProposalStore(f.root).readEnvelope("accepted", "quarantine-draft")).payload).toEqual(await canon.getEntity(entity.id));
+  const { CompilerBatchStore, prepareCompilerBatches } = await import("../src/compiler/batches.js");
+  const { PreparedNovelCache } = await import("../src/compiler/prepared-cache.js");
+  await new CompilerBatchStore(f.root).replaceCompleted(f.sourceId, (await prepareCompilerBatches(f.root, f.source.source)).map(b => b.id));
+  const cache = new PreparedNovelCache(f.root, path.join(f.root, "repair-cache"));
+  const inspection = await cache.inspectRepairCandidate(f.source.source);
+  expect(inspection.baselineIssues[0]?.message).toContain("ENTITY_IDENTITY_CONSUMPTION_BLOCKED");
+  expect(inspection.bundle.canonical.initialWorld).toEqual(opening);
+  expect(inspection.assessment.issues).toContainEqual(inspection.baselineIssues[0]);
+  expect(inspection.assessment.entryReady).toBe(false); expect(inspection.assessment.fullNovelReady).toBe(false);
+  for (const action of [() => cache.candidateSnapshot(f.source.source), () => cache.archiveCandidate(f.source.source), () => cache.certifyCandidate(f.source.source)])
+    await expect(action()).rejects.toThrow("ENTITY_IDENTITY_CONSUMPTION_BLOCKED");
+  await expect(f.ledger.recordEvaluation(plan.planHash)).rejects.toThrow("Executable requirement evaluation has a blocked baseline");
+  expect(await cache.loadActive(f.source.source)).toBeNull();
 });
 
 it("recovers a written draft only from its pre-write validated intent, without rerunning the tool", async () => {
@@ -702,6 +1075,9 @@ it("reserves one isolated Pi slot before session construction and charges malfor
     expect(options.additionalTools?.map(tool => tool.name)).toEqual(["read_upstream_repair_context", "propose_quotation"]);
     return { dispose, promptWithReport: async (prompt: string) => {
       const data = JSON.parse(prompt), tool = options.additionalTools!.find(tool => tool.name === "propose_quotation")!;
+      const { createCompilerProposalToolset } = await import("../src/compiler/proposal-tools.js");
+      expect(data.originalToolGuidelines).toEqual(createCompilerProposalToolset(f.root).tools.find(t => t.name === "propose_quotation")!.promptGuidelines);
+      expect(data.originalToolGuidelines.length).toBeGreaterThan(0);
       const call = async (proposal_json: string) => tool.execute("model-call", tool.prepareArguments!({ proposal_json }) as never, undefined, undefined, {} as never);
       expect(data.context.evidence[0].segmentId).toBe(f.source.segmentId);
       await expect(call("not JSON")).rejects.toThrow();
@@ -719,6 +1095,30 @@ it("reserves one isolated Pi slot before session construction and charges malfor
   expect(state.attempts[1]!.staged).toBe(true);
   expect(await new SourceAnnotationStore(f.root).read(f.sourceId, "quote-one")).toEqual(f.annotation);
   await expect(runUpstreamRepairModelSlot(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, {}, createSession)).rejects.toThrow("successful draft");
+  expect(createSession).toHaveBeenCalledOnce();
+});
+
+it("retains the terminal tool diagnostic and exhausted allowance when an isolated Pi worker stops", async () => {
+  const { runUpstreamRepairModelSlot } = await import("../src/compiler/pi-upstream-repair.js");
+  const { readNwhToolRecovery } = await import("../src/agent/tool-recovery.js");
+  const f = await fixture(); await f.ledger.register(f.plan); await f.ledger.authorize(f.plan.planHash);
+  let terminal: Error | undefined;
+  const createSession = vi.fn(async (options: import("../src/agent/pi-session.js").PiAgentSessionOptions) => ({ dispose: async () => {}, promptWithReport: async () => {
+    const tool = options.additionalTools!.find(t => t.name === "propose_quotation")!;
+    for (const text of ["invalid JSON", "different invalid JSON"]) {
+      try { await tool.execute("bad", tool.prepareArguments!({ proposal_json: text }) as never, undefined, undefined, {} as never); }
+      catch (error) { terminal = error as Error; }
+    }
+    return {} as never;
+  } }));
+  await expect(runUpstreamRepairModelSlot(f.root, f.sourceId, f.plan.planHash, { kind: "quotation", id: "quote-one" }, {}, createSession)).rejects.not.toThrow("Model returned without");
+  const advice = readNwhToolRecovery({ content: [{ type: "text", text: terminal!.message }] }, "propose_quotation");
+  expect(advice?.retryable).toBe(false);
+  expect(terminal!.message.match(/<nwh-tool-recovery>/g)).toHaveLength(1);
+  const state = await f.ledger.inspect();
+  expect(state.attempts.filter(a => a.failed)).toHaveLength(2);
+  expect(state.modelSessions[0]!.closed).toBe(true);
+  expect(state.plans[0]!.state).toBe("needs-host-review");
   expect(createSession).toHaveBeenCalledOnce();
 });
 

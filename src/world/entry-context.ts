@@ -1,5 +1,6 @@
 import { entryKnowledgeSupplement } from "./entry-knowledge.js";
-import { entryAgencyIssues, remoteEntryOccurrenceIssues } from "./entry-agency.js";
+import { remoteEntryOccurrenceIssues } from "./entry-agency.js";
+import { assessEntryState } from "./entry-contract.js";
 import { applyProcessDelta, emptyProcessState } from "./process-effects.js";
 import { applyStateDelta, emptyWorldState, StateSchemaRegistry, DEFAULT_STATE_FIELDS, evaluatePredicateTruth, advanceTemporalState } from "./state.js";
 import { resolveActionInvocation } from "./action-ontology.js";
@@ -108,7 +109,6 @@ export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): Charac
   const characters = bundle.canonical.entities.filter((entity) => entity.kind === "character");
   const orderedEvents = eventsInDiscourseOrder(bundle.canonical.events);
   const eventRanks = new Map(orderedEvents.map((event, index) => [event.id, index]));
-  const soleCharacterId = characters.length === 1 ? characters[0]!.id : undefined;
   const openingOrder = openingDiscourseOrder(bundle, orderedEvents);
   const completeReaderContextBefore = new Set<string>();
   let readerContextComplete = true;
@@ -120,7 +120,7 @@ export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): Charac
 
   for (const character of characters) {
     let entry: CharacterEntryPoint | undefined;
-    if (initialWorldRepresentsActor(bundle, character.id, soleCharacterId === character.id)) {
+    if (initialWorldRepresentsActor(bundle, character.id)) {
       entry = {
         actorId: character.id,
         kind: "opening",
@@ -422,21 +422,13 @@ function characterEntryOption(entity: Entity, entry: CharacterEntryPoint): Chara
 function initialWorldRepresentsActor(
   bundle: PreparedNovelBundle,
   actorId: string,
-  allowSoleAliveFallback: boolean,
 ): boolean {
-  const actorOperations = bundle.canonical.initialWorld.delta.operations.filter((operation) =>
-    "entityId" in operation && operation.entityId === actorId);
-  const playablePresence = !entryAgencyIssues(actorId, bundle.canonical.initialWorld, {
+  return assessEntryState(actorId, bundle.canonical.initialWorld, {
     sourceId: bundle.source.id, entities: new Map(bundle.canonical.entities.map(entity => [entity.id, entity])),
     acquisitions: new Map((bundle.canonical.acquisitions ?? []).map(item => [item.id, item])),
     processTemplates: new Map((bundle.canonical.processTemplates ?? []).map(template => [template.id, template])),
     actionSchemas: new Map((bundle.canonical.actionSchemas ?? []).map(action => [action.id, action])),
-  }).length;
-  if (playablePresence && actorOperations.some((operation) =>
-    "entityId" in operation
-    && ["character.location", "character.plan", "character.momentum"].includes(operation.field))) return true;
-  return allowSoleAliveFallback && !bundle.canonical.entities.find(entity => entity.id === actorId)?.agencyProfile && actorOperations.some((operation) =>
-    operation.op === "set" && operation.field === "character.alive" && operation.value === true);
+  }).state === "grounded";
 }
 
 function eventOffersEntry(event: CanonicalEvent, actorId: string, bundle: PreparedNovelBundle): boolean {
@@ -449,16 +441,12 @@ function entryCheckpointFor(event: CanonicalEvent, actorId: string, bundle: Prep
   return event.characterEntryCheckpoints?.find((checkpoint) =>
     checkpoint.actorId === actorId
     && !remoteEntryOccurrenceIssues(actorId, checkpoint, event, bundle.canonical.eventParticipations).length
-    && !entryAgencyIssues(actorId, checkpoint, {
+    && assessEntryState(actorId, checkpoint, {
       sourceId: bundle.source.id, entities: new Map(bundle.canonical.entities.map(item => [item.id, item])),
       processTemplates: new Map((bundle.canonical.processTemplates ?? []).map(item => [item.id, item])),
       actionSchemas: new Map((bundle.canonical.actionSchemas ?? []).map(item => [item.id, item])),
       acquisitions: new Map((bundle.canonical.acquisitions ?? []).map(item => [item.id, item])),
-    }).length
-    && checkpoint.delta.operations.some((operation) =>
-      "entityId" in operation
-      && operation.entityId === actorId
-      && ["character.location", "character.plan", "character.momentum"].includes(operation.field)));
+    }).state === "grounded");
 }
 
 function eventAdvancesMainTimeline(event: CanonicalEvent): boolean {

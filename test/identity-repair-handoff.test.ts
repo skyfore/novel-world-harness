@@ -85,12 +85,12 @@ it("separates a fully recorded local review from blocked repair and unread globa
   expect(() => buildIdentityRepairPlan(f.p, records)).toThrow("no repair authority");
 });
 
-it("hands off an unsupported entity repair with exact cyclic dependency baselines and separate source-review coverage", () => {
+it("hands off an entity revision without granting original-scope writes with exact cyclic dependency baselines and separate source-review coverage", () => {
   const f = fixture(), before = h(f);
   const result = buildIdentityRepairHandoff(f.p, f.records.slice(0, 4), { ref: "entity/unknown", limit: 2 });
   expect(result).toMatchObject({ selected: { payload: { id: "unknown", canonicalName: "the stranger" },
     recordedAssessment: { disposition: "additional-repair-required", independentReview: { verdict: "supported" } } },
-  capability: { existingArtifactRevision: "unsupported-kind", writableFields: [], originalIdentityScopeAllowsConsumerWrites: false },
+  capability: { existingArtifactRevision: "requires-independent-exact-plan", writableFields: ["canonicalName", "aliases", "evidence", "identityConsumption"], originalIdentityScopeAllowsConsumerWrites: false },
   downstream: { total: 4, nextOffset: 2 }, executionAuthority: false });
   if (!("downstream" in result)) throw new Error("detail missing");
   const second = buildIdentityRepairHandoff(f.p, f.records.slice(0, 4), { ref: "entity/unknown", offset: result.downstream.nextOffset!, limit: 2 });

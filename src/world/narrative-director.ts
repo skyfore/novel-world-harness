@@ -153,7 +153,7 @@ export async function buildNarrativeDirection(
 
   for (const goal of scopedGoals) {
     if (goal.actorId !== actorId && !scene.presentEntityIds.includes(goal.actorId)) continue;
-    const activation = evaluateCharacterGoal(goal, {
+    const activation = evaluateCharacterGoal(goal, { entities: context.entities, identityCatalog: context,
       state,
       knownClaimIds: knownClaimsByActor.get(goal.actorId) ?? new Set(),
       realizedCanonicalEventIds,

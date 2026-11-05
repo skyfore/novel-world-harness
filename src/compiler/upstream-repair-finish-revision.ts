@@ -22,7 +22,7 @@ export type UpstreamRepairFinishRevisionReview = Omit<UpstreamRepairFinishRevisi
 
 function storeKind(kind: UpstreamRepairKind): "world" | "annotation" | "entity-resolution" | "event-resolution" {
   if (kind === "entity-resolution" || kind === "event-resolution") return kind;
-  return kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
+  return kind === "entity" || kind === "initial-world" || kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
 }
 
 async function readStoredEnvelopes(root: string, sourceId: string, kind: UpstreamRepairKind, proposalId: string): Promise<StoredEnvelope[]> {

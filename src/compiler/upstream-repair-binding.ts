@@ -20,7 +20,7 @@ const globalKinds = new Set(["source", "unit", "roster", "entry", "requirement-s
 export function upstreamRepairDependencyPath(raw: ClosureGraph, targetRef: string, annotationId: string, revisionHash: string): Array<Pick<Node, "kind" | "id" | "revisionHash">> | null {
   return dependencyLookup(raw)(targetRef, annotationId, revisionHash);
 }
-function dependencyLookup(raw: ClosureGraph, rootKinds = ["event", "norm", "action"]) {
+function dependencyLookup(raw: ClosureGraph, rootKinds = ["event", "norm", "action", "goal"]) {
   const graph = closureGraphSchema.parse(raw), nodes = new Map(graph.nodes.map(node => [key(node), node]));
   if (nodes.size !== graph.nodes.length) throw upstreamRepairHostError("Dependency binding has duplicate closure identities");
   for (const node of graph.nodes) for (const ref of node.dependsOn) {

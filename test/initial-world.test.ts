@@ -48,7 +48,8 @@ describe("canonical initial world", () => {
       proposalId: "initial",
       payload: {
         version: 1,
-        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait at the opening" }] },
         knowledge: {
           version: 1,
           operations: [{ op: "learn", actorId: "hero", claimId: "opening-claim", status: "knows", confidence: 1 }],
@@ -82,7 +83,7 @@ describe("canonical initial world", () => {
     expect((await commits.accept("initial-world", "initial")).accepted).toBe(true);
 
     const initial = await new InitialWorldStore(root).get();
-    expect(initial?.delta.operations).toHaveLength(1);
+    expect(initial?.delta.operations).toHaveLength(2);
     const { context } = await loadWorldContext(root);
     const engine = new WorldEngine(root, context);
     const head = await engine.createBranch("main", "Main", initial!.delta, initial!.knowledge);

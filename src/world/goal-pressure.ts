@@ -31,7 +31,7 @@ export async function activeGoalPressures(engine: WorldEngine, commitId: string)
       known = actionableKnowledgeClaimIds(await knowledge.view(goal.actorId, commitId), sourceId);
       views.set(goal.actorId, known);
     }
-    if (!evaluateCharacterGoal(goal, { state, knownClaimIds: known, realizedCanonicalEventIds: realized,
+    if (!evaluateCharacterGoal(goal, { entities: context.entities, identityCatalog: context, state, knownClaimIds: known, realizedCanonicalEventIds: realized,
       experiencedCanonicalEventIds: experiencedCanonicalEvents(scopedHistory, goal.actorId, context.events),
       storyTime: state.logicalTime.storyTime,
     }).active) continue;

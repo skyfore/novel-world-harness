@@ -470,7 +470,7 @@ describe("CompilerCommitService", () => {
     expect(validation.errors).toContainEqual(expect.objectContaining({ code: "UNPLAYABLE_INITIAL_WORLD" }));
   });
 
-  it("rejects an alive-only opening inventory for a multi-character source", async () => {
+  it("retains an alive-only inventory as unproven archival input without granting an entry", async () => {
     const { proposals, commits, evidence } = await fixture();
     for (const [proposalId, id, name] of [
       ["opening-cao", "cao-cao", "曹操"],
@@ -500,8 +500,8 @@ describe("CompilerCommitService", () => {
     });
 
     const validation = await commits.accept("initial-world", "alive-inventory-opening");
-    expect(validation.accepted).toBe(false);
-    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "INACTIONABLE_INITIAL_WORLD" }));
+    expect(validation.accepted).toBe(true);
+    expect(validation.warnings).toContainEqual(expect.objectContaining({ code: "INACTIONABLE_INITIAL_WORLD" }));
   });
 
   it("rejects character IDs stored as relationship references in an initial world", async () => {

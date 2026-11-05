@@ -6,13 +6,15 @@ import { CompilerValidator } from "./validator.js";
 import { RequirementLedger, requirementResultIssues, sceneCatalogKeys, type RequirementSet } from "./requirement-ledger.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { sceneCapabilitySpecSchema, type SceneReviewCatalog } from "../eval/scene-capabilities.js";
+import { inspectSemanticCoverage } from "./semantic-coverage.js";
+import { ActorModelStore } from "../world/actors.js";
 
 export async function requirementInputs(root: string, sourceId: string) {
   const source = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
   if (!source) throw new Error("Requirement source is not registered; stop for host source review.");
   const bytes = await new SourceMaterialStore().read(source);
   if (!bytes) throw new Error("Requirement source bytes are missing; stop for host storage repair, do not retry unchanged.");
-  const loaded = await new CompilerValidator(new CanonicalModelStore(root)).loadCatalog();
+  const loaded = await new CompilerValidator(new CanonicalModelStore(root), undefined, new ActorModelStore(root)).loadCatalog();
   const catalog = Object.fromEntries(sceneCatalogKeys.map(key => [key, new Map([...(loaded[key]?.values() ?? [])]
     .filter(value => !value.evidence.length || value.evidence.every(ref => ref.span.sourceId === sourceId))
     .map(value => [value.id, value]))])) as SceneReviewCatalog;
@@ -27,11 +29,14 @@ export async function settleSourceRequirements(root: string, sourceId: string) {
   for (const { receipt } of await CompilerFinishReceipts.listRetained(root, sourceId)) {
     if (receipt.state === "completed" && receipt.identity.requirementAttempts) await ledger.recordCoreRoleAttempts(receipt);
   }
-  if (!sets.length) return { sets, results: [], issues: [] };
   const { bytes, catalog, source } = await requirementInputs(root, sourceId);
   if (sets.some(set => set.spec.sourceSha256 !== source.contentSha256)) throw new Error("Requirement source revision changed; stop for host source review.");
   const results = await ledger.evaluate(bytes, catalog);
-  return { sets, results, issues: requirementResultIssues(sets, results, catalog) };
+  const coverage = inspectSemanticCoverage(sourceId, catalog, sets.map(s => s.spec));
+  // Partial repair and candidate archival may settle their existing specs.
+  // The complete-inventory coverage obligation belongs to global closure and
+  // certification, not every unrelated upstream repair or source-role review.
+  return { sets, results, coverage, issues: requirementResultIssues(sets, results, catalog) };
 }
 
 export function frozenSceneCatalog(bundle: Pick<PreparedNovelBundle, "canonical">): SceneReviewCatalog {

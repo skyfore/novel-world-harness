@@ -18,6 +18,7 @@ import { validateSemanticScopeHistory, validateSemanticScopePlan } from "./role-
 import { verifySemanticScopeRecord } from "./role-semantic-scope-trace.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
 import { identityIntentSchema, identityRequirementId, IDENTITY_CONSUMER_SHARD_SIZE, type IdentityIntent, type IdentityInventory } from "./identity-requirements.js";
+import { retainedUpstreamReviewPrefix } from "./upstream-review-prefix.js";
 
 const mapping: Record<string, [string, ClosureKind]> = {
   entity: ["entities", "entity"], proposition: ["propositions", "proposition"], attribution: ["attributions", "attribution"], claim: ["claims", "claim"],
@@ -120,7 +121,7 @@ export async function prepareIdentityRequirements(root: string, input: RoleDepen
     consumerShards: Array.from({ length: Math.ceil(inventory.consumers.length / IDENTITY_CONSUMER_SHARD_SIZE) }, (_, i) => ({ index: i, refs: inventory.consumers.slice(i * IDENTITY_CONSUMER_SHARD_SIZE, (i + 1) * IDENTITY_CONSUMER_SHARD_SIZE).map(c => c.ref) })),
     catalogHash: contentHash(catalog), inventoryHash: contentHash(inventory), requiredSourceSegmentIds: selected.map(s => s.id), targets,
     requirementPrefix: existing?.requirementPrefix ?? { length: journal.length, head: journal.at(-1)!.hash },
-    upstreamPrefix: { length: upstream.length, head: upstream.at(-1)!.hash }, priorUsage });
+    upstreamPrefix: retainedUpstreamReviewPrefix(upstream, existing?.upstreamPrefix), priorUsage });
   if (existing && contentHash(existing) !== contentHash(intent)) throw prerequisiteStop("Original identity intent changed; no phase retry or namespace rotation");
   return { ...prepared, intent, semantic, inventory, graph, manifest };
 }

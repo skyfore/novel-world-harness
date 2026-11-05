@@ -150,6 +150,15 @@ export type ResolvedActionInvocation = {
   stateEffects: Array<{ operation: StateOperation; required: boolean }>;
 };
 
+/** Instantiate declared effects only; this does not evaluate preconditions or
+ * authorize a commit. Used by bounded probes as well as typed action adapters. */
+export function declaredActionStateDelta(invocation: Extract<ActionInvocation, { lane: "schema-bound" }>, schema: ActionSchema): StateDelta {
+  if (invocation.schemaId !== schema.id) throw new Error("Action schema binding changed");
+  const roles = new Map(invocation.roleBindings.map(binding => [binding.roleId, binding.entityIds]));
+  return { version: 1, operations: schema.stateEffects.filter(effect => effect.required)
+    .map(effect => instantiateEffect(effect, roles, invocation.parameters).operation) };
+}
+
 /** Resolve and validate the schema-bound lane; ad-hoc actions keep normal engine validation. */
 export function resolveActionInvocation(
   invocationInput: ActionInvocation,

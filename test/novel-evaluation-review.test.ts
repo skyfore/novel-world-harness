@@ -19,6 +19,7 @@ import { NovelCompilationRunStore } from "../src/workflow/novel-compilation.js";
 import * as roleReview from "../src/workflow/role-review.js";
 import * as preparation from "../src/commands/prepare-all.js";
 import * as evaluation from "../src/eval/novel-play-evaluator.js";
+import * as compilationClosure from "../src/compiler/compilation-closure.js";
 import { NovelPlayQualityStore } from "../src/eval/novel-play-quality.js";
 
 const roots: string[] = [];
@@ -29,8 +30,8 @@ async function candidate() {
   const fixture = await createEvidenceFixture(root, "Hero waits.\n");
   const canonical = new CanonicalModelStore(root);
   await canonical.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") });
-  await new InitialWorldStore(root).put({ version: 1, evidence: fixture.evidence("Hero waits."), delta: { version: 1,
-    operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] } });
+  await new InitialWorldStore(root).put({ version: 1, participantPresence: [{ entityId: "hero", mode: "physical" }], evidence: fixture.evidence("Hero waits."), delta: { version: 1,
+    operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait" }] } });
   const batches = await prepareCompilerBatches(root, fixture.source);
   await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map(batch => batch.id));
   const cache = new PreparedNovelCache(root);
@@ -91,9 +92,16 @@ it("independent review requires source coverage before freezing, binds real trac
   vi.spyOn(preparation, "prepareAllCommand").mockResolvedValue({} as never);
   const options = { root, sourceId: fixture.source.id, onProgress() {} };
   await expect(certifyPreparedNovel(options)).rejects.toThrow("owning compiler lock");
+  // The fixture has marker-only batches: the new production closure gate must
+  // stop before any experiment, even though earlier adapters report success.
+  await expect(withWorkspaceOperationLock(root, "compiler", () => certifyPreparedNovel(options))).rejects.toThrow("COMPILATION_CLOSURE_BLOCKED");
+  const closure = structuredClone((await new NovelCompilationRunStore(root).read(fixture.source.id))!.closure!);
+  closure.complete = true;
+  closure.gates = closure.gates.map(g => ({ ...g, state: "passed", refs: [], reasons: [] }));
+  vi.spyOn(compilationClosure, "checkCompilationClosure").mockResolvedValue(closure);
   await expect(withWorkspaceOperationLock(root, "compiler", () => certifyPreparedNovel(options))).rejects.toThrow("NOVEL_EVALUATION_FAILED");
   const run = (await new NovelCompilationRunStore(root).read(fixture.source.id))!;
-  expect(run.history.map(item => item.phase)).toEqual(["roles", "repair", "requirements", "archive", "evaluation-plan", "evaluate"]);
+  expect(run.history.slice(-7).map(item => item.phase)).toEqual(["roles", "repair", "requirements", "closure", "archive", "evaluation-plan", "evaluate"]);
   expect(run.history.at(-1)?.status).toBe("blocked");
   expect(create).toHaveBeenCalledOnce();
   expect(await cache.loadActive(fixture.source)).toBeNull();

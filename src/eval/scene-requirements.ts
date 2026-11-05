@@ -32,7 +32,7 @@ export function buildSceneRequirementAssessment(
     const result = byId.get(item.id), issues = result?.issues ?? [];
     const targetRef = item.kind === "event-effects" ? `event:${item.eventId}`
       : item.kind === "knowledge-cut" ? `event:${item.acquisitionEventId}`
-        : item.kind === "norm-scope" ? `norm:${item.normId}` : `action:${item.action.schemaId}`;
+        : item.kind === "norm-scope" ? `norm:${item.normId}` : item.kind === "goal-lifecycle" ? `goal:${item.goalId}` : `action:${item.action.schemaId}`;
     const evidenceRefs = [...new Set(item.evidence.map(anchor =>
       `source-anchor:${anchor.sourceId}:${anchor.startByte}:${anchor.endByte}:${anchor.exactHash}`))];
     const common = issues.filter(issue => issue.stage === "source-review");

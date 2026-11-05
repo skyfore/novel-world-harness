@@ -8,6 +8,7 @@ import { redactTraceSecrets } from "../../trace/redaction.js";
 import { read, save } from "./state.js";
 import { verifyNovelDelivery, workerResultSchema, type WorkerResult } from "./delivery.js";
 import { TraceStore } from "../../trace/store.js";
+import { compilationStopFromError } from "../../compiler/compilation-stop.js";
 
 export type WorkerRequest = Omit<CompileNovelOptions, "signal" | "onProgress"> & { sourceId: string };
 export type { WorkerResult } from "./delivery.js";
@@ -48,7 +49,8 @@ export async function compileLoopWorker(operation: string, requestFile: string, 
       save(output, workerResultSchema.parse({ status: "succeeded", delivery: { runId: run.id, candidateBundleHash: run.bundleHash,
         branchId: run.branchId, completed: run.completed } }));
     } catch (error) {
-      save(output, { status: "failed", error: String(error) } satisfies WorkerResult);
+      const recovery = compilationStopFromError(error);
+      save(output, { status: "failed", error: String(error), ...(recovery ? { recovery } : {}) } satisfies WorkerResult);
       throw error;
     }
   });

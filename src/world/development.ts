@@ -141,7 +141,7 @@ export async function projectCharacterDevelopment(
     .filter((goal) => goal.actorId === actorId)
     .filter((goal) => evidenceBelongsExclusivelyToSource(goal.evidence, effectiveSourceId));
   for (const goal of goals) {
-    const activation = evaluateCharacterGoal(goal, {
+    const activation = evaluateCharacterGoal(goal, { entities: context.entities, identityCatalog: context,
       state,
       knownClaimIds,
       realizedCanonicalEventIds: realized,

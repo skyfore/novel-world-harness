@@ -10,6 +10,14 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it("keeps consumer draft correction bounded and never overrides a retained host or budget stop", () => {
+    const advice = buildNwhToolRecoveryAdvice("preview_consumer_revalidation", "Read every requiredSourceSegmentIds before submitting");
+    expect(advice).toMatchObject({ category: "invalid-arguments", retryable: true });
+    for (const field of ["read_consumer_revalidation", "items[].id", "items[].ref", "same", "once", "stop"])
+      expect(advice.steps.join(" ")).toContain(field);
+    for (const error of ["ROLE_PREREQUISITE_HOST_REVIEW: work scope changed", "Model request budget exhausted: no new validated progress", "tool-call safety fuse exhausted"])
+      expect(buildNwhToolRecoveryAdvice("preview_consumer_revalidation", error).retryable).toBe(false);
+  });
   it.each(["submit_role_semantic_scope", "read_semantic_source", "read_semantic_dependencies", "submit_source_representation", "propose_entity_resolution"])("never turns an explicit prerequisite/upstream host stop into retry advice: %s", tool => {
     for (const diagnostic of [
       "ROLE_PREREQUISITE_HOST_REVIEW: Criterion lacks exact repair slots or its explicit missing condition.",
@@ -103,6 +111,14 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("Use '/canonicalEventId' instead of '/payload/canonicalEventId'");
     expect(advice.steps.join(" ")).toContain("IDs alone are not a binding");
     expect(advice.steps.join(" ")).toContain("never submit a third input");
+  });
+  it("keeps consumer dependency lookup failures distinct from offsets mentioned in their recovery SOP", () => {
+    const advice = buildNwhToolRecoveryAdvice("read_consumer_revalidation", 'CONSUMER_ARTIFACT_REF_MISS "initial/source": Discover collection=artifacts offset=0; copy items[].ref.');
+    expect(advice).toMatchObject({ category: "lookup-miss", retryable: true,
+      suggestedCall: { tool: "read_consumer_revalidation", arguments: { collection: "artifacts", query: "initial/source", offset: 0 } } });
+    expect(advice.steps.join(" ")).toContain("items[].ref");
+    expect(advice.steps.join(" ")).toContain("stop");
+    expect(buildNwhToolRecoveryAdvice("read_consumer_revalidation", "ROLE_PREREQUISITE_HOST_REVIEW: missing dependency, offset=0").retryable).toBe(false);
   });
   it("turns a stale read ref into an exact paired-discovery SOP", () => {
     const advice = buildNwhToolRecoveryAdvice(
@@ -720,6 +736,15 @@ it("bounds perception recovery and stops stale or unrealized sensory proof", () 
   expect(advice.steps.join(" ")).toContain("results[].ref");
   expect(advice.retryCondition).toContain("one corrected retry");
 });
+it("does not misclassify the consumer source-search contract as an offset error", () => {
+  const old = buildNwhToolRecoveryAdvice("read_consumer_revalidation", "query is for artifacts discovery only; copy a known ID/kind, offset=0, then returned items[].ref into refs once.");
+  expect(old).toMatchObject({ category: "host-repair-required", retryable: false });
+  const mixed = buildNwhToolRecoveryAdvice("read_consumer_revalidation", "CONSUMER_READ_MODE discovery needs query and offset=0 without refs");
+  expect(mixed).toMatchObject({ category: "invalid-arguments", retryable: true });
+  expect(mixed.steps.join(" ")).toContain("items[].id");
+  expect(mixed.steps.join(" ")).toContain("items[].ref");
+});
+
 it("stops unavailable acquisition history and discovers typed dependencies within source scope", () => {
   for (const code of ["ACQUISITION_REVISION_MISMATCH", "ACQUISITION_DEPENDENCY_CYCLE", "ACQUISITION_PRIOR_NOT_REALIZED", "ACQUISITION_PREMISE_UNAVAILABLE", "ACQUISITION_CUT_NOT_CURRENT"]) expect(buildNwhToolRecoveryAdvice("propose_acquisition", code).retryable).toBe(false);
   const missing = buildNwhToolRecoveryAdvice("propose_acquisition", "ACQUISITION_DEPENDENCY_MISSING: acquisition/prior");

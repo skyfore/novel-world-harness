@@ -101,6 +101,7 @@ export function projectAgencyChannels(entity: Entity, processes: ProcessState, c
 /** An identity appearing in a photo, memory or mention is not a live actor there. */
 export function agencyPresenceIssues(entity: Entity | undefined, presence: ParticipantPresence["mode"] | undefined): ValidationIssue[] {
   const fail = (code: string, message: string): ValidationIssue[] => [{ code, message: `${message} Preserve the head and stop for host agency/channel review; do not change the presence label, guess a mechanism or retry unchanged.`, path: "actorId" }];
+  if (entity?.identityConsumption?.mode === "quarantined") return fail("ENTITY_IDENTITY_CONSUMPTION_BLOCKED", "This retained entity has quarantined world consumption; unresolved cross-identity alone does not establish or disprove local agency.");
   if (presence && ["represented", "mentioned", "memory", "dream"].includes(presence)) return fail("AGENCY_NOT_LIVE", "This occurrence represents an identity without granting it current agency.");
   if (entity?.agencyProfile && entity.agencyProfile.agency !== "autonomous") return fail("AGENCY_UNAVAILABLE", "This entity has no established autonomous agency.");
   if (entity?.agencyProfile?.embodiment === "mediated" && presence === "physical") return fail("AGENCY_BODY_REQUIRED", "A mediated entity cannot be relabeled as physically embodied.");

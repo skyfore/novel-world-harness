@@ -2,7 +2,7 @@ import { recoverUpstreamResolutionBaselines, assertUpstreamResolutionAbsences } 
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
 import { ProposalStore } from "../world/canonical-model.js";
-import { artifactProposalSchema, idSchema } from "../world/model.js";
+import { artifactProposalSchema } from "../world/model.js";
 import { SourceAnnotationStore, sourceAnnotationProposalSchema } from "./annotations.js";
 import { EntityResolutionStore, identityResolutionProposalSchema } from "./entity-resolution.js";
 import { EventResolutionStore, eventResolutionProposalSchema } from "./event-resolution.js";
@@ -10,13 +10,21 @@ import { CompilerFinishReceipts, compilerFinishReceiptSchema } from "./finish-re
 import { UpstreamRepairLedger, inspectUpstreamRepairJournal, upstreamRepairJournalSchema, type UpstreamRepairRecord } from "./upstream-repair-ledger.js";
 import { upstreamRepairHostError } from "./upstream-repair-preflight.js";
 import { COMPILER_PIPELINE_VERSION } from "./batch-progress.js";
-import { compilerProposalSchemas } from "./proposals.js";
+import { compilerProposalLogicalIdentity, compilerProposalSchemas } from "./proposals.js";
 import { loadCompilerArtifactRecords } from "./artifact-retrieval.js";
+import type { UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import type { UpstreamRepairFinishIntent } from "./upstream-repair-finish-intent.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const common = { planHash: hash, attemptRef: hash, status: z.enum(["pending", "accepted"]) };
+const worldEnvelopeSchema = z.discriminatedUnion("kind", [
+  artifactProposalSchema(compilerProposalSchemas.entity).extend({ kind: z.literal("entity") }),
+  artifactProposalSchema(compilerProposalSchemas["initial-world"]).extend({ kind: z.literal("initial-world") }),
+  artifactProposalSchema(compilerProposalSchemas["canonical-event"]).extend({ kind: z.literal("canonical-event") }),
+  artifactProposalSchema(compilerProposalSchemas["event-participation"]).extend({ kind: z.literal("event-participation") }),
+]);
 const draftSchema = z.discriminatedUnion("store", [
-  z.object({ ...common, store: z.literal("world"), envelope: artifactProposalSchema(z.object({ id: idSchema }).passthrough()) }).strict(),
+  z.object({ ...common, store: z.literal("world"), envelope: worldEnvelopeSchema }).strict(),
   z.object({ ...common, store: z.literal("annotation"), envelope: sourceAnnotationProposalSchema }).strict(),
   z.object({ ...common, store: z.literal("entity-resolution"), envelope: identityResolutionProposalSchema }).strict(),
   z.object({ ...common, store: z.literal("event-resolution"), envelope: eventResolutionProposalSchema }).strict(),
@@ -30,9 +38,12 @@ function sourceStoreFor(root: string, store: Exclude<Draft["store"], "world">) {
   return store === "annotation" ? new SourceAnnotationStore(root) : store === "entity-resolution" ? new EntityResolutionStore(root) : new EventResolutionStore(root);
 }
 const storeForKind = (kind: string): Draft["store"] => kind === "entity-resolution" || kind === "event-resolution" ? kind
-  : kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
+  : kind === "entity" || kind === "initial-world" || kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
 const draftKind = (draft: Draft): string => draft.store === "world" ? draft.envelope.kind
   : draft.store === "annotation" ? draft.envelope.payload.annotationType : draft.store;
+const draftId = (draft: Draft): string => draft.store === "world"
+  ? compilerProposalLogicalIdentity(draft.envelope.kind, draft.envelope.payload)!.slice(draft.envelope.kind.length + 1)
+  : draft.envelope.payload.id;
 
 /** Validate complete declared draft membership against the immutable staging journal. */
 export function assertUpstreamRepairCheckpoint(input: UpstreamRepairCheckpoint, journal: readonly UpstreamRepairRecord[], sourceId: string, includeCompleted = true) {
@@ -51,7 +62,7 @@ export function assertUpstreamRepairCheckpoint(input: UpstreamRepairCheckpoint, 
     const started = records.find(record => record.hash === draft.attemptRef)?.payload;
     const staged = records.find(record => record.payload.kind === "attempt-staged" && record.payload.attemptRef === draft.attemptRef)?.payload;
     const validated = records.find(record => record.payload.kind === "attempt-validated" && record.payload.attemptRef === draft.attemptRef)?.payload;
-    if (seen.has(key) || started?.kind !== "attempt-started" || started.planHash !== draft.planHash || started.proposalId !== draft.envelope.id || started.artifactId !== draft.envelope.payload.id
+    if (seen.has(key) || started?.kind !== "attempt-started" || started.planHash !== draft.planHash || started.proposalId !== draft.envelope.id || started.artifactId !== draftId(draft)
       || storeForKind(started.artifactKind) !== draft.store
       || (draft.store === "world" && started.artifactKind !== draft.envelope.kind)
       || (draft.store === "annotation" && started.artifactKind !== draft.envelope.payload.annotationType)
@@ -142,7 +153,7 @@ export async function restoreUpstreamRepairCheckpoint(root: string, sourceId: st
   const records = await loadCompilerArtifactRecords(root, sourceId);
   for (const draft of checkpoint.drafts.filter(item => item.status === "accepted")) {
     const current = draft.store === "world"
-      ? records.find(item => item.status === "canonical" && item.kind === draft.envelope.kind && item.logicalId === (draft.envelope.payload as { id?: string }).id)?.payload
+      ? records.find(item => item.status === "canonical" && item.kind === draft.envelope.kind && item.logicalId === draftId(draft))?.payload
       : (await sourceStoreFor(root, draft.store).list(sourceId)).find(item => item.id === draft.envelope.payload.id);
     if (!current || contentHash(current) !== contentHash(draft.envelope.payload)) throw upstreamRepairHostError("Restore accepted envelopes only after their verified current snapshot is materialized");
   }
@@ -151,14 +162,8 @@ export async function restoreUpstreamRepairCheckpoint(root: string, sourceId: st
       const reader = new ProposalStore(root);
       try { await reader.readEnvelope("accepted", draft.envelope.id); continue; }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      if (draft.envelope.kind !== "canonical-event" && draft.envelope.kind !== "event-participation") throw upstreamRepairHostError("Checkpoint world draft has an unauthorized semantic kind");
-      if (draft.envelope.kind === "canonical-event") {
-        const envelope = artifactProposalSchema(compilerProposalSchemas["canonical-event"]).parse(draft.envelope);
-        await reader.writePending(envelope, compilerProposalSchemas["canonical-event"]);
-      } else {
-        const envelope = artifactProposalSchema(compilerProposalSchemas["event-participation"]).parse(draft.envelope);
-        await reader.writePending(envelope, compilerProposalSchemas["event-participation"]);
-      }
+      const schema = compilerProposalSchemas[draft.envelope.kind];
+      await reader.writePending<z.output<typeof schema>>(draft.envelope, schema);
       if (draft.status === "accepted") await reader.transition(draft.envelope.id, "pending", "accepted");
     } else {
       const reader = sourceStoreFor(root, draft.store);
@@ -173,6 +178,35 @@ export async function restoreUpstreamRepairCheckpoint(root: string, sourceId: st
   for (const receipt of checkpoint.activeReceipts) await CompilerFinishReceipts.restoreActiveUpstreamFinish(root, sourceId, receipt);
 }
 
+/** Recover only the exact completed parent's retired identity decisions as audit
+ * evidence. They must never reappear in the incoming active projection. */
+export function retainedConsumerResolutionBaselines(plan: UpstreamRepairPlan, active: ReadonlyMap<string, unknown>, parent?: {
+  plan: UpstreamRepairPlan; finishedReceipt?: string;
+  finishIntent?: Pick<UpstreamRepairFinishIntent, "baselines" | "proposals">;
+}) {
+  const authority = plan.identityRequirements?.consumerRevalidation, retained = new Map<string, unknown>();
+  if (!authority) return retained;
+  if (!parent?.finishIntent || parent.plan.planHash !== authority.parentPlanHash
+    || parent.finishedReceipt !== authority.parentReceiptFingerprint
+    || parent.plan.identityRequirements?.taskId !== plan.identityRequirements!.taskId
+    || parent.plan.sourceScope.sourceId !== plan.sourceScope.sourceId
+    || parent.plan.sourceScope.sourceSha256 !== plan.sourceScope.sourceSha256
+    || contentHash(authority.retainedResolutionIds.slice().sort()) !== contentHash((parent.plan.resolutionRevisions ?? [])
+      .filter(r => r.kind === "entity-resolution").map(r => r.predecessorId).sort()))
+    throw upstreamRepairHostError("Checkpoint retained identity evidence lacks its exact completed parent");
+  const recovered = new Map(active);
+  recoverUpstreamResolutionBaselines(parent.plan, recovered,
+    new Map(parent.finishIntent.proposals.map(p => [`${p.artifactKind}:${p.artifactId}`, p.payloadHash])), parent.finishIntent.baselines);
+  for (const id of authority.retainedResolutionIds) {
+    const key = `entity-resolution:${id}`, payload = recovered.get(key);
+    const expected = plan.baselineRefs.find(r => r.kind === "entity-resolution" && r.id === id);
+    if (active.has(key) || !payload || contentHash(payload) !== expected?.revisionHash)
+      throw upstreamRepairHostError(`Checkpoint retired identity baseline is missing, changed or active: ${key}`);
+    retained.set(key, payload);
+  }
+  return retained;
+}
+
 /** Validate incoming active revisions and field/evidence authority before any materialization write. */
 export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRepairCheckpoint, journal: readonly UpstreamRepairRecord[], sourceId: string, sourceSha256: string, bytes: Buffer, payloads: Map<string, unknown>) {
   assertUpstreamRepairCheckpoint(checkpoint, journal, sourceId);
@@ -185,10 +219,14 @@ export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRe
     if (plan.sourceScope.sourceSha256 !== sourceSha256) throw upstreamRepairHostError("Checkpoint immutable source revision changed");
     const drafts = checkpoint.drafts.filter(item => item.planHash === plan.planHash);
     const receipt = checkpoint.activeReceipts.find(item => item.identity.upstreamRepairIntent?.planHash === plan.planHash);
-    const outputs = new Map(drafts.map(item => [`${draftKind(item)}:${item.envelope.payload.id}`, item.envelope.payload]));
+    const outputs = new Map(drafts.map(item => [`${draftKind(item)}:${draftId(item)}`, item.envelope.payload]));
     assertUpstreamResolutionAbsences(plan, payloads, receipt ? new Map([...outputs].map(([key, value]) => [key, contentHash(value)])) : new Map());
     const recovered = new Map(payloads);
     recoverUpstreamResolutionBaselines(plan, recovered, receipt ? new Map([...outputs].map(([key, value]) => [key, contentHash(value)])) : new Map(), current.finishIntent?.baselines ?? []);
+    const retained = retainedConsumerResolutionBaselines(plan, payloads,
+      state.plans.find(p => p.plan.planHash === plan.identityRequirements?.consumerRevalidation?.parentPlanHash));
+    for (const [key, payload] of retained) { recovered.set(key, payload); original.set(key, payload); }
+    const retainedRevisions = new Map([...retained].map(([key, value]) => [key, contentHash(value)]));
     for (const ref of plan.baselineRefs) {
       const key = `${ref.kind}:${ref.id}`, output = outputs.get(key);
       if (contentHash(recovered.get(key) ?? null) !== ref.revisionHash && (!receipt || !output || actual.get(key) !== contentHash(output))) throw upstreamRepairHostError(`Checkpoint active baseline changed: ${key}`);
@@ -201,8 +239,9 @@ export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRe
     }
     for (const draft of drafts) {
       const kind = draftKind(draft);
-      if ((draft.status === "accepted" || (draft.store !== "world" && receipt?.state === "completed")) && actual.get(`${kind}:${draft.envelope.payload.id}`) !== contentHash(draft.envelope.payload)) throw upstreamRepairHostError("Checkpoint accepted proposal differs from its active artifact");
-      checkUpstreamRepairMutation({ plan, bytes, payloads: original, activeRevisions: new Map([...original].map(([key, value]) => [key, contentHash(value)])) }, kind as import("./upstream-repair-plan.js").UpstreamRepairKind, draft.envelope.payload.id, draft.envelope.payload, outputs,
+      if ((draft.status === "accepted" || (draft.store !== "world" && receipt?.state === "completed")) && actual.get(`${kind}:${draftId(draft)}`) !== contentHash(draft.envelope.payload)) throw upstreamRepairHostError("Checkpoint accepted proposal differs from its active artifact");
+      checkUpstreamRepairMutation({ plan, bytes, payloads: original, retainedRevisions,
+        activeRevisions: new Map([...original].filter(([key]) => !retained.has(key)).map(([key, value]) => [key, contentHash(value)])) }, kind as import("./upstream-repair-plan.js").UpstreamRepairKind, draftId(draft), draft.envelope.payload, outputs,
         draft.store === "world" ? draft.envelope.evidenceAssertions : []);
     }
   }

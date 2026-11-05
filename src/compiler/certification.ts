@@ -5,6 +5,7 @@ import { roleReviewFinishIssues } from "./role-review-finish.js";
 import { coreRoleAttemptHistoryIssues, requirementJournalBindingIssues, requirementSnapshotInputs } from "./requirement-ledger.js";
 import fs from "node:fs/promises";
 import { activeRequirementSets, evaluateRequirementSet, requirementResultSchema, requirementResultIssues } from "./requirement-ledger.js";
+import { inspectSemanticCoverage } from "./semantic-coverage.js";
 import { reconciliationObligationIssues } from "./reconciliation-review-ledger.js";
 import { frozenSceneCatalog } from "./requirement-service.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
@@ -18,6 +19,8 @@ import { worldStorageRoot } from "../world/paths.js";
 import { buildPreparedClosure, closureGraphSchema } from "./closure.js";
 import { buildRoleRoster, majorRoleCandidates, roleRosterSchema, validateRoleRoster, validateRoleDevelopmentExpectations } from "./role-roster.js";
 import { entryDriverWitnessIssues } from "./entry-driver-probe.js";
+import { entryActionDependencyIssues, entryActionWitnessIssues } from "./entry-action-probe.js";
+import { ENTRY_CONTRACT_VERSION } from "../world/entry-contract.js";
 import { evaluateCoreRoleCapabilities, coreRoleResultIssues } from "./core-role-capabilities.js";
 import { assertCoreRoleDefinitionEvidence, coreRoleDefinitionBindingIssues } from "./core-role-requirement-records.js";
 import { playabilityManifestSchema, probeMajorRoleEntries } from "./playability.js";
@@ -26,6 +29,7 @@ import { NovelPlayQualityStore, novelPlayQualitySchema, validateNovelPlayQuality
 import { baseStructuralUnits, validateSourceStructure } from "./structure.js";
 import { deriveCharacterEntrySeed } from "../world/entry-context.js";
 import { annotationAnchors } from "./annotations.js";
+import { isBlockingSourceAccountingStatus, retainedSourceAccountingDecisions } from "./source-accounting.js";
 import { assessSemanticSupport, supportAssessmentSchema } from "./semantic-support.js";
 import { buildSceneExecutionContracts, sceneExecutionContractSchema } from "./scene-execution-contracts.js";
 
@@ -50,9 +54,10 @@ export function preparedSubjectHash(bundle: Pick<PreparedNovelBundle, "version" 
 }
 
 /** Readiness is derived from current frozen inputs. This inspection cannot publish or create a public play session. */
-export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle): Promise<NovelClosureAssessment> {
+export async function assessNovelClosure(root: string, bundle: PreparedNovelBundle,
+  retainedInputIssues: NovelClosureAssessment["issues"] = []): Promise<NovelClosureAssessment> {
   const subjectSnapshotHash = preparedSubjectHash(bundle), closure = buildPreparedClosure(bundle);
-  const issues = [...closure.issues, ...validateFrozenAccounting(bundle)];
+  const issues = [...retainedInputIssues, ...closure.issues, ...validateFrozenAccounting(bundle)];
   issues.push(...upstreamRepairSnapshotIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "UPSTREAM_REPAIR_SNAPSHOT_INVALID", message })));
   issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true).map(message => ({ code: "REQUIREMENT_JOURNAL_INVALID", message })));
   issues.push(...reconciliationObligationIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.source.id, bundle.source.contentSha256).map(message => ({ code: "RECONCILIATION_OBLIGATION_UNRESOLVED", message })));
@@ -60,6 +65,7 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   const snapshot = bundle.compilerSnapshot;
   issues.push(...roleReviewFinishIssues(snapshot.reconciliationObligations ?? [], snapshot.roleRoster, bundle.source.id).map(message => ({ code: "ROLE_REVIEW_FINISH_NOT_CERTIFIED", message })));
   const requirementSets = activeRequirementSets(snapshot.requirementDefinitions ?? []);
+  issues.push(...inspectSemanticCoverage(bundle.source.id, frozenSceneCatalog(bundle), requirementSets.map(s => s.spec)).issues.map(message => ({ code: "SEMANTIC_REVIEW_NOT_CERTIFIED", message })));
   const coreDefinitions = snapshot.coreRoleRequirementDefinitions ?? [];
   const requirementResults: z.infer<typeof requirementResultSchema>[] = [];
   if (requirementSets.length || coreDefinitions.length) {
@@ -132,12 +138,18 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
   if (contentHash(buildSceneExecutionContracts(bundle, assessment.roster).contracts) !== contentHash(assessment.sceneContracts)) issues.push("SCENE_CONTRACT_STALE: scene execution inputs changed");
   if (contentHash(assessSemanticSupport(bundle, assessment.quality?.supportReviews).assessments) !== contentHash(assessment.supportAssessments)) issues.push("SUPPORT_ASSESSMENT_STALE: support review inputs changed");
   if (assessment.playability && (assessment.playability.subjectSnapshotHash !== assessment.subjectSnapshotHash || assessment.playability.rosterHash !== contentHash(assessment.roster))) issues.push("MAJOR_ROLE_ROSTER_MISMATCH: entry probes refer to another source or roster");
+  if (assessment.playability?.contractVersion !== ENTRY_CONTRACT_VERSION) issues.push("ENTRY_CONTRACT_STALE: re-evaluate entries under the current contract; preserve the old assessment and history");
   for (const role of assessment.playability?.roles ?? []) {
     if (!role.actorId) { issues.push(`ENTRY_DRIVER_NOT_EVALUATED: ${role.candidateId}`); continue; }
     try {
       const cut = deriveCharacterEntrySeed(bundle, role.actorId).cut;
       issues.push(...entryDriverWitnessIssues(role.driverWitness, { sourceId: bundle.source.id,
         subjectSnapshotHash: assessment.subjectSnapshotHash, entryCutHash: cut.hash, actorId: role.actorId }));
+      issues.push(...entryActionWitnessIssues(role.actionWitness, { sourceId: bundle.source.id,
+        subjectSnapshotHash: assessment.subjectSnapshotHash, entryCutHash: cut.hash, actorId: role.actorId }));
+      if (role.actionWitness) {
+        issues.push(...entryActionDependencyIssues(role.actionWitness, bundle.canonical));
+      }
     } catch (error) { issues.push(`ENTRY_DRIVER_CUT_INVALID: ${role.candidateId}: ${String(error)}`); }
   }
   return issues;
@@ -183,11 +195,16 @@ export function validateFrozenAccounting(bundle: PreparedNovelBundle) {
   catch (error) { return [{ code: "SOURCE_PARTITION_INVALID", message: String(error) }]; }
   if (!accounting || accounting.sourceId !== bundle.source.id || accounting.sourceSha256 !== bundle.source.contentSha256 || accounting.structureVersion !== structure.structureVersion) issues.push({ code: "SOURCE_ACCOUNTING_STALE", message: "Accounting must refer to the frozen source and structure" });
   const records = new Map(accounting?.records.map((record) => [record.unitId, record]) ?? []);
+  const decisions = accounting ? retainedSourceAccountingDecisions(accounting) : new Map();
   const annotations = new Map(bundle.compilerSnapshot.annotations.map((annotation) => [annotation.id, annotation]));
   const assertions = new Map(bundle.compilerSnapshot.evidenceBindings.flatMap((binding) => binding.assertions.map((assertion) => [assertion.id, assertion] as const)));
   if (records.size !== (accounting?.records.length ?? 0) || [...records.keys()].some((id) => !structure.baseUnitIds.includes(id))) issues.push({ code: "SOURCE_ACCOUNTING_INVENTORY_INVALID", message: "Accounting has duplicate or unknown units" });
   for (const unit of baseStructuralUnits(structure)) {
     const record = records.get(unit.id);
+    const decision = decisions.get(unit.id);
+    if (decision && isBlockingSourceAccountingStatus(decision.status) && record && !isBlockingSourceAccountingStatus(record.status)) {
+      issues.push({ code: "SOURCE_ACCOUNTING_BLOCKER_SUPPRESSED", message: `Source unit ${unit.id} retains ${decision.status}: ${decision.reason}. Overlapping evidence does not resolve the original review.`, path: unit.id });
+    }
     if (!record || ["unresolved", "intentionally-deferred"].includes(record.status)) issues.push({ code: "SOURCE_UNIT_UNACCOUNTED", message: `Source unit ${unit.id} is missing or unresolved`, path: unit.id });
     else if (record.status === "represented" && !record.annotationIds.length && !record.evidenceAssertionIds.length) issues.push({ code: "SOURCE_REPRESENTATION_UNSUPPORTED", message: `Represented unit ${unit.id} has no annotation or evidence assertion`, path: unit.id });
     else if (record.status !== "represented" && (!record.reason?.trim() || (record.reviewedBy === "deterministic" && !(unit.kind === "non-scene" && record.status === "background-only")))) issues.push({ code: "SOURCE_EXCLUSION_UNREVIEWED", message: `Excluded source unit ${unit.id} requires an explicit model or human disposition`, path: unit.id });

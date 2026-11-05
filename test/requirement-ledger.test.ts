@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
-import { RequirementLedger, requirementResultIssues } from "../src/compiler/requirement-ledger.js";
+import { afterEach, expect, it, vi } from "vitest";
+import { RequirementLedger, requirementJournalSchema, requirementResultIssues } from "../src/compiler/requirement-ledger.js";
 import { registerSourceRequirements, requirementInputs, settleSourceRequirements } from "../src/compiler/requirement-service.js";
 import { canonicalEventSchema } from "../src/world/model.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
@@ -19,7 +19,7 @@ import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { CompilerFinishReceipts } from "../src/compiler/finish-receipts.js";
 
 const roots: string[] = [];
-afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 async function setup(content = "Ada waits. Nothing changes.") {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-requirement-ledger-")); roots.push(root);
   const fixture = await createEvidenceFixture(root, content);
@@ -123,6 +123,7 @@ it("settles only committed active artifacts after the real proposal, finish and 
 
 it("fails closed on a missing head, missing committed record or corrupted content", async () => {
   const f = await setup(); await f.register();
+  await f.ledger.history();
   const directory = path.join(worldStorageRoot(f.root), "compiler", "requirements", f.sourceId);
   const headPath = path.join(directory, "head.json"), headBytes = await fs.readFile(headPath);
   const head = JSON.parse(headBytes.toString());
@@ -137,6 +138,42 @@ it("fails closed on a missing head, missing committed record or corrupted conten
   await expect(f.ledger.definitions()).rejects.toThrow("hash mismatch");
   await fs.writeFile(file, original);
   expect(await f.ledger.definitions()).toHaveLength(1);
+});
+
+it("reuses byte-verified history across instances without leaking mutable records or hiding new entries", async () => {
+  const f = await setup(), first = await f.register();
+  const history = await f.ledger.history(), expected = structuredClone(history);
+  const parse = vi.spyOn(requirementJournalSchema, "parse");
+  history[0]!.hash = "0".repeat(64);
+  expect(await new RequirementLedger(f.root, f.sourceId).history()).toEqual(expected);
+  const returned = await f.ledger.history();
+  returned[0]!.payload = { kind: "definition", definition: { ...first, scopeDecisionRef: "caller mutation" } };
+  expect(await f.ledger.history()).toEqual(expected);
+  expect(parse).not.toHaveBeenCalled();
+  const successor = await f.register({ ...f.spec, review: { ...f.spec.review, auditRef: "new-review" } }, first.revisionHash);
+  expect(await f.ledger.definitionHistory()).toEqual([first, successor]);
+  expect(parse).toHaveBeenCalled();
+});
+
+it("detects changes to cached predecessors even when file size, timestamps and head are unchanged", async () => {
+  const f = await setup(), first = await f.register();
+  await f.register({ ...f.spec, review: { ...f.spec.review, auditRef: "next-review" } }, first.revisionHash);
+  const history = await f.ledger.history();
+  const file = path.join(worldStorageRoot(f.root), "compiler", "requirements", f.sourceId, `${history[0]!.hash}.json`);
+  const original = await fs.readFile(file), stat = await fs.stat(file);
+  const changed = Buffer.from(original.toString().replace("review-decision", "forged-decision"));
+  expect(changed.equals(original)).toBe(false);
+  expect(changed.length).toBe(original.length);
+  await fs.writeFile(file, changed);
+  await fs.utimes(file, stat.atime, stat.mtime);
+  await expect(new RequirementLedger(f.root, f.sourceId).history()).rejects.toThrow("hash mismatch");
+  await fs.writeFile(file, original);
+  expect(await f.ledger.history()).toEqual(history);
+  // A harmless serialization change must also pass through full validation.
+  await fs.writeFile(file, Buffer.concat([original, Buffer.from("\n")]));
+  const parse = vi.spyOn(requirementJournalSchema, "parse");
+  expect(await f.ledger.history()).toEqual(history);
+  expect(parse).toHaveBeenCalledOnce();
 });
 
 it("round-trips full definition lineage and refuses rollback that forgets local obligations", async () => {

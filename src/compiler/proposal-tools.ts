@@ -15,6 +15,8 @@ import { readKnowledgeRepairPlan, knowledgeRepairScopeIssues } from "./knowledge
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { initialWorldInputIssues, INITIAL_WORLD_INPUT_GUIDANCE } from "./initial-world-preflight.js";
+import { diagnoseEntryRepair } from "./entry-repair-diagnostics.js";
+import { CompilerValidator } from "./validator.js";
 import { initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
 import { CompilerAccountingPages } from "./accounting-pages.js";
 import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
@@ -76,6 +78,8 @@ import {
   SourceAccountingStore,
   isBlockingSourceAccountingStatus,
   projectSourceAccountingProposalDecisions,
+  sourceAccountingRefinedUnitIds,
+  retainedSourceAccountingDecisions,
   sourceUnitReviewRange,
   sourceUnitAccountingDecisionSchema,
   type ActiveSourceAccountingProposal,
@@ -1051,7 +1055,7 @@ function safeTextSuffix(text: string, maxChars: number): string {
 export function createCompilerProposalToolset(
   workspaceRoot: string,
   generatedBy: { provider?: string; model?: string } = {},
-  hostOptions: { recoverPreparedFinish?: boolean; hostObligationCorrection?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown, evidenceAssertions?: readonly EvidenceAssertion[]) => Promise<void> } } = {},
+  hostOptions: { recoverPreparedFinish?: boolean; hostObligationCorrection?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; retainedEntityEvidence?: { id: string; evidence: EvidenceRef[]; assertions: EvidenceAssertion[] }; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown, evidenceAssertions?: readonly EvidenceAssertion[]) => Promise<void> } } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
@@ -1429,6 +1433,13 @@ export function createCompilerProposalToolset(
     if (kind === "world-rule") {
       payload = injectHostWorldRuleEvidence(payload, supportingSemanticEvidence, counterEvidence);
     }
+    const retained = kind === "entity" ? hostOptions.upstreamRepair?.retainedEntityEvidence : undefined;
+    if (retained && (payload as { id: string }).id === retained.id) {
+      // A marker-only revision does not re-author the entity's historical source
+      // support. Keep the host-verified original evidence and exact bindings.
+      payload = { ...(payload as Record<string, unknown>), evidence: structuredClone(retained.evidence) };
+      evidenceAssertions.unshift(...structuredClone(retained.assertions));
+    }
     return kind === "state-delta"
       ? { payload, evidence, evidenceAssertions }
       : { payload, evidenceAssertions };
@@ -1768,21 +1779,23 @@ export function createCompilerProposalToolset(
       ...semanticCoverage.annotations.flatMap((annotation) => annotation.anchors),
     ];
     const proposalStatus = new Map(activeProposals.map((item) => [item.proposal.id, item.proposalStatus]));
+    const refinedUnitIds = sourceAccountingRefinedUnitIds(activeProposals);
     return projectSourceAccountingProposalDecisions(activeProposals).flatMap((decision) => {
         const unit = units.get(decision.unitId);
         const nowRepresented = unit !== undefined && unit.kind !== "non-scene" && semanticSpans.some((span) =>
           span.sourceId === structure.sourceId
           && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
         // Accepted dispositions were valid under their original finish. On a
-        // later recovery, newly available exact semantics deterministically
-        // supersede only the overlapping decisions; the immutable proposal
-        // remains history and every still-unrepresented decision is replayed.
+        // later recovery, new coverage can replace nonblocking classifications.
+        // Explicit blockers and their reviewed successors remain in the receipt;
+        // overlapping text is not proof that a semantic obligation was resolved.
         const inheritedRepresentation = unit !== undefined && semanticCoverage.inheritedSpans.some((span) =>
           span.sourceId === structure.sourceId && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
         // A migrated, interrupted batch can still have pending classifications
         // from before cross-stage coverage existed. Preserve those immutable
         // drafts but project the verified prior evidence over their decisions.
-        if (nowRepresented && (proposalStatus.get(decision.proposalId!) === "accepted" || inheritedRepresentation)) return [];
+        if (nowRepresented && !isBlockingSourceAccountingStatus(decision.status) && !refinedUnitIds.has(decision.unitId)
+          && (proposalStatus.get(decision.proposalId!) === "accepted" || inheritedRepresentation)) return [];
         return [decision];
       });
   };
@@ -1861,6 +1874,7 @@ export function createCompilerProposalToolset(
       "For read-only inspection, page only through exact returned nextOffset values until null; never estimate an offset.",
       "Units marked represented are host-derived from exact evidence or annotations and must not be dispositioned by the model.",
       "Same-slice checkpointed observation/semantic evidence contributes source coverage only. You must still review executable mechanisms; represented is not proof of an action, rule, or playable world.",
+      "Explicit unresolved/intentionally-deferred reviews survive overlapping evidence. A same-batch nonblocking refinement must address the original reason and retain its predecessor; overlap alone is not a resolution.",
       "A prior field reports the materialized parent/current manifest only as review context; it never satisfies this active batch's fresh accounting requirement.",
       "A non-empty status=unresolved result returns a pageToken and one-based unit indexes. Review every unit, then pass that token to account_source_units with one page_default plus only genuinely different page_overrides.",
       "After a successful page accounting proposal, refetch status=unresolved at offset=0. Blocking unresolved/intentionally-deferred decisions remain discoverable; resolve them under a fresh proposal ID when later review supports a nonblocking disposition.",
@@ -1893,6 +1907,7 @@ export function createCompilerProposalToolset(
         ? boundedSliceSegments.filter((segment) => segment.id === input.segment_id)
         : boundedSliceSegments;
       const currentByUnit = new Map((manifest?.records ?? []).map((record) => [record.unitId, record]));
+      const retainedDecisions = manifest ? retainedSourceAccountingDecisions(manifest) : new Map();
       const pendingByUnit = new Map(projectActiveAccountingDecisions(activeAccounting, structure, semanticCoverage).map((decision) => [
         decision.unitId,
         { proposalId: decision.proposalId!, status: decision.status, reason: decision.reason },
@@ -1913,11 +1928,14 @@ export function createCompilerProposalToolset(
             && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
           const pending = pendingByUnit.get(unit.id);
           const current = currentByUnit.get(unit.id);
+          const review = pending ?? retainedDecisions.get(unit.id);
           const status: SourceAccountingStatus = unit.kind === "non-scene"
             ? "background-only"
-            : represented
-              ? "represented"
-              : pending?.status ?? "unresolved";
+            : review && isBlockingSourceAccountingStatus(review.status)
+              ? review.status
+              : represented
+                ? "represented"
+                : pending?.status ?? "unresolved";
           return {
             unitId: unit.id,
             kind: unit.kind,
@@ -2083,11 +2101,13 @@ export function createCompilerProposalToolset(
         if (unit.kind === "non-scene") {
           throw new Error(`Source unit ${decision.unitId} is deterministic non-scene content and cannot receive a model disposition.`);
         }
-        if (semanticSpans.some((span) => span.sourceId === source.id
+        const priorDecision = alreadyDecided.get(decision.unitId);
+        const refinesBlocker = priorDecision?.proposalId && priorDecision.proposalId !== input.proposal_id
+          && isBlockingSourceAccountingStatus(priorDecision.status) && !isBlockingSourceAccountingStatus(decision.status);
+        if (!refinesBlocker && semanticSpans.some((span) => span.sourceId === source.id
           && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte))) {
           representedUnitIds.push(decision.unitId);
         }
-        const priorDecision = alreadyDecided.get(decision.unitId);
         if (priorDecision?.proposalId && priorDecision.proposalId !== input.proposal_id) {
           if (isBlockingSourceAccountingStatus(priorDecision.status)
             && !isBlockingSourceAccountingStatus(decision.status)) {
@@ -2224,8 +2244,8 @@ export function createCompilerProposalToolset(
             ...(compilerBatchId ? { compilerBatchId } : {}),
           },
           ...(hostOptions.upstreamRepair ? { beforeWrite: async (payload: unknown, evidenceAssertions: readonly EvidenceAssertion[]) => {
-            if (kind !== "canonical-event" && kind !== "event-participation") throw finishHostError("managed semantic upstream repair attempted an unauthorized world proposal kind");
-            await hostOptions.upstreamRepair!.beforeStage(kind, compilerProposalArtifactId(kind, payload, input.proposal_id), payload, evidenceAssertions);
+            if (kind !== "entity" && kind !== "initial-world" && kind !== "canonical-event" && kind !== "event-participation") throw finishHostError("managed semantic upstream repair attempted an unauthorized world proposal kind");
+            await hostOptions.upstreamRepair!.beforeStage(kind, kind === "initial-world" ? "singleton" : compilerProposalArtifactId(kind, payload, input.proposal_id), payload, evidenceAssertions);
           } } : {}),
         });
         successfulProposalIds.add(accepted.proposalId);
@@ -2315,9 +2335,20 @@ export function createCompilerProposalToolset(
           .map(issue => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`));
       }
       if (issues.length) previewFailure(issues);
+      let writablePointers = ["/delta", "/participantPresence"];
+      if (hostOptions.upstreamRepair) {
+        const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
+        const managedPlan = (await new UpstreamRepairLedger(workspaceRoot, activeSourceId!).inspect()).plans
+          .find(item => item.plan.planHash === hostOptions.upstreamRepair!.planHash)?.plan;
+        writablePointers = managedPlan?.allowedWrites.filter(write => write.kind === "initial-world" && write.id === "singleton").flatMap(write => write.pointers) ?? [];
+      }
+      const entryDiagnostics = diagnoseEntryRepair({ sourceId: activeSourceId!, entry: initialWorldSchema.parse(normalized!.payload),
+        catalog: await new CompilerValidator(new CanonicalModelStore(workspaceRoot)).loadCatalog(),
+        writablePointers, catalogScope: "canonical-catalog" });
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ valid: true, proposalId: input.proposal_id,
           checked: ["input", "exact-evidence", "field-evidence"], unchecked: ["graph-closure", "commit", "playability"],
+          entryDiagnostics,
           next: "Submit the reviewed envelope with propose_initial_world; the host revalidates it before staging." }) }],
         details: { readOnly: true, proposalStaged: false },
       };
@@ -3153,6 +3184,7 @@ export function createCompilerProposalToolset(
           evidenceAssertions: prospectiveCoverage.assertions,
           annotations: prospectiveCoverage.annotations,
           unitDecisions: activeAccountingDecisions,
+          refinedUnitIds: sourceAccountingRefinedUnitIds(activeAccountingProposals),
           requireExplicitSemanticDisposition: accountingSource.bytes >= EXPLICIT_SOURCE_ACCOUNTING_MIN_SOURCE_BYTES
             && compilerBatchId.startsWith(`batch-${activeSourceId}-`)
             && !activeBoundaryCalibration,
@@ -3436,7 +3468,7 @@ export function createCompilerProposalToolset(
     ].map(trackProposal).map((tool): CompilerToolDefinition => {
       const run = async (invoke: () => ReturnType<ToolDefinition["execute"]>) => {
         if (!batchReady) throw finishHostError("compiler batch initialization did not complete; stop tool calls and preserve the original scope for host review");
-        if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(tool.name))) {
+        if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity", "propose_initial_world", "propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(tool.name))) {
           throw finishHostError(hostOptions.upstreamFinish
             ? "frozen upstream finish authorizes only the original host finish; preserve its receipt and drafts, and stop other tool calls"
             : "managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
@@ -3464,7 +3496,7 @@ export function createCompilerProposalToolset(
   return {
     tools,
     async executeHostProposal(name, callId, input) {
-      if (!managedUpstream || !["propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(name)) {
+      if (!managedUpstream || !["propose_entity", "propose_initial_world", "propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(name)) {
         throw finishHostError("host proposal execution requires an authorized upstream staging scope and an exact proposal tool; do not retry in a model session");
       }
       const tool = tools.find(candidate => candidate.name === name);

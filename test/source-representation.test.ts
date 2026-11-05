@@ -12,6 +12,7 @@ import { stageUpstreamRepair, upstreamRepairSlotContext } from "../src/compiler/
 import { SourceAnnotationStore, discourseObservationSchema } from "../src/compiler/annotations.js";
 import { withWorkspaceOperationLock } from "../src/util/workspace-lock.js";
 import { contentHash } from "../src/world/canonical.js";
+import { upstreamRepairSnapshotIssues } from "../src/compiler/upstream-repair-snapshot.js";
 
 import { representationFixture as fixture, cleanupRepresentationFixtures } from "./helpers/source-representation.js";
 afterEach(cleanupRepresentationFixtures);
@@ -25,6 +26,14 @@ it("retains exact scopes in fresh Pi sessions and enters only the ordinary host 
   expect((await upstream.inspect()).plans).toEqual([]);
   await withWorkspaceOperationLock(f.root, "compiler", async () => { await verifyUpstreamRepairPlan(f.root, plan); await upstream.register(plan); await upstream.authorize(plan.planHash); });
   expect((await upstream.inspect()).plans[0]!.state).toBe("authorized");
+  const snapshot = { upstreamRepairJournal: await upstream.history(), requirementJournal: await f.ledger.history() };
+  expect(upstreamRepairSnapshotIssues(snapshot, f.f.source.id, f.f.source.contentSha256)).toEqual([]);
+  // A definition can be frozen before its postconditions exist; it must still
+  // retain the original independent check and every source prerequisite.
+  expect(upstreamRepairSnapshotIssues({ ...snapshot, requirementJournal: snapshot.requirementJournal.filter(r => r.payload.kind !== "source-representation") }, f.f.source.id, f.f.source.contentSha256))
+    .toContain("UPSTREAM_REPAIR_REPRESENTATION_AUTHORITY_MISMATCH");
+  expect(upstreamRepairSnapshotIssues({ ...snapshot, requirementJournal: snapshot.requirementJournal.filter(r => r.payload.kind !== "role-source-prerequisite") }, f.f.source.id, f.f.source.contentSha256))
+    .toContain("UPSTREAM_REPAIR_REPRESENTATION_AUTHORITY_MISMATCH");
   expect(plan.allowedCreations).toHaveLength(1); expect(plan.allowedWrites).toEqual([]);
   const target = plan.allowedCreations[0]!;
   await withWorkspaceOperationLock(f.root, "compiler", async () => {

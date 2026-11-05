@@ -231,7 +231,7 @@ export function modelActorProposalSource(
       const knownClaimIds = actionableKnowledgeClaimIds(rawActor, activeSourceId);
       if (goal.canonical) {
         const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
-        if (!evaluateCharacterGoal(goal.canonical, {
+        if (!evaluateCharacterGoal(goal.canonical, { entities: context.entities, identityCatalog: context,
           state,
           knownClaimIds,
           realizedCanonicalEventIds,

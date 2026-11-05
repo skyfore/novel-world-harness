@@ -105,7 +105,7 @@ novelOptions(compileNovel).option("--rebuild", "recompile all source batches; an
   .option("--loop-new-run <hash>", "start one new rebuild from an exact completed supervision.stateHash; repeating this token resumes that generation")
   .option("--loop-host-patch <hash>", "independently verify an exact host source repair without renewing exhausted engineering rounds")
   .option("--loop-resolution <text>", "concrete host review authorizing migration of the legacy supervisor");
-const runCompileNovel = async (command: Command, novel?: string, phase?: NovelCompilationPhase | "status", batchStage?: "structure" | "observation" | "semantic" | "executable" | "boundary") => {
+const runCompileNovel = async (command: Command, novel?: string, phase?: NovelCompilationPhase | "status" | "plan", batchStage?: "structure" | "observation" | "semantic" | "executable" | "boundary") => {
   // Commander optsWithGlobals lets the root's default cwd overwrite --root
   // on a subcommand. Explicit options nearer the selected action win here.
   const options = { ...program.opts(), ...compileNovel.opts(), ...command.opts() };
@@ -128,6 +128,7 @@ const phaseDescriptions: Record<NovelCompilationPhase, string> = {
   roles: "Complete independent source character reviews and register core-role requirements",
   repair: "Resume authorized upstream repairs and reconcile world/graph gaps",
   requirements: "Re-evaluate all registered requirements and global closure gates",
+  closure: "Reverify current finish receipts, source accounting, identity/role handoffs and global compilation dimensions",
   archive: "Archive an immutable candidate without activation or a completeness claim",
   "evaluation-plan": "Generate/reuse or import and freeze independent gold, support reviews and scenarios",
   evaluate: "Run/resume independent live Pi experiments against the frozen candidate",
@@ -147,6 +148,8 @@ for (const stage of ["structure", "observation", "semantic", "executable", "boun
 }
 novelOptions(compileNovel.command("status").description("Read current source/phase/obligation/candidate status without models, migration or certification"))
   .action(async (_options, child) => runCompileNovel(child, undefined, "status"));
+novelOptions(compileNovel.command("plan").description("Discover the complete remaining phase/dependency handoff and exact recovery conditions without writes or model calls"))
+  .action(async (_options, child) => runCompileNovel(child, undefined, "plan"));
 
 const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and run bounded host-reviewed corrections");
 program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")
@@ -177,6 +180,156 @@ requirementsCommand.command("inspect-upstream").requiredOption("--source <id>", 
   .action(async options => {
     const { UpstreamRepairLedger } = await import("./compiler/upstream-repair-ledger.js");
     console.log(JSON.stringify(await new UpstreamRepairLedger(rootFor({}), options.source).inspect(), null, 2));
+  });
+requirementsCommand.command("review-identity-repair").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "exact tasks[].taskId from inspect-identity-repairs")
+  .requiredOption("--ref <ref>", "exact additional-repair items[].ref from that task")
+  .requiredOption("--authorization-ref <ref>", "user authorization for this same original finding")
+  .description("Run single-use Pi repair planning and independent check against retained requirements; no world writes or parent resume")
+  .action(async options => {
+    const { runIdentityConsumerRepair } = await import("./workflow/identity-consumer-repair.js");
+    console.log(JSON.stringify(await runIdentityConsumerRepair({ root: rootFor({}), sourceId: options.source, taskId: options.task,
+      ref: options.ref, authorizationRef: options.authorizationRef }), null, 2));
+  });
+requirementsCommand.command("execute-identity-repair").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "exact original identity task")
+  .requiredOption("--ref <ref>", "exact independently checked additional-repair ref")
+  .requiredOption("--authorization-ref <ref>", "retained user authorization for this finding")
+  .option("--revalidation-id <hash>", "exact independently supported consumerRevalidation.reviews[].id for its joint typed repair")
+  .option("--correct-failed-attempt <hash>", "exact lastFailure.attemptRef for one settled initial-world field-evidence correction; preserves original slot and failures")
+  .option("--correction-authorization-ref <ref>", "explicit authorization for one additional bounded Pi correction allowance, never a reset of the original budget")
+  .option("--revise-failed-finish <hash>", "exact typedRepairs[].currentStop.recordRef for one pre-receipt opening graph revision")
+  .option("--revision-authorization-ref <ref>", "explicit authorization for one bounded semantic draft; independent review spends its original remaining allowance")
+  .option("--recover-entry-contract <hash>", "exact finishRevisionProgress.contractRecoveryCandidate.previousContextHash for one authorized contract transition")
+  .option("--contract-recovery-authorization-ref <ref>", "explicit authorization to use the stopped draft's remaining allowance after an entry contract upgrade")
+  .option("--recover-acceptance-evidence <hash>", "exact rejectedInputHash to restore omitted staged evidence under the same contract-recovery authority and remaining review budget")
+  .option("--inspect", "read-only typed plan, retained budget and dependency preflight; no invocation or state writes")
+  .description("Continue the same finding through bounded Pi typed staging, independent acceptance and original finish/convergence; preserve failures and budgets")
+  .action(async options => {
+    const { runIdentityConsumerUpstream } = await import("./workflow/identity-consumer-upstream.js");
+    console.log(JSON.stringify(await runIdentityConsumerUpstream({ root: rootFor({}), sourceId: options.source, taskId: options.task,
+      ref: options.ref, authorizationRef: options.authorizationRef, revalidationId: options.revalidationId,
+      correctFailedAttempt: options.correctFailedAttempt, correctionAuthorizationRef: options.correctionAuthorizationRef,
+      reviseFailedFinish: options.reviseFailedFinish, revisionAuthorizationRef: options.revisionAuthorizationRef,
+      recoverEntryContract: options.recoverEntryContract, contractRecoveryAuthorizationRef: options.contractRecoveryAuthorizationRef,
+      recoverAcceptanceEvidence: options.recoverAcceptanceEvidence, inspect: options.inspect }), null, 2));
+  });
+requirementsCommand.command("revalidate-identity-consumer").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")
+  .requiredOption("--ref <ref>", "exact original availableRefs[] consumer")
+  .requiredOption("--authorization-ref <ref>", "existing user authorization to continue the same repair")
+  .option("--compiler-correction <policy>", "single retained-budget correction: source-local-referent/v1, consumer-review-scope/v1 or proven consumer-evidence-coverage/v1; inspect first")
+  .option("--resume-unsubmitted <mode>", "inspect or run the sole audited continuation; retain failed sessions and subtract their original stage usage")
+  .option("--provider-resumption <path>", "later authorization JSON for a settled quota refusal or proven work owner-exit; use with --resume-unsubmitted inspect before run")
+  .option("--continuation-budget <path>", "explicit later authorization JSON for one bounded call amendment before the original continuation starts")
+  .option("--host-recovery <path>", "explicit original-task reader/request-size recovery JSON; inspect first, preserve all prior attempts and charges")
+  .option("--recover-submitted-ref", "validate the exact saved Pi proposal rejected only for a discovered entity:id spelling; no proposal replay")
+  .option("--execution-policy <policy>", "consumer-work/v1: prepare complete evidence and use validated draft progress; preserves legacy history")
+  .option("--execution-authorization-ref <ref>", "existing explicit authorization to migrate a settled legacy stage to the versioned execution policy")
+  .option("--inspect-execution", "read-only evidence, context and migration preflight; no model calls or state writes")
+  .option("--recover-contract-binding", "one correction of an original check's isolated rejected contract-hash preview; retain failure and spend only its remaining budget")
+  .option("--binding-recovery-authorization-ref <ref>", "explicit later authorization for this exact contract-binding repair; inspect first")
+  .option("--recover-transport-retry <path>", "later authorization JSON to seal an original submission after one proven WebSocket retry; inspect with --inspect-execution first, no proposal replay")
+  .description("Independently revalidate one original consumer after the exact completed identity repair; retain old reviews, budgets and questions")
+  .action(async options => {
+    const { runIdentityConsumerRevalidation } = await import("./workflow/identity-consumer-revalidation.js");
+    console.log(JSON.stringify(await runIdentityConsumerRevalidation({ root: rootFor({}), sourceId: options.source,
+      taskId: options.task, ref: options.ref, authorizationRef: options.authorizationRef, compilerCorrection: options.compilerCorrection,
+      resumeUnsubmitted: options.resumeUnsubmitted,
+      executionPolicy: options.executionPolicy, executionAuthorizationRef: options.executionAuthorizationRef, inspectExecution: options.inspectExecution,
+      recoverContractBinding: options.recoverContractBinding, bindingRecoveryAuthorizationRef: options.bindingRecoveryAuthorizationRef,
+      recoverTransportRetry: options.recoverTransportRetry ? JSON.parse(await fs.readFile(options.recoverTransportRetry, "utf8")) : undefined,
+      providerResumption: options.providerResumption ? JSON.parse(await fs.readFile(options.providerResumption, "utf8")) : undefined,
+      recoverSubmittedRef: options.recoverSubmittedRef,
+      hostRecovery: options.hostRecovery ? JSON.parse(await fs.readFile(options.hostRecovery, "utf8")) : undefined,
+      budgetAmendment: options.continuationBudget ? JSON.parse(await fs.readFile(options.continuationBudget, "utf8")) : undefined }), null, 2));
+  });
+requirementsCommand.command("semantic-review-plan").requiredOption("--source <id>", "registered source ID")
+  .description("Read-only complete event/goal source-review inventory; never derives expected semantics from current drafts")
+  .action(async options => {
+    const { requirementInputs } = await import("./compiler/requirement-service.js");
+    const { inspectSemanticCoverage } = await import("./compiler/semantic-coverage.js");
+    const { RequirementLedger } = await import("./compiler/requirement-ledger.js");
+    const { source, catalog } = await requirementInputs(rootFor({}), options.source);
+    const definitions = await new RequirementLedger(rootFor({}), options.source).definitions();
+    console.log(JSON.stringify({ sourceId: source.id, sourceSha256: source.contentSha256,
+      coverage: inspectSemanticCoverage(source.id, catalog, definitions.map(d => d.spec)), definitions,
+      events: [...catalog.events.values()], goals: [...catalog.goals?.values() ?? []],
+      nextAction: "Read the original evidence spans, independently define event-effects and goal-lifecycle cases, then review-scenes --spec <file> --register <stable set ID>. Copy an existing predecessorRevision for changes. Current artifacts are subjects under test, never expected results. Keep unknown/unmapped outcomes blocked; no world writes or certification are granted." }, null, 2));
+  });
+requirementsCommand.command("consumer-queue")
+  .requiredOption("--source <id>", "original registered source")
+  .requiredOption("--task <hash>", "tasks[].taskId from inspect-identity-repairs")
+  .option("--authorization-ref <ref>", "original user authorization for this queue; required for execution")
+  .option("--shard <index>", "original shard index; omitted means the complete inventory", Number)
+  .option("--limit <count>", "maximum new consumers this invocation, without removing the queue tail", Number)
+  .option("--provider-resumption <path>", "exact inspected continuation JSON for one retained consumer")
+  .option("--inspect", "read-only durable queue state and process liveness")
+  .action(async options => {
+    const { inspectConsumerQueue, runIdentityConsumerQueue } = await import("./workflow/identity-consumer-queue.js");
+    if (options.inspect) return console.log(JSON.stringify(await inspectConsumerQueue(rootFor({}), options.source, options.task, options.shard), null, 2));
+    if (!options.authorizationRef) throw new Error("consumer-queue execution requires --authorization-ref from the user's original loop instruction; inspection does not authorize execution.");
+    const result = await runIdentityConsumerQueue({ root: rootFor({}), sourceId: options.source, taskId: options.task, shard: options.shard, limit: options.limit,
+      authorizationRef: options.authorizationRef, providerResumption: options.providerResumption ? JSON.parse(await fs.readFile(options.providerResumption, "utf8")) : undefined,
+      onProgress: event => process.stderr.write(JSON.stringify(event) + "\n") });
+    console.log(JSON.stringify(result, null, 2));
+  });
+requirementsCommand.command("settle-interrupted-consumer")
+  .requiredOption("--directory <path>", "exact attempts[].directory from inspect-identity-repairs")
+  .requiredOption("--stage <name>", "exact stages[].stage of the interrupted work")
+  .requiredOption("--lock-recovery <path>", "archivePath returned by compiler-lock recover on the owning host")
+  .requiredOption("--authorization-ref <ref>", "user authorization to settle and continue the interrupted loop")
+  .option("--inspect", "verify all evidence without settling or dispatching")
+  .action(async options => {
+    if (!["consumer-revalidation", "consumer-revalidation-check"].includes(options.stage)) throw new Error("Copy stages[].stage from requirements inspect-identity-repairs; correct once, do not guess or retry unchanged.");
+    const { settleInterruptedConsumerWork } = await import("./compiler/consumer-work-interruption.js");
+    console.log(JSON.stringify(await settleInterruptedConsumerWork({ root: rootFor({}), ...options }), null, 2));
+  });
+requirementsCommand.command("repair-entry-presence").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")
+  .requiredOption("--ref <ref>", "exact blocked entry ref from consumerRevalidation.reviews[]")
+  .requiredOption("--authorization-ref <ref>", "user authorization to preserve source uncertainty in this entry")
+  .option("--inspect", "read-only exact negative review and repair preflight; no model calls or writes")
+  .description("Propose, independently check and commit a blocked unresolved-presence entry; retain all original obligations and history")
+  .action(async options => {
+    const { runEntryPresenceRepair } = await import("./workflow/entry-presence-repair.js");
+    console.log(JSON.stringify(await runEntryPresenceRepair({ root: rootFor({}), sourceId: options.source, taskId: options.task,
+      ref: options.ref, authorizationRef: options.authorizationRef, inspect: options.inspect }), null, 2));
+  });
+requirementsCommand.command("repair-entry-state").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")
+  .requiredOption("--ref <ref>", "exact blocked entry ref from consumerRevalidation.reviews[]")
+  .requiredOption("--authorization-ref <ref>", "user authorization to repair source-supported state in this entry")
+  .option("--inspect", "read-only exact negative review and repair preflight; no model calls or writes")
+  .description("Propose, independently check and commit actor-local entry state; retain all original obligations and history")
+  .action(async options => {
+    const { runEntryStateRepair } = await import("./workflow/entry-state-repair.js");
+    console.log(JSON.stringify(await runEntryStateRepair({ root: rootFor({}), sourceId: options.source, taskId: options.task,
+      ref: options.ref, authorizationRef: options.authorizationRef, inspect: options.inspect }), null, 2));
+  });
+requirementsCommand.command("repair-entry-wording").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")
+  .requiredOption("--ref <ref>", "exact blocked entry ref from consumerRevalidation.reviews[]")
+  .requiredOption("--authorization-ref <ref>", "user authorization to repair source-supported entry wording")
+  .option("--inspect", "read-only exact negative review and repair preflight; no model calls or writes")
+  .description("Propose, independently check and commit before-event entry wording; preserve state, history and obligations")
+  .action(async options => {
+    const { runEntryStateRepair } = await import("./workflow/entry-state-repair.js");
+    const { ENTRY_WORDING_REPAIR } = await import("./compiler/entry-state-repair-model.js");
+    console.log(JSON.stringify(await runEntryStateRepair({ root: rootFor({}), sourceId: options.source, taskId: options.task,
+      ref: options.ref, authorizationRef: options.authorizationRef, inspect: options.inspect, policy: ENTRY_WORDING_REPAIR }), null, 2));
+  });
+requirementsCommand.command("repair-entry-binding").requiredOption("--source <id>", "registered source ID")
+  .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")
+  .requiredOption("--ref <ref>", "exact blocked entry ref from consumerRevalidation.reviews[]")
+  .requiredOption("--authorization-ref <ref>", "user authorization to repair a source-supported entry delta binding")
+  .option("--inspect", "read-only exact negative review and repair preflight; no model calls or writes")
+  .description("Propose, independently check and commit the exact canonical entry delta in its execution binding; preserve all other fields and history")
+  .action(async options => {
+    const { runEntryStateRepair } = await import("./workflow/entry-state-repair.js");
+    const { ENTRY_DELTA_BINDING_REPAIR } = await import("./compiler/entry-state-repair-model.js");
+    console.log(JSON.stringify(await runEntryStateRepair({ root: rootFor({}), sourceId: options.source, taskId: options.task,
+      ref: options.ref, authorizationRef: options.authorizationRef, inspect: options.inspect, policy: ENTRY_DELTA_BINDING_REPAIR }), null, 2));
   });
 requirementsCommand.command("plan-bound-upstream-repair").requiredOption("--request <path>", "current binding snapshot and selected findings JSON")
   .description("Derive original scene requirement IDs and freeze every supported dependency path before host authorization")
@@ -280,7 +433,9 @@ requirementsCommand.command("evaluate-upstream").requiredOption("--source <id>",
   .action(async options => {
     const { withWorkspaceOperationLock } = await import("./util/workspace-lock.js");
     const { settleUpstreamRepairRequirements } = await import("./compiler/upstream-repair-evaluation.js");
-    const result = await withWorkspaceOperationLock(rootFor({}), "compiler", () => settleUpstreamRepairRequirements(rootFor({}), options.source));
+    const { withIdentityAuthorityVerification } = await import("./compiler/identity-requirement-upstream.js");
+    const result = await withWorkspaceOperationLock(rootFor({}), "compiler", () =>
+      withIdentityAuthorityVerification(() => settleUpstreamRepairRequirements(rootFor({}), options.source)));
     console.log(JSON.stringify(result, null, 2));
     if (result.issues.length) process.exitCode = 2;
   });

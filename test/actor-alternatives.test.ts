@@ -56,5 +56,9 @@ it("reports exhausted alternative search without committing or calling the resul
   const established = await source({ branchId: "main", commitId: head, maxActors: 32 });
   expect(established).toHaveLength(1);
   expect(established[0]!.proposal.actorId).toBe("bo");
+  const speechOnly = deterministicActorProposalSource(engine, store, {
+    acceptCandidate: (_candidate, preview) => Boolean(preview.progressCertificate?.channels.includes("speech")),
+  });
+  await expect(speechOnly({ branchId: "main", commitId: head, maxActors: 1 })).rejects.toThrow("ACTOR_ALTERNATIVE_BUDGET_EXHAUSTED");
   expect(await engine.branches.readHead("main")).toBe(head);
 });

@@ -322,7 +322,7 @@ it.each(scenes.flatMap(scene => [false, true].map(later => ({ ...scene, later, t
     const binding = (await evidenceStore.bindingForArtifact("event-execution", "later-entry"))!;
     await evidenceStore.replaceForArtifact("event-execution", "later-entry", binding.artifactHash, []);
     expect((await auditCompiler(f.root, { sourceId: f.source.source.id })).evidence.errors.some(item => item.code === "ENTRY_AGENCY_EVIDENCE_REQUIRED")).toBe(true);
-    await expect(cache.candidateSnapshot(f.source.source)).rejects.toThrow("Remote entry exact evidence");
+    await expect(cache.candidateSnapshot(f.source.source)).rejects.toThrow("Entry/body exact evidence");
     await evidenceStore.replaceForArtifact("event-execution", "later-entry", binding.artifactHash, binding.assertions);
   }
   const initialBinding = (await evidenceStore.bindingForArtifact("initial-world", "initial-world"))!;

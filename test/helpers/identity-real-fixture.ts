@@ -16,10 +16,11 @@ import { mockPiProvider } from "./pi-provider.js";
 import { digest } from "../../src/runtime/compile-loop/workspace.js";
 import { decodeJsonValues, LOSSLESS_CONTEXT_PROTOCOL } from "../../src/agent/lossless-json-context.js";
 
-export async function realIdentityFixture(large = false, failFirstConsumer = false, consumerCount = 48) {
+export async function realIdentityFixture(large = false, failFirstConsumer = false, consumerCount = 48,
+  options: { consumerRefs?: string[]; additionalSource?: string } = {}) {
   const controls = { failFirstConsumer, exhaustRecovery: false, submitWithReads: false, discoverOperationHashes: false };
   let parent: any;
-  const bytes = Buffer.from("Ada waits.\n" + (large ? Array.from({ length: 2800 }, (_, i) => `${i}:未核实的人物关系必须保留未知，不能推断同一身份。\n`).join("") : ""));
+  const bytes = Buffer.from("Ada waits.\n" + (options.additionalSource ?? "") + (large ? Array.from({ length: 2800 }, (_, i) => `${i}:未核实的人物关系必须保留未知，不能推断同一身份。\n`).join("") : ""));
   const upstream = await roleDependencyFixture(failFirstConsumer ? (root, source) => {
     parent = { phase: "BREAK", root, sourceId: source.id, sourceHash: source.contentSha256, childPid: null,
       workers: 21, repairs: 20, commands: 83, failures: { original: 2 }, pending: { key: "original" } };
@@ -76,6 +77,10 @@ export async function realIdentityFixture(large = false, failFirstConsumer = fal
       refs: p.inventory.consumers.slice(index * 48, (index + 1) * 48).map((c: { ref: string }) => c.ref) }));
     p.inventory.candidateIds = Array.from({ length: 78 }, (_, i) => `role-${i}-${h(i)}`);
     p.inventory.sourcePages = Array.from({ length: 73 }, (_, i) => i);
+  }
+  if (options.consumerRefs) {
+    p.inventory.consumers = options.consumerRefs.map(ref => ({ ref, revisionHash: h(ref), payload: { id: ref }, reason: "typed-consumer", dependencies: [] }));
+    p.intent.consumerShards = options.consumerRefs.map((ref, index) => ({ index, refs: [ref] }));
   }
   p.intent.inventoryHash = h(p.inventory);
   p.intent.semanticRecordHashes = p.semantic.map(h);

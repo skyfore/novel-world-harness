@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
-import { canonicalEventSchema, eventParticipationSchema, idSchema, textAnchorSchema } from "../world/model.js";
+import { canonicalEventSchema, entitySchema, eventParticipationSchema, idSchema, textAnchorSchema } from "../world/model.js";
 import { predicateReferences, stateOperationReferences } from "../world/state-references.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { sourceAnnotationSchema } from "./annotations.js";
@@ -8,6 +8,8 @@ import { identityResolutionSchema } from "./entity-resolution.js";
 import { eventResolutionSchema } from "./event-resolution.js";
 import { representationAuthoritySchema, representationSemanticHash } from "./source-representation.js";
 import { identitySemanticHash } from "./identity-requirements.js";
+import { initialWorldSchema } from "../world/initial.js";
+import { INITIAL_WORLD_REPAIR_ID, initialWorldRepairReferences, initialWorldRevisionFields } from "./initial-world-repair.js";
 import {
   sourcePatternObligationRequirementId,
   sourcePatternObligationRequirementSetHash,
@@ -16,9 +18,12 @@ import {
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const text = z.string().trim().min(1);
-export const upstreamRepairKindSchema = z.enum(["entity-mention", "event-mention", "quotation", "discourse-segment", "entity-resolution", "event-resolution", "canonical-event", "event-participation"]);
+export const upstreamRepairKindSchema = z.enum(["entity", "initial-world", "entity-mention", "event-mention", "quotation", "discourse-segment", "entity-resolution", "event-resolution", "canonical-event", "event-participation"]);
 export type UpstreamRepairKind = z.infer<typeof upstreamRepairKindSchema>;
 const fields: Record<UpstreamRepairKind, readonly string[]> = {
+  // Stable identity/kind and operational capabilities are outside this revision.
+  entity: ["canonicalName", "aliases", "evidence", "identityConsumption"],
+  "initial-world": initialWorldRevisionFields,
   "entity-mention": ["anchor", "surface", "form", "kindCandidates", "sceneId", "confidence", "interpretation"],
   "event-mention": ["triggerAnchor", "trigger", "extentAnchors", "eventTypeCandidates", "participantMentionIds", "sceneId", "discourseSegmentId", "salience", "confidence", "interpretation"],
   quotation: ["anchor", "mode", "speakerMentionId", "addresseeMentionIds", "cueAnchor", "sceneId", "attributionConfidence", "interpretation"],
@@ -59,6 +64,10 @@ const identitySchema = z.object({
   requirementSetHash: hash, requirementIds: z.array(text).min(1).max(128),
   proposalObligation: sourcePatternUpstreamAuthoritySchema.optional(),
   identityRequirements: z.object({ taskId: hash, intentHash: hash, recordHashes: z.array(hash).min(4).max(130),
+    consumerRepair: z.object({ findingId: hash, recordHashes: z.array(hash).length(2), entityId: idSchema,
+      resolutionId: idSchema, capabilityVersion: z.literal(1) }).strict().optional(),
+    consumerRevalidation: z.object({ id: hash, recordHashes: z.array(hash).length(2), scopeHash: hash,
+      parentPlanHash: hash, parentReceiptFingerprint: hash, initialWorldPointers: z.array(text).min(1), retainedResolutionIds: z.array(idSchema) }).strict().optional(),
     semanticSlots: z.array(z.object({ id: idSchema, payloadHash: hash }).strict()).min(1).max(48) }).strict().optional(),
   sourceRepresentation: representationAuthoritySchema.extend({
     semanticSlots: z.array(z.object({ id: idSchema, payloadHash: hash }).strict()).min(1).max(48),
@@ -100,10 +109,28 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
     plan.baselineRefs.map(key), plan.allowedWrites.map(key), plan.allowedCreations.map(key), plan.readableRefs.map(key)]) if (!unique(values)) fail("Duplicate repair plan member");
   if (!plan.allowedWrites.length && !plan.allowedCreations.length) fail("Repair plan has no bounded mutation");
   if (plan.identityRequirements) {
-    if (plan.sourceRepresentation || plan.proposalObligation || plan.allowedWrites.length || plan.semanticEventCreations?.length
+    const consumer = plan.identityRequirements.consumerRepair, revalidation = plan.identityRequirements.consumerRevalidation;
+    if (revalidation) {
+      if (!consumer || plan.sourceRepresentation || plan.proposalObligation || plan.allowedCreations.length || plan.resolutionAbsences?.length
+        || plan.resolutionRevisions?.length || plan.semanticEventCreations?.length || plan.allowedWrites.length !== 2
+        || !plan.allowedWrites.some(w => w.kind === "entity" && w.id === consumer.entityId && contentHash(w.pointers) === contentHash(["/identityConsumption"]))
+        || !plan.allowedWrites.some(w => w.kind === "initial-world" && w.id === INITIAL_WORLD_REPAIR_ID && contentHash(w.pointers) === contentHash(revalidation.initialWorldPointers))
+        || !plan.dependencyEdges.some(e => e.from === "initial-world:singleton" && e.to === `entity:${consumer.entityId}`)
+        || !plan.baselineRefs.some(r => r.kind === "entity-resolution" && r.id === consumer.resolutionId)
+        || revalidation.retainedResolutionIds.some(id => !plan.baselineRefs.some(r => r.kind === "entity-resolution" && r.id === id))
+        || contentHash(plan.predecessorReceiptRefs) !== contentHash([revalidation.parentReceiptFingerprint]))
+        fail("Revalidated consumer authority permits only the supported existing entity and exact initial-world fields; no new resolution or identity");
+    } else {
+    if (plan.sourceRepresentation || plan.proposalObligation || (!consumer && plan.allowedWrites.length) || plan.semanticEventCreations?.length
       || plan.allowedCreations.length !== plan.identityRequirements.semanticSlots.length || plan.allowedCreations.some(c => c.kind !== "entity-resolution")
       || !unique(plan.identityRequirements.semanticSlots.map(s => s.id))
       || contentHash(plan.allowedCreations.map(c => c.id).sort()) !== contentHash(plan.identityRequirements.semanticSlots.map(s => s.id).sort())) fail("Independent identity authority permits only its exact reviewed resolution creations");
+    if (consumer && (plan.allowedWrites.length !== 1 || plan.allowedWrites[0]?.kind !== "entity" || plan.allowedWrites[0]?.id !== consumer.entityId
+      || contentHash(plan.allowedWrites[0]?.pointers) !== contentHash(["/identityConsumption"])
+      || !plan.allowedCreations.some(c => c.kind === "entity-resolution" && c.id === consumer.resolutionId)
+      || !plan.dependencyEdges.some(e => e.from === `entity:${consumer.entityId}` && e.to === `entity-resolution:${consumer.resolutionId}`)))
+      fail("Identity consumer repair permits only its exact existing entity quarantine after the original resolution dependency");
+    }
   }
   if (plan.sourceRepresentation) {
     if (plan.proposalObligation || plan.allowedWrites.length || plan.resolutionAbsences?.length || plan.resolutionRevisions?.length || plan.semanticEventCreations?.length
@@ -158,6 +185,9 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
   }
   for (const creation of plan.allowedCreations) if (["canonical-event", "event-participation"].includes(creation.kind)
     && !semanticSlots.has(key(creation))) fail("Semantic creation lacks its reviewed event contract");
+  if (plan.allowedCreations.some(c => c.kind === "entity")) fail("Entity repair requires an existing exact baseline; it cannot allocate or merge identities");
+  if (plan.allowedCreations.some(c => c.kind === "initial-world") || plan.allowedWrites.some(c => c.kind === "initial-world" && c.id !== INITIAL_WORLD_REPAIR_ID))
+    fail("Initial-world repair requires the existing exact singleton; creation or another identity is forbidden");
   if (plan.proposalObligation && plan.allowedCreations.some(creation => !semanticSlots.has(key(creation)))) {
     fail("Proposal-obligation repair contains a creation outside its reviewed missing-event contract");
   }
@@ -181,6 +211,16 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
   }
 });
 export type UpstreamRepairPlan = z.infer<typeof upstreamRepairPlanSchema>;
+
+/** Retired resolutions remain receipt-backed audit dependencies, never active
+ * decisions in the convergence projection. */
+export function upstreamRepairConvergedRevisions(plan: UpstreamRepairPlan, outputs: readonly { artifactKind: string; artifactId: string; payloadHash: string }[]) {
+  const revisions = new Map(plan.baselineRefs.map(ref => [`${ref.kind}:${ref.id}`, ref.revisionHash]));
+  for (const output of outputs) revisions.set(`${output.artifactKind}:${output.artifactId}`, output.payloadHash);
+  for (const ref of plan.resolutionRevisions ?? []) revisions.delete(`${ref.kind}:${ref.predecessorId}`);
+  for (const id of plan.identityRequirements?.consumerRevalidation?.retainedResolutionIds ?? []) revisions.delete(`entity-resolution:${id}`);
+  return revisions;
+}
 export function freezeUpstreamRepairPlan(input: z.input<typeof identitySchema>): UpstreamRepairPlan {
   const identity = identitySchema.parse(input);
   return upstreamRepairPlanSchema.parse({ ...identity, planHash: contentHash(identity) });
@@ -197,6 +237,8 @@ export function assertUpstreamResolutionAbsences(plan: UpstreamRepairPlan, paylo
 }
 
 export function parseUpstreamRepairPayload(kind: UpstreamRepairKind, raw: unknown) {
+  if (kind === "initial-world") return initialWorldSchema.parse(raw);
+  if (kind === "entity") return entitySchema.parse(raw);
   if (kind === "entity-resolution") return identityResolutionSchema.parse(raw);
   if (kind === "event-resolution") return eventResolutionSchema.parse(raw);
   if (kind === "canonical-event") return canonicalEventSchema.parse(raw);
@@ -207,9 +249,21 @@ export function parseUpstreamRepairPayload(kind: UpstreamRepairKind, raw: unknow
 }
 
 export function upstreamRepairReferencedKeys(kind: UpstreamRepairKind, raw: unknown): string[] {
+  if (kind === "initial-world") return initialWorldRepairReferences(raw);
   const refs: string[] = [];
   const add = (type: string, ids: readonly (string | undefined)[]) => { for (const id of ids) if (id) refs.push(`${type}:${id}`); };
-  if (kind === "entity-resolution") {
+  if (kind === "entity") {
+    const value = entitySchema.parse(raw);
+    if (value.identityConsumption) {
+      add("entity-mention", [value.identityConsumption.mentionId]);
+      add("entity-resolution", [value.identityConsumption.resolutionId, ...value.identityConsumption.supersedesResolutionIds]);
+      if (value.identityConsumption.mode === "source-local") add("entity-mention", value.identityConsumption.referentScope.mentionIds);
+    }
+    for (const channel of value.agencyProfile?.channels ?? []) {
+      add("process-template", [channel.processTemplateId]);
+      add("action-schema", [channel.actionSchemaId]);
+    }
+  } else if (kind === "entity-resolution") {
     const value = identityResolutionSchema.parse(raw);
     add("entity-mention", [value.mentionId, ...value.candidates.flatMap(item => item.basisMentionIds)]);
     add("entity", [value.entityId, value.intendedEntityId, ...value.candidates.map(item => item.entityId)]);
@@ -274,23 +328,37 @@ export function upstreamRepairReferencedKeys(kind: UpstreamRepairKind, raw: unkn
 export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, input: {
   kind: UpstreamRepairKind; id: string; baseline: unknown | null; payload: unknown;
   activeRevisions: ReadonlyMap<string, string>; sourceSha256: string; requirementSetHash: string;
+  retainedRevisions?: ReadonlyMap<string, string>;
   citedSegmentIds: readonly string[]; hostDerivation: unknown;
 }): void {
   const plan = upstreamRepairPlanSchema.parse(planInput);
   const stop = (message: string): never => { throw new Error(`UPSTREAM_REPAIR_REQUIRES_HOST_REVIEW: ${message}. Preserve plan, budget and drafts; stop this task. Do not guess IDs, rotate namespaces or retry unchanged.`); };
   if (input.sourceSha256 !== plan.sourceScope.sourceSha256 || input.requirementSetHash !== plan.requirementSetHash) stop("Source or requirement revision changed");
-  for (const ref of plan.baselineRefs) if (input.activeRevisions.get(key(ref)) !== ref.revisionHash) stop(`Active baseline changed: ${key(ref)}`);
+  for (const ref of plan.baselineRefs) if (input.activeRevisions.get(key(ref)) !== ref.revisionHash
+    && !(ref.kind === "entity-resolution" && plan.identityRequirements?.consumerRevalidation?.retainedResolutionIds.includes(ref.id)
+      && input.retainedRevisions?.get(key(ref)) === ref.revisionHash)) stop(`Active baseline changed: ${key(ref)}`);
   if (!input.citedSegmentIds.length || input.citedSegmentIds.some(id => !plan.citableEvidenceRefs.includes(id))) stop("Evidence is not citable under this plan");
   const next = parseUpstreamRepairPayload(input.kind, input.payload);
   if (plan.identityRequirements) {
     const expected = plan.identityRequirements.semanticSlots.find(s => s.id === input.id);
-    if (input.kind !== "entity-resolution" || !expected || expected.payloadHash !== identitySemanticHash(next)) stop("Identity proposal differs from the independent exact semantic payload");
+    const consumer = plan.identityRequirements.consumerRepair, revalidation = plan.identityRequirements.consumerRevalidation;
+    if (input.kind === "entity" && consumer && input.id === consumer.entityId) {
+      const basis = entitySchema.parse(next).identityConsumption;
+      if (!basis || basis.mode !== (revalidation ? "source-local" : "quarantined") || basis.resolutionId !== consumer.resolutionId) stop("Entity consumption mode differs from the exact independently reviewed repair dependency");
+      if (revalidation) {
+        const prior = entitySchema.parse(input.baseline).identityConsumption;
+        const stable = (value: typeof basis) => { if (!value) return null; const { mode: _, rationale: _r, ...rest } = value; const { referentScope: _scope, ...binding } = rest as typeof rest & { referentScope?: unknown }; return binding; };
+        if (!prior || contentHash(stable(prior)) !== contentHash(stable(basis))) stop("Source-local revision changed its unresolved identity, exact decision or retained predecessor chain");
+      }
+    } else if (revalidation && input.kind === "initial-world" && input.id === INITIAL_WORLD_REPAIR_ID) {
+      // Full pointer, evidence, dependency and independent acceptance checks remain below.
+    } else if (input.kind !== "entity-resolution" || !expected || expected.payloadHash !== identitySemanticHash(next)) stop("Identity proposal differs from the independent exact semantic payload");
   }
   if (plan.sourceRepresentation) {
     const expected = plan.sourceRepresentation.semanticSlots.find(s => s.id === input.id);
     if (!expected || expected.payloadHash !== representationSemanticHash(sourceAnnotationSchema.parse(next))) stop("Source annotation differs from the independently reviewed exact semantic payload");
   }
-  if (next.id !== input.id || ("sourceId" in next && next.sourceId !== plan.sourceScope.sourceId)) stop("Payload identity or source escapes plan");
+  if (("id" in next ? next.id : INITIAL_WORLD_REPAIR_ID) !== input.id || ("sourceId" in next && next.sourceId !== plan.sourceScope.sourceId)) stop("Payload identity or source escapes plan");
   const absence = plan.resolutionAbsences?.find(ref => ref.kind === input.kind && ref.id === input.id);
   if (absence) {
     const actualMentions = input.kind === "entity-resolution" ? [identityResolutionSchema.parse(next).mentionId] : eventResolutionSchema.parse(next).eventMentionIds;
@@ -346,8 +414,13 @@ export function assertUpstreamRepairMutation(planInput: UpstreamRepairPlan, inpu
   }
   const write = plan.allowedWrites.find(ref => key(ref) === target);
   const baseline = parseUpstreamRepairPayload(input.kind, input.baseline);
+  if (input.kind === "entity") {
+    const before = entitySchema.parse(baseline), after = entitySchema.parse(next);
+    if (before.identityConsumption && !after.identityConsumption) stop("Identity quarantine cannot be cleared by an entity revision");
+    if (after.identityConsumption && after.identityConsumption.sourceId !== plan.sourceScope.sourceId) stop("Identity consumption source escapes plan");
+  }
   const ref = plan.baselineRefs.find(ref => key(ref) === target);
-  if (!write || !ref || contentHash(baseline) !== ref.revisionHash || baseline.id !== input.id
+  if (!write || !ref || contentHash(baseline) !== ref.revisionHash || ("id" in baseline ? baseline.id : INITIAL_WORLD_REPAIR_ID) !== input.id
     || ("sourceId" in baseline && "sourceId" in next && baseline.sourceId !== next.sourceId)) stop("Mutation lacks exact frozen baseline");
   const allowed = write!.pointers.map(repairPointerTokens);
   const before = baseline as Record<string, unknown>, after = next as Record<string, unknown>;

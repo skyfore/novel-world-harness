@@ -1,5 +1,463 @@
 # Agent tool failure recovery
 
+## Consumer review target and time scope
+
+New consumer scopes bind `consumer-review/v2` independently of mutation
+capability. `initial/<source>` retains the singleton opening contract;
+`entry/<actor>/<event>` binds the active owning event, any active execution
+overlay, and the cut immediately **before** that event at its own story time.
+The evidence packet includes the full owning artifacts and their source
+segments. Unknown time remains unknown. The owning event's outcome and later
+knowledge are not entry facts. Other artifacts are assessed for their own
+validity and actual identity dependencies. Only the initial-world consumer can
+request a singleton repair; other consumer reviews remain read-only.
+
+Both sessions receive the same hashed contract. Every original requirement and
+question remains; the requirement verdict expresses this consumer's dependency
+compatibility, never global identity closure. Proposals must assess every bound
+source/identity/time/knowledge check, plus presence, agency and entry state for
+entries. An unresolved check cannot clear a consumer. The independent check must
+bind the same contract hash. Supported local reviews do not grant source-audit
+continuation, an action witness, certification or activation. Legacy sealed
+inputs and receipts retain their original contract and remain verifiable.
+
+`--compiler-correction consumer-review-scope/v1` is a separate, explicit host
+correction for a demonstrated legacy scope ambiguity, not execution-policy
+migration. It requires later user authorization, the exact original entry/ref,
+unchanged source and dependency revisions, an independently supported blocked
+pair, and retained old inputs that supplied singleton capability without an
+entry review contract. Bind both negative records and the corrected code hash;
+never edit or erase the old verdict. Inspect with `--inspect-execution` first.
+Copy the exact `reviews[].ref` from `requirements inspect-identity-repairs` for
+the same source/task; permit at most one corrected ref, never guessing.
+
+This one-time successor uses only each predecessor stage's remaining calls and
+bytes, with hard enforcement and no preview renewal. It retains original
+failures, sessions, requests, drafts, budgets and cumulative usage. A second
+correction, exhausted allowance, changed source/dependency, unsettled session,
+or unsupported new verdict stops the loop; no unchanged retry, allowance reset,
+parent resume or acceptance waiver. A sealed successor can only recover its
+exact registration without new model generation.
+
+The original predecessor has one compiler-correction owner across all policies.
+Freezing a correction's `scope.json` reserves that allowance even if no semantic
+record was published or its invocation failed. Ledger validation and dispatch
+both reject a sibling policy against the same predecessor; changing policy or
+authorization cannot spend the allowance again. Inspect the same source/task
+with `inspect-identity-repairs`, copy `summary.consumerRevalidation.attempts[].ref`
+and `compilerCorrection.policy`, and recover only that attempt's sealed
+registration when available. Failed or consumed attempts stop without another
+grant. Read-only inspection does not reserve an allowance.
+
+## Versioned consumer work execution
+
+New work plans with a review contract use `consumer-review-binding/v1`: tool
+schemas fix the exact `scopeHash`, checked `proposalHash`, and contract hash.
+Copy `input.reviewContractHash` into `review.contractHash` (proposal) or
+`reviewContractHash` (check); `priorSubjectHash` identifies a different artifact.
+One corrected preview is allowed, including SDK validation failures before the
+tool executes. A second invalid preview, changed scope/proposal, or any failed
+terminal submission stops. The host never substitutes a corrected output.
+
+For the original unbound check's single rejected contract-hash preview only,
+`--recover-contract-binding --binding-recovery-authorization-ref <later-ref>`
+permits one explicitly authorized correction. Inspect with `--inspect-execution`
+first. Discover the same source/task/ref with `inspect-identity-repairs`, copying
+`summary.consumerRevalidation.attempts[].ref`, `scopeHash` and `stages[].stage`;
+an ID miss allows one corrected discovery retry, never guessing. The host proves
+the exact failure from its saved Pi transcript, actual requests, trace, proposal
+and frozen evidence. No submitted check, other error, repeated failed preview,
+changed dependency, circuit stop or exhausted allowance qualifies.
+
+The separate `execution-v1/contract-binding-recovery` retains the old session,
+failure and charges. A fresh independent check receives the full original
+evidence and unchanged proposal; the rejected draft grants no semantic approval.
+Only the original remaining calls and bytes are available, all hard enforced;
+there is no progress renewal, quota reset, budget amendment or second recovery.
+Another invalid preview stops immediately. A sealed result can recover only its
+registration, without generation. Status exposes `stages[].bindingRecovery`
+alongside the original failed execution and counts both segments once. Original
+acceptance, unresolved questions, parent stop and certification remain intact.
+
+New identity-consumer scopes use `consumer-work/v1`. Before dispatch, the host
+freezes exact source ranges, the current consumer, original requirements/questions
+and required artifact revisions. All semantic fields remain present. Only the
+ordered `unitIds`/`extractionRunIds` of a retained roster and mechanical denominator
+lists use versioned hash/count views; complete values remain in the plan and
+original inventory. These manifests prove coverage, not semantic support.
+Conservative closure dependencies and the complete consumer denominator remain.
+
+`revalidate-identity-consumer --inspect-execution` is read-only. For a legacy
+scope, select `--execution-policy consumer-work/v1`; a consumed legacy stage
+also requires `--execution-authorization-ref` naming existing explicit user
+authorization for that migration. Do not combine these with legacy continuation,
+host-recovery, provider-resumption or budget-amendment flags. Copy the original
+source/task/ref from the same `inspect-identity-repairs` result; an ID miss permits
+one discovery-based correction, never guessing or scope changes.
+
+Migration verifies every settled original read-only session, actual request,
+untransmitted final context, failure and cumulative charge. Original scope, IDs,
+files and blocked budgets remain unchanged. A separate
+`execution-v1/<stage>.plan.json` binds the history. No proposal, negative semantic
+judgment, unsettled write, explicit call amendment or verified no-progress stop
+can be turned into another attempt. A sealed submission must use zero-generation
+registration recovery. Missing or changed proof stops migration. Consumed read
+correction allowances carry forward, including failed argument hashes; preloading
+corrected evidence does not pardon an old tool failure.
+
+The initial evidence packet satisfies delivery for this session. Additional
+source discovery through `read_consumer_revalidation` is navigation only: copy
+`items[].id` into `segmentIds`; artifact discovery supplies `items[].ref` for
+`refs`. At most one corrected read remains if the original allowance permits it.
+No empty search, hash manifest, summary or former-session read proves support.
+The independent checker receives its own session with the original packet,
+decisive proposal source selectors and exact proposed repair dependencies.
+
+Work admission uses `pi-message-context/v1`: measure the complete normalized
+system, tools and user context through Pi's existing `message/v1` lossless
+encoder, including JSON escaping, then reserve provider framing and draft space.
+The plan, all evidence, budget and raw-size preflight receipt stay unchanged;
+the new receipt is `<stage>.preflight-message-v1.json`. A raw-size false stop
+before invocation may be re-inspected with `--inspect-execution` for the same
+source/task/ref. Copy `availableRefs[]` from `inspect-identity-repairs` if the
+ref is missing, allowing one corrected lookup. Only an uninvoked stage whose
+complete encoded context fits may proceed. A consumed stage, actual request
+size stop or remaining oversized packet must not be retried through this
+measurement change; use its existing recovery or retain the host stop. Runtime
+context and provider-payload limits still apply to every actual request.
+
+Use `preview_consumer_revalidation` with a complete grounded draft. It retains
+the draft and checks structure, exact scope, original question coverage, delivery
+and original text anchors. Success is not semantic acceptance, world truth or
+certification. Submit that exact draft through `submit_consumer_revalidation` in
+a later sole-tool response. A format/selector miss permits one correction from
+the same input/discovery fields; unchanged retries, host/scope errors and consumed
+stages stop.
+
+The persistent 12-call no-progress window renews only for the first host-validated
+draft, keyed by the immutable work. Reads, repeated previews and new wording earn
+nothing. Every call and payload remains charged and cumulatively reported. The
+historical 12,288,000 total-byte default is observational for this policy; the
+512,000 single-request bound remains hard. Explicit amended ceilings cannot be
+bypassed by migration. Complete evidence and draft/submission space are checked
+before dispatch. Admission is not a guarantee of successful reasoning. Oversized
+work is `context-blocked`, with zero model calls, and requires a host-validated
+split that preserves coverage; never silently truncate or retry unchanged.
+
+`message/v1` lossless transport uses a self-contained dictionary per message.
+Earlier messages remain unchanged as new results arrive. Historical profiles
+retain exact reconstruction; prefix stability tests do not establish provider
+cache savings.
+
+Quota refusals are `external-wait`, not semantic judgments. They retain actual
+charges and cause no automatic retry or provider fallback. Context, no-progress,
+unsubmitted and host failures retain exact plans, drafts, messages and budgets.
+Inspect the same source/task/ref before further host work; a consumed work-policy
+stage cannot be restarted or relabeled. Status exposes `stages[].execution`
+separately from legacy allowances. Only a sealed successful session permits
+registration recovery without new generation. Neither a draft nor a completed
+consumer resumes the parent, shrinks coverage, certifies or activates a world.
+
+### Interrupted consumer work and durable queue
+
+`requirements consumer-queue --source <id> --task <taskId>` persists its plan,
+states and prior state hashes below the original identity task, rather than in
+`/tmp`. Copy `tasks[].taskId` from `requirements inspect-identity-repairs` and
+retain the original source, intent/inventory hashes and complete denominator.
+`--shard` selects an original shard without removing the other consumers;
+`--limit` yields with the undispatched tail preserved. `--inspect` is read-only.
+For a resumed queue copy `plan.authorizationRef`; a new invocation cannot
+replace it. A missing ID permits one same-scope discovery correction, never
+guessing or unchanged retries.
+
+The queue invokes the existing consumer proposal and independent-check stages
+under the compiler lock. Supported blocked/repair-required dispositions remain
+blocked while other independent consumers can proceed. An unsettled call,
+scope/revision change, failed preflight or consumed failed attempt stops the
+queue. Partial proposals still require their independent check. Historical
+scheduling receipts never authorize clearance, parent resume or certification.
+
+Status reports host/boot/PID-namespace liveness and last trace activity. Missing
+processes in another namespace are `unknown`, not dead. A retained RUNNING
+receipt whose verified owner exited is `orphaned`; status never changes its files.
+To settle an orphan, first use `compiler-lock inspect` on the owning host and
+recover its exact `owner.token`. Copy the resulting `archivePath` to
+`requirements settle-interrupted-consumer --lock-recovery`, together with
+`summary.consumerRevalidation.attempts[].directory` and its `stages[].stage`.
+Use `--inspect` before settlement. Live/unknown owners, partial journals,
+responses, tools or submissions must stop without replay.
+
+`consumer-work-interruption/v1` currently supports exactly one fully recorded
+first request with no returned response or executed tool. It verifies the same
+host's recovered lock, original plan/input, actual Pi transcript, live messages,
+request payload and trace. Original files remain unchanged; the trace settles as
+interrupted, and a separate proof records provider usage as unknown. The sent
+request remains fully charged. Copy the returned `providerResumption` JSON
+(including `cause: owner-exited`) into the original `revalidate-identity-consumer`
+command's `--provider-resumption`; retain its original authorization, inspect
+with `--resume-unsubmitted inspect`, then use `run` only when ready. The durable
+queue can retain that same JSON with `--provider-resumption`.
+
+This uses the one existing stage-specific continuation slot with hard remaining
+call/byte limits and no progress renewal. It is not a quota refusal and grants no
+second continuation. A sealed submission recovers registration, never model
+generation. All source, evidence, independent acceptance and question gates
+remain mandatory.
+
+### Independent event effects and goal lifecycle
+
+`requirements semantic-review-plan --source <id>` discovers all source-scoped
+event/goal IDs, immutable revisions, evidence spans and registered requirements.
+Copy `events[].id` or `goals[].id` and independently read the original source;
+allow one corrected ID from this same discovery, never guess. Use the existing
+`review-scenes --spec <file> --register <stable set ID>` path and its exact
+predecessor revision for changes. This is available before candidate archival
+and does not depend on an identity-failure chain.
+
+Event cases distinguish a supported nonempty delta, justified `no-change`,
+`no-state-change` (knowledge may change), `unknown` evidence and `unmapped`
+semantics. Empty outcomes alone never establish no change. Goal lifecycle cases
+must include an active unfinished cut and a distinct completed cut, both derived
+from independent source expectations. Activation that entails completion is
+rejected, including a fact equality that already proves a completion existence
+check; a single shared conjunct is not enough to prove an entire conjunction.
+Unknown/unmapped checks remain unresolved. Missing event/goal specifications
+block current global closure and certification. Coverage and successful probes
+still do not certify the entire novel or automatically grant any artifact write.
+
+### Work-policy provider continuation
+
+After later user authorization and a successful availability check of the same
+Pi provider/model, `consumer-work-provider-resumption/v1` can continue an original
+work stage whose final request received an empty, zero-usage quota refusal after
+successful read-only work. This includes a validated preview without a terminal
+submission. The legacy first-request-only rule remains unchanged.
+
+Discover the same source/task/ref with `requirements inspect-identity-repairs`.
+Copy `stages[].execution.providerResumptionCandidate` fields `scopeHash`, `stage`
+and `failedTraceRunId` into `--provider-resumption` JSON; add the later
+`authorizationRef` and `authorizedAt`. Keep the original command authorization.
+Use `--resume-unsubmitted inspect`, then the identical JSON with `run` only when
+ready. A ref miss permits one correction from discovery, not a guessed retry.
+
+The host verifies the entire original session, request and live-message journals,
+settled trace, source/input revisions, draft receipts and budget. All original
+files stay immutable. The fixed stage-specific `provider-resumption` directory
+permits one continuation; changing authorization cannot mint another. The exact
+remaining progress window (or enforced call allowance) and remaining byte cap
+become finite continuation limits, and previews never renew them. All prior and
+new calls remain in the same stage's cumulative usage.
+
+Pi receives the full frozen evidence again. Additional original reads must be
+read again if absent from that packet. An already validated draft must be
+confirmed, previewed and submitted unchanged; the host never turns it into a
+semantic verdict. A fresh session is still subject to normal independent-review
+and registration checks. A sealed registration interruption recovers without
+generation. Attempted submissions, failed tools, partial quota output, changed
+evidence, hard budget stops, retries, unknown publication and a consumed
+continuation stop without another session or reset. No parent resume or
+certification follows from this local continuation.
+
+Historical records select their exact original, binding-recovery or provider
+execution directory through their recorded proof. Verification and status
+inspection use that same selection, including work plans predating evidence
+coverage. A missing or changed selected plan stops; never fall back to the
+original directory. A recovered execution remains inspectable but cannot also
+fund a separate compiler correction from the original allowance.
+
+### Consumer evidence coverage
+
+New work plans bind `consumer-evidence-coverage/v1`. Before dispatch, the host
+collects source spans and anchors from the exact current consumer and selected
+semantic dependencies, including nested evidence and counter-evidence. It validates
+source ownership, ranges, byte-bound quote hashes and complete segment coverage,
+then delivers every intersecting original segment. The full retained roster stays
+available as audit context; its inventory is not a request to reread the whole
+book. An invalid range or incomplete manifest stops before a model call. The
+context-size gate still applies to the complete packet; never omit required text
+to fit it. Coverage proves delivery, not semantic support or world truth.
+
+Additional artifact reads return `missingSourceSegmentIds`. Copy these exact IDs
+into `read_consumer_revalidation` with `collection=source`, `segmentIds`, `offset=0`,
+using batches below 240000 response bytes. For discovery use the same source/task,
+`collection=source`, and copy `items[].id`; permit one corrected ID, never guessing
+or unchanged retries. Complete partial artifact pages first. Preview and submission
+reject unread referenced source even for a `blocked` judgment. After reading,
+correct the draft once using that evidence; all prior errors and charges remain.
+Host, scope, budget, consumed-stage and repeated correction failures stop. Both
+the journal verifier and independent checker enforce these obligations. The checker
+receives all completed proposal-side source and artifact reads, including evidence
+that the proposal did not cite.
+
+For an already independently blocked work review, discovery may expose
+`summary.consumerRevalidation.attempts[].evidenceCorrection`. Copy that attempt's
+exact `ref` and the returned `policy` to `revalidate-identity-consumer
+--compiler-correction consumer-evidence-coverage/v1`, with later user authorization
+in `--authorization-ref`; inspect with `--inspect-execution` first. This uses the
+existing compiler-correction lineage and requirement ledger. Eligibility requires
+two verified original records whose actual complete-read receipts both omitted
+referenced source; a negative check that read it is ineligible. Source, consumer,
+dependencies, review contract and original requirements remain fixed. Old plans,
+judgments, requests, failures and usage remain immutable. The successor supplies
+the missing evidence and spends only each original stage's remaining calls and
+bytes, with no preview renewal or second correction. Registration interruption
+recovers its sealed result without generation. A genuine semantic gap remains
+blocked, and neither recovery nor a positive review resumes the parent or grants
+certification. Existing historical plans reconstruct under their original policy.
+
+### Pi transport retry registration
+
+One `WebSocket closed 1006` retry may retain an unsuccessful assistant response
+followed immediately by Pi's `context_edit` with `replacement: null`. The host
+accepts that omission only with the complete original session, live messages,
+actual request journal and matching request/response/retry trace. The failed
+response must have no executed tool. A partial terminal tool call in that failed
+response is not execution: Pi exits error turns before tool dispatch. Its call ID
+must never be reused or receive a tool result, and the trace must contain no tool
+event for the failed request or between that request and its retry. The only
+accepted submission is the subsequent successful response's complete receipt. All attempts and
+bytes remain charged. Other edits, missing evidence, multiple retries or failed
+tools remain stops.
+
+Transport registration reconstructs reads from the verified original message
+journal, including complete additional source reads and hash-verified artifact
+pages. Live tools, registration and trace verification share the same read
+receipt reduction. These are the original session's receipts; a new provider
+continuation must still read its own evidence. Discovery, failed reads and
+unfinished pages never satisfy full delivery.
+
+For an original `consumer-work/v1` submission rejected by the old blanket
+"transcript is truncated, forked or edited" seal check or the older rejection of
+an unexecuted terminal tool fragment in a transport retry, later user authorization
+may recover only its original terminal receipt. Discover the same source/task/ref
+with `requirements inspect-identity-repairs`; copy
+`summary.consumerRevalidation.attempts[].stages[].execution.transportRecoveryCandidate`
+fields `scopeHash`, `stage`, `failedTraceRunId` and `failureHash` into a JSON file,
+adding the later `authorizationRef` and `authorizedAt`. Keep the original command's
+`--authorization-ref`. Run `revalidate-identity-consumer --recover-transport-retry
+<JSON> --inspect-execution` first, then remove `--inspect-execution` only after
+`transport-recovery-ready`. An ID miss permits one correction from that discovery;
+never guess or retry unchanged. Do not combine this with other recovery paths.
+
+Recovery appends an immutable proof and checkpoint beside the original failure,
+plan, proposal, journals and budget. It performs zero proposal generation and
+preserves the original failed trace and negative semantic conclusions. Registration
+interruption resumes this exact proof; it cannot replace the authorization or
+regenerate the submission. The unused independent check still runs with its own
+original allowance. A consumed check, exhausted budget, changed scope/evidence,
+missing receipt or different failure must stop; no new grant, parent resume,
+certification or activation follows from transport recovery.
+
+## Entry capability contract recovery
+
+`entry-capability/v2` separates grounded final entry state, a real actor action,
+and an independent autonomous driver. `preview_initial_world.entryDiagnostics`
+is read-only: `valid` covers shape and evidence checks, never graph closure,
+commit or playability. Its canonical catalog can omit current pending proposals.
+The report includes registered field definitions and the exact retained write
+pointers for a managed repair. Inspect source evidence and dependencies before
+submitting one corrected proposal under existing authority; never infer a missing
+entity or permission from an incomplete catalog.
+
+`BODILY_STATE_EVIDENCE_REQUIRED` needs an exact `supports` selector of explicit
+or strong-inference strength on the named operation, such as
+`/delta/operations/1`. Read the same-source evidence with
+`find_source_evidence`/`read_source_evidence`; correct the selector once only if
+it supports the subject, field and qualitative value. Omitted state remains
+unknown. Never substitute a plan, location, numeric health or identity claim.
+
+`ENTRY_ACTION_UNPROVEN` and `ENTRY_ACTION_SEARCH_INCOMPLETE` retain a missing
+witness; neither proves source impossibility. A compiled goal may omit its
+explicit action invocation: the probe and origin check use the engine's ad-hoc
+normalization of its existing title, predicates and effects. This does not create
+a new goal, effect or permission. Use same-source
+`find_compiler_artifacts` for `character-goal` and `action-schema`, copy
+`results[].readArguments.ref` into `read_compiler_artifact.ref`, and inspect the
+exact preconditions, disclosure and frozen revisions. An ID/ref miss allows at
+most one corrected discovery-based retry. The probe does not authorize module
+installation, fabricated goals, future canon replay or budget expansion. A
+changed head, mismatched effect hash, stale dependency or stale contract requires
+host review/re-evaluation of the original candidate, never an unchanged retry.
+
+`scope-conflict` and `consumed-stage` diagnostics stop dispatch. For an identity
+consumer, use the source/task/ref discovery protocol below and inspect
+`finishRevisionProgress.entryContractReview`. Preserve the original stop,
+consumed grant, draft and acceptance status. New field support or passing code
+tests grants no new semantic attempt, ledger write, certificate or activation.
+
+An explicitly authorized entry-contract upgrade can recover a settled,
+no-proposal opening revision through the original `execute-identity-repair`.
+In the same source/task/ref, copy
+`finishRevisionProgress.contractRecoveryCandidate.previousContextHash` from
+`inspect-identity-repairs` into `--recover-entry-contract`, and supply the explicit
+`--contract-recovery-authorization-ref`. Retain the original authorization and
+revalidation ID; use `--inspect` first. Discovery and inspection confer no authority.
+An ID miss allows one correction from that exact discovery field, never guessing.
+
+The host verifies the complete old Pi session, requests, failure and source read;
+the entry schema must have changed while source bytes, dependencies, original
+revision intent and writable fields remain identical. It freezes that transition
+and retains every old artifact. `finish-revision-contract-recovery.*` records one
+new read/submission session with at most two model calls, using only the original
+draft's remaining call and byte allowance. The cumulative budget includes both
+sessions. A prior submission, unsettled request, changed scope, insufficient
+allowance, failed recovery or another invocation stops without retry, renamed
+authority or budget renewal. Passing tests alone never authorizes this transition.
+
+Recovery searches the complete retained trace index for the exact source and
+operation, independent of the recent-run listing limit. Older failures remain
+discoverable; missing or duplicate matching traces still require host review.
+Inspect the original source/task records without replaying or renaming the stage.
+
+Only a verified new Pi submission can enter the existing finish-revision protocol.
+The changed graph still needs deterministic commit preview and fresh independent
+`finish-revision-acceptance` under its original remaining allowance. A sealed
+draft may resume host persistence without replaying Pi. Old judgments and the
+parent BREAK remain until the original consumer and source-audit revalidations
+pass; this local recovery never grants certification or activation.
+
+Acceptance receives `stagedEvidence` with the original envelope's hash-bound
+field evidence assertions as well as its payload. If a completed negative review
+under this explicit contract recovery omitted that metadata, inspect
+`finishRevisionProgress.acceptanceEvidenceRecoveryCandidate.rejectedInputHash`.
+Copy it into `--recover-acceptance-evidence`, retaining both contract-recovery
+arguments and the original finding parameters, and preflight with `--inspect`.
+The host verifies the entire negative session, unchanged proposal graph and
+material omitted evidence. One separate `finish-revision-evidence-acceptance`
+session uses the original review's remaining calls/bytes after both earlier
+reviews; old verdicts, sessions and charges remain immutable. A changed proposal,
+already supplied metadata, unsettled session or failed evidence recovery stops.
+This restores transport context, never converts a negative verdict into support;
+fresh independent acceptance remains mandatory and cannot be replayed.
+
+Receipt recovery keeps the repair slot `initial-world:singleton` distinct from
+the evidence target `initial-world:initial-world`. The host maps only this
+canonical singleton identity when restoring original evidence; foreign targets
+and missing or modified committed assertions still stop. After an identity-mapping
+implementation fix, resume the original verified finish and receipt without
+another Pi draft or acceptance invocation.
+
+Checkpoint validation also keeps a consumer repair's retained identity decisions
+separate from active resolutions. It recovers them only from the exact completed
+parent plan and finish intent, with unchanged successor hashes and predecessor
+links. Missing or modified evidence, another receipt, or a reactivated predecessor
+stops. After fixing this host projection, rerun the original
+`requirements evaluate-upstream --source <id>`; do not rewrite resolutions or
+replay their model stages.
+
+## Opening compiler failure recovery
+
+`ENTRY_CONTEXT_REQUIRES_SOURCE_REVIEW` is a typed `phase:opening` semantic stop
+for a settled pass that leaves no usable opening, not for an invocation exception.
+CLI and Web preserve thrown errors, their cause chains and pending drafts; TUI
+retains the actual run/finish diagnostic and stops. Unknown engineering or
+provider failures do not acquire semantic recovery merely because no opening
+was produced. Inspect the original trace/session before resolving the owning
+failure; do not reject its drafts, retry unchanged or synthesize state.
+Use `nwh compile-novel status --source <source-id>` to inspect the retained phase
+and repair conditions; do not synthesize an alive-only opening or route this
+condition into an engineering retry loop.
+
 ## Player move transport recovery
 
 A `playerMoveId` identifies one exact request on one branch. The host validates
@@ -718,7 +1176,9 @@ Ordinary hydrated batches include the exact batch's accepted/rejected world-prop
 
 The active retry inventory also includes exact-batch pending/accepted source annotations and recoverable entity/event resolutions, with envelope `proposalId`, payload `logicalId`, and lifecycle status kept distinct. Recovery must use the owning store: `find_source_annotations`/`read_source_annotation` for observations, `find_identity_resolutions`/`read_identity_resolution` for identity decisions, `find_event_resolutions`/`read_event_resolution` for event decisions, and `find_compiler_artifacts`/`read_compiler_artifact` only for world proposals. Copy each finder's exact read `ref` into its paired reader; copy `annotationId`, `resolutionId`, or another payload ID only into the matching logical field. A failed mention-candidate lookup should search a distinctive fragment of the exact failed mention ID rather than a truncated wildcard page. Event-resolution supersession uses only exact `status=current` resolution IDs; `(none)` means an empty supersession list, never a rejected ID or pending envelope ID.
 
-Source-accounting discovery persists a protocol receipt for each issued unresolved page: source hash, batch, segment IDs, exact ordered unit IDs and eventual consumer. This is audit metadata, not a source disposition or world mutation. `status=unresolved` includes active `unresolved` and `intentionally-deferred` decisions because both remain preparation blockers. After later review supports a nonblocking disposition, submit the fresh page under a **new** `proposal_id`; the compiler preserves the blocking proposal and records a hash-bound refinement edge. A refinement may replace only a blocking decision with `background-only`, `paratext`, or `duplicate-description`; it cannot overwrite valid nonblocking accounting or replace one blocker with another. If new evidence or nonblocking accounting covers a submitted unit, `account_source_units` rejects the entire call with `coverage-changed`, listing `representedUnitIds`, `accountedUnits` and `remainingUnitIds`. Preserve the failed `proposal_id`, call same-batch `find_source_accounting_units` with `status=unresolved, offset=0`, copy the returned `pageToken`, review the fresh page and make at most one corrected call. Never reuse indexes without inspecting that page. If no units remain, stop for host coverage review rather than submit an empty array or withdraw valid coverage. Receipts survive fresh sessions; consumed tokens stay single-use.
+Source-accounting discovery persists a protocol receipt for each issued unresolved page: source hash, batch, segment IDs, exact ordered unit IDs and eventual consumer. This is audit metadata, not a source disposition or world mutation. `status=unresolved` includes active `unresolved` and `intentionally-deferred` decisions because both remain preparation blockers. After later review supports a nonblocking disposition, submit the fresh page under a **new** `proposal_id`; the compiler preserves the blocking proposal and records a hash-bound refinement edge. A refinement may replace only a blocking decision with `background-only`, `paratext`, or `duplicate-description`; it cannot overwrite valid nonblocking accounting or replace one blocker with another. Except for a verified refinement of an existing blocking decision, if new evidence or nonblocking accounting covers a submitted unit, `account_source_units` rejects the entire call with `coverage-changed`, listing `representedUnitIds`, `accountedUnits` and `remainingUnitIds`. Preserve the failed `proposal_id`, call same-batch `find_source_accounting_units` with `status=unresolved, offset=0`, copy the returned `pageToken`, review the fresh page and make at most one corrected call. Never reuse indexes without inspecting that page. If no units remain, stop for host coverage review rather than submit an empty array or withdraw valid coverage. Receipts survive fresh sessions; consumed tokens stay single-use.
+
+Explicit blocking reviews remain visible even when later annotations or assertions overlap the unit. Same-batch refinement still requires the original reason to be reviewed, a fresh unconsumed page, and the exact hash-bound predecessor; overlap alone grants no semantic resolution. Accepted blocking decisions and their accepted refinements survive finish recovery. Candidate projection retains the negative review and its reason, and certification rejects historical snapshots that replaced it with represented coverage. `SOURCE_ACCOUNTING_BLOCKER_SUPPRESSED` requires host review of the original unit decision and a newly verified candidate; do not retry certification unchanged, discard the review, or reset the batch. Ordinary ID/page errors use the discovery and single corrected retry above; consumed, scope, exhausted, or uncertain-write stops remain host-owned.
 
 An exhausted accounting identity with a proven blocking-predecessor refinement requires the host-only `reviewAccountingRefinementObligation` API. Eligibility is verified from exact inputs, page receipts, predecessor decisions and absence of output, not error-message wording. First call it read-only with the exact source, batch, failed proposal, predecessor settlement IDs, a genuinely changed `correctedInput` retaining the latest failed page token, any accepted semantic proposal IDs supporting `duplicate-description` decisions, reason, and audit reference. Inspect its source text, proposed dispositions, and bound support dependencies, then pass the returned `authorityHash` as `expectedAuthorityHash` to one apply call. The operation rechecks immutable source/structure, exact batch segments, all failed input/page hashes, active accounting and semantic baselines, checkpoints, finish receipts, predecessor histories, and every current accepted support revision plus exact overlapping evidence under the compiler lock. It submits the reviewed correction through normal `account_source_units` validation, preserves every old attempt/proposal, settles only the explicitly bound predecessor obligations after the successor is durable, and refuses unchanged, unsupported, changed, repeated, accepted, checkpointed, or receipt-frozen state. An interruption may complete the same retained reviewed intent only when its exact pending output, dependency graph and page-consumption markers remain unambiguous.
 
@@ -887,6 +1347,12 @@ reconciliation, upstream-repair, and role-review scopes still stop on a pipeline
 mismatch; they cannot use this bounded source-plan retirement authority.
 
 ## Contract
+
+恢复验收中的 trace 存在性、唯一性及后续调用检查必须读取完整的同来源历史。
+精确 operation 使用 `TraceStore.peekRunsByOperation`，跨 operation 的历史约束使用
+`peekAllRuns`；二者只读、按时间倒序并限制并发文件读取。`peekRuns` 的最近记录
+窗口只供状态发现，不能证明旧调用不存在或唯一。完整查询仍保留重复、未结算及
+缺失记录的原停止条件，不重新派发模型、不改变预算或把历史失败改为成功。
 
 The `compile-novel` lifecycle preserves the same failure/finish/requirement authorities across stage commands and full runs. Its scheduling journal is not a semantic certificate and cannot reset an obligation, role review or repair budget. `compile-novel status` reports the stopped stage, original diagnostic and retained evaluation review/report without executing recovery. Follow a host-review stop before invoking the suggested stage command again; `--rebuild` is not an error-reset mechanism.
 
@@ -1659,6 +2125,31 @@ non-character participation must omit presence. These mismatches are corrected
 explicitly and are never silently normalized.
 
 ### Upstream history in prepared candidates
+
+Candidate snapshots bind source-representation and independent-identity plans to
+their original requirement journal, independently checked definitions, exact
+source scope and receipt identities. A frozen definition is distinct from its
+current postconditions: snapshot loading must not require a later evaluation or
+silently promote it. Missing or changed authority stops candidate loading; inspect
+`requirements inspect-upstream` for the same source and copy
+`plans[].plan.planHash` once. Do not recreate the definition, restage a consumed
+plan or retry unchanged.
+
+Derived upstream evaluation/invalidation appends retain the original frozen
+prefix of a role dependency or identity review. They neither change that intent
+nor authorize new work. A rewritten prefix or appended execution/authority event
+still stops reconstruction and requires same-source/task host inspection; never
+repin the prefix to the current head.
+
+Role dependency reconstruction compares the complete retained path/hash inventory
+before preserving its original serialized ordering. Filesystem traversal order
+alone is not a changed task. Missing, additional, duplicated or changed files
+still stop reconstruction; original records and their hashes are never rewritten.
+Existing records may use the earlier producer's whole role-work tree plus original
+plan journal. Compatibility requires an exact match of that complete historical
+inventory, including archived failures and budgets. New records retain the current
+source-local capture. Unknown layouts cannot be repinned or treated as permission
+to drop files, change a budget, or reopen a phase.
 
 Candidate snapshots retain the complete upstream repair journal. Frozen plans
 must match a retained original requirement definition and the exact completed
@@ -3418,3 +3909,488 @@ missing-condition report cannot satisfy it. See
 消费者审查的 `bindings[].payloadHash` 由宿主对完整 `JSON.parse(frozenScope.operations[].payloadJson)` 做 canonical hash；模型不能自行猜算，也不能用 `revisionHash` 或 operation ID 替代。`read_identity_dependencies` 在消费者阶段、`collection=dependencies` 的发现及完整读取结果中提供 `operationPayloadHashes[].slot` 和 `.payloadHash`。缺少值时用同一工具、同一 collection、`offset=0` 发现，按 slot 复制精确字段，最多一次实质更正；host/consumed 错误仍停止。独立定义阶段不暴露这些哈希或冻结操作，消费者读取仍限于原分片。
 
 这些字段是只读派生元数据，不改原 input、intent、冻结 payload 或历史哈希。完整证据预检与实际工具返回计入相同字段和字节。若会话已因未提交而封存失败，补齐字段不授权重新派发、复用旧源码审查 PASS 或刷新预算；保留实际失败和全部已付调用，按新的停止状态处理宿主审查。
+
+## 编译收尾交接：plan 与 closure
+
+已收敛上游计划的交接使用现有 `requirements evaluate-upstream --source <id>`。
+这个入口只重验既有独立要求，不重开 Pi staging，也不必先通过全书 `repair`
+阶段。完整 `compile-novel requirements` 仍保留其全局门禁；局部评估成功不代表
+角色问题已解决或父监督器可以恢复。
+
+Web 在修复／交付阶段的“继续编译”使用同一 `compileNovelWithLoop` 入口，沿用
+原 source、监督策略、Pi 预算、回执和失败历史，继续到原有评估／认证／激活
+阶段。Web 的单批操作也不能越过已保留的 `BREAK`。遇到该状态先读取同来源的
+`compile-novel plan/status`，解决原 `resumeCondition` 后由宿主按既有精确状态哈希
+恢复协议处理；按钮和新请求 ID 均不续 grant，不原样重试。发布审计已为
+`not-ready` 时显示阻塞，不能因尚无闭合评估而显示未知。
+监督编译保留自己的 Pi trace 与预算；Web operation 不额外创建一个持续 running
+的 `prepare` trace，以免恢复检查把界面操作误判为尚未结算的模型调用。
+
+`nwh compile-novel plan --source <id>` 是只读发现入口；不启动模型、工程监督器、迁移、认证或激活。未知 source 时运行 `nwh status --json`，复制 `sources[].sourceId`，最多纠正一次；不要猜 ID 或原样循环。输出 `sources[].handoff.tasks` 的 `command` 与 `resumeCondition` 必须一起读取；命令可发现不代表其写权限已获批准。
+
+`COMPILATION_PREREQUISITES_BLOCKED` 保留原始角色／身份停止条件。身份任务仍使用 `requirements inspect-identity-repairs` 的同 source/task：复制 `items[].ref`（或 `availableRefs[]`）到 `--ref`，至多一次实质纠正。只读检查不能重开已消费阶段。额外消费者修复需要原有窄类型、独立要求、准确计划与验收；证据不足、类型不支持或原授权耗尽时停止对应工作，不续 grant、不轮换任务 ID、不恢复父编译。
+
+`COMPILATION_CLOSURE_BLOCKED` 的完整检查保存在原运行 `closure.gates`，计划入口也返回这份历史快照。按每项 `owner`、`refs` 与诊断处理原 requirement／repair scope，然后重新执行 `compile-novel closure`。旧快照、检查点计数、零 proposal obligations 或归档成功都不能替代新检查。闭合阶段本身不调用模型；不得把这个阶段的重新检查解释为重试原模型失败的许可。锁不归当前进程时使用正式阶段入口并先检查 `compiler-lock inspect`；不得并发执行或删锁绕过。
+
+交接命令中的绝对 `--root` 与 `--source` 必须一起保留，不能因当前目录不同而切换原任务范围。已评估上游计划的负面结果仍需检查同 source 的 `requirements inspect-upstream`，读取 `plans[].evaluation.result.result.requirements`；`UPSTREAM_REPAIR_EVALUATION_STALE` 或 `UPSTREAM_REPAIR_EVALUATION_UNVERIFIED` 要求先解决具体输入／存储条件，再通过原 `requirements` 阶段重验。发现结果不能授权重新 staging 已消费计划，闭合检查也不会刷新其评估或预算。
+
+
+### 原身份消费者 finding 的修复方案与独立复核
+
+`nwh requirements review-identity-repair --source <id> --task <hash> --ref <ref> --authorization-ref <ref>` 用于用户已授权的原 `additional-repair-required` finding。它复用原独立要求，运行两个独立的 Pi 只读会话，追加 `identity-consumer-repair` 记录；不创建要求定义、验收标准、上游写入许可或父编译恢复许可。`supported` 的能力缺口表示实现仍缺失，不能据此激活世界。
+
+任务或引用不匹配时，先在同一 source 调用 `requirements inspect-identity-repairs`，复制 `tasks[].taskId` 到 `--task`，再复制原任务 `items[].ref` 到 `--ref`，最多纠正一次；不得猜 ID、换 task/finding、重开旧消费者阶段或更改原失败文件。该入口不执行已退役的 context-recovery adapter，也不移除 `contextRecoveryAttempt`。
+
+两个阶段继承原预算文件的完整 lineage；同一阶段只按实际增量累计失败与恢复调用，保留原预算哈希和逐阶段上限。缺祖先、分叉、计数下降、来源/基线/要求前缀漂移、未结算 trace 或已消费 invocation 都必须停止，不能重置预算、缩小消费者分母或更换阶段名重试。
+
+模型工具仍为 `read_identity_source`、`read_identity_dependencies`、`submit_identity_requirements`。此入口的依赖读取没有 collection 参数：在同一任务以 `offset=0` 发现，复制 `items[].ref` 到 `refs` 获取完整基线与精确引用指针；源码读取复制 `segments[].id` 到 `segmentIds`。必须先取得完整读取结果，再单独提交。格式/发现错误最多一次实质纠正；来源、宿主、预算、消费状态或混合读取/提交错误禁止重试。
+
+实体已有修订只支持注册字段的精确差异；`id`、`kind`、能力配置、创建、合并、删除、重绑均不在该写入范围。`identityConsumption` 的 `unresolved/quarantined` 标记绑定当前未决身份决议的完整修订哈希、原提及及完整继任链。它保留历史实体，不授予确定身份；实体直接引用、状态读写、事件/知识/机制间接引用、角色入口、目标和名册消费必须检查该标记。名称或别名修订不能替代隔离语义。
+
+`requirements execute-identity-repair` 复用同 source/task/ref/authorization-ref 的原 finding 与两个独立 Pi 修复能力记录。宿主冻结窄类型计划：原身份决议槽位及唯一实体 `/identityConsumption` 修订。按依赖顺序由 Pi 提交；实体保留宿主验证的历史证据和原精确绑定，决议哈希复制 `read_upstream_repair_context` 的 `stagedDependencies[].payloadHash`，提及和链路复制其完整 `payload`。ID 失配先用同作用域 `read_upstream_repair_context`，复制 `readable[].id` 或 `stagedDependencies[].payload.id`，证据复制 `evidence[].segmentId`，最多一次实质纠正；宿主、已消费、预算、来源或作用域失败必须停止，不原样重试。
+
+实际暂存图由另一独立 Pi 会话按原要求验收。`read_identity_upstream_acceptance` 的 `segmentIds=[]` 返回 `segments[].id`；复制到 `segmentIds` 读取完整原文，之后单独调用 `submit_identity_upstream_acceptance`。此验收只允许原要求 ID，不授权下游消费、原关键问题结算或父编译恢复。负面验收保留，不补造支持结论。
+
+逐阶段调用和实际载荷计费继承原失败及方案复核预算；完整 Pi 会话、实时消息、实际请求日志和检查点分别保存并核对。恢复读取原单次 invocation、已封存检查点、暂存尝试和回执，不能重新请求已完成的模型阶段。缺少完整检查点或存在未结算 trace 时保留原状态并检查原拥有者，禁止自动重开。宿主失败状态写入历史，累计计费不归零。上游暂存仍经过原字段与证据校验、原尝试预算、冻结完成回执和确定性收敛；世界提案在完成回执后仍须收敛，不能把检查点当作实体提交或编译完成。
+
+修订后 `inspect-identity-repairs` 分别显示原 finding 基线与当前实体/修复状态，不用新目录覆盖旧上下文。全部原消费者分片、来源页、候选名单、关键问题及其失败记录仍需按原验收重验；本地隔离修复收敛不能代替全局闭合、可执行认证或激活。
+
+已完成原 finish 回执之后的宿主收敛检查失败，通过同一执行入口恢复：宿主必须持有编译锁，核对原已完成回执、全部已结算 Pi 会话、原精确提案及独立验收，再重验当前修订和证据绑定。仅同一回执中接受的证据断言可作为修复输出；其他目录漂移仍阻塞。成功时追加带 `recoveredStopRef` 的收敛记录，旧 `needs-host-review` 与 BREAK 文件原样保留。没有完成回执、调用未结算、提案/证据变更或复核不支持时禁止恢复；此路径不开放暂存、不续模型额度，也不恢复父编译。
+
+`requirements evaluate-upstream` 对身份、来源表示和 proposal obligation 的局部后置条件保留完整当前快照；下游初始世界因隔离身份而不可执行时，局部要求可单独记录结果，原无效消费者仍以 `SOURCE_ISOLATED_BASELINE_INVALID` 阻塞。它不删除该消费者、不把隔离实体改成可玩角色，也不绕过候选归档、可执行场景／角色验收、认证或激活的有效基线门禁。先读取同 source/task 的 `inspect-identity-repairs --ref` 中原消费者及其精确引用，满足其既有修复条件后再重验；不能原样重复已完成的实体修复或用局部 `satisfied` 恢复父编译。快照的来源、证据、暂存或账本无法验证时仍停止，不记成功结果。
+
+### 完成实体修复后的原消费者重验
+
+`requirements revalidate-identity-consumer --source <id> --task <hash> --ref <ref> --authorization-ref <ref>`
+仅用于已有用户授权、原任务的实体修复已独立验收并完成收敛之后。先用同来源的
+`inspect-identity-repairs` 复制 `tasks[].taskId`，再从同任务复制 `availableRefs[]` 到
+`--ref`；ID/ref 失配只允许一次发现后的更正。它追加原消费者重验及独立复核记录，
+原 536 项等清单分母由保存的任务决定，不能从成功的对象反推。旧分片、关键问题、
+负面审计和已消费阶段保持不变；局部通过不授予父流程恢复或认证。
+
+新阶段必须绑定实际已完成的上游回执、原要求定义和原消费者修订，并继承原预算
+与失败调用的累计消耗。每阶段沿用身份审查的请求/总载荷/调用门禁。旧 invocation
+不能重放；完整 Pi 会话、实际请求、消息观察及封存检查点可验证时，仅恢复其原
+提交的宿主登记，零新增模型调用。不存在完整检查点、依赖漂移、未结算 trace、
+预算耗尽或负面复核时停止，不更名、不缩小分母、不清失败。
+
+`entry/<actorId>/<eventId>` 是当前 canonical event 与有效 event-execution 的
+只读投影，不是独立存储工件。重验按同一事件执行投影规则定位入口，核对事件及
+执行绑定的活动修订哈希；已退休绑定不参与投影。缺失当前事件／入口、修订不符、
+角色错配或重复绑定均保留停止，不能退回冻结的旧入口。先在同 source/task 的
+`inspect-identity-repairs --ref` 检查原对象及其拥有者，解决实际版本条件后才续行。
+定位修复不重新派发已消费阶段，不放宽独立复核、完整消费者分母或父编译门禁。
+
+Pi 的 `read_consumer_revalidation` 在同一 scope 内通过 `collection=source`
+或 `artifacts`、`offset=0` 发现：分别复制 `items[].id` 到 `segmentIds`、
+`items[].ref` 到 `refs`，分页只复制 `nextOffset`。`collection=consumer` 复制
+`scope.ref` 到 `refs` 读取原对象和当前版本。发现不是完整证据读取。
+`source` 发现支持 `query` 按原文字面搜索，`artifacts` 按准确 ID/kind 搜索；
+分页保持同一 collection/query。`query` 不与 `segmentIds` 或 `refs` 混用，
+也不用于 `consumer`。搜索结果只提供导航 ID，须另行完整读取后才能提交。
+新增发现能力不重开已耗尽纠错次数的原会话，也不使历史失败成为成功。
+`submit_consumer_revalidation` 必须在完整读取后作为单独一次调用提交；格式或
+发现错误最多一次实质纠正，host/scope/consumed/budget 错误禁止重试。
+
+初始世界上游修复使用既有 `initial-world` 单例的 `singleton` 修复引用。只允许
+计划中批准的完整字段修订；不允许创建另一个初始世界、改版本或写数组子索引。
+状态、知识、开场事实、观察、时间切面和投影种子的外部引用须冻结精确依赖，
+仍经过原提案校验、完成回执和确定性收敛。独立审查提出的字段范围不是提交许可；
+实际世界修改仍需其类型化计划、原验收及 Pi 提案，不能由会话手工填写小说内容。
+
+`inspect-identity-repairs` 和编译状态的 `consumerRevalidation` 单独展示回执绑定的
+重验进度，原分片和原消费者审查计数保持不变。`independentVerdict=supported`
+只支持所记载的 disposition；若 disposition 为 `blocked`，来源审计仍依赖这项
+阻塞，不能转换成通过票或重开原单次审计。`reviews[].rationale`、
+`blockedRequirements`、`receiptFingerprint` 保留原条件与回执定位信息。
+
+世界消费者必须存在精确的当前有效修订；被继任的旧决议仅作为历史证据读取，
+不得以冻结的旧载荷替代缺失的当前对象。`artifacts` 返回的 `current=false`
+表示历史证据，不能作为新修复的当前依赖。来源页、候选和待审清单仍由原来源
+审计负责；对此类 ref 不调度世界消费者重验，回到同任务的 `sourceReviewCoverage`
+检查原阻塞，不能缩小分母、另起审计或原样重试。
+
+### 身份不确定与局部主体能力的源码纠正
+
+`identityConsumption.mode=quarantined` 继续禁止世界消费。`source-local` 表示经原文
+及独立复核支持的局部人物指称，`status` 仍为 `unresolved`，`referentScope` 必须
+保留 `crossIdentity=unresolved` 与 `distinctness=unasserted`。稳定 ID 不证明其与
+具名人物相同，也不证明其与全部其他人物不同。局部提及必须锚定同一来源位置；
+梦境、画像、传闻不能仅靠此模式获得现实身体。原身体／通道、知识、时间和证据
+检查全部保留；模式及作用域仍通过既有精确证据断言和类型化提案验收。
+
+对原消费者重验因旧代码只能表达“全隔离”而阻塞的情况，同一命令可带
+`--compiler-correction source-local-referent/v1`。宿主绑定原两份负面记录、源码
+契约哈希和原任务，不修改旧 invocation 或结论。此纠正键固定，只能继续一次，
+不能靠修改代码哈希、更换授权文字或重命名生成新机会。两阶段分别扣除原阶段
+已用调用和载荷后使用剩余额度，累计费用继承全部旧调用；无余量时停止。
+
+Pi 必须重读原证据、原条件和原负面结论，判断缺的是来源证据还是表达能力。
+只有独立支持的具体修复范围才能进入后续类型化执行；该纠正本身不清关键问题、
+不改变完整消费者分母、不恢复原来源审计或父编译。未知策略、缺前驱、源码契约
+漂移、预算变动或已消费调用均停止，检查同 source/task/ref 的原记录，不自动重试。
+
+`read_consumer_revalidation` 区分闭包依赖引用与工件引用：仅从已验证的原 inventory
+建立 `event` → `canonical-event`、`norm` → `norm-template` 等明确映射，
+`initial/<sourceId>` 只能映射本来源的 `initial-world:singleton`。同一精确
+`kind:id` 与 `kind/id` 均可读取；返回 `aliases` 供原失败引用交接，禁止猜别名或跨来源。
+优先复制输入的 `artifactReadRefs[].ref`；缺失时使用同 scope 的
+`collection=artifacts, query=<精确已知 ID 或 kind>, offset=0`，复制返回的
+`items[].ref` 后只纠正一次。`CONSUMER_ARTIFACT_REF_MISS` 是引用缺失，不因恢复说明
+含 `offset=0` 而误判为分页错误。空结果应停止，不能遍历整个目录猜身份。
+
+`roster/<sourceId>` 读取经过原 inventory 哈希和来源验证的冻结角色名册，标记
+`evidenceRole=retained-role-roster, current=false`；它是原审查依据，不是世界真值或新审查。
+大工件的 `readMode=paged` 提供精确 `readArguments`，单独读取后复制
+`items[0].page.nextOffset`，直到 `complete=true`。页面采用 `consumer-artifact-json/v1`：
+按序拼接文本并解析 JSON，依返回说明展开固定宽度 ID 后缀与前缀；`hex85` 仅对十六进制
+不透明 ID 后缀做可逆基数编码，不改变语义文本。每个 ID、顺序、重复项
+和字段均保留，不摘要、不删减分母。只有完整顺序页重建的 payload 哈希匹配原 revision
+才计入读取；漏页、跳页、哈希漂移不构成证据。历史未分页读取仍按原完整返回核验。
+分页及无损编码不增加调用或字节限额；原失败次数、原 pending 引用和恢复证明保持不变。
+新消费者会话可选择 JSON 字典 `compact/v1` 编码，共享重复的短 ID，并以
+`$nwh.front-coded` 保存 ID 数组中相邻项的共同前缀长度和完整后缀；所有项及顺序均能
+精确重建，原文字段不摘要。实际 wire 明确记录所选 profile。核验旧请求仍使用旧 profile，
+原会话、请求正文和预算不重写；紧凑编码不比原编码节省时保留原表示。
+
+没有终结提交的失败不会产生语义审查记录。只读状态在 `consumerRevalidation.attempts`
+保留其 `BREAK`、失败原因、原调用是否已消费、检查点、累计用量和各原阶段余量；
+`reviews` 中旧负面结论及原审查计数不变。纠正未完成不能被解读为新的“原文不足”
+结论；剩余额度本身也不能重开已消费且没有封存提交的调用。
+
+### 消费者重验未提交失败的受控续接
+
+#### 已确认读取缺陷或请求体超限的宿主恢复
+
+`requirements revalidate-identity-consumer --host-recovery <JSON> --resume-unsubmitted inspect`
+仅检查原消费者提案阶段的两种已结束、从未提交的失败：`source-search-contract`
+（旧实现拒绝合法原文搜索）和 `request-size`（包括原唯一续接已消费后的请求体硬停）。
+这是用户明确授权修复后的独立恢复协议，不是自动重试或另一份语义授权。
+
+先使用同 source/task/ref 的 `requirements inspect-identity-repairs`，复制匹配
+`summary.consumerRevalidation.attempts[].stages[].hostRecoveryCandidate` 中的
+`scopeHash`、`stage`、`failedTraceRunId`、`failureHash`、`cause`；JSON 另含后来明确
+授权的 `authorizationRef`、`authorizedAt` 和 `maxRequestBytes`。保持命令原有
+`--authorization-ref`。引用不匹配最多从同作用域发现结果纠正一次，不猜测或不变重试。
+预检不写状态、不调用模型；通过后同一 JSON 配合 `--resume-unsubmitted run`。
+
+宿主核对完整 Pi 会话、实时消息、实际请求、未发送的超限请求、失败 trace 和
+全部旧预算。请求体上限可有界增加至最多 2048000 字节，同时绑定该消费者尚未开始
+的独立检查；两个阶段都不增加调用数或累计字节额度，提案扣除原阶段及旧续接用量。
+搜索契约恢复保持所有字节上限，保留被旧实现误拒的搜索及其次数，修复不是删除错误。
+搜索契约错误不得因为诊断包含 `offset=0` 而报告为分页错误。混合发现与读取参数时，
+分别发现 `items[].id` / `items[].ref` 后只允许一次纠正；原文查询与工件查询均受来源限定。
+
+唯一的 `consumer-revalidation.host-recovery/recovery.json` 保存原文件哈希、失败、
+后续授权和剩余额度。原 `.continuation` 与预算不改写。恢复会话重新完整读取原必需
+来源、先前读取的来源与依赖，并以单独工具调用提交；独立 Pi 审查仍不可省略。
+状态分开展示原失败、旧续接、新恢复及累计用量。完整封存后的登记中断复用原回执，
+不重放模型。已有提交、独立检查已开始而无原恢复证明、原证据漂移、剩余额度不足、
+未知失败或恢复再次失败时停止，不更名、不补写授权、不清空计数或启动第二次恢复。
+唯一例外是下述可完整证明的首请求、零输出用量拒绝；它只续接原恢复的剩余额度。
+该局部恢复不解除原语义问题，不恢复父编译，不认证或激活世界。
+
+中断消费者的 `scope.requirementPrefix` 始终指向原冻结账本前缀，不随恢复更新。
+前缀后的追加记录只有属于同一 `taskId` 和 `identityIntentHash` 的只读消费者重验时，
+才允许原封存提案继续登记与独立检查；前缀哈希变化、未来前缀或其他任务／写入记录
+均停止，不改写 scope 或历史。新增审查记录必须先通过完整预期账本校验，再发布 head。
+若旧实现已封存并登记有效提案后因把合法追加误认为前缀漂移而停止，宿主核验原
+同作用域记录及完整会话后复用该提案，只运行尚未消费的独立检查，不能重跑提案。
+
+首次请求即被 Pi `openai-codex/gpt-6.1-sol` 用量限制拒绝的消费者阶段，可在用户后来明确
+要求继续、宿主核实同提供方／模型恢复后使用原唯一续接。增加 `--provider-resumption <JSON>`，
+保持原 source/task/ref 和 `--authorization-ref`。从同作用域 `inspect-identity-repairs` 的
+`summary.consumerRevalidation.attempts[]` 中匹配 ref 的 `scopeHash`、`stages[].stage`、`stages[].traceRunId` 复制
+`scopeHash`、`stage`、`failedTraceRunId`，另记录这次后续用户授权的 `authorizationRef`
+和 `authorizedAt`（ISO 时间）。先以 `--resume-unsubmitted inspect` 验证；发现引用错误最多
+更正一次，禁止猜测或不变重试。
+
+原完整 Pi 会话、实时消息、实际请求、预算和唯一失败 trace 必须共同证明：恰好一次请求、
+明确的用量限制错误、空输出、零提供方用量、零工具调用和零重试。未知错误、部分输出、
+已尝试提交、未结束会话、硬预算停止或已消费续接均不适用。后续授权必须晚于原失败并
+绑定同一 trace；不得复用原授权冒充新的宿主决定。授权随原 `continuation.json` 冻结，
+以后恢复登记和验证历史复用同一证明，不能换授权再开会话。原失败请求的调用和字节
+照常扣除，独立检查额度不变；此入口不提高预算、不解除原语义阻塞、不恢复父 loop。
+
+若这一拒绝发生在已绑定的 `consumer-revalidation.host-recovery` 提案阶段，宿主同样先
+检查原提供方／模型已恢复，从同一发现结果的 `stages[].hostRecovery.traceRunId` 复制
+`failedTraceRunId`，使用晚于拒绝的新用户授权及原 `--authorization-ref`。原宿主恢复
+自动读取已冻结的 `recovery.json`；如传 `--host-recovery`，仍必须是原 JSON。不得把
+最初修复授权冒充这次续接授权。先 `inspect`，然后同一 `--provider-resumption` 执行
+`run`；发现引用不符最多纠正一次，不能改名或反复尝试。
+
+证明与唯一会话存放于原宿主恢复下面的 `consumer-revalidation.continuation`，同时绑定
+`hostRecoveryHash` 和 `continuationHash`。原始失败、旧续接、宿主恢复全部保持不可变，
+每段实际调用与字节只累计一次。用量拒绝的那次请求仍扣除；请求体上限不提高，原必读
+来源和依赖重新完整读取，独立检查仍用另一会话且额度不变。状态单独显示原拒绝与
+`hostRecovery.providerResumption` 的结果。此续接再次失败且无封存检查点时停止，不能
+继续派生新段；有封存检查点时仅恢复原登记。独立检查已启动、部分输出、非额度错误、
+证据或授权漂移均不适用，不恢复父任务、认证或激活。
+
+宿主明确获准恢复后，在原 `requirements revalidate-identity-consumer` 命令、相同
+source/task/ref、授权引用及编译纠正策略下，先使用 `--resume-unsubmitted inspect`。
+该入口只读，不创建锁、不改状态、不调用模型。它验证原 Pi 完整会话、逐次实际
+请求与消息观察、失败 trace、来源和要求输入，以及真实调用／载荷累计。
+只有已结束、从未尝试终结提交的只读失败可进入此协议；已有提交须恢复原登记，
+会话缺失、预算硬停、作用域漂移、未结束 trace 或已用完纠错机会均停止。
+
+`--resume-unsubmitted run` 为同一原阶段保留唯一的 `.continuation` 目录及不可变
+`continuation.json`。原 invocation、会话、请求、错误、预算不改写。新 Pi 会话须
+重新读取原必读来源／消费者，并补读原失败请求中尚未完成的精确工件；历史发现
+和读取不冒充新会话读取。原工具错误次数继续计入有界纠错，不续发纠错次数。
+原要求、分母、来源边界、独立检查与验收规则不变，两个阶段不得互借额度。
+
+新段只能使用该阶段减去原失败实际用量后的剩余额度。读取之后的单独提交至少
+需要两次模型调用；这是启动下限，不是完成保证。余量不足时记录 `budget-blocked`
+预检，父状态保持 `BREAK`，不创建模型 invocation、不消耗最后额度、不重置预算。
+状态的 `consumerRevalidation.attempts[].stages[].continuation` 分开展示旧失败、
+续接预检、续接检查点和用量；累计计算两段的全部实际消耗。
+
+续接段自身也只有一次 invocation；其失败且无检查点时不得再开第二段。完整提交
+之后若宿主登记中断，只恢复同一封存结果，零新增模型调用。续接记录必须绑定
+原失败证明，独立检查仍使用另一 Pi 会话；任何阶段通过均不直接恢复来源审计或
+父编译，也不自动认证或激活小说世界。
+
+若该预检因调用余量不足而阻塞，且用户后来明确授权追加预算，宿主可在同一命令
+增加 `--continuation-budget <JSON 文件>`；先配合 `--resume-unsubmitted inspect`
+只读预检，随后 `run`。JSON 仅含从预检复制的 `continuationHash`、`stage`、
+`additionalCalls`（1–12）以及这次后续授权的 `authorizationRef`。原命令的授权
+引用保持不变，不得用旧授权冒充追加许可。追加记录不是新的需求或验收标准。
+
+单一不可变 `budget-amendment.json` 绑定原续接证明，只增加本阶段调用上限，
+不增加字节额度、不挪用独立检查额度，不改旧 `continuation.json`、`preflight.json`
+或预算。新调用、模型输入、预算和审查记录均绑定追加记录哈希。状态同时显示原
+余量、追加额度与两段累计用量。仅在续接尚未启动时允许追加；已经启动、授权或
+哈希不符、已有另一追加记录时停止，检查原续接目录，不换 ID、不追补许可、不重试。
+完整提交后的登记恢复仍不调用模型，也不获得第二段执行机会。
+
+`entityRepair.ref` 同样接受发现结果中的精确 `entity:id` 与旧 `entity/id`，二者须
+匹配原完成回执中的同一实体 ID 和修订哈希；不猜别名、不改写 Pi 原始提案。
+若唯一续接的终结提交只因宿主旧版斜杠校验被拒，使用同一命令的
+`--resume-unsubmitted inspect --recover-submitted-ref` 只读检查。仅允许原诊断、
+唯一独立提交、全部成功的完整读取、相同来源／要求、实际会话三方证据和旧用量
+均吻合，且完整原提交通过当前全部校验的情况。其他失败停止，不适用此恢复。
+
+通过预检后 `--resume-unsubmitted run --recover-submitted-ref` 以零新增提案模型调用
+保留单一 `consumer-revalidation.ref-recovery.json`，登记未经改写的原 Pi 提案。
+它不伪造成功工具回执：原失败 trace、消息、预算、错误均保留，记录显式绑定
+`refRecoveryHash` 而非成功会话检查点。随后仍由原独立 Pi 检查阶段判断该提案。
+恢复证明、原提案或任何读取证据漂移时停止；不得借此重开失败会话或跳过独立验收。
+
+已获独立 `supported` 的 `repair-required` 联合范围，可通过原
+`requirements execute-identity-repair --revalidation-id <id> --inspect` 查看类型化
+计划与继承预算；复制同 source/task 的 `consumerRevalidation.reviews[].id` 和
+原 `ref`，授权引用仍须一致。去掉 `--inspect` 后才进入 Pi 执行。计划由原审查
+记录确定，只修订既有实体的 `/identityConsumption` 和原初始世界单例的精确字段，
+不创建实体或身份决议。先暂存实体，再在其精确暂存依赖下修订单例，最后用另一
+Pi 会话对联合图按原要求独立验收，并经过原 finish／convergence。
+
+已退休的决议仅由原完成回执恢复为只读证据，不标作当前有效决议。完整目录基线
+由原冻结目录及前次完成回执重建，不能把无关变动重新冻结为合法基线。新的执行
+段继承所有旧阶段、续接、格式误拒及检查用量，沿用现有槽位和独立验收上限；
+任何范围、来源、精确回执、目录、预算、暂存图或独立验收不符都停止，保留原
+错误，不猜 ID、不重开调用、不改写已消费授权。局部修复完成仍不替代消费者和
+原来源审计重验，也不直接恢复父编译或认证世界。
+
+联合修复沿用修复账本的前驱协议：在完整预检通过后，以原独立重验和完成回执
+记录旧计划被后续修复接替的原因，显式关联同一前驱计划；原完成及评估记录
+保持不变。若中断只发生在前驱停记与新计划登记之间，仅允许相同原因和相同
+计划继续登记。其他宿主停止原因不得绕过。退休决议仍保留为审计依赖，收敛
+结果只列当前有效决议，不能把历史决议重新标作有效。
+
+隔离类型化槽位须传递原工具的完整 `promptGuidelines`。初始世界的事实、即时情境
+和角色观察要求精确到 `summary` 的证据绑定；引用其父对象不能替代字段绑定。
+该规则是现有校验的说明，不降低证据要求，也不自动改写模型的选择器。内层工具
+已返回 `retryable=false` 或修复账本已停止时，外层不得重新包装成可重试错误；
+保留原诊断并阻止后续模型请求。检查入口返回最近失败的 `attemptRef`、完整诊断
+和只读宿主复核命令；补充工具说明不会刷新已消费槽位或原纠正上限。
+
+若最新初始世界槽位已结算失败，且原诊断仅为 `MISSING_OPENING_FIELD_EVIDENCE`，
+先在同 source/task 的 `inspect-identity-repairs` 中复制
+`typedRepairs[].lastFailure.attemptRef`。原 `execute-identity-repair` 可带
+`--correct-failed-attempt <ref> --correction-authorization-ref <已有明确授权引用>`
+和 `--inspect` 做只读预检。首次执行须有明确的一次额外有界纠正授权；旧槽位的
+4 次上限、已用调用、失败、原计划和提案 ID 均不变。ID 不符最多按发现值纠正
+一次；其他失败、进行中会话、已开始验收、范围变化或预算漂移停止，不适用此入口。
+
+去掉 `--inspect` 后先保留 `correction.intent.json`，额外 Pi 纠正阶段最多 4 次
+调用、单次 512000 请求字节、累计 2048000 请求字节；这些是调用／字节限制，
+不是 tokenizer 估算。用量累加到原失败之后，并传给原独立验收及后续消费者。
+`read_identity_upstream_correction` 一次完整返回原上下文，精确复制
+`failedProposal.proposal_id`、`context.readable[].id`、
+`context.stagedDependencies[].payload.id` 和 `context.evidence[].segmentId`，
+不得猜测或重复发送完整上下文来消耗额度。`submit_identity_upstream_correction`
+只能在完整读取后的单独响应提交一次，只改原提案的 `evidence_selectors`；
+payload、来源与提案 ID 均保留。该工具只保留 Pi 草稿，任一错误均停止，不另开
+会话、不更名、不重复提交。原文不足时保持阻塞，不编造证据。
+
+真实 Pi 会话、完整读取、请求用量和终结回执封存后，宿主才把原样草稿交给已有
+`authorizeHostCorrection` 与常规 staging 校验。它显式关联原失败会话和新的
+只读 Pi 证明，不伪造成功的模型 staging reservation。中断只恢复同一证明、
+宿主授权或精确已预留输入，不能重放 Pi。失败的宿主校验保留完整诊断并停止。
+已暂存实体保持原样，联合图仍须由独立 Pi 按原要求验收，再进入原 finish 和
+convergence；该局部恢复不代替消费者重验、原来源审计或整体认证。
+
+后续独立验收前先运行与 finish 相同的只读 canonical commit preview，保留绑定
+暂存图的诊断，不消费 Pi 验收调用、不提交世界。该预检通过仍不能替代语义验收。
+`INACTIONABLE_INITIAL_WORLD` 沿用原多角色来源的可执行开场条件：在场角色须有
+有证据的地点、计划或动态状态；读者上下文、观察文字和 `alive=true` 不能代替。
+不得因局部身份要求已获 supported 就删除这道门禁。finish 已冻结后失败时，
+`typedRepairs[].currentStop` 返回当前停止记录与原 finish intent；旧
+`lastFailure` 继续保留原槽位错误。不能误走已完成回执的 convergence recovery，
+也不能重复 evidence-only 纠正；需要按原 pre-receipt finish revision 协议由
+Pi 提出所需语义修订，并对变化后的图重新独立验收，保留旧提案与旧验收。
+
+该恢复通过原 `execute-identity-repair` 的
+`--revise-failed-finish <typedRepairs[].currentStop.recordRef>` 与
+`--revision-authorization-ref <明确修复授权引用>` 进入；同 source/task/ref、
+原 authorization-ref 和 revalidation-id 必须完全一致。先带 `--inspect` 只读
+验证；ID 不符只允许从同作用域发现结果纠正一次。范围变更、未结算 I/O、已有
+prepared/completed finish 回执、已消费修订或任何修订失败均停止，不猜测、不
+换授权、不原样重试，也不与 evidence-only 纠正入口合并。
+
+`read_identity_finish_revision` 完整返回原失败图、精确可读依赖、原文和可写字段。
+复制 `intent.proposalId` 与 `source[].segmentId`，不自行生成 ID。
+`submit_identity_finish_revision` 在完整读取后的独立响应中提交一次完整
+`propose_initial_world` 输入；只允许原单例范围的实质 payload 修订，不能仅换
+证据、保留同一失败内容或写入宿主猜测的地点、计划、动态状态。工具仅封存草稿，
+任何错误都停止。一次额外草稿阶段最多 4 次调用、单次 512000 请求字节、累计
+2048000 请求字节；失败也计入原累计用量，不能重置原槽位额度。
+
+宿主验证真实 Pi 会话、原文字节、精确依赖、请求预算与唯一终结提交后，复用
+已有 pre-receipt finish revision 协议暂存，并运行原确定性 commit preview。
+独立验收写入 `finish-revision-acceptance.*`，保留 `acceptance.*` 原文件；两次
+验收合计不能超过原 24 次／12288000 请求字节上限。新验收必须使用另一会话，
+绑定变化后的完整图，旧 supported 不能授权新图。只恢复同一已封存证明的宿主
+中断，不重放 Pi；提交、收敛后仍由原回执绑定的消费者重验判定效果。
+
+验证已完成的 source-local 消费者审阅时，仍核对冻结语义契约、原输入、真实
+会话、来源、失败与预算链；后续代码或测试文件变化本身不使历史证据失效。
+新模型调用仍要求实现哈希匹配原冻结 scope，不允许以读取历史为由续 grant。
+
+如果草稿会话读取原文后未提交修订，失败和实际调用仍原样保留，独立验收不启动。
+`inspect-identity-repairs` 的 `typedRepairs[].finishRevisionProgress` 及执行入口的
+只读 `--inspect` 显示已消费阶段、实际用量和原消息文件；当前恢复类型为
+`inspect-consumed-opening-revision`，不能再次提示开启同一修订。复制
+`stages[].modelResponseFile` 查看原助手解释，它是诊断而非独立验收。来源或原字段
+不足时保留 host-review；不重放调用、不续授权、不扩张范围或降低开局门禁。
+
+契约升级不会自动解除以上停止。仅在用户明确授权后，可按本文开头的
+Entry capability contract recovery 入口核验旧会话并登记一次契约转换；
+旧修订保持 stopped，新阶段最多使用原剩余的两次调用，失败后不可再次恢复。
+
+## Compile loop domain recovery
+
+`COMPILE_LOOP_DOMAIN_ACTION` 保留阶段回执中的结构化领域或宿主状态停止条件。
+先在同 source 的 `compile-novel plan` 复制 `tasks[].command` 并满足
+`tasks[].resumeCondition`；不会仅凭错误文本启动工程代理或重复编译。不修改
+旧 BREAK、事故计数和原授权；未知工程异常仍进入原工程恢复，已验证宿主补丁
+仍按原独立复核协议处理。
+
+领域修复完成后，先通过原阶段入口重新验收。明确恢复原监督停止时，监督器仅在
+同一编译运行保留完整旧历史、追加对应阶段 completed 且没有后续失败的情况下
+登记领域解除证据，再让编译器重新校验当前输入；不凭一句 resolution、换 run
+或删掉失败历史启动工作，也不为已经解除的领域条件启动无关工程修复。
+
+### 入口状态修复（entry-checkpoint-state/v1）
+
+`requirements repair-entry-state --source <id> --task <hash> --ref <ref> --authorization-ref <ref>`
+处理已有独立支持的 blocked 入口复验，先用 `--inspect` 验证范围；该检查只读且不调用模型。
+范围发现使用同一 source/task 的 `requirements inspect-identity-repairs`，复制
+`summary.consumerRevalidation.reviews[].ref`，不得猜测角色或事件。原负面判断、完整来源包、
+原问题、要求、分母、账本前缀、费用和失败历史都绑定在修复意图中。
+
+`preview_entry_state_repair` 和 `submit_entry_state_repair` 只保存提案或独立检查。
+从输入 `stateOperations[]` 复制 `index`、`operationHash`，从
+`context.originalInput.evidencePacket.sources[]` 复制原文段 ID 和 exact。
+删除仅限该角色的意图或定性身体状态操作；新增仅限既有 `character.plan` 和定性身体字段，
+每项都须有精确证据、支持强度及解释。字段／选择器错误最多一次实质纠正；有效 preview
+之后在独立的一轮中单独提交原样草稿。SDK 参数拒绝同样计数。范围、宿主、预算、已消耗阶段
+或第二次错误必须停止，不重命名、不换授权重跑；已封存结果只能零生成恢复登记。
+
+独立会话逐项检查来源、身份依赖、事件之前的时间边界、知识隔离、在场与能动性、入口状态、
+写入范围以及全部原要求的兼容性。只有完整支持的提案才能通过原提案库提交。
+`lowerEntryState` 是不依赖小说或身份任务的纯转换，不授予写权限。它只修改目标入口的
+角色状态操作，不能改动知识、在场、原文叙述、其他角色、事件结果或执行覆盖层。
+原文不能支持可操作上下文时仍为 blocked，不从后续结果反推动机。
+
+四阶段回执追加到原 RequirementLedger。`reviews` 保留原负面判断，`currentReviews`
+另行投影已接受修订的复验状态。该状态不解决全局身份问题，不恢复角色来源审计，也不授予
+行动证明、全书认证或激活。入口状态与在场修复按同一账本顺序逆向验证，不能分开回退后
+掩盖中间修订。后续消费者继承全部已消耗调用；版本或证据漂移必须停止。
+
+### 入口文字修复（entry-checkpoint-wording/v1）
+
+`requirements repair-entry-wording --source <id> --task <hash> --ref <ref> --authorization-ref <ref>`
+沿用上述独立负面复验、原文包、原问题、分母及预算，先以 `--inspect` 只读确认。
+范围发现同样使用 `requirements inspect-identity-repairs`，只复制同一 source/task 的
+`summary.consumerRevalidation.reviews[].ref`；不得猜测、变更父判断或重新执行已消费阶段。
+
+纯转换 `lowerEntryWording` 只允许修改目标角色入口的 `readerSetup` 和 `actorObservation`。
+模型从 `entryWordingFields` 复制字段名，并为每个字段提供精确原文选择器、支持强度和理由。
+事件后的距离、伤势、站位不能倒填到事件前。状态、知识、在场、身份、时间、其他角色和事件
+结果保持不变。原文不足或其他入口义务未满足时保留 blocked。
+
+该策略复用 `preview_entry_state_repair` / `submit_entry_state_repair` 和原四阶段账本格式，
+但冻结不同 policy，使用独立 `wording-repair` 目录和严格字段 schema，不能跨策略扩大写入面。
+预览／终结规则、一次实质纠错、宿主／范围／预算／已消费失败即停均与状态修复相同。
+独立会话必须重验全部标准和原要求。更新改动字段的证据，保留不受改动影响的断言；接受链按原账本
+顺序统一逆向核验。全部模型费用继承并去重，负面历史不被覆盖，父任务和认证不因此恢复。
+
+已完成修复允许在代码升级后零生成核验，但必须通过完整原回执、证据和接受链校验。
+未完成修复仍绑定原实现指纹；源码变化不得重新打开单次模型授权。
+
+### 入口状态绑定校正（entry-delta-binding/v1）
+
+`requirements repair-entry-binding --source <id> --task <hash> --ref <ref> --authorization-ref <ref>`
+处理已有独立支持的 blocked 入口复验。先以 `--inspect` 只读核对；从同一 source/task 的
+`requirements inspect-identity-repairs` 复制 `summary.consumerRevalidation.reviews[].ref`，
+并检查其两个 `reviewContract.ownerRefs`。必须恰好有一个规范事件和一个该角色的执行入口，
+两者修订、原负面判断、切点、来源包和预算都不能改变。多重、缺失或漂移的所有权必须停止。
+
+纯转换 `lowerEntryDeltaBinding` 只把规范事件中该角色已有的 `delta` 复制到执行入口。
+只允许角色自己的意图或定性身体状态 set；不能创作值、用无映射数值代替意图、改变事件、
+执行动作、恢复机制、入口文字、在场、知识或投影种子。规范事件是只读依据，不自动构成
+语义正确性的证明；无法支持其状态或保留字段时仍为 blocked。
+
+复用原 preview/submit 和四阶段账本协议，冻结独立 policy 与 `delta-binding-repair` 目录。
+从 `bindingDeltas` 复制两个 delta 哈希及 `requiredBindingIndices`；每个复制操作恰有一条
+证据绑定，选择器须来自完整原来源包。字段或引用错误最多一次实质纠正；宿主、范围、预算、
+已消耗阶段或第二次错误停止，不猜值、换范围或重试原样输入。封存结果只能零生成恢复登记。
+
+独立会话检查完整修订入口、全部八项标准及原要求，不能仅证明两份 delta 相等。
+提交仅生成一个 event-execution 提案；事件基线在模型调用及提交恢复时保持冻结。
+回溯接受链时同时核对只读事件与改动绑定，旧回执、失败、费用和原身份问题继续保留。
+该校正不授予行动机制、父审计恢复、完整性认证或激活权限。
+
+### 未决在场入口修复（entry-presence-uncertainty/v1）
+
+`requirements repair-entry-presence` 只处理同一 source/task 下已有独立支持的
+blocked 角色入口复验；`--inspect` 不调用模型或写状态。用
+`requirements inspect-identity-repairs --source <id> --task <hash>` 发现范围，复制
+`consumerRevalidation.reviews[].ref`（详细结果中位于 `summary` 内），不得猜测 actor/event。
+字段或原文选择器错误最多允许一次有实质修正的 preview；必须从已提供的完整原文段复制
+segment ID 和 exact。范围、宿主状态、预算、single-use 或 circuit-breaker 错误立即停止，
+不得改名重试、清空记录或重置预算。已封存而未登记的结果只能零生成恢复。
+
+纠错次数按保存的真实工具结果核对，包括 Pi SDK 在 execute 之前拒绝的参数。
+第二次无效 preview、原样重试或终结提交失败都停止；不能通过换一个错误字段绕开次数。
+源码与构建后的 CLI 使用同一份源码实现指纹；实现变化不自动重开已消费的阶段。
+
+该流程保留原始负面判断，以两个独立 Pi 会话提出、复核限定修订，再通过现有提案库和
+CompilerCommitService 提交。四阶段记录进入既有 RequirementLedger；提交意图先于写入，
+中断时按相同提案及哈希完成宿主恢复。旧修订、回执、失败、费用、角色分母及所有问题继续保留。
+`unresolved` 不推定身体、远程通道、梦境或缺席。入口必须标为 `admission.status=blocked`，
+有精确原文证据，且不能含状态、知识操作或投影种子；运行时和完整性审计仍拒绝授予可玩入口。
+独立 supported 只认可对不确定性的处理，不满足可执行入口义务，不恢复父任务或授予认证。
+后续原队列读取新活动修订；旧冻结目录比较只允许经该回执核验的精确差异，其他漂移照常阻塞。
+
+领域转换 `lowerUnresolvedEntryPresence` 仅接受原事件、参与记录、角色、精确修订、原文证据
+和待审文字，不依赖小说名称、身份任务或模型提供方。普通编译可复用此转换构造提案，再走
+原有提案校验与提交；该函数本身没有写权限。上述命令只是保留历史身份授权的适配入口。
+执行覆盖层拥有的入口须使用其现有类型化修复范围；本入口不得移除覆盖层以绕开所有权。
+
+`unresolved` 不授予角色亲历事件，也不能据此触发目标或成长阶段。多个角色依次修订同一
+事件时，每个后继仍需独立审阅其当时的活动修订；不能复用旧的负面判断给新图授权。
+历史回执核验绑定原封存提案与证据；活动目录按账本顺序逆向核对完整的接受链，再还原最早
+基线用于上游比较。缺失中间回执、来源变化、提案或证据漂移均停止，不重新冻结目录或重跑模型。

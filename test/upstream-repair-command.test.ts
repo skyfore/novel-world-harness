@@ -18,7 +18,7 @@ it("holds the compiler lock throughout model execution and releases it after hos
   await expect(runUpstreamRepairSlotCommand(root, options, run)).rejects.toThrow("original provider failure");
   expect(run).toHaveBeenCalledWith(root, options.source, options.plan, { kind: "quotation", id: "quote-one" }, { model: "selected-model", timeoutMs: 1234 });
   expect((await WorkspaceOperationLock.inspect(root)).owner).toBeUndefined();
-  await expect(runUpstreamRepairSlotCommand(root, { ...options, kind: "entity" }, run)).rejects.toThrow();
+  await expect(runUpstreamRepairSlotCommand(root, { ...options, kind: "proposition" }, run)).rejects.toThrow();
   await expect(runUpstreamRepairSlotCommand(root, { ...options, config: path.join(root, "missing-config.json") }, run)).rejects.toThrow();
   expect(run).toHaveBeenCalledOnce();
 });

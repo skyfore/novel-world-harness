@@ -1,11 +1,12 @@
 import { z } from "zod";
+import { compilationStopSchema } from "../../compiler/compilation-stop.js";
 
 export const workerResultSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("succeeded"), delivery: z.object({
     runId: z.string().min(1), candidateBundleHash: z.string().regex(/^[a-f0-9]{64}$/),
     branchId: z.string().min(1), completed: z.literal(true),
   }).strict() }).strict(),
-  z.object({ status: z.literal("failed"), error: z.string().optional() }).strict(),
+  z.object({ status: z.literal("failed"), error: z.string().optional(), recovery: compilationStopSchema.optional() }).strict(),
 ]);
 export const deliveryVerificationSchema = z.object({ verified: z.boolean(), reason: z.string().min(1) }).strict();
 export type WorkerResult = z.infer<typeof workerResultSchema>;

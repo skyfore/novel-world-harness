@@ -1,12 +1,18 @@
 # 小说全流程编译命令
 
+工作策略下，读取或有效草稿之后遇到用量限制，可在同一 Pi 提供方恢复及后续用户授权后使用原阶段的一次有界续接。由 `inspect-identity-repairs` 的 `stages[].execution.providerResumptionCandidate` 复制作用域、阶段和失败 trace，添加后续授权与时间，保存为 JSON；沿用原命令，先执行 `--provider-resumption <JSON> --resume-unsubmitted inspect`，通过后改为 `run`。原草稿须由 Pi 再次确认后原样提交，失败、读取、预算和分母均保留；不重置调用窗口，也不能重复续接。详见[工作策略用量恢复](agent-tool-recovery.md#work-policy-provider-continuation)。
+
 `nwh compile-novel` 从不可变原文一直执行到独立评估、认证、激活和可玩分支交付。默认继续已有编译进度；`--rebuild` 明确启动全量重编。完成标准遵循[小说编译流程与完整性验收规范](novel-compilation-protocol.zh-CN.md)。
 
 新消费者复核使用 `consumer-work/v1`：宿主一次准备完整必读证据，模型预检草稿后单独提交，再由独立会话验收。`--inspect-execution` 只读显示证据规模、提交预留和是否可执行；`stages[].execution` 显示进展窗口、草稿和实际消耗，旧 `remainingAllowance` 继续描述历史执行段。
 
+新工作计划通过 `consumer-evidence-coverage/v1` 按当前工件及所选依赖的来源引用补齐原文，不依赖小说名称或工件类型特判。模型额外读取依赖后，工具会列出尚未读取的 `missingSourceSegmentIds`；补读并据此纠正草稿后才能提交。未交付或未读文本与原文确实不支持判断分开处理，独立复核接收完整补读记录。已完成且被独立确认阻塞的旧复核，只有双方实际漏读可验证时，才会在 `inspect-identity-repairs` 的 `summary.consumerRevalidation.attempts[].evidenceCorrection` 显示纠正候选。沿用原 source/task/ref，使用 `--compiler-correction consumer-evidence-coverage/v1 --authorization-ref <后续修复授权> --inspect-execution` 核验后执行。原结论和失败保留，只用原剩余额度纠正一次，不自动放行语义检查。详见[证据覆盖与纠正协议](agent-tool-recovery.md#consumer-evidence-coverage)。
+
 已停止的旧消费者须显式选择 `--execution-policy consumer-work/v1`，并以 `--execution-authorization-ref` 引用既有用户对策略迁移的授权。先带 `--inspect-execution`，核验通过后去掉它执行。保留原 `--source`、`--task`、`--ref` 和 `--authorization-ref`；这些值从同作用域 `inspect-identity-repairs` 复制，不猜测或重命名。完整清单、旧失败、预算和会话不变，转换记录追加在原消费者的 `execution-v1` 下。不能与旧续接／额度修订 flags 混用。已有提交恢复登记，不重新生成；无进展、负面语义判断和显式额度修订不能借迁移重开。
 
 大角色表的机械来源 ID 采用可核验的 hash/count 视图，全部角色和其他语义字段仍交给模型。超出上下文的完整工作集在付费调用前停止，不能删证据或减少分母。配额失败保留消耗并等待外部恢复，不自动循环。详细策略和恢复边界见[工具恢复协议](agent-tool-recovery.md#versioned-consumer-work-execution)及[实施计划](plans/2026-10-30-consumer-execution.zh-CN.md)。
+
+如果 Pi 在一次 `WebSocket closed 1006` 后已成功提交，但旧宿主因重试产生的 `context_edit` 拒绝封存，可在用户后续要求重试时恢复原提交登记。先从同一 `inspect-identity-repairs` 的 `summary.consumerRevalidation.attempts[].stages[].execution.transportRecoveryCandidate` 复制 `scopeHash`、`stage`、`failedTraceRunId`、`failureHash`，添加后续授权的 `authorizationRef` 和 `authorizedAt`，保存为 JSON。在原消费者命令上增加 `--recover-transport-retry <JSON> --inspect-execution`，预检返回 `transport-recovery-ready` 后去掉 `--inspect-execution` 执行。命令本身仍保留原 `--authorization-ref`。此恢复不重新生成提案；完整日志、原失败、预算和负面判断保留，尚未启动的独立检查继续使用原额度。缺失证据、其他错误或已消费检查不能重开。见[精确恢复边界](agent-tool-recovery.md#pi-transport-retry-registration)。
 
 ```sh
 # 首次编译：登记原文并执行全流程

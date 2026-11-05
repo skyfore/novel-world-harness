@@ -218,9 +218,9 @@ requirementsCommand.command("revalidate-identity-consumer").requiredOption("--so
   .requiredOption("--task <hash>", "original tasks[].taskId from inspect-identity-repairs")
   .requiredOption("--ref <ref>", "exact original availableRefs[] consumer")
   .requiredOption("--authorization-ref <ref>", "existing user authorization to continue the same repair")
-  .option("--compiler-correction <policy>", "single retained-budget correction: source-local-referent/v1 or explicitly authorized consumer-review-scope/v1")
+  .option("--compiler-correction <policy>", "single retained-budget correction: source-local-referent/v1, consumer-review-scope/v1 or proven consumer-evidence-coverage/v1; inspect first")
   .option("--resume-unsubmitted <mode>", "inspect or run the sole audited continuation; retain failed sessions and subtract their original stage usage")
-  .option("--provider-resumption <path>", "later authorization JSON for a settled first-request quota refusal in the original stage or its bound host recovery; use with --resume-unsubmitted")
+  .option("--provider-resumption <path>", "later authorization JSON for a settled read-only work quota refusal, or a legacy first-request refusal; use with --resume-unsubmitted inspect before run")
   .option("--continuation-budget <path>", "explicit later authorization JSON for one bounded call amendment before the original continuation starts")
   .option("--host-recovery <path>", "explicit original-task reader/request-size recovery JSON; inspect first, preserve all prior attempts and charges")
   .option("--recover-submitted-ref", "validate the exact saved Pi proposal rejected only for a discovered entity:id spelling; no proposal replay")
@@ -229,6 +229,7 @@ requirementsCommand.command("revalidate-identity-consumer").requiredOption("--so
   .option("--inspect-execution", "read-only evidence, context and migration preflight; no model calls or state writes")
   .option("--recover-contract-binding", "one correction of an original check's isolated rejected contract-hash preview; retain failure and spend only its remaining budget")
   .option("--binding-recovery-authorization-ref <ref>", "explicit later authorization for this exact contract-binding repair; inspect first")
+  .option("--recover-transport-retry <path>", "later authorization JSON to seal an original submission after one proven WebSocket retry; inspect with --inspect-execution first, no proposal replay")
   .description("Independently revalidate one original consumer after the exact completed identity repair; retain old reviews, budgets and questions")
   .action(async options => {
     const { runIdentityConsumerRevalidation } = await import("./workflow/identity-consumer-revalidation.js");
@@ -237,6 +238,7 @@ requirementsCommand.command("revalidate-identity-consumer").requiredOption("--so
       resumeUnsubmitted: options.resumeUnsubmitted,
       executionPolicy: options.executionPolicy, executionAuthorizationRef: options.executionAuthorizationRef, inspectExecution: options.inspectExecution,
       recoverContractBinding: options.recoverContractBinding, bindingRecoveryAuthorizationRef: options.bindingRecoveryAuthorizationRef,
+      recoverTransportRetry: options.recoverTransportRetry ? JSON.parse(await fs.readFile(options.recoverTransportRetry, "utf8")) : undefined,
       providerResumption: options.providerResumption ? JSON.parse(await fs.readFile(options.providerResumption, "utf8")) : undefined,
       recoverSubmittedRef: options.recoverSubmittedRef,
       hostRecovery: options.hostRecovery ? JSON.parse(await fs.readFile(options.hostRecovery, "utf8")) : undefined,

@@ -7,15 +7,17 @@ import { prerequisiteEvidenceSchema, prerequisiteStop } from "./role-source-prer
 import { initialWorldRevisionFields } from "./initial-world-repair.js";
 import type { LedgerRecord } from "./requirement-ledger.js";
 import { CONSUMER_REVIEW_CORRECTION, consumerReviewContractSchema, consumerReviewAssessmentSchema, validateConsumerReviewAssessment } from "./consumer-review-contract.js";
+import { CONSUMER_EVIDENCE_COVERAGE } from "./consumer-evidence-coverage.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/), text = z.string().trim().min(1).max(6000);
 const evidence = z.array(modelTextSelectorSchema).min(1).max(24);
 /** Exact compiler discovery spellings for the same entity ID, never aliases. */
 export const consumerEntityRepairId = (ref: string) => /^entity[:/](.+)$/.exec(ref)?.[1];
 export const consumerEntityScopeError = "Source-local scope changed the original accepted entity; no guessed actor or expanded repair";
-export const consumerCompilerCorrectionSchema = z.object({ policy: z.enum(["source-local-referent/v1", CONSUMER_REVIEW_CORRECTION]),
+export const consumerCompilerCorrectionSchema = z.object({ policy: z.enum(["source-local-referent/v1", CONSUMER_REVIEW_CORRECTION, CONSUMER_EVIDENCE_COVERAGE]),
   predecessorId: hash, predecessorScopeHash: hash, predecessorRecordHashes: z.tuple([hash, hash]), contractHash: hash,
-}).strict();
+  evidenceGapHash: hash.optional(),
+}).strict().refine(c => (c.policy === CONSUMER_EVIDENCE_COVERAGE) === Boolean(c.evidenceGapHash), "Evidence coverage correction requires its original omitted-read proof only");
 /** A changed, committed dependency is the reason to revalidate. This is never
  * another invocation of the old consumer review or a replacement definition. */
 export const consumerRevalidationScopeSchema = z.object({
@@ -74,11 +76,15 @@ export const consumerRevalidationRecordSchema = z.object({ scope: consumerRevali
   hostRecoveryHash: hash.optional(),
   executionPlanHash: hash.optional(),
   bindingRecoveryHash: hash.optional(),
+  providerResumptionHash: hash.optional(),
   evidence: z.array(prerequisiteEvidenceSchema).min(1).max(24),
 }).strict().refine(r => Boolean(r.sessionCheckpointHash) !== Boolean(r.refRecoveryHash), "Exactly one actual submission checkpoint or explicit rejected-ref recovery proof is required")
   .refine(r => !r.bindingRecoveryHash || Boolean(r.executionPlanHash) && r.output.phase === "consumer-revalidation-check"
     && !r.continuationHash && !r.hostRecoveryHash && !r.refRecoveryHash && !r.budgetAmendmentHash,
-  "Binding recovery requires the original work check and cannot combine other recovery authorities");
+  "Binding recovery requires the original work check and cannot combine other recovery authorities")
+  .refine(r => !r.providerResumptionHash || Boolean(r.executionPlanHash) && !r.bindingRecoveryHash
+    && !r.continuationHash && !r.hostRecoveryHash && !r.refRecoveryHash && !r.budgetAmendmentHash,
+  "Work provider continuation cannot combine other recovery authorities");
 export type ConsumerRevalidationRecord = z.infer<typeof consumerRevalidationRecordSchema>;
 
 export function validateConsumerRevalidationHistory(records: ConsumerRevalidationRecord[], original: IdentityRecord[]) {
@@ -141,8 +147,11 @@ export function validateConsumerRevalidationHistory(records: ConsumerRevalidatio
 export function validateConsumerCorrectionLineage(scope: ConsumerRevalidationScope, all: ConsumerRevalidationRecord[]) {
   const correction = scope.compilerCorrection;
   if (!correction) return;
+  assertConsumerCorrectionOwner(scope, all.map(record => record.scope));
   const prior = all.filter(r => consumerRevalidationId(r.scope) === correction.predecessorId);
   const first = prior[0], check = prior[1];
+  if (prior.some(record => record.bindingRecoveryHash || record.providerResumptionHash))
+    throw prerequisiteStop("Compiler correction requires the original execution pair; its remaining allowance already belongs to a recovered execution. Inspect requirements inspect-identity-repairs for the same source/task/ref and its retained recovery and charges. A recovered stage cannot also fund a separate compiler correction; no new segment, policy switch or retry");
   if (prior.length !== 2 || !first || first.scope.compilerCorrection || first.output.phase !== "consumer-revalidation"
     || first.output.disposition !== "blocked" || check?.output.phase !== "consumer-revalidation-check" || check.output.verdict !== "supported"
     || contentHash(prior.map(contentHash)) !== contentHash(correction.predecessorRecordHashes)
@@ -154,4 +163,18 @@ export function validateConsumerCorrectionLineage(scope: ConsumerRevalidationSco
     || !scope.reviewContract || scope.reviewContract.target.kind !== "character-entry" || !scope.ref.startsWith("entry/")
     || scope.authorizationRef === first.scope.authorizationRef || !scope.executionPolicy))
     throw prerequisiteStop("Review-scope correction requires an explicitly authorized legacy entry review with unchanged evidence, new exact target contract and retained negative judgments; no renewed correction or automatic retry");
+  if (correction.policy === CONSUMER_EVIDENCE_COVERAGE && (!first.scope.executionPolicy || !scope.executionPolicy
+    || contentHash(scope.reviewContract ?? null) !== contentHash(first.scope.reviewContract ?? null)
+    || !correction.evidenceGapHash || scope.authorizationRef === first.scope.authorizationRef))
+    throw prerequisiteStop("Evidence coverage correction requires the exact original review contract, omitted-read proof and later authorization; no changed verdict, scope or renewed allowance");
+}
+
+/** The predecessor owns one correction allowance across policies. Policy names
+ * retain historical IDs; they cannot create parallel owners of that allowance. */
+export function assertConsumerCorrectionOwner(scope: ConsumerRevalidationScope, attempts: readonly ConsumerRevalidationScope[]) {
+  const correction = scope.compilerCorrection;
+  if (!correction) return;
+  if (attempts.some(attempt => attempt.compilerCorrection?.predecessorId === correction.predecessorId
+    && consumerRevalidationId(attempt) !== consumerRevalidationId(scope)))
+    throw prerequisiteStop("Original consumer correction allowance already belongs to another policy. Inspect requirements inspect-identity-repairs in the same source/task and copy summary.consumerRevalidation.attempts[].ref and compilerCorrection.policy to inspect that retained attempt once. A frozen, failed or completed correction cannot be replaced by another policy; no new grant, budget reset or model retry. Recover only its own sealed registration when available");
 }

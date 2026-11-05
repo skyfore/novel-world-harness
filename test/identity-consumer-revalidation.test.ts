@@ -22,7 +22,7 @@ import { assertUpstreamRepairMutation, freezeUpstreamRepairPlan } from "../src/c
 import { initialWorldRepairReferences } from "../src/compiler/initial-world-repair.js";
 import { identityReviewStatus } from "../src/compiler/identity-review-status.js";
 import { identityReviewStatuses, inspectIdentityReviewStatuses } from "../src/compiler/identity-repair-handoff.js";
-import { assertConsumerCompilerCorrection, consumerRevalidationLimits, SOURCE_LOCAL_CORRECTION, sourceLocalContractHash } from "../src/compiler/identity-consumer-correction.js";
+import { assertConsumerCompilerCorrection, assertConsumerCorrectionSlot, consumerRevalidationLimits, SOURCE_LOCAL_CORRECTION, sourceLocalContractHash } from "../src/compiler/identity-consumer-correction.js";
 import { IDENTITY_REQUIREMENT_LIMITS } from "../src/compiler/identity-requirements.js";
 import { captureRecordTree } from "../src/runtime/compile-loop/dedicated-session.js";
 import { consumerStageRecoveryDirectory } from "../src/compiler/identity-consumer-stage-recovery.js";
@@ -42,6 +42,10 @@ import * as workPlans from "../src/compiler/consumer-work-plan.js";
 import { bindingRecoveryDirectory } from "../src/compiler/consumer-review-binding.js";
 import { CONSUMER_REVIEW_CORRECTION, deriveConsumerReviewContract } from "../src/compiler/consumer-review-contract.js";
 import { canonicalEventSchema } from "../src/world/model.js";
+import * as upstreamSession from "../src/compiler/identity-upstream-session.js";
+import { prerequisiteStop } from "../src/compiler/role-source-prerequisites.js";
+import { verifyIdentitySessionEvidence } from "../src/compiler/identity-session-integrity.js";
+import { CONSUMER_EVIDENCE_COVERAGE } from "../src/compiler/consumer-evidence-coverage.js";
 
 it("keeps a stopped review's exact journal prefix across sibling reviews but rejects unrelated changes", () => {
   const { proposal, check } = fixture(), history: any[] = [{ hash: h("original prefix"), payload: { kind: "identity-requirements" } }];
@@ -213,6 +217,77 @@ it("does not substitute a missing or superseded consumer with its frozen origina
   expect(() => revalidation.currentConsumerPayload({ ref: "source-review/old", reason: "source-review-coverage", payload }, current)).toThrow(/original owning audit/);
 });
 
+it.each([CONSUMER_REVIEW_CORRECTION, CONSUMER_EVIDENCE_COVERAGE])("reserves one predecessor allowance across policies after %s, including unrecorded failures", async policy => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-correction-owner-"));
+  try {
+    const { proposal, check } = fixture();
+    if (proposal.output.phase !== "consumer-revalidation") throw Error("fixture");
+    proposal.scope.ref = "entry/ada/later"; proposal.scope.executionPolicy = "consumer-work/v1";
+    proposal.output.disposition = "blocked"; proposal.output.initialWorldRepair = null;
+    const prior = [proposal, check], correction = { predecessorId: consumerRevalidationId(proposal.scope), predecessorScopeHash: h(proposal.scope),
+      predecessorRecordHashes: prior.map(h) as [string, string], contractHash: h("fixed contract") };
+    const scopeReview = consumerRevalidationScopeSchema.parse({ ...proposal.scope, authorizationRef: "user:correct-scope", compilerCorrection: { ...correction, policy: CONSUMER_REVIEW_CORRECTION },
+      reviewContract: { version: "consumer-review/v2", ref: proposal.scope.ref, currentRevisionHash: proposal.scope.currentRevisionHash,
+        target: { kind: "character-entry", actorId: "ada", beforeEventId: "later", storyTime: { kind: "unknown" }, position: "before-event" },
+        ownerRefs: [], requiredChecks: ["temporal-boundary"], originalRequirements: "consumer-dependency-compatibility", globalIdentityQuestions: "retained" } });
+    const evidenceReview = consumerRevalidationScopeSchema.parse({ ...proposal.scope, authorizationRef: "user:correct-evidence",
+      compilerCorrection: { ...correction, policy: CONSUMER_EVIDENCE_COVERAGE, evidenceGapHash: h("omitted reads") } });
+    for (const scope of [scopeReview, evidenceReview]) expect(() => validateConsumerCorrectionLineage(scope, prior)).not.toThrow();
+    for (const key of ["providerResumptionHash", "bindingRecoveryHash"] as const) {
+      const recovered = prior.map(record => ({ ...record, [key]: h("prior recovery") }));
+      const attempted = { ...evidenceReview, compilerCorrection: { ...evidenceReview.compilerCorrection!, predecessorRecordHashes: recovered.map(h) as [string, string] } };
+      expect(() => validateConsumerCorrectionLineage(attempted, recovered)).toThrow(/already belongs to a recovered execution/);
+    }
+    const [owner, other] = policy === CONSUMER_REVIEW_CORRECTION ? [scopeReview, evidenceReview] : [evidenceReview, scopeReview];
+    const history = [...prior, ...prior.map(record => ({ ...record, scope: owner }))];
+    expect(() => validateConsumerCorrectionLineage(owner!, history)).not.toThrow();
+    expect(() => validateConsumerCorrectionLineage(other!, history)).toThrow(/allowance already belongs/);
+    const directory = consumerRevalidationDirectory(root, owner!);
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(path.join(directory, "scope.json"), JSON.stringify(owner));
+    await fs.writeFile(path.join(directory, "state.json"), JSON.stringify({ status: "BREAK", recordedStages: 0 }));
+    const before = captureRecordTree(workspaceStateDir(root));
+    await expect(assertConsumerCorrectionSlot(root, owner!)).resolves.toBeUndefined();
+    await expect(assertConsumerCorrectionSlot(root, other!)).rejects.toThrow(/allowance already belongs/);
+    // No original budget is even consulted after another policy reserved it.
+    await expect(consumerRevalidationLimits(root, other!, "consumer-revalidation")).rejects.toThrow(/allowance already belongs/);
+    expect(captureRecordTree(workspaceStateDir(root))).toEqual(before);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+it("binds evidence delivery correction to the same negative pair and subtracts its settled work budget", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-evidence-correction-budget-"));
+  try {
+    const { proposal, check } = fixture();
+    if (proposal.output.phase !== "consumer-revalidation") throw Error("fixture");
+    proposal.scope.executionPolicy = "consumer-work/v1"; proposal.output.disposition = "blocked"; proposal.output.initialWorldRepair = null;
+    const prior = [proposal, check];
+    const scope = structuredClone({ ...proposal.scope, authorizationRef: "user:fix-evidence-delivery",
+      compilerCorrection: { policy: CONSUMER_EVIDENCE_COVERAGE, predecessorId: consumerRevalidationId(proposal.scope),
+        predecessorScopeHash: h(proposal.scope), predecessorRecordHashes: prior.map(h) as [string, string],
+        evidenceGapHash: h("verified missing original segment"), contractHash: h("fixed coverage implementation") } });
+    expect(() => consumerRevalidationScopeSchema.parse(scope)).not.toThrow();
+    expect(() => validateConsumerCorrectionLineage(scope, prior)).not.toThrow();
+    const renamed = { ...scope, authorizationRef: "another name",
+      compilerCorrection: { ...scope.compilerCorrection, evidenceGapHash: h("different gap"), contractHash: h("another code version") } };
+    expect(consumerRevalidationId(scope)).toBe(consumerRevalidationId(renamed));
+    for (const mutate of [
+      (s: typeof scope) => { s.authorizationRef = proposal.scope.authorizationRef; },
+      (s: typeof scope) => { s.currentRevisionHash = h("different consumer"); },
+      (s: typeof scope) => { s.compilerCorrection.predecessorRecordHashes[1] = h("different independent check"); },
+      (s: typeof scope) => { s.compilerCorrection.evidenceGapHash = ""; },
+    ]) { const changed = structuredClone(scope); mutate(changed); expect(() => validateConsumerCorrectionLineage(changed, prior)).toThrow(); }
+    expect(() => validateConsumerCorrectionLineage(scope, [{ ...proposal, scope }, { ...check, scope }])).toThrow();
+    const directory = path.join(consumerRevalidationDirectory(root, proposal.scope), "execution-v1"); await fs.mkdir(directory, { recursive: true });
+    const file = path.join(directory, "consumer-revalidation.budget.json"), budget = { limits: { maxModelCalls: 12, maxRequestBytes: 512000, maxTotalPayloadBytes: 12288000 },
+      originalBudgetHash: scope.originalBudgetHash, state: { blocked: false, usage: { modelCalls: 3, totalPayloadBytes: 800000 } } };
+    await fs.writeFile(file, JSON.stringify(budget)); scope.priorBudgetFiles.push({ path: file, hash: h(budget) });
+    expect(await consumerRevalidationLimits(root, scope, "consumer-revalidation")).toEqual({ maxModelCalls: 9, maxRequestBytes: 512000, maxTotalPayloadBytes: 11488000 });
+    await fs.writeFile(file, JSON.stringify({ ...budget, state: { ...budget.state, usage: { modelCalls: 0, totalPayloadBytes: 0 } } }));
+    await expect(consumerRevalidationLimits(root, scope, "consumer-revalidation")).rejects.toThrow(/predecessor allowance/);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 it("discovers exact artifact refs without a whole-catalog scan or guessed identity aliases", () => {
   const target = { kind: "entity", id: "anonymous-local", payload: { name: "A local observer" } };
   const catalog = [...Array.from({ length: 300 }, (_, i) => ({ kind: "entity", id: `other-${i}`, payload: {} })), target];
@@ -327,15 +402,23 @@ it("requires exact initial-world field authority and binds state, observations a
 });
 
 it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: false }, { discoveryOnly: false, work: true },
+  { discoveryOnly: false, work: true, preflightRemeasure: true },
   { discoveryOnly: false, work: true, stall: true }, { discoveryOnly: false, work: true, previewLoop: true },
   { discoveryOnly: false, work: true, quota: true }, { discoveryOnly: false, work: true, oversized: true },
+  { discoveryOnly: false, work: true, transportRecovery: true },
+  { discoveryOnly: false, work: true, transportRecovery: true, transportTerminal: true },
+  { discoveryOnly: false, work: true, transportRecovery: true, additionalEvidence: true },
+  { discoveryOnly: false, work: true, transportTerminal: true },
+  ...["proposal", "check", "read", "fail", "changed-draft"].map(providerResume => ({ discoveryOnly: false, work: true, providerResume })),
+  { discoveryOnly: false, work: true, providerResume: "proposal", legacyEvidencePlan: true },
+  { discoveryOnly: false, work: true, additionalEvidence: true },
   { discoveryOnly: false, work: true, scoped: true }, { discoveryOnly: false, work: true, scoped: true, cleared: true },
   ...["once", "twice", "scope", "terminal"].map(bindingIssue => ({ discoveryOnly: false, work: true, scoped: true, cleared: true, bindingIssue })),
   ...["success", "fail", "interrupt"].map(bindingRecovery => ({ discoveryOnly: false, work: true, scoped: true, cleared: true, bindingRecovery })),
-])("runs independent Pi reviews with full reads ($discoveryOnly), work ($work), scoped $scoped, cleared $cleared, stall $stall, preview loop $previewLoop, quota $quota, oversized $oversized, binding $bindingIssue recovery $bindingRecovery, and recovers registration without replay", async ({ discoveryOnly, work, stall, previewLoop, quota, oversized, scoped, cleared, bindingIssue, bindingRecovery }: { discoveryOnly: boolean; work: boolean; stall?: boolean; previewLoop?: boolean; quota?: boolean; oversized?: boolean; scoped?: boolean; cleared?: boolean; bindingIssue?: string; bindingRecovery?: string }) => {
+])("runs independent Pi reviews with full reads ($discoveryOnly), work ($work), scoped $scoped, cleared $cleared, stall $stall, preview loop $previewLoop, quota $quota, oversized $oversized, binding $bindingIssue recovery $bindingRecovery, transport $transportRecovery terminal $transportTerminal, extra evidence $additionalEvidence, provider resumption $providerResume legacy evidence $legacyEvidencePlan, preflight remeasurement $preflightRemeasure, and recovers registration without replay", async ({ discoveryOnly, work, stall, previewLoop, quota, oversized, scoped, cleared, bindingIssue, bindingRecovery, transportRecovery, transportTerminal, additionalEvidence, providerResume, preflightRemeasure, legacyEvidencePlan }: { discoveryOnly: boolean; work: boolean; stall?: boolean; previewLoop?: boolean; quota?: boolean; oversized?: boolean; scoped?: boolean; cleared?: boolean; bindingIssue?: string; bindingRecovery?: string; transportRecovery?: boolean; transportTerminal?: boolean; additionalEvidence?: boolean; providerResume?: string; preflightRemeasure?: boolean; legacyEvidencePlan?: boolean }) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-revalidation-")), providers: Awaited<ReturnType<typeof mockPiProvider>>[] = [];
   try {
-    const text = "Ada waits. 女孩等待。", source = await createEvidenceFixture(root, text), f0 = fixture();
+    const text = "Ada waits. 女孩等待。" + (additionalEvidence ? "\n# Later\nAda sees the door." : ""), source = await createEvidenceFixture(root, text), f0 = fixture();
     const f: ReturnType<typeof fixture> = JSON.parse(JSON.stringify(f0).replaceAll("src", source.source.id).replaceAll('"seg"', JSON.stringify(source.segmentId)).replaceAll(f0.f.intent.sourceHash, source.source.contentSha256));
     const scope = f.proposal.scope;
     if (work) scope.executionPolicy = "consumer-work/v1";
@@ -362,6 +445,11 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
       current: { payload: {}, revisionHash: scope.currentRevisionHash }, acceptance: { output: {} }, prepared: { ...f.f.p, intent: f.f.intent, inventory: f.f.inventory,
         bytes: Buffer.from(text), manifest, review: { scope: { questions: [] } } } };
     if (work) p.consumer.dependencies = [{ kind: "entity", id: "ada" }];
+    if (additionalEvidence) {
+      expect(manifest!.segments).toHaveLength(2);
+      const payload = { id: "extra", evidence: source.evidence("Ada sees the door.") };
+      p.catalog.push({ kind: "world-rule", id: "extra", payload, revisionHash: h(payload), current: true });
+    }
     if (scoped) {
       const payload = { actorId: "ada", readerSetup: "Later entry", actorObservation: "You wait.", participantPresence: [{ entityId: "ada", mode: "physical" }], delta: { version: 1, operations: [] } };
       const event = canonicalEventSchema.parse({ id: "later", title: "Later entry", participants: ["ada"], characterEntryCheckpoints: [payload],
@@ -391,9 +479,19 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
       ...previous.map(record => ({ payload: { kind: "identity-consumer-revalidation", record } })),
     ] as any);
     const createPlan = workPlans.createConsumerWorkPlan;
-    const legacyPlans = bindingRecovery ? vi.spyOn(workPlans, "createConsumerWorkPlan").mockImplementation(args => createPlan({ ...args, reviewBinding: undefined })) : undefined;
+    const legacyPlans = bindingRecovery || legacyEvidencePlan ? vi.spyOn(workPlans, "createConsumerWorkPlan").mockImplementation(args => createPlan({ ...args,
+      reviewBinding: bindingRecovery ? undefined : args.reviewBinding,
+      evidencePolicy: legacyEvidencePlan && args.stage === "consumer-revalidation" ? undefined : args.evidencePolicy })) : undefined;
     let recovering = false, interruptRecovery = false;
-    let interrupt = true;
+    let interrupt = !transportRecovery && !providerResume;
+    let providerRecovering = false;
+    // Reproduce the old sealing failure after the real Pi retry and terminal
+    // submission. Recovery below uses the real, corrected verifier throughout.
+    const legacySeal = transportRecovery ? vi.spyOn(upstreamSession, "sealIdentityUpstreamSession").mockImplementationOnce(async () => {
+      throw prerequisiteStop(transportTerminal
+        ? "Identity context edit is not one recorded unsubmitted WebSocket retry; preserve its complete history, no redispatch"
+        : "Identity transcript is truncated, forked or edited; retain its complete original evidence");
+    }) : undefined;
     vi.spyOn(RequirementLedger.prototype, "recordIdentityConsumerRevalidation").mockImplementation(async record => {
       await revalidation.verifyConsumerRevalidationRecord(root, record);
       if (interruptRecovery) { interruptRecovery = false; throw Error("recovery registration interruption"); }
@@ -408,16 +506,20 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
       const check = path.basename(options.runtimeDir!) === "consumer-revalidation-check";
       const session = await create({ ...options, model: undefined, piAgentDir: path.join(root, "pi") });
       providers.push(await mockPiProvider(session, { provider: "openai-codex", modelId: "gpt-6.1-sol",
-        ...(quota ? { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } : {}),
+        ...(quota || providerResume ? { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } : {}),
         response: (context, index) => {
-        if (!bindingIssue && !bindingRecovery && !stall && !previewLoop && index > (discoveryOnly ? 3 : 1)) throw Error("Unexpected model retry");
+        if (!bindingIssue && !bindingRecovery && !transportRecovery && !transportTerminal && !additionalEvidence && !stall && !previewLoop && index > (discoveryOnly ? 3 : 1)) throw Error("Unexpected model retry");
         if (work) {
           if (quota) return fauxAssistantMessage([], { stopReason: "error", errorMessage: "Codex error: The usage limit has been reached" });
+          if (providerResume && (providerResume === "proposal" ? !check : check) && index === 1 && (!providerRecovering || providerResume === "fail"))
+            return fauxAssistantMessage([], { stopReason: "error", errorMessage: "Codex error: The usage limit has been reached" });
+          if (providerResume === "read" && check && !providerRecovering && index === 0)
+            return fauxAssistantMessage([fauxToolCall("read_consumer_revalidation", { collection: "artifacts", refs: ["entity:ada"], offset: 0 }, { id: "read-before-quota" })], { stopReason: "toolUse" });
           if (stall) return fauxAssistantMessage([fauxToolCall("read_consumer_revalidation", { collection: "consumer", refs: [scope.ref], offset: 0 }, { id: `repeated-read-${index}` })], { stopReason: "toolUse" });
           const user = context.messages.find(m => m.role === "user")!;
           const envelope = JSON.parse(typeof user.content === "string" ? user.content : user.content.find(c => c.type === "text")!.text);
           const input = decodeJsonValues(envelope.dictionary, [envelope.value], envelope.dictionaryProfile)[0] as any;
-          expect(input.evidencePacket.sources[0].text).toBe(text);
+          expect(input.evidencePacket.sources[0].text).toBe(Buffer.from(text).subarray(manifest!.segments[0]!.startByte, manifest!.segments[0]!.endByte).toString("utf8"));
           expect(input.evidencePacket.artifacts.find((a: any) => a.ref === "entity:ada")).toMatchObject({ payload: { id: "ada" } });
           if (scoped) {
             expect(input.reviewContract.target).toMatchObject({ kind: "character-entry", beforeEventId: "later", position: "before-event", storyTime: { orderHint: 30 } });
@@ -425,7 +527,48 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
             expect(input.evidencePacket.artifacts.some((a: any) => a.ref === "canonical-event:later")).toBe(true);
           }
           expect(input.denominator.refs).toEqual({ policy: "ordered-inventory/v1", count: f.f.inventory.consumers.length, hash: h(f.f.inventory.consumers.map(c => c.ref)) });
-          const output = check ? { ...f.check.output, scopeHash: h(scope), proposalHash: h(previous[0]!.output) } : f.proposal.output;
+          const output = structuredClone(check ? { ...f.check.output, scopeHash: h(scope), proposalHash: h(previous[0]!.output) } : f.proposal.output);
+          if (providerRecovering && providerResume === "changed-draft") output.rationale += "changed after quota";
+          if (additionalEvidence) {
+            const extraId = manifest!.segments[1]!.id;
+            if (check) {
+              expect(input.evidencePacket.sources.some((s: any) => s.id === extraId)).toBe(true);
+              expect(input.evidencePacket.artifacts.some((a: any) => a.ref === "world-rule:extra")).toBe(true);
+            } else {
+              if (transportRecovery) {
+                output.evidence.push({ segment_id: extraId, exact: "Ada sees the door." });
+                if (index === 0) return fauxAssistantMessage([fauxToolCall("read_consumer_revalidation",
+                  { collection: "artifacts", refs: ["world-rule:extra"], offset: 0 }, { id: "transport-extra-artifact" })], { stopReason: "toolUse" });
+                if (index === 1) return fauxAssistantMessage([fauxToolCall("read_consumer_revalidation",
+                  { collection: "source", segmentIds: [extraId], offset: 0 }, { id: "transport-extra-source" })], { stopReason: "toolUse" });
+                if (index === 3) return fauxAssistantMessage([fauxToolCall("submit_consumer_revalidation", output, { id: "transport-partial-submit" })],
+                  { stopReason: "error", errorMessage: "WebSocket closed 1006" });
+                return fauxAssistantMessage([fauxToolCall(index === 2 ? "preview_consumer_revalidation" : "submit_consumer_revalidation", output,
+                  { id: `transport-completed-${index}` })], { stopReason: "toolUse" });
+              }
+              const reads: Array<Record<string, string | number | string[]> | null> = [
+                { collection: "artifacts", query: "extra", offset: 0 },
+                { collection: "artifacts", refs: ["world-rule:extra"], offset: 0 },
+                null, { collection: "source", segmentIds: [extraId], offset: 0 },
+              ];
+              if (index === 3) {
+                const rejected = context.messages.find(m => m.role === "toolResult" && m.toolCallId === "extra-2");
+                expect(rejected).toMatchObject({ isError: true });
+                expect(JSON.stringify(rejected)).toContain("CONSUMER_EVIDENCE_UNREAD");
+              }
+              if (index >= 4) output.evidence.push({ segment_id: extraId, exact: "Ada sees the door." });
+              if (index > 5) throw Error("Unexpected evidence retry");
+              return fauxAssistantMessage([fauxToolCall(index < 4 && reads[index] ? "read_consumer_revalidation"
+                : index === 5 ? "submit_consumer_revalidation" : "preview_consumer_revalidation",
+                index < 4 && reads[index] ? reads[index]! : output, { id: `extra-${index}` })], { stopReason: "toolUse" });
+            }
+          }
+          if (transportRecovery && !transportTerminal && !check && index === 0)
+            return fauxAssistantMessage([fauxToolCall("preview_consumer_revalidation", output, { id: "unexecuted-partial-preview" })],
+              { stopReason: "error", errorMessage: "WebSocket closed 1006" });
+          if (transportTerminal && !check && index === 1)
+            return fauxAssistantMessage([fauxToolCall("submit_consumer_revalidation", output, { id: "unexecuted-partial-submit" })],
+              { stopReason: "error", errorMessage: "WebSocket closed 1006" });
           if (check && (bindingIssue || bindingRecovery)) {
             const badHash = { ...output, reviewContractHash: h("prior subject, not the contract") };
             const isBad = bindingRecovery ? !recovering || bindingRecovery === "fail" : bindingIssue === "twice" || index === 0;
@@ -435,7 +578,8 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
             return fauxAssistantMessage([fauxToolCall(name, candidate, { id: `binding-${providers.length}-${index}` })], { stopReason: "toolUse" });
           }
           if (previewLoop) return fauxAssistantMessage([fauxToolCall("preview_consumer_revalidation", { ...output, rationale: `${output.rationale} wording ${index}` }, { id: `preview-loop-${index}` })], { stopReason: "toolUse" });
-          return fauxAssistantMessage([fauxToolCall(index ? "submit_consumer_revalidation" : "preview_consumer_revalidation", output,
+          const turn = index - (transportRecovery && !transportTerminal && !check ? 1 : 0);
+          return fauxAssistantMessage([fauxToolCall(turn ? "submit_consumer_revalidation" : "preview_consumer_revalidation", output,
             { id: `work-${check}-${index}` })], { stopReason: "toolUse" });
         }
         if (index === 1) {
@@ -476,9 +620,17 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
           fauxToolCall("read_consumer_revalidation", { collection: "artifacts", refs: ["entity/ada"], offset: 0 }, { id: `artifact-${check}` }),
         ] : [fauxToolCall("submit_consumer_revalidation", index === 3 ? { ...output, rationale: `${output.rationale}; now grounded in the complete source read.` } : output,
           { id: `submit-${check}-${index}` })], { stopReason: "toolUse" });
-      } })); return session;
+      } }));
+      if (transportRecovery || transportTerminal) providers.at(-1)!.host.session.settingsManager.applyOverrides({ retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 } });
+      return session;
     });
     const args = { root, sourceId: scope.sourceId, taskId: scope.taskId, ref: scope.ref, authorizationRef: scope.authorizationRef };
+    const oldPreflight = path.join(consumerWorkDirectory(directory), "consumer-revalidation.preflight.json");
+    const oldPreflightBytes = JSON.stringify({ status: "context-blocked", rawMeasurement: true, modelDispatchAllowed: false });
+    if (preflightRemeasure) {
+      await fs.mkdir(path.dirname(oldPreflight), { recursive: true });
+      await fs.writeFile(oldPreflight, oldPreflightBytes);
+    }
     if (work) {
       const before = captureRecordTree(workspaceStateDir(root));
       expect(await runIdentityConsumerRevalidation({ ...args, inspectExecution: true })).toMatchObject({ status: oversized ? "context-blocked" : "ready", execution: { minimumModelCalls: 2 } });
@@ -486,7 +638,137 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
     }
     if (oversized) {
       expect(await runIdentityConsumerRevalidation(args)).toMatchObject({ status: "context-blocked", execution: { modelDispatchAllowed: false } });
+      expect((await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous))[0]!.stages[0]!.execution)
+        .toMatchObject({ status: "context-blocked", invocationConsumed: false, usage: { modelCalls: 0 } });
       expect(dispatch).not.toHaveBeenCalled(); expect(previous).toEqual([]); return;
+    }
+    if (providerResume) {
+      await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(/usage limit/);
+      const stage = providerResume === "proposal" ? "consumer-revalidation" : "consumer-revalidation-check";
+      const workDirectory = consumerWorkDirectory(directory), originalTree = captureRecordTree(workDirectory);
+      const failedBudget = JSON.parse(await fs.readFile(path.join(workDirectory, `${stage}.budget.json`), "utf8"));
+      const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+      const candidate = attempts[0]!.stages.find(s => s.stage === stage)!.execution!.providerResumptionCandidate!;
+      expect(candidate).toMatchObject({ scopeHash: h(scope), stage, inspectionRequired: true });
+      await new Promise(resolve => setTimeout(resolve, 5));
+      const providerResumption = { scopeHash: candidate.scopeHash, stage, failedTraceRunId: candidate.failedTraceRunId,
+        authorizationRef: "user:continue-after-provider-availability-check", authorizedAt: new Date().toISOString() } as const;
+      const resume = { ...args, providerResumption };
+      const before = captureRecordTree(workspaceStateDir(root));
+      expect(await runIdentityConsumerRevalidation({ ...resume, resumeUnsubmitted: "inspect" })).toMatchObject({
+        status: "ready", execution: { modelDispatchAllowed: true, ...(!legacyEvidencePlan ? {
+          limits: { maxModelCalls: providerResume === "read" ? 10 : 11 }, budgetPolicy: { modelCallsMode: "enforce" } } : {}) } });
+      expect(captureRecordTree(workspaceStateDir(root))).toEqual(before);
+      for (const patch of [{ scopeHash: h("wrong") }, { failedTraceRunId: "wrong" }, { authorizationRef: scope.authorizationRef }, { authorizedAt: "2000-01-01T00:00:00.000Z" }])
+        await expect(runIdentityConsumerRevalidation({ ...args, providerResumption: { ...providerResumption, ...patch }, resumeUnsubmitted: "inspect" })).rejects.toThrow();
+      const draftName = (await fs.readdir(workDirectory)).find(n => n.startsWith(stage + ".draft-"));
+      const originalDraft = draftName ? JSON.parse(await fs.readFile(path.join(workDirectory, draftName), "utf8")) : undefined;
+      providerRecovering = true;
+      const resumedDirectory = workPlans.consumerWorkProviderDirectory(workDirectory, stage);
+      if (providerResume === "fail" || providerResume === "changed-draft") {
+        await expect(runIdentityConsumerRevalidation({ ...resume, resumeUnsubmitted: "run" })).rejects.toThrow(providerResume === "fail" ? /usage limit/ : /changed the original validated draft/);
+        const dispatches = dispatch.mock.calls.length;
+        await expect(runIdentityConsumerRevalidation({ ...resume, resumeUnsubmitted: "run" })).rejects.toThrow(/stage is consumed/);
+        expect(dispatch).toHaveBeenCalledTimes(dispatches);
+      } else {
+        interruptRecovery = true;
+        await expect(runIdentityConsumerRevalidation({ ...resume, resumeUnsubmitted: "run" })).rejects.toThrow("recovery registration interruption");
+        const result = await runIdentityConsumerRevalidation({ ...resume, resumeUnsubmitted: "run" });
+        expect(result).toMatchObject({ status: "blocked", cumulative: { modelCalls: 183 }, parentResumeAllowed: false });
+        const record = previous.find(r => r.output.phase === stage)!;
+        expect(record.output).toEqual(originalDraft?.output ?? { ...f.check.output, scopeHash: h(scope), proposalHash: h(previous[0]!.output) });
+        expect(record.providerResumptionHash).toMatch(/^[a-f0-9]{64}$/);
+        expect(providers.map(p => p.contexts.length)).toEqual([2, 2, 2]);
+        const dispatches = dispatch.mock.calls.length;
+        expect((await runIdentityConsumerRevalidation({ ...resume, resumeUnsubmitted: "run" })).cumulative).toEqual(result.cumulative);
+        expect(dispatch).toHaveBeenCalledTimes(dispatches);
+        const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+        expect(attempts[0]!.cumulative).toEqual(result.cumulative);
+        expect(attempts[0]!.stages.find(s => s.stage === stage)!.execution!.providerResumption).toMatchObject({ status: "sealed", usage: { modelCalls: 2 } });
+        expect(attempts[0]!.evidenceCorrection).toBeUndefined();
+        vi.mocked(revalidation.prepareConsumerRevalidation).mockRejectedValue(new Error("later active dependency changed"));
+        await revalidation.verifyConsumerRevalidationRecord(root, record);
+        vi.mocked(revalidation.prepareConsumerRevalidation).mockResolvedValue(p);
+      }
+      const proof = JSON.parse(await fs.readFile(path.join(resumedDirectory, "recovery.json"), "utf8"));
+      expect(proof.priorUsage).toEqual(failedBudget.cumulative);
+      if (providerResume === "read") expect(proof.requiredArtifactRevisions).toEqual([{ ref: "entity:ada", revisionHash: h({ id: "ada" }) }]);
+      expect(proof.limits.maxTotalPayloadBytes).toBe(failedBudget.limits.maxTotalPayloadBytes - failedBudget.state.usage.totalPayloadBytes);
+      const after = captureRecordTree(workDirectory);
+      for (const [name, hash] of Object.entries(originalTree)) expect(after[name]).toBe(hash);
+      if (legacyEvidencePlan) {
+        const resumedPlanFile = path.join(resumedDirectory, `${stage}.plan.json`), savedPlan = await fs.readFile(resumedPlanFile, "utf8");
+        await fs.writeFile(resumedPlanFile, await fs.readFile(path.join(workDirectory, `${stage}.plan.json`), "utf8"));
+        await expect(inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous)).rejects.toThrow(/exact sealed plan/);
+        await fs.writeFile(resumedPlanFile, savedPlan);
+        const beforeInspect = captureRecordTree(workspaceStateDir(root));
+        await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+        expect(captureRecordTree(workspaceStateDir(root))).toEqual(beforeInspect);
+      }
+      return;
+    }
+    if (transportRecovery) {
+      await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(/transcript is truncated|context edit is not/);
+      legacySeal!.mockRestore();
+      expect(dispatch).toHaveBeenCalledTimes(1); expect(previous).toHaveLength(0);
+      const workDirectory = consumerWorkDirectory(directory), failureFile = path.join(workDirectory, "consumer-revalidation.failure.json");
+      const originalFailure = await fs.readFile(failureFile, "utf8"), failure = JSON.parse(originalFailure);
+      const originalBudget = await fs.readFile(path.join(workDirectory, "consumer-revalidation.budget.json"), "utf8");
+      const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
+      const candidate = attempts[0]!.stages[0]!.execution!.transportRecoveryCandidate!;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      const request = { scopeHash: candidate.scopeHash, stage: "consumer-revalidation" as const,
+        failedTraceRunId: candidate.failedTraceRunId, failureHash: candidate.failureHash,
+        authorizationRef: "user:retry-after-transport-sealing-failure", authorizedAt: new Date().toISOString() };
+      const recovery = { ...args, recoverTransportRetry: request };
+      const before = captureRecordTree(workspaceStateDir(root));
+      expect(await runIdentityConsumerRevalidation({ ...recovery, inspectExecution: true })).toMatchObject({
+        status: "transport-recovery-ready", providerCalls: 0, disposition: "blocked", independentCheckRequired: true });
+      expect(captureRecordTree(workspaceStateDir(root))).toEqual(before);
+      for (const patch of [{ failureHash: h("wrong") }, { scopeHash: h("wrong") }, { authorizationRef: scope.authorizationRef }, { authorizedAt: "2000-01-01T00:00:00.000Z" }])
+        await expect(runIdentityConsumerRevalidation({ ...args, recoverTransportRetry: { ...request, ...patch }, inspectExecution: true })).rejects.toThrow();
+      const transcript = await fs.readFile(failure.sessionFile, "utf8"), entries = transcript.trimEnd().split("\n").map(line => JSON.parse(line));
+      const rawRequests = await fs.readFile(path.join(workDirectory, "consumer-revalidation.requests.jsonl"), "utf8");
+      const rawMessages = await fs.readFile(path.join(workDirectory, "consumer-revalidation.messages.jsonl"), "utf8");
+      const input = JSON.parse(await fs.readFile(path.join(workDirectory, "consumer-revalidation.input.json"), "utf8"));
+      const submitted = JSON.parse(await fs.readFile(path.join(workDirectory, "consumer-revalidation.proposal.json"), "utf8"));
+      const record = { sessionId: failure.sessionId, provider: "openai-codex" as const, model: "gpt-6.1-sol" as const, output: submitted };
+      const proposalCalls = additionalEvidence ? 5 : 3;
+      expect(verifyIdentitySessionEvidence(transcript, root, record, JSON.stringify(input), rawRequests, rawMessages, workPlans.consumerWorkContract, true).transcript.responses).toBe(proposalCalls);
+      expect(() => verifyIdentitySessionEvidence(transcript, root, record, JSON.stringify(input), rawRequests, rawMessages, workPlans.consumerWorkContract)).toThrow(/context edit/);
+      for (const patch of [{ replacement: { content: "rewritten" } }, { targetId: entries.find(e => e.message?.role === "user").id }]) {
+        const changed = entries.map(e => e.type === "context_edit" ? { ...e, ...patch } : e);
+        expect(() => verifyIdentitySessionEvidence(changed.map(e => JSON.stringify(e)).join("\n") + "\n", root, record,
+          JSON.stringify(input), rawRequests, rawMessages, workPlans.consumerWorkContract, true)).toThrow(/context edit/);
+      }
+      const actualEvents = await new TraceStore(root).peekEvents(request.failedTraceRunId);
+      const failedResponse = actualEvents.find(e => e.type === "llm.response.failed")!;
+      expect(actualEvents.some(e => e.callId === failedResponse.callId && e.type.startsWith("tool."))).toBe(false);
+      for (const callId of [failedResponse.callId, "incorrectly-associated-request"]) {
+        const startedTool = { ...failedResponse, type: "tool.call.started" as const,
+          callId, data: { toolName: "submit_consumer_revalidation" } };
+        const executed = vi.spyOn(TraceStore.prototype, "peekEvents").mockResolvedValue([...actualEvents, startedTool]);
+        await expect(runIdentityConsumerRevalidation({ ...recovery, inspectExecution: true })).rejects.toThrow(/exact original trace/);
+        executed.mockRestore();
+      }
+      const traceSpy = vi.spyOn(TraceStore.prototype, "peekEvents").mockResolvedValue(actualEvents.filter(e => e.type !== "llm.retry"));
+      await expect(runIdentityConsumerRevalidation({ ...recovery, inspectExecution: true })).rejects.toThrow(/exact original trace/);
+      traceSpy.mockRestore();
+      interruptRecovery = true;
+      await expect(runIdentityConsumerRevalidation(recovery)).rejects.toThrow("recovery registration interruption");
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      const result = await runIdentityConsumerRevalidation(recovery);
+      expect(result).toMatchObject({ status: "blocked", cumulative: { modelCalls: 179 + proposalCalls }, parentResumeAllowed: false, certificationGranted: false });
+      expect(dispatch).toHaveBeenCalledTimes(2); expect(providers.map(p => p.contexts.length)).toEqual([proposalCalls, 2]);
+      expect(previous[0]!.output).toEqual(submitted);
+      expect(await fs.readFile(failureFile, "utf8")).toBe(originalFailure);
+      expect(await fs.readFile(path.join(workDirectory, "consumer-revalidation.budget.json"), "utf8")).toBe(originalBudget);
+      expect((await new TraceStore(root).peekRun(request.failedTraceRunId)).status).toBe("failed");
+      const again = await runIdentityConsumerRevalidation(recovery);
+      expect(again.cumulative).toEqual(result.cumulative); expect(dispatch).toHaveBeenCalledTimes(2);
+      await fs.appendFile(failure.sessionFile, '{"tampered":true}\n');
+      await expect(runIdentityConsumerRevalidation(recovery)).rejects.toThrow(/changed|lost/);
+      expect(dispatch).toHaveBeenCalledTimes(2); return;
     }
     if (stall || previewLoop || quota) {
       await expect(runIdentityConsumerRevalidation(args)).rejects.toThrow(quota ? /usage limit/ : /no new validated progress/);
@@ -568,15 +850,23 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
         totalConsumers: 2, reviews: [{ retainedQuestionIds: f.f.inventory.originalQuestionIds }] });
       expect(status.parentResumeAllowed).toBe(false);
     }
-    expect(result.cumulative.modelCalls).toBe(bindingIssue === "once" ? 182 : discoveryOnly ? 185 : 181); expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(result.cumulative.modelCalls).toBe(additionalEvidence ? 185 : bindingIssue === "once" || transportTerminal ? 182 : discoveryOnly ? 185 : 181); expect(dispatch).toHaveBeenCalledTimes(2);
     const again = await runIdentityConsumerRevalidation(args);
     expect(again.cumulative).toEqual(result.cumulative); expect(dispatch).toHaveBeenCalledTimes(2);
+    if (preflightRemeasure) {
+      expect(await fs.readFile(oldPreflight, "utf8")).toBe(oldPreflightBytes);
+      const wire = JSON.parse(await fs.readFile(path.join(consumerWorkDirectory(directory), "consumer-revalidation.preflight-message-v1.json"), "utf8"));
+      expect(wire).toMatchObject({ measurementPolicy: "pi-message-context/v1", status: "ready", transport: { dictionaryProfile: "message/v1" } });
+      const calls = providers.map(p => p.contexts.length);
+      expect(await runIdentityConsumerRevalidation({ ...args, inspectExecution: true })).toMatchObject({ status: result.status });
+      expect(providers.map(p => p.contexts.length)).toEqual(calls);
+    }
     const oldStates = await fs.readdir(path.join(directory, "history"));
     expect((await Promise.all(oldStates.map(n => fs.readFile(path.join(directory, "history", n), "utf8")))).some(s => s.includes("injected registration interruption"))).toBe(true);
     if (work) {
       const attempts = await inspectConsumerRevalidationAttempts(root, scope.sourceId, f.original, previous);
       expect(attempts[0]!.cumulative).toEqual(result.cumulative);
-      expect(attempts[0]!.stages[0]!.execution).toMatchObject({ policy: "consumer-work/v1", status: "sealed", draftCount: 1, usage: { modelCalls: 2 } });
+      expect(attempts[0]!.stages[0]!.execution).toMatchObject({ policy: "consumer-work/v1", status: "sealed", draftCount: 1, usage: { modelCalls: additionalEvidence ? 6 : transportTerminal ? 3 : 2 } });
       // A later world repair may make new dispatch preparation unavailable.
       // Already accepted historical reviews still verify from immutable source,
       // their exact ledger record and sealed packet, without consulting HEAD.

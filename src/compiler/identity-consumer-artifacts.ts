@@ -133,9 +133,11 @@ export function consumerArtifactReadHint(c: ConsumerArtifact) {
 /** Only the complete, ordered, hash-verified page sequence counts as a read. */
 export class ConsumerArtifactReadTracker {
   readonly completed = new Set<string>();
+  readonly subjects = new Map<string, { ref: string; revisionHash: string; payload: unknown; evidenceRole?: ConsumerArtifact["evidenceRole"] }>();
   private pages = new Map<string, { hash: string; next: number; text: string }>();
   next(ref: string) { return this.pages.get(ref)?.next ?? 0; }
-  accept(item: { ref: string; revisionHash: string; payload?: unknown; page?: { offset: number; nextOffset: number | null; text: string }; complete?: boolean }) {
+  accept(item: { ref: string; revisionHash: string; payload?: unknown; page?: { offset: number; nextOffset: number | null; text: string }; complete?: boolean; evidenceRole?: ConsumerArtifact["evidenceRole"] }) {
+    let payload = item.payload;
     if (item.page) {
       const old = this.pages.get(item.ref), page = item.page;
       if (page.offset !== (old?.next ?? 0) || old && old.hash !== item.revisionHash
@@ -143,9 +145,11 @@ export class ConsumerArtifactReadTracker {
         throw prerequisiteStop("Artifact pages are missing, reordered or changed; preserve the read trace, no retry");
       const text = (old?.text ?? "") + page.text;
       if (page.nextOffset !== null) { this.pages.set(item.ref, { hash: item.revisionHash, next: page.nextOffset, text }); return; }
-      if (contentHash(decodeConsumerArtifact(JSON.parse(text))) !== item.revisionHash) throw prerequisiteStop("Complete artifact pages do not match their original revision; no retry");
+      payload = decodeConsumerArtifact(JSON.parse(text));
+      if (contentHash(payload) !== item.revisionHash) throw prerequisiteStop("Complete artifact pages do not match their original revision; no retry");
       this.pages.delete(item.ref);
     } else if (contentHash(item.payload) !== item.revisionHash) throw prerequisiteStop("Artifact read lost its exact payload hash; no retry");
     this.completed.add(item.ref);
+    this.subjects.set(item.ref, { ref: item.ref, revisionHash: item.revisionHash, payload, ...(item.evidenceRole ? { evidenceRole: item.evidenceRole } : {}) });
   }
 }

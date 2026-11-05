@@ -10,6 +10,12 @@ import { prepareConsumerWorkExecution, assertConsumerWorkRetained } from "../com
 import { assertConsumerReadMode } from "../compiler/identity-consumer-read-contract.js";
 import { assertBoundPreviewAllowance, assertConsumerReviewBinding, bindingRecoveryDirectory, bindingRecoveryStop, boundConsumerReviewSchema } from "../compiler/consumer-review-binding.js";
 import { prepareConsumerBindingRecovery } from "../compiler/consumer-binding-recovery.js";
+import { prepareWorkProviderResumption, workProviderStop } from "../compiler/consumer-work-provider-resumption.js";
+import { consumerWorkProviderDirectory } from "../compiler/consumer-work-plan.js";
+import { consumerTransportRecoveryRequestSchema, prepareConsumerTransportRecovery, transportRecoveryFile, transportRecoveryStop,
+  type ConsumerTransportRecoveryRequest } from "../compiler/consumer-transport-recovery.js";
+import { CONSUMER_EVIDENCE_COVERAGE, consumerEvidenceCoverage, assertConsumerEvidenceRead, additionalConsumerEvidenceSubjects,
+  createConsumerEvidenceReads, acceptConsumerEvidenceRead, consumerEvidenceReads } from "../compiler/consumer-evidence-coverage.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { contentHash } from "../world/canonical.js";
 import { RequirementLedger } from "../compiler/requirement-ledger.js";
@@ -19,7 +25,7 @@ import { CONSUMER_REVIEW_CORRECTION, consumerReviewCapability, consumerReviewIns
 import { prerequisiteStop } from "../compiler/role-source-prerequisites.js";
 import { resolveTextSelectorAnchor } from "../compiler/text-anchors.js";
 import { prepareConsumerRevalidation, consumerRevalidationInput, revalidationContract, verifyConsumerRevalidationRecord, findConsumerArtifact, discoverConsumerArtifacts } from "../compiler/identity-consumer-revalidation.js";
-import { artifactRef, artifactPageInstructions, consumerArtifactPages, consumerArtifactReadHint, ConsumerArtifactReadTracker } from "../compiler/identity-consumer-artifacts.js";
+import { artifactRef, artifactPageInstructions, consumerArtifactPages, consumerArtifactReadHint } from "../compiler/identity-consumer-artifacts.js";
 import { prepareConsumerStageRecovery, consumerStageRecoveryDirectory, consumerStageUsage, consumerRecoveryPreflight,
   consumerRecoveryInput, assertConsumerRecoveryInput, verifyConsumerStageRecovery, consumerProviderResumptionSchema,
   type ConsumerStageRecovery, type ConsumerProviderResumption } from "../compiler/identity-consumer-stage-recovery.js";
@@ -27,7 +33,7 @@ import { inspectConsumerRefRecovery, consumerRefRecoveryFile } from "../compiler
 import { consumerRevalidationOutputSchema, consumerRevalidationProposalSchema, consumerRevalidationCheckSchema,
   consumerEntityRepairId, consumerEntityScopeError, validateConsumerRevalidationHistory, type ConsumerRevalidationRecord, type ConsumerRevalidationScope } from "../compiler/identity-consumer-revalidation-model.js";
 import { assertPiSubscription, retainPiArtifact, runReceiptBoundPiStage } from "./receipt-bound-pi-stage.js";
-import { assertConsumerCompilerCorrection, consumerRevalidationLimits } from "../compiler/identity-consumer-correction.js";
+import { assertConsumerCompilerCorrection, assertConsumerCorrectionSlot, consumerRevalidationLimits } from "../compiler/identity-consumer-correction.js";
 import { consumerBudgetAmendmentRequestSchema, inspectConsumerBudgetAmendment, consumerRecoveryLimits,
   type ConsumerBudgetAmendmentRequest, type ConsumerBudgetAmendment } from "../compiler/identity-consumer-budget-amendment.js";
 import { consumerHostRecoveryRequestSchema, inspectConsumerHostRecovery, consumerHostRecoveryDirectory, consumerHostRecoveryInput,
@@ -93,9 +99,10 @@ In the proposal, return the exact ref/currentRevisionHash, all original requirem
 For the independent check, independently inspect all evidence and the supplied proposal at the SAME target cut. Return the exact proposalHash and reviewContractHash. A supported check means that the proposed disposition and rationale are evidence-faithful, including a blocked disposition; it does not itself certify or activate a world. Neither phase may infer global identity closure from consumer compatibility. Use Chinese rationales.
 If compilerCorrection is present, inspect both previous negative judgments and identify whether their objections apply to this exact target cut. Preserve all valid objections. A corrected time/scope contract is not proof that the consumer is supported; either outcome is legitimate.
 ` + (work ? `The complete evidencePacket delivers every required source and selected artifact, including the exact consumer and owning event/execution bindings. Mechanical manifests preserve full retained inventories; inspect all semantic fields. Do not reread delivered evidence for bookkeeping. A retained-role-roster is an audit denominator, not active truth. For additional dependencies, discover with read_consumer_revalidation and copy artifactReadRefs[].ref; finish every returned page.nextOffset for that same ref. Source discovery is not evidence.
-First call preview_consumer_revalidation with a complete grounded draft; it checks structure, scope and source anchors, not semantic support. Submit that exact validated draft in a later response as the sole tool call to submit_consumer_revalidation. Keep one response for submission.
-` + (scope.compilerCorrection?.policy === CONSUMER_REVIEW_CORRECTION
-    ? "This explicitly authorized scope correction uses only the predecessor's remaining calls and byte allowance shown in execution.limits. Previews never renew it; no new progress window, call amendment or automatic retry.\n"
+When evidenceCoverage is present, its segmentIds identify original text selected from the actual consumer and dependency spans. Read the supplied originals for meaning; coverage does not prove support. For additional source, discover with read_consumer_revalidation collection=source, copy items[].id into segmentIds and read completely. Additional artifact reads return missingSourceSegmentIds when their original text is still unread: read those before preview. An incomplete packet or unread referenced text is a delivery gap, not evidence that the novel lacks support. A genuine semantic gap after reading remains blocked.
+After required reads, call preview_consumer_revalidation with a complete grounded draft; it checks structure, scope and source anchors, not semantic support. Submit that exact validated draft in a later response as the sole tool call to submit_consumer_revalidation. Keep one response for submission.
+` + (scope.compilerCorrection?.policy === CONSUMER_REVIEW_CORRECTION || scope.compilerCorrection?.policy === CONSUMER_EVIDENCE_COVERAGE
+    ? "This explicitly authorized compiler correction uses only the predecessor's remaining calls and byte allowance shown in execution.limits. Previews never renew it; no new progress window, call amendment or automatic retry.\n"
     : "Only the first valid draft preview renews the bounded no-progress window; repeated previews, reads and wording changes earn nothing.\n")
     : "Read every requiredSourceSegmentIds and exact scope.ref through read_consumer_revalidation; read every ownerRef and all dependencies needed for the judgment. For missing refs discover in the same scope and copy artifactReadRefs[].ref, finish all returned pages. Submit once as the sole tool call after all reads complete.\n")
     + "An ID/ref miss permits at most one corrected discovery-based retry. Host-state, scope, consumed-invocation and budget failures require stopping without unchanged retries. Never write world truth, resume the parent, grant certification or activate the world.";
@@ -103,7 +110,7 @@ First call preview_consumer_revalidation with a complete grounded draft; it chec
 
 export async function runIdentityConsumerRevalidation(options: { root: string; sourceId: string; taskId: string; ref: string; authorizationRef: string; compilerCorrection?: string; resumeUnsubmitted?: "inspect" | "run"; budgetAmendment?: ConsumerBudgetAmendmentRequest; recoverSubmittedRef?: boolean; providerResumption?: ConsumerProviderResumption; hostRecovery?: ConsumerHostRecoveryRequest;
   executionPolicy?: typeof CONSUMER_WORK_POLICY; executionAuthorizationRef?: string; inspectExecution?: boolean;
-  recoverContractBinding?: boolean; bindingRecoveryAuthorizationRef?: string }) {
+  recoverContractBinding?: boolean; bindingRecoveryAuthorizationRef?: string; recoverTransportRetry?: ConsumerTransportRecoveryRequest }) {
   if (options.executionPolicy && options.executionPolicy !== CONSUMER_WORK_POLICY)
     throw prerequisiteStop("Unknown execution policy; use consumer-work/v1 and --inspect-execution for the same source/task/ref, no guessed policy or retry");
   if (options.resumeUnsubmitted && !["inspect", "run"].includes(options.resumeUnsubmitted))
@@ -112,6 +119,7 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
   const requestedAmendment = options.budgetAmendment ? consumerBudgetAmendmentRequestSchema.parse(options.budgetAmendment) : undefined;
   const providerResumption = options.providerResumption ? consumerProviderResumptionSchema.parse(options.providerResumption) : undefined;
   const hostRequest = options.hostRecovery ? consumerHostRecoveryRequestSchema.parse(options.hostRecovery) : undefined;
+  const transportRequest = options.recoverTransportRetry ? consumerTransportRecoveryRequestSchema.parse(options.recoverTransportRetry) : undefined;
   if (hostRequest && (!options.resumeUnsubmitted || requestedAmendment || options.recoverSubmittedRef))
     throw prerequisiteStop("Use --host-recovery only with --resume-unsubmitted inspect or run; no call amendment, rejected-ref recovery or guessed retry");
   if (providerResumption && !options.resumeUnsubmitted) throw prerequisiteStop("Provider resumption requires --resume-unsubmitted inspect or run for the original failed stage; no automatic retry");
@@ -123,12 +131,16 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
     const p = await prepareConsumerRevalidation(root, sourceId, taskId, options.ref, options.authorizationRef, options.compilerCorrection), { scope, directory } = p;
     const useWork = Boolean(options.executionPolicy || scope.executionPolicy || await maybe(path.join(consumerWorkDirectory(directory), "consumer-revalidation.plan.json")));
     const inspectOnly = options.inspectExecution || options.resumeUnsubmitted === "inspect";
-    if (useWork && (options.resumeUnsubmitted || hostRequest || providerResumption || requestedAmendment || options.recoverSubmittedRef))
+    if (transportRequest && (!useWork || scope.compilerCorrection || options.recoverContractBinding || options.resumeUnsubmitted
+      || hostRequest || providerResumption || requestedAmendment || options.recoverSubmittedRef || transportRequest.scopeHash !== contentHash(scope)))
+      throw transportRecoveryStop("Transport registration requires the original work scope, separately from other recovery paths");
+    if (useWork && (options.resumeUnsubmitted && !providerResumption || hostRequest || requestedAmendment || options.recoverSubmittedRef))
       throw prerequisiteStop("Versioned work execution retains old recoveries through its migration proof. Use --inspect-execution and the same execution policy; do not combine legacy recovery flags or retry unchanged");
     if (options.inspectExecution && !useWork) throw prerequisiteStop("Select --execution-policy consumer-work/v1 to inspect migration of this legacy scope; no dispatch or guessed policy");
     const ledger = new RequirementLedger(root, sourceId), records = [...p.previous];
     if (options.recoverContractBinding && (!useWork || records.length !== 1 || options.resumeUnsubmitted || hostRequest || providerResumption || requestedAmendment || options.recoverSubmittedRef))
       throw bindingRecoveryStop("Binding repair requires the original work check with exactly one sealed proposal");
+    await assertConsumerCorrectionSlot(root, scope);
     if (!inspectOnly) {
       await fs.mkdir(directory, { recursive: true }); await retainPiArtifact(path.join(directory, "scope.json"), scope);
     }
@@ -137,6 +149,7 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
       if (!originalRepairs[0]) throw prerequisiteStop("Original entity repair lineage missing");
       await assertConsumerRepairRetainedState(root, originalRepairs[0].intent);
       await assertConsumerCompilerCorrection(scope);
+      await assertConsumerCorrectionSlot(root, scope);
       for (const file of scope.priorBudgetFiles) if (contentHash(await read(file.path)) !== file.hash) throw prerequisiteStop("Inherited budget changed; preserve all charges, no further dispatch");
     };
     const cumulative = async () => {
@@ -157,12 +170,23 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
     try {
       const hostRecovery = useWork ? undefined : await inspectConsumerHostRecovery(root, scope, revalidationContract, hostRequest);
       if (hostRecovery && (requestedAmendment || options.recoverSubmittedRef)) throw prerequisiteStop("The original host recovery is already selected; no alternate recovery or grant");
-      if (providerResumption) await prepareConsumerStageRecovery(root, scope, providerResumption.stage, revalidationContract, providerResumption, hostRecovery);
+      if (providerResumption && !useWork) await prepareConsumerStageRecovery(root, scope, providerResumption.stage, revalidationContract, providerResumption, hostRecovery);
       if (requestedAmendment) {
         const plan = await prepareConsumerStageRecovery(root, scope, requestedAmendment.stage, revalidationContract);
         await inspectConsumerBudgetAmendment(consumerStageRecoveryDirectory(directory, requestedAmendment.stage), plan, requestedAmendment);
       }
       for (const record of records) await verifyConsumerRevalidationRecord(root, record);
+      if (useWork && providerResumption && records.some(record => record.output.phase === providerResumption.stage)) {
+        const saved = await maybe(path.join(consumerWorkProviderDirectory(consumerWorkDirectory(directory), providerResumption.stage), "recovery.json"));
+        if (!saved || contentHash(saved.request) !== contentHash(providerResumption)) throw workProviderStop("Registered continuation has a different frozen authorization");
+      } else if (useWork && providerResumption && providerResumption.stage !== (records.length ? "consumer-revalidation-check" : "consumer-revalidation")) {
+        throw workProviderStop("Provider continuation does not select the original unfinished stage");
+      }
+      if (transportRequest && records.some(record => record.output.phase === transportRequest.stage)) {
+        const retained = await read(transportRecoveryFile(consumerWorkDirectory(directory), transportRequest.stage));
+        if (contentHash(retained.request) !== contentHash(transportRequest))
+          throw transportRecoveryStop("The already registered transport recovery has a different frozen authorization");
+      }
       for (const check of [false, true].slice(records.length)) {
         const stage = check ? "consumer-revalidation-check" : "consumer-revalidation", baseInput = { ...consumerRevalidationInput(p, records, check),
           capability: consumerReviewCapability(scope) };
@@ -173,6 +197,18 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
         let rejectedRef: Awaited<ReturnType<typeof inspectConsumerRefRecovery>> | undefined;
         if (useWork) {
           work = await prepareConsumerWorkExecution(root, p, baseInput, stage, options.executionAuthorizationRef);
+          const providerSaved = await maybe(path.join(consumerWorkProviderDirectory(work.directory, stage), "recovery.json"));
+          if (providerResumption?.stage === stage || providerSaved) {
+            const recovered = await prepareWorkProviderResumption(root, scope, work, providerResumption?.stage === stage ? providerResumption : undefined);
+            work = recovered;
+            if (!inspectOnly) {
+              await fs.mkdir(work.directory, { recursive: true });
+              await retainPiArtifact(path.join(work.directory, "recovery.json"), recovered.recovery);
+            }
+            systemPrompt = systemPrompt.replace("Only the first valid draft preview renews the bounded no-progress window; repeated previews, reads and wording changes earn nothing.",
+              "This provider continuation uses only the original remaining allowance. No preview renews its budget.")
+              + "\nFollow input.providerResumption: confirm the retained draft unchanged after reading the complete original packet and any required additional evidence. If unable to confirm it, stop. A draft remains a proposal until the normal successful submission and independent review gates pass.";
+          }
           if (check && (options.recoverContractBinding || await maybe(path.join(bindingRecoveryDirectory(work.directory), "recovery.json")))) {
             const recovered = await prepareConsumerBindingRecovery(root, scope, work, records[0]!, options.bindingRecoveryAuthorizationRef);
             work = recovered;
@@ -264,9 +300,14 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
           }
           if (hostRecovery) await inspectConsumerHostRecovery(root, scope, revalidationContract, undefined, contentHash(hostRecovery));
           if (continuation) await verifyConsumerStageRecovery(root, scope, stage, contentHash(continuation), revalidationContract, amendment ? contentHash(amendment) : undefined, hostRecovery); };
-        const artifactReads = new ConsumerArtifactReadTracker();
-        const sourceRead = rejectedRef?.sourceRead ?? new Set<string>(), artifactsRead = artifactReads.completed; let consumerRead = rejectedRef?.consumerRead ?? false;
+        const evidenceReads = createConsumerEvidenceReads(), artifactReads = evidenceReads.artifacts;
+        const sourceRead = evidenceReads.sourceIds, artifactsRead = artifactReads.completed; let consumerRead = rejectedRef?.consumerRead ?? false;
+        rejectedRef?.sourceRead.forEach(id => sourceRead.add(id));
         rejectedRef?.artifactsRead.forEach(ref => artifactsRead.add(ref));
+        const canonicalReadRef = (ref: string) => {
+          const artifact = findConsumerArtifact(p.catalog, ref);
+          return artifact ? artifactRef(artifact) : ref;
+        };
         if (work) {
           // These exact values are included in every initial request, and the
           // sealed verifier independently checks their source/plan bindings.
@@ -280,6 +321,22 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
         };
         const validateCandidate = async (candidate: ReturnType<typeof consumerRevalidationOutputSchema.parse>) => {
           if (candidate.phase !== stage) throw prerequisiteStop("Consumer revalidation changed its assigned phase");
+          if (work?.plan.providerResumption) {
+            const resumed = work.plan.providerResumption;
+            if (resumed.draft !== undefined && contentHash(candidate) !== contentHash(resumed.draft))
+              throw workProviderStop("Provider continuation changed the original validated draft");
+            if (resumed.requiredSourceSegmentIds.some(id => !sourceRead.has(id)) || resumed.requiredArtifactRefs.some(ref => !artifactsRead.has(ref)))
+              throw new Error("Read providerResumption.requiredSourceSegmentIds and requiredArtifactRefs not already supplied in the evidence packet before previewing; historical receipts do not count.");
+            for (const required of resumed.requiredArtifactRevisions ?? []) {
+              const actual = artifactReads.subjects.get(required.ref) ?? work.plan.artifacts.find(a => artifactRef(a) === required.ref);
+              if (actual?.revisionHash !== required.revisionHash) throw workProviderStop("An additional dependency changed since the original quota refusal");
+            }
+          }
+          if (work?.plan.evidenceCoverage) {
+            assertConsumerEvidenceRead(work.plan.evidenceCoverage, sourceRead);
+            assertConsumerEvidenceRead(consumerEvidenceCoverage(scope.sourceId, p.prepared.bytes, p.prepared.manifest.segments,
+              additionalConsumerEvidenceSubjects(artifactReads)), sourceRead);
+          }
           if (work?.plan.reviewBinding) assertConsumerReviewBinding(scope, candidate, check ? contentHash(records[0]!.output) : undefined);
           if (!consumerRead || input.requiredSourceSegmentIds.some(id => !sourceRead.has(id))) throw new Error("Read every requiredSourceSegmentIds and scope.ref fully before one corrected submission.");
           if (hostRecovery && (hostRecovery.requiredSourceSegmentIds.some(id => !sourceRead.has(id))
@@ -301,7 +358,7 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
             throw new Error("Read all proposed segmentIds/readableRefs in full and copy their exact revisionHash; correct once. Retained resolution predecessors remain immutable audit dependencies, never active identity decisions.");
           const evidence = await Promise.all(candidate.evidence.map(resolve));
           validateConsumerRevalidationHistory([...records, { scope, output: candidate, evidence, inputHash: contentHash(input), predecessorRecordHash: records.length ? contentHash(records.at(-1)) : null,
-            ...(work ? { executionPlanHash: contentHash(work.plan), ...(work.plan.bindingRecoveryHash ? { bindingRecoveryHash: work.plan.bindingRecoveryHash } : {}) } : {}),
+            ...(work ? { executionPlanHash: contentHash(work.plan), ...(work.plan.bindingRecoveryHash ? { bindingRecoveryHash: work.plan.bindingRecoveryHash } : {}), ...(work.plan.providerResumptionHash ? { providerResumptionHash: work.plan.providerResumptionHash } : {}) } : {}),
             ...(hostRecovery ? { hostRecoveryHash: contentHash(hostRecovery) } : {}),
             sessionId: "pending-session", traceRunId: "pending-trace", sessionCheckpointHash: "0".repeat(64) }], p.original);
           return evidence;
@@ -321,6 +378,20 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
             refRecoveryHash: contentHash(proof), predecessorRecordHash: null, sessionId: proof.sessionId, traceRunId: proof.traceRunId };
           await ledger.recordIdentityConsumerRevalidation(record); await retainPiArtifact(path.join(stageDirectory, `${stage}.record.json`), record); records.push(record); continue;
         }
+        if (work && transportRequest?.stage === stage) {
+          await assertStage();
+          const recovery = await prepareConsumerTransportRecovery(root, scope, work, transportRequest);
+          // Registration resumes the verified original session, so its complete
+          // receipts still count. Provider continuations instead start fresh.
+          consumerEvidenceReads(recovery.messages, evidenceReads, canonicalReadRef);
+          await validateCandidate(consumerRevalidationOutputSchema.parse(recovery.checkpoint.output));
+          if (inspectOnly) return { status: "transport-recovery-ready", ref: scope.ref, directory,
+            stage, recoveryHash: contentHash(recovery.recovery), disposition: recovery.checkpoint.output.disposition,
+            providerCalls: 0, originalFailurePreserved: true, independentCheckRequired: !check,
+            cumulative: await cumulative(), parentResumeAllowed: false, certificationGranted: false };
+          await retainPiArtifact(transportRecoveryFile(stageDirectory, stage), recovery.recovery);
+          await retainPiArtifact(path.join(stageDirectory, `${stage}.session-checkpoint.json`), recovery.checkpoint);
+        }
         const saved = await maybe(path.join(stageDirectory, `${stage}.record.json`));
         if (work && inspectOnly && saved) return { status: "sealed", ref: scope.ref, directory, records, executionPlanHash: contentHash(work.plan),
           cumulative: await cumulative(), parentResumeAllowed: false, certificationGranted: false };
@@ -337,7 +408,7 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
             evidence.push({ selector, anchor: await resolveTextSelectorAnchor(root, segment, selector) });
           }
           const record: ConsumerRevalidationRecord = { scope, output, evidence, inputHash: contentHash(await read(path.join(stageDirectory, `${stage}.input.json`))),
-            ...(work ? { executionPlanHash: contentHash(work.plan), ...(work.plan.bindingRecoveryHash ? { bindingRecoveryHash: work.plan.bindingRecoveryHash } : {}) } : {}),
+            ...(work ? { executionPlanHash: contentHash(work.plan), ...(work.plan.bindingRecoveryHash ? { bindingRecoveryHash: work.plan.bindingRecoveryHash } : {}), ...(work.plan.providerResumptionHash ? { providerResumptionHash: work.plan.providerResumptionHash } : {}) } : {}),
             ...(hostRecovery ? { hostRecoveryHash: contentHash(hostRecovery) } : {}),
             ...(continuation ? { continuationHash: contentHash(continuation) } : {}),
             ...(amendment ? { budgetAmendmentHash: contentHash(amendment) } : {}),
@@ -383,7 +454,7 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
                 const segments = a.segmentIds.map(id => { const s = p.prepared.manifest.segments.find(s => s.id === id);
                   if (!s) throw new Error("Discover collection=source offset=0, copy items[].id to segmentIds once; no guessing.");
                   return { id, text: Buffer.from(p.prepared.bytes).subarray(s.startByte, s.endByte).toString("utf8"), complete: true }; });
-                value = { segments }; if (Buffer.byteLength(JSON.stringify(value)) <= 240000) segments.forEach(s => sourceRead.add(s.id));
+                value = { segments };
               } else {
                 const bytes = Buffer.from(p.prepared.bytes);
                 const matches = p.prepared.manifest.segments.filter(s => !a.query || bytes.subarray(s.startByte, s.endByte).toString("utf8").includes(a.query));
@@ -406,15 +477,23 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
                   }
                   if (a.offset) throw new Error("Invalid artifact page offset: an unpaged full read requires offset=0; correct once.");
                   return { ref: artifactRef(c), ...c, complete: true }; });
-                value = { items }; if (Buffer.byteLength(JSON.stringify(value)) <= 240000) items.forEach(item => artifactReads.accept(item));
+                value = { items };
               } else {
                 const matches = discoverConsumerArtifacts(p.catalog, a.query);
                 if (a.offset >= matches.length && a.offset !== 0) throw new Error("Discover offset=0 with the same query and copy nextOffset once.");
                 value = { total: matches.length, items: matches.slice(a.offset, a.offset + 32).map(c => ({ ...consumerArtifactReadHint(c), kind: c.kind, id: c.id })), nextOffset: a.offset + 32 < matches.length ? a.offset + 32 : null };
               }
             }
+            if (work?.plan.evidenceCoverage && a.collection === "artifacts" && a.refs) {
+              const coverage = consumerEvidenceCoverage(scope.sourceId, p.prepared.bytes, p.prepared.manifest.segments,
+                [...additionalConsumerEvidenceSubjects(artifactReads), ...a.refs.map(ref => findConsumerArtifact(p.catalog, ref)!)
+                  .filter(c => c.evidenceRole !== "retained-role-roster").map(c => ({ ref: artifactRef(c), revisionHash: c.revisionHash, payload: c.payload }))]);
+              value = { ...(value as object), missingSourceSegmentIds: coverage.segmentIds.filter(id => !sourceRead.has(id)),
+                sourceReadInstruction: "Read missingSourceSegmentIds with collection=source, segmentIds, offset=0 before preview. These are unread references, not missing novel evidence. Use bounded batches; host/scope/budget failures stop." };
+            }
             if (Buffer.byteLength(JSON.stringify(value)) > 240000) throw new Error("Read fewer discovered IDs once; complete read limit is 240000 bytes, no truncation.");
-            if (a.collection === "consumer") consumerRead = true;
+            acceptConsumerEvidenceRead(evidenceReads, a, value, canonicalReadRef);
+            if (evidenceReads.consumerRefs.has(scope.ref)) consumerRead = true;
             return result(value);
           }); } }), defineTool({ name: "submit_consumer_revalidation", label: "Retain original-requirement consumer review", parameters: outputParameters,
           description: "Single-use read-only judgment after complete source/consumer reads. Copy original requirement IDs, scopeHash and currentRevisionHash; no new criteria or world writes. One format correction; host/scope/budget/consumed failures stop.",
@@ -445,7 +524,9 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
             migrated: work.migrated, cumulative: await cumulative(), parentResumeAllowed: false, certificationGranted: false };
           await fs.mkdir(stageDirectory, { recursive: true });
           await retainPiArtifact(path.join(stageDirectory, `${stage}.plan.json`), work.plan);
-          await retainPiArtifact(path.join(stageDirectory, `${stage}.preflight.json`), preflight);
+          // Keep historical raw-size admission receipts intact. This only
+          // remeasures an uninvoked stage; consumed invocation gates still apply.
+          await retainPiArtifact(path.join(stageDirectory, `${stage}.preflight-message-v1.json`), preflight);
           if (!preflight.modelDispatchAllowed) {
             await publish("BREAK", { stage, execution: preflight });
             return { status: preflight.status, ref: scope.ref, directory, records, execution: preflight, cumulative: await cumulative(), parentResumeAllowed: false, certificationGranted: false };
@@ -457,7 +538,7 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
           ...(hostRecovery ? { hostRecoveryHash: contentHash(hostRecovery) } : {}),
           ...(continuation ? { continuationHash: contentHash(continuation) } : {}),
           ...(amendment ? { budgetAmendmentHash: contentHash(amendment) } : {}),
-          ...(work ? { executionPlanHash: contentHash(work.plan), workBudgetPolicy: workBudgetPolicy(work.plan), bindingRecoveryHash: work.plan.bindingRecoveryHash } : {}),
+          ...(work ? { executionPlanHash: contentHash(work.plan), workBudgetPolicy: workBudgetPolicy(work.plan), bindingRecoveryHash: work.plan.bindingRecoveryHash, providerResumptionHash: work.plan.providerResumptionHash } : {}),
           priorUsage: work ? work.plan.priorUsage : await cumulative(), limits: work ? work.plan.limits : continuation ? consumerRecoveryLimits(continuation, amendment)
             : hostRecovery ? (check ? hostRecovery.checkLimits : hostRecovery.proposalLimits) : await consumerRevalidationLimits(root, scope, stage), contract: work ? consumerWorkContract : revalidationContract,
           assertOriginal: async () => { if (fatal) throw fatal; await assertStage(); },
@@ -472,7 +553,7 @@ export async function runIdentityConsumerRevalidation(options: { root: string; s
             return output;
           } });
         const record: ConsumerRevalidationRecord = { scope, output: proof.value, inputHash: proof.inputHash,
-          ...(work ? { executionPlanHash: contentHash(work.plan), ...(work.plan.bindingRecoveryHash ? { bindingRecoveryHash: work.plan.bindingRecoveryHash } : {}) } : {}),
+          ...(work ? { executionPlanHash: contentHash(work.plan), ...(work.plan.bindingRecoveryHash ? { bindingRecoveryHash: work.plan.bindingRecoveryHash } : {}), ...(work.plan.providerResumptionHash ? { providerResumptionHash: work.plan.providerResumptionHash } : {}) } : {}),
           ...(hostRecovery ? { hostRecoveryHash: contentHash(hostRecovery) } : {}),
           ...(continuation ? { continuationHash: contentHash(continuation) } : {}),
           ...(amendment ? { budgetAmendmentHash: contentHash(amendment) } : {}),

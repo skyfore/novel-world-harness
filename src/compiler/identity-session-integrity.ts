@@ -21,7 +21,9 @@ export function assertIdentitySubmissionTurn(message: Message, terminalTool = "s
 export type IdentitySessionContract = { terminalTool: string; readTools: readonly string[]; receipt: "retained" | "staged"; allowCorrectedSubmission?: boolean };
 const defaultContract: IdentitySessionContract = { terminalTool: "submit_identity_requirements", readTools: identityReadTools, receipt: "retained" };
 export const identityQuotaRefusal = "Codex error: The usage limit has been reached";
-function inspectTranscript(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model"> & { output: unknown }, prompt: string, contract = defaultContract, unsubmitted = false, rejectedSubmissionError?: string, settledFailure = false, quotaRefusal = false) {
+type IdentityTranscriptSummary = { entries: number; lastEntryId: string | null; responses: number; toolResults: number;
+  transportRetries?: Array<{ policy: "pi-websocket-retry/v1"; editId: string; targetId: string; messageIndex: number; responseIndex: number; messageHash: string }> };
+function inspectTranscript(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model"> & { output: unknown }, prompt: string, contract = defaultContract, unsubmitted = false, rejectedSubmissionError?: string, settledFailure = false, quotaRefusal = false, verifyTransportRetry = false, readOnlyQuota = false): { messages: Message[]; localStop: Message | undefined; summary: IdentityTranscriptSummary } {
   if (!text.endsWith("\n")) throw prerequisiteStop("Identity transcript has an incomplete final entry; preserve it, no redispatch");
   const entries = text.trimEnd().split("\n").map(line => JSON.parse(line)) as FileEntry[];
   const header = entries[0];
@@ -29,15 +31,33 @@ function inspectTranscript(text: string, root: string, record: Pick<IdentityReco
     throw prerequisiteStop("Identity transcript has a foreign or resumed session header");
   const ids = new Set<string>(); let parent: string | null = null;
   const messages: Message[] = [];
+  const retryMessages = new Set<Message>();
+  const transportRetries: NonNullable<IdentityTranscriptSummary["transportRetries"]> = [];
+  let previous: FileEntry = header;
   for (const entry of entries.slice(1)) {
     if (entry.type === "session" || !entry.id || ids.has(entry.id) || entry.parentId !== parent
-      || ["compaction", "context_edit", "branch_summary", "custom_message"].includes(entry.type))
+      || ["compaction", "branch_summary", "custom_message"].includes(entry.type))
       throw prerequisiteStop("Identity transcript is truncated, forked or edited; retain its complete original evidence");
+    if (entry.type === "context_edit") {
+      const failed = previous.type === "message" ? previous.message as Message : undefined;
+      // Pi retains an unsuccessful response, then omits only that response
+      // from its next request. Pi never executes tools from an error response,
+      // even when the stream already contains a partial terminal tool call.
+      // Full request/live/trace proof must establish that no tool executed;
+      // transcript-only verification stays strict.
+      if (!verifyTransportRetry || transportRetries.length || entry.replacement !== null || entry.targetId !== previous.id
+        || failed?.role !== "assistant" || failed.stopReason !== "error" || failed.errorMessage !== "WebSocket closed 1006")
+        throw prerequisiteStop("Identity context edit is not one recorded unsubmitted WebSocket retry; preserve its complete history, no redispatch");
+      retryMessages.add(failed);
+      transportRetries.push({ policy: "pi-websocket-retry/v1", editId: entry.id, targetId: entry.targetId,
+        messageIndex: messages.length - 1, responseIndex: messages.filter(m => m.role === "assistant").length - 1, messageHash: contentHash(failed) });
+    }
     ids.add(entry.id); parent = entry.id;
     if (entry.type === "message") {
       if (!["system", "user", "assistant", "toolResult"].includes(entry.message.role)) throw prerequisiteStop("Identity transcript contains a message outside its stage protocol");
       messages.push(entry.message as Message);
     }
+    previous = entry;
   }
   const users = messages.filter(m => m.role === "user");
   const userText = users[0]?.content;
@@ -51,13 +71,13 @@ function inspectTranscript(text: string, root: string, record: Pick<IdentityReco
     && lastMessage.errorMessage === rejectedSubmissionError && lastMessage.content.every(b => b.type === "text" && b.text === "")
     && Object.values(lastMessage.usage).every(v => typeof v === "number" ? v === 0 : typeof v === "object" && Object.values(v).every(n => n === 0))
     ? lastMessage : undefined;
-  const refused = quotaRefusal && assistants.length === 1 && lastMessage?.role === "assistant"
+  const refused = quotaRefusal && (assistants.length === 1 || readOnlyQuota) && lastMessage?.role === "assistant"
     && lastMessage.stopReason === "error" && lastMessage.errorMessage === identityQuotaRefusal
-    && lastMessage.content.length === 0 && messages.every(m => m.role !== "toolResult")
+    && lastMessage.content.length === 0 && messages.every(m => m.role !== "toolResult" || readOnlyQuota && !m.isError)
     && Object.values(lastMessage.usage).every(v => typeof v === "number" ? v === 0 : typeof v === "object" && Object.values(v).every(n => n === 0))
     ? lastMessage : undefined;
   if (quotaRefusal && !refused) throw prerequisiteStop("Quota continuation requires exactly one empty, zero-usage provider refusal and no tools; preserve the failure, no retry");
-  if (!assistants.length || assistants.some(m => m.provider !== record.provider || m.model !== record.model || m !== localStop && m !== refused && ["error", "aborted", "pending"].includes(m.stopReason)))
+  if (!assistants.length || assistants.some(m => m.provider !== record.provider || m.model !== record.model || m !== localStop && m !== refused && !retryMessages.has(m) && ["error", "aborted", "pending"].includes(m.stopReason)))
     throw prerequisiteStop("Identity transcript lacks settled provider responses");
   const pending = new Map<string, string>(), callIds = new Set<string>();
   const submissions: { id: string; arguments: unknown }[] = [];
@@ -65,6 +85,15 @@ function inspectTranscript(text: string, root: string, record: Pick<IdentityReco
     if (message.role === "assistant") {
       if (pending.size) throw prerequisiteStop("Identity response preceded its unsettled tool results; no authority or retry");
       const calls = message.content.filter(b => b.type === "toolCall");
+      if (retryMessages.has(message)) {
+        // Keep even unexecuted IDs reserved: a later result or reused ID may
+        // not turn an omitted partial call into an executed submission.
+        for (const block of calls) {
+          if (callIds.has(block.id)) throw prerequisiteStop("Identity transcript reused a tool call ID");
+          callIds.add(block.id);
+        }
+        continue;
+      }
       assertIdentitySubmissionTurn(message, contract.terminalTool);
       for (const block of calls) {
         if (![...contract.readTools, contract.terminalTool].includes(block.name)) throw prerequisiteStop("Identity transcript used a tool outside its exact stage");
@@ -112,7 +141,8 @@ function inspectTranscript(text: string, root: string, record: Pick<IdentityReco
     || !last.content.some(b => b.type === "text" && JSON.parse(b.text)[contract.receipt] === true))
     throw prerequisiteStop("Identity transcript has no complete terminal submission receipt");
   return { messages, localStop: undefined, summary: { entries: entries.length, lastEntryId: parent, responses: assistants.length,
-    toolResults: messages.filter(m => m.role === "toolResult").length } };
+    toolResults: messages.filter(m => m.role === "toolResult").length,
+    ...(transportRetries.length ? { transportRetries } : {}) } };
 }
 
 export function inspectIdentityTranscript(text: string, root: string, record: IdentityRecord, prompt: string) {
@@ -124,8 +154,8 @@ export function inspectIdentityTranscript(text: string, root: string, record: Id
  * the final response/signature and terminal tool result (never sent again).
  * A hash computed after data was lost is not evidence of complete persistence. */
 export function verifyIdentitySessionEvidence(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model"> & { output: unknown }, prompt: string,
-  rawRequests: string, rawMessages: string, contract = defaultContract) {
-  return verifySessionObservations(inspectTranscript(text, root, record, prompt, contract), rawRequests, rawMessages, contract);
+  rawRequests: string, rawMessages: string, contract = defaultContract, verifyTransportRetry = false) {
+  return verifySessionObservations(inspectTranscript(text, root, record, prompt, contract, false, undefined, false, false, verifyTransportRetry), rawRequests, rawMessages, contract);
 }
 
 /** This proves only an immutable failed read session, never a semantic result.
@@ -149,6 +179,15 @@ export function verifyStoppedReadOnlyIdentitySession(text: string, root: string,
 export function verifyQuotaRefusedIdentitySession(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model">,
   prompt: string, rawRequests: string, rawMessages: string, contract: IdentitySessionContract) {
   return verifySessionObservations(inspectTranscript(text, root, { ...record, output: null }, prompt, contract, true, undefined, false, true), rawRequests, rawMessages, contract);
+}
+
+/** Work-policy continuation may retain successful reads and draft previews.
+ * The final refusal must still be empty, zero-usage and never submitted. This
+ * does not broaden the legacy first-request quota recovery above. */
+export function verifyWorkQuotaRefusedSession(text: string, root: string, record: Pick<IdentityRecord, "sessionId" | "provider" | "model">,
+  prompt: string, rawRequests: string, rawMessages: string, contract: IdentitySessionContract) {
+  return verifySessionObservations(inspectTranscript(text, root, { ...record, output: null }, prompt, contract,
+    true, undefined, false, true, false, true), rawRequests, rawMessages, contract);
 }
 
 /** Evidence of a rejected proposal only. It does not synthesize a successful
@@ -198,7 +237,9 @@ function verifySessionObservations({ messages, summary, localStop }: ReturnType<
       if (systemHash && systemHash !== contentHash(system)) throw prerequisiteStop("Identity system prompt or tools changed between requests; no retry");
       systemHash = contentHash(system);
     }
-    prefix.push(message);
+    // Raw history and message observations still include the failed response;
+    // only the exact Pi omission may differ in the next model projection.
+    if (!summary.transportRetries?.some(retry => retry.messageIndex === index)) prefix.push(message);
   }
   let blockedRequestBytes: number | undefined;
   if (requestSizeStop) {

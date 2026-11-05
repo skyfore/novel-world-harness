@@ -5,6 +5,9 @@ import { ModelRequestBudget, type ModelRequestBudgetState } from "../src/runtime
 import { createConsumerWorkPlan, consumerWorkInput, consumerArtifactView, consumerWorkPreflight,
   consumerWorkBudgetPolicy, workBudgetPolicy, verifyConsumerWorkProgress, consumerWorkFailure, type ConsumerWorkBaseInput } from "../src/compiler/consumer-work-plan.js";
 import { CONSUMER_REVIEW_CORRECTION } from "../src/compiler/consumer-review-contract.js";
+import { CONSUMER_EVIDENCE_COVERAGE } from "../src/compiler/consumer-evidence-coverage.js";
+import { losslessJsonContext, decodeJsonValues } from "../src/agent/lossless-json-context.js";
+import { normalizeContext } from "@earendil-works/pi-ai";
 import type { ConsumerRevalidationScope } from "../src/compiler/identity-consumer-revalidation-model.js";
 
 function fixture(withRoster = false, text = "Ada waits. Later, Ada leaves.") {
@@ -64,6 +67,38 @@ it("rejects an oversized complete work packet before dispatch instead of hiding 
   expect(preflight.requiredBytes).toBeGreaterThan(preflight.maxRequestBytes);
 });
 
+it("admits repeated complete evidence using Pi's lossless wire size without changing the plan or allowance", () => {
+  const { args } = fixture(false, "证据".repeat(55_000));
+  args.segments = [{ id: "s1", startByte: 0, endByte: args.bytes.length },
+    { id: "s2", startByte: 0, endByte: args.bytes.length }];
+  const plan = createConsumerWorkPlan({ ...args, extraSources: ["s2"] }), before = h(plan);
+  const preflight = consumerWorkPreflight(plan, "Inspect all evidence.", []);
+  expect(preflight.inputBytes).toBeGreaterThan(plan.limits.maxRequestBytes);
+  expect(preflight).toMatchObject({ measurementPolicy: "pi-message-context/v1", status: "ready", modelDispatchAllowed: true,
+    transport: { dictionaryProfile: "message/v1", applied: true } });
+  expect(preflight.requiredBytes).toBeLessThan(plan.limits.maxRequestBytes);
+  const input = consumerWorkInput(plan);
+  const context = losslessJsonContext(normalizeContext({ messages: [{ role: "user", content: JSON.stringify(input), timestamp: 0 }] }),
+    [], "message/v1").context;
+  const user = context.messages[0]!;
+  if (user.role !== "user" || typeof user.content !== "string") throw new Error("Missing exact user envelope");
+  const envelope = JSON.parse(user.content);
+  expect(decodeJsonValues(envelope.dictionary, [envelope.value], "message/v1")).toEqual([input]);
+  const budget = new ModelRequestBudget(plan.limits, { save() {} }, consumerWorkBudgetPolicy);
+  expect(() => budget.beginCall(context)).not.toThrow();
+  expect(h(plan)).toBe(before);
+});
+
+it("counts JSON string escaping in the actual context even when raw input appears to fit", () => {
+  const { args } = fixture(false, '"\n'.repeat(105_000));
+  args.segments = [{ id: "s1", startByte: 0, endByte: args.bytes.length }];
+  const plan = createConsumerWorkPlan(args), preflight = consumerWorkPreflight(plan, "Inspect evidence.", []);
+  expect(preflight.inputBytes + preflight.overheadBytes + preflight.draftReserveBytes).toBeLessThan(plan.limits.maxRequestBytes);
+  expect(preflight).toMatchObject({ status: "context-blocked", modelDispatchAllowed: false });
+  expect(preflight.transport.encodedBytes).toBeGreaterThan(plan.limits.maxRequestBytes);
+  expect(consumerWorkInput(plan).evidencePacket.sources[0]!.text).toBe(args.bytes.toString());
+});
+
 it("persists one validated draft milestone while repeats and raw reads still exhaust the progress window", () => {
   const { plan } = fixture(); let state: ModelRequestBudgetState | undefined;
   const budget = new ModelRequestBudget(plan.limits, { save: value => { state = value; } }, consumerWorkBudgetPolicy);
@@ -90,9 +125,9 @@ it("separates external refusal, context limits and no-progress without inventing
   expect(consumerWorkFailure("no progress", "no-progress").kind).toBe("no-progress");
 });
 
-it("enforces a scope correction's remaining allowance without a renewed preview window", () => {
+it.each([CONSUMER_REVIEW_CORRECTION, CONSUMER_EVIDENCE_COVERAGE])("enforces %s remaining allowance without a renewed preview window", policy => {
   const { args } = fixture();
-  args.scope.compilerCorrection = { policy: CONSUMER_REVIEW_CORRECTION } as ConsumerRevalidationScope["compilerCorrection"];
+  args.scope.compilerCorrection = { policy } as ConsumerRevalidationScope["compilerCorrection"];
   args.input.scopeHash = h(args.scope);
   expect(() => createConsumerWorkPlan(args)).toThrow(/remaining allowance/);
   const plan = createConsumerWorkPlan({ ...args, limits: { maxModelCalls: 2, maxRequestBytes: 512000, maxTotalPayloadBytes: 1000000 } });

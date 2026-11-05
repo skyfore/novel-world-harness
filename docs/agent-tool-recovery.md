@@ -39,6 +39,16 @@ or unsupported new verdict stops the loop; no unchanged retry, allowance reset,
 parent resume or acceptance waiver. A sealed successor can only recover its
 exact registration without new model generation.
 
+The original predecessor has one compiler-correction owner across all policies.
+Freezing a correction's `scope.json` reserves that allowance even if no semantic
+record was published or its invocation failed. Ledger validation and dispatch
+both reject a sibling policy against the same predecessor; changing policy or
+authorization cannot spend the allowance again. Inspect the same source/task
+with `inspect-identity-repairs`, copy `summary.consumerRevalidation.attempts[].ref`
+and `compilerCorrection.policy`, and recover only that attempt's sealed
+registration when available. Failed or consumed attempts stop without another
+grant. Read-only inspection does not reserve an allowance.
+
 ## Versioned consumer work execution
 
 New work plans with a review contract use `consumer-review-binding/v1`: tool
@@ -103,6 +113,19 @@ No empty search, hash manifest, summary or former-session read proves support.
 The independent checker receives its own session with the original packet,
 decisive proposal source selectors and exact proposed repair dependencies.
 
+Work admission uses `pi-message-context/v1`: measure the complete normalized
+system, tools and user context through Pi's existing `message/v1` lossless
+encoder, including JSON escaping, then reserve provider framing and draft space.
+The plan, all evidence, budget and raw-size preflight receipt stay unchanged;
+the new receipt is `<stage>.preflight-message-v1.json`. A raw-size false stop
+before invocation may be re-inspected with `--inspect-execution` for the same
+source/task/ref. Copy `availableRefs[]` from `inspect-identity-repairs` if the
+ref is missing, allowing one corrected lookup. Only an uninvoked stage whose
+complete encoded context fits may proceed. A consumed stage, actual request
+size stop or remaining oversized packet must not be retried through this
+measurement change; use its existing recovery or retain the host stop. Runtime
+context and provider-payload limits still apply to every actual request.
+
 Use `preview_consumer_revalidation` with a complete grounded draft. It retains
 the draft and checks structure, exact scope, original question coverage, delivery
 and original text anchors. Success is not semantic acceptance, world truth or
@@ -134,6 +157,129 @@ stage cannot be restarted or relabeled. Status exposes `stages[].execution`
 separately from legacy allowances. Only a sealed successful session permits
 registration recovery without new generation. Neither a draft nor a completed
 consumer resumes the parent, shrinks coverage, certifies or activates a world.
+
+### Work-policy provider continuation
+
+After later user authorization and a successful availability check of the same
+Pi provider/model, `consumer-work-provider-resumption/v1` can continue an original
+work stage whose final request received an empty, zero-usage quota refusal after
+successful read-only work. This includes a validated preview without a terminal
+submission. The legacy first-request-only rule remains unchanged.
+
+Discover the same source/task/ref with `requirements inspect-identity-repairs`.
+Copy `stages[].execution.providerResumptionCandidate` fields `scopeHash`, `stage`
+and `failedTraceRunId` into `--provider-resumption` JSON; add the later
+`authorizationRef` and `authorizedAt`. Keep the original command authorization.
+Use `--resume-unsubmitted inspect`, then the identical JSON with `run` only when
+ready. A ref miss permits one correction from discovery, not a guessed retry.
+
+The host verifies the entire original session, request and live-message journals,
+settled trace, source/input revisions, draft receipts and budget. All original
+files stay immutable. The fixed stage-specific `provider-resumption` directory
+permits one continuation; changing authorization cannot mint another. The exact
+remaining progress window (or enforced call allowance) and remaining byte cap
+become finite continuation limits, and previews never renew them. All prior and
+new calls remain in the same stage's cumulative usage.
+
+Pi receives the full frozen evidence again. Additional original reads must be
+read again if absent from that packet. An already validated draft must be
+confirmed, previewed and submitted unchanged; the host never turns it into a
+semantic verdict. A fresh session is still subject to normal independent-review
+and registration checks. A sealed registration interruption recovers without
+generation. Attempted submissions, failed tools, partial quota output, changed
+evidence, hard budget stops, retries, unknown publication and a consumed
+continuation stop without another session or reset. No parent resume or
+certification follows from this local continuation.
+
+Historical records select their exact original, binding-recovery or provider
+execution directory through their recorded proof. Verification and status
+inspection use that same selection, including work plans predating evidence
+coverage. A missing or changed selected plan stops; never fall back to the
+original directory. A recovered execution remains inspectable but cannot also
+fund a separate compiler correction from the original allowance.
+
+### Consumer evidence coverage
+
+New work plans bind `consumer-evidence-coverage/v1`. Before dispatch, the host
+collects source spans and anchors from the exact current consumer and selected
+semantic dependencies, including nested evidence and counter-evidence. It validates
+source ownership, ranges, byte-bound quote hashes and complete segment coverage,
+then delivers every intersecting original segment. The full retained roster stays
+available as audit context; its inventory is not a request to reread the whole
+book. An invalid range or incomplete manifest stops before a model call. The
+context-size gate still applies to the complete packet; never omit required text
+to fit it. Coverage proves delivery, not semantic support or world truth.
+
+Additional artifact reads return `missingSourceSegmentIds`. Copy these exact IDs
+into `read_consumer_revalidation` with `collection=source`, `segmentIds`, `offset=0`,
+using batches below 240000 response bytes. For discovery use the same source/task,
+`collection=source`, and copy `items[].id`; permit one corrected ID, never guessing
+or unchanged retries. Complete partial artifact pages first. Preview and submission
+reject unread referenced source even for a `blocked` judgment. After reading,
+correct the draft once using that evidence; all prior errors and charges remain.
+Host, scope, budget, consumed-stage and repeated correction failures stop. Both
+the journal verifier and independent checker enforce these obligations. The checker
+receives all completed proposal-side source and artifact reads, including evidence
+that the proposal did not cite.
+
+For an already independently blocked work review, discovery may expose
+`summary.consumerRevalidation.attempts[].evidenceCorrection`. Copy that attempt's
+exact `ref` and the returned `policy` to `revalidate-identity-consumer
+--compiler-correction consumer-evidence-coverage/v1`, with later user authorization
+in `--authorization-ref`; inspect with `--inspect-execution` first. This uses the
+existing compiler-correction lineage and requirement ledger. Eligibility requires
+two verified original records whose actual complete-read receipts both omitted
+referenced source; a negative check that read it is ineligible. Source, consumer,
+dependencies, review contract and original requirements remain fixed. Old plans,
+judgments, requests, failures and usage remain immutable. The successor supplies
+the missing evidence and spends only each original stage's remaining calls and
+bytes, with no preview renewal or second correction. Registration interruption
+recovers its sealed result without generation. A genuine semantic gap remains
+blocked, and neither recovery nor a positive review resumes the parent or grants
+certification. Existing historical plans reconstruct under their original policy.
+
+### Pi transport retry registration
+
+One `WebSocket closed 1006` retry may retain an unsuccessful assistant response
+followed immediately by Pi's `context_edit` with `replacement: null`. The host
+accepts that omission only with the complete original session, live messages,
+actual request journal and matching request/response/retry trace. The failed
+response must have no executed tool. A partial terminal tool call in that failed
+response is not execution: Pi exits error turns before tool dispatch. Its call ID
+must never be reused or receive a tool result, and the trace must contain no tool
+event for the failed request or between that request and its retry. The only
+accepted submission is the subsequent successful response's complete receipt. All attempts and
+bytes remain charged. Other edits, missing evidence, multiple retries or failed
+tools remain stops.
+
+Transport registration reconstructs reads from the verified original message
+journal, including complete additional source reads and hash-verified artifact
+pages. Live tools, registration and trace verification share the same read
+receipt reduction. These are the original session's receipts; a new provider
+continuation must still read its own evidence. Discovery, failed reads and
+unfinished pages never satisfy full delivery.
+
+For an original `consumer-work/v1` submission rejected by the old blanket
+"transcript is truncated, forked or edited" seal check or the older rejection of
+an unexecuted terminal tool fragment in a transport retry, later user authorization
+may recover only its original terminal receipt. Discover the same source/task/ref
+with `requirements inspect-identity-repairs`; copy
+`summary.consumerRevalidation.attempts[].stages[].execution.transportRecoveryCandidate`
+fields `scopeHash`, `stage`, `failedTraceRunId` and `failureHash` into a JSON file,
+adding the later `authorizationRef` and `authorizedAt`. Keep the original command's
+`--authorization-ref`. Run `revalidate-identity-consumer --recover-transport-retry
+<JSON> --inspect-execution` first, then remove `--inspect-execution` only after
+`transport-recovery-ready`. An ID miss permits one correction from that discovery;
+never guess or retry unchanged. Do not combine this with other recovery paths.
+
+Recovery appends an immutable proof and checkpoint beside the original failure,
+plan, proposal, journals and budget. It performs zero proposal generation and
+preserves the original failed trace and negative semantic conclusions. Registration
+interruption resumes this exact proof; it cannot replace the authorization or
+regenerate the submission. The unused independent check still runs with its own
+original allowance. A consumed check, exhausted budget, changed scope/evidence,
+missing receipt or different failure must stop; no new grant, parent resume,
+certification or activation follows from transport recovery.
 
 ## Entry capability contract recovery
 

@@ -37,6 +37,7 @@ export async function runReceiptBoundPiStage<T>(options: {
   hostRecoveryHash?: string;
   executionPlanHash?: string;
   bindingRecoveryHash?: string;
+  providerResumptionHash?: string;
   workBudgetPolicy?: ReturnType<typeof workBudgetPolicy>;
   assertOriginal: () => Promise<void>;
   run: (factory: (args: PiAgentSessionOptions) => Promise<PiAgentSession>, trace: TraceRecorder, budget: ModelRequestBudget, signal: AbortSignal) => Promise<T>;
@@ -48,6 +49,7 @@ export async function runReceiptBoundPiStage<T>(options: {
     ...(options.hostRecoveryHash ? { hostRecoveryHash: options.hostRecoveryHash } : {}),
     ...(options.executionPlanHash ? { executionPlanHash: options.executionPlanHash } : {}),
     ...(options.bindingRecoveryHash ? { bindingRecoveryHash: options.bindingRecoveryHash } : {}),
+    ...(options.providerResumptionHash ? { providerResumptionHash: options.providerResumptionHash } : {}),
     ...(options.budgetAmendmentHash ? { budgetAmendmentHash: options.budgetAmendmentHash } : {}) }), { flag: "wx", mode: 0o600 }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw prerequisiteStop("This receipt-bound Pi invocation is consumed; inspect its original checkpoint and failure, never redispatch or rename the stage"); throw error; }
   const budget = new ModelRequestBudget(options.limits, { save: state => {
@@ -57,6 +59,7 @@ export async function runReceiptBoundPiStage<T>(options: {
       ...(options.hostRecoveryHash ? { hostRecoveryHash: options.hostRecoveryHash } : {}),
       ...(options.executionPlanHash ? { executionPlanHash: options.executionPlanHash, policy: options.workBudgetPolicy ?? consumerWorkBudgetPolicy } : {}),
       ...(options.bindingRecoveryHash ? { bindingRecoveryHash: options.bindingRecoveryHash } : {}),
+      ...(options.providerResumptionHash ? { providerResumptionHash: options.providerResumptionHash } : {}),
       priorUsage: options.priorUsage, state, cumulative: { modelCalls: options.priorUsage.modelCalls + state.usage.modelCalls,
         totalPayloadBytes: options.priorUsage.totalPayloadBytes + state.usage.totalPayloadBytes } }), { flag: "wx", mode: 0o600 });
     renameSync(file + ".tmp", file);
@@ -64,7 +67,7 @@ export async function runReceiptBoundPiStage<T>(options: {
   const requests = path.join(directory, `${stage}.requests.jsonl`), messages = path.join(directory, `${stage}.messages.jsonl`);
   await fs.writeFile(requests, "", { flag: "wx", mode: 0o600 }); await fs.writeFile(messages, "", { flag: "wx", mode: 0o600 });
   const trace = await TraceRecorder.start(new TraceStore(root), { kind: "prepare", sourceId,
-    operationId: `receipt-bound-${scopeHash}-${stage}${options.executionPlanHash ? "-work-v1" : ""}${options.bindingRecoveryHash ? "-binding-recovery" : ""}${options.hostRecoveryHash ? "-host-recovery" : ""}${options.continuationHash ? "-continuation" : ""}` });
+    operationId: `receipt-bound-${scopeHash}-${stage}${options.executionPlanHash ? "-work-v1" : ""}${options.bindingRecoveryHash ? "-binding-recovery" : ""}${options.providerResumptionHash ? "-provider-resumption" : ""}${options.hostRecoveryHash ? "-host-recovery" : ""}${options.continuationHash ? "-continuation" : ""}` });
   let session: PiAgentSession | undefined, prompt: string | undefined, fatal: unknown, sequence = 0;
   const observe = (phase: string, value: unknown) => fs.appendFile(requests, JSON.stringify({ phase, value }) + "\n");
   try {

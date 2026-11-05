@@ -3,16 +3,17 @@ import path from "node:path";
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
 import { TraceStore } from "../trace/store.js";
-import { consumerWorkContract, consumerWorkInput, consumerWorkDirectory, consumerReviewRecoveryBudgetPolicy, workBudgetPolicy, type ConsumerWorkPlan } from "./consumer-work-plan.js";
+import { consumerWorkContract, consumerWorkInput, consumerReviewRecoveryBudgetPolicy, workBudgetPolicy, type ConsumerWorkPlan } from "./consumer-work-plan.js";
 import { CONSUMER_REVIEW_BINDING, bindingRecoveryDirectory, bindingRecoveryStop, boundConsumerReviewSchema } from "./consumer-review-binding.js";
 import { validateConsumerReviewAssessment } from "./consumer-review-contract.js";
-import { consumerRevalidationDirectory, validateConsumerRevalidationHistory, type ConsumerRevalidationRecord, type ConsumerRevalidationScope } from "./identity-consumer-revalidation-model.js";
+import { validateConsumerRevalidationHistory, type ConsumerRevalidationRecord, type ConsumerRevalidationScope } from "./identity-consumer-revalidation-model.js";
 import { verifyStoppedReadOnlyIdentitySession } from "./identity-session-integrity.js";
 import { assertConsumerWorkRetained, verifyRecordedConsumerWork } from "./identity-consumer-work.js";
 import { maybeRecoveryFile } from "./identity-consumer-stage-recovery.js";
 import { resolveTextSelectorAnchor } from "./text-anchors.js";
 import { SegmentStore } from "./segments.js";
 import { RequirementLedger } from "./requirement-ledger.js";
+import { consumerWorkRecordDirectory } from "./consumer-work-evidence.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/), count = z.number().int().nonnegative();
 export const consumerBindingRecoverySchema = z.object({ version: z.literal(1), policy: z.literal("consumer-binding-recovery/v1"),
@@ -123,7 +124,7 @@ export async function verifyRecordedBindingRecovery(root: string, record: Consum
   if (!record.executionPlanHash || !record.bindingRecoveryHash || record.output.phase !== "consumer-revalidation-check"
     || record.continuationHash || record.hostRecoveryHash || record.refRecoveryHash || record.budgetAmendmentHash)
     throw bindingRecoveryStop("Binding recovery cannot combine unrelated authorities");
-  const base = consumerWorkDirectory(consumerRevalidationDirectory(root, record.scope)), directory = bindingRecoveryDirectory(base);
+  const directory = consumerWorkRecordDirectory(root, record);
   const recovery = consumerBindingRecoverySchema.parse(await read(path.join(directory, "recovery.json")));
   if (contentHash(recovery) !== record.bindingRecoveryHash || record.sessionId === recovery.originalSessionId || record.traceRunId === recovery.originalTraceRunId)
     throw bindingRecoveryStop("Binding recovery lost its exact independent continuation");

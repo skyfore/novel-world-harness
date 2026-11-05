@@ -4,8 +4,9 @@ import { fileURLToPath } from "node:url";
 import { contentHash } from "../world/canonical.js";
 import { IDENTITY_REQUIREMENT_LIMITS } from "./identity-requirements.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
-import { consumerRevalidationDirectory, type ConsumerRevalidationScope } from "./identity-consumer-revalidation-model.js";
+import { assertConsumerCorrectionOwner, consumerRevalidationId, consumerRevalidationScopeSchema, consumerRevalidationDirectory, type ConsumerRevalidationScope } from "./identity-consumer-revalidation-model.js";
 import { CONSUMER_REVIEW_CORRECTION } from "./consumer-review-contract.js";
+import { CONSUMER_EVIDENCE_COVERAGE } from "./consumer-evidence-coverage.js";
 
 export const SOURCE_LOCAL_CORRECTION = "source-local-referent/v1" as const;
 export const sourceLocalConsumerContract = {
@@ -28,8 +29,9 @@ export async function sourceLocalContractHash() {
 
 export async function consumerRevalidationLimits(root: string, scope: ConsumerRevalidationScope, stage: string) {
   if (!scope.compilerCorrection) return IDENTITY_REQUIREMENT_LIMITS;
+  await assertConsumerCorrectionSlot(root, scope);
   const parent = path.join(path.dirname(consumerRevalidationDirectory(root, scope)), scope.compilerCorrection.predecessorId);
-  if (scope.compilerCorrection.policy === CONSUMER_REVIEW_CORRECTION) {
+  if (scope.compilerCorrection.policy === CONSUMER_REVIEW_CORRECTION || scope.compilerCorrection.policy === CONSUMER_EVIDENCE_COVERAGE) {
     const file = path.join(parent, "execution-v1", `${stage}.budget.json`), value = JSON.parse(await fs.readFile(file, "utf8"));
     if (value.originalBudgetHash !== scope.originalBudgetHash || value.state.blocked || value.state.failure || value.budgetAmendmentHash
       || !scope.priorBudgetFiles.some(b => b.path === file && b.hash === contentHash(value)))
@@ -49,8 +51,30 @@ export async function consumerRevalidationLimits(root: string, scope: ConsumerRe
   return limits;
 }
 
+/** Frozen scopes reserve the same allowance even before a semantic record
+ * exists (including a crash or failed invocation). The workflow holds the
+ * workspace operation lock while checking this and freezing its scope. */
+export async function assertConsumerCorrectionSlot(root: string, scope: ConsumerRevalidationScope) {
+  if (!scope.compilerCorrection) return;
+  const parent = path.dirname(consumerRevalidationDirectory(root, scope));
+  const entries = await fs.readdir(parent, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  for (const entry of entries.filter(e => e.isDirectory() && /^[a-f0-9]{64}$/.test(e.name))) {
+    let raw: unknown;
+    try { raw = JSON.parse(await fs.readFile(path.join(parent, entry.name, "scope.json"), "utf8")); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+    const attempt = consumerRevalidationScopeSchema.parse(raw);
+    if (consumerRevalidationId(attempt) !== entry.name || attempt.sourceId !== scope.sourceId || attempt.taskId !== scope.taskId)
+      throw prerequisiteStop("Consumer correction reservation lost its original scope. Inspect the same source/task retained scope.json files; no changed policy, dispatch or retry");
+    assertConsumerCorrectionOwner(scope, [attempt]);
+  }
+}
+
 export async function assertConsumerCompilerCorrection(scope: ConsumerRevalidationScope) {
-  if (scope.compilerCorrection && scope.compilerCorrection.contractHash !== await (scope.compilerCorrection.policy === CONSUMER_REVIEW_CORRECTION ? consumerReviewCorrectionHash() : sourceLocalContractHash()))
+  if (scope.compilerCorrection && scope.compilerCorrection.contractHash !== await (scope.compilerCorrection.policy === CONSUMER_EVIDENCE_COVERAGE
+    ? consumerEvidenceCorrectionHash() : scope.compilerCorrection.policy === CONSUMER_REVIEW_CORRECTION ? consumerReviewCorrectionHash() : sourceLocalContractHash()))
     throw prerequisiteStop("Compiler correction implementation changed after freezing; preserve its original scope and invocation, no repinning or automatic model retry");
 }
 
@@ -70,7 +94,17 @@ export async function consumerReviewCorrectionHash() {
   const files = ["src/compiler/consumer-review-contract.ts", "src/compiler/identity-consumer-revalidation-model.ts",
     "src/compiler/identity-consumer-revalidation.ts", "src/compiler/identity-consumer-correction.ts", "src/workflow/identity-consumer-revalidation.ts",
     "src/compiler/consumer-work-plan.ts", "src/compiler/identity-consumer-work.ts", "src/workflow/receipt-bound-pi-stage.ts",
-    "src/compiler/consumer-review-binding.ts", "src/compiler/review-preview-allowance.ts"];
+    "src/compiler/consumer-review-binding.ts", "src/compiler/review-preview-allowance.ts", "src/compiler/consumer-work-evidence.ts"];
   return contentHash({ policy: CONSUMER_REVIEW_CORRECTION,
+    files: await Promise.all(files.map(async file => ({ file, hash: contentHash(await fs.readFile(path.join(root, file), "utf8")) }))) });
+}
+
+export async function consumerEvidenceCorrectionHash() {
+  const root = fileURLToPath(new URL("../../", import.meta.url));
+  const files = ["src/compiler/consumer-evidence-coverage.ts", "src/compiler/consumer-evidence-correction.ts",
+    "src/compiler/identity-consumer-revalidation.ts", "src/compiler/identity-consumer-revalidation-model.ts",
+    "src/compiler/identity-consumer-correction.ts", "src/compiler/identity-consumer-artifacts.ts",
+    "src/compiler/consumer-work-plan.ts", "src/compiler/consumer-work-evidence.ts", "src/compiler/identity-consumer-work.ts", "src/workflow/identity-consumer-revalidation.ts"];
+  return contentHash({ policy: CONSUMER_EVIDENCE_COVERAGE,
     files: await Promise.all(files.map(async file => ({ file, hash: contentHash(await fs.readFile(path.join(root, file), "utf8")) }))) });
 }

@@ -13,12 +13,17 @@ import { consumerHostRecoveryDirectory, oldSourceSearchError, type ConsumerHostR
 import { consumerWorkDirectory, workBudgetPolicy, type ConsumerWorkPlan } from "./consumer-work-plan.js";
 import { bindingRecoveryDirectory } from "./consumer-review-binding.js";
 import { consumerBindingRecoverySchema, deriveBindingRecoveryPlan } from "./consumer-binding-recovery.js";
+import { inspectConsumerTransportRecoveryCandidate } from "./consumer-transport-recovery.js";
+import { inspectConsumerEvidenceGap } from "./consumer-evidence-correction.js";
+import { consumerWorkProviderDirectory } from "./consumer-work-plan.js";
+import { consumerWorkProviderRecoverySchema, deriveWorkProviderPlan, inspectWorkProviderCandidate } from "./consumer-work-provider-resumption.js";
 
 export type ConsumerRevalidationAttempt = {
   id: string; ref: string; scopeHash: string; directory: string;
   compilerCorrection: ConsumerRevalidationScope["compilerCorrection"] | null;
   status: string; reason: string | null; recordedStages: number; semanticJudgmentPending: boolean;
   cumulative: { modelCalls: number; totalPayloadBytes: number };
+  evidenceCorrection?: { policy: "consumer-evidence-coverage/v1"; evidenceGapHash: string; missingSegmentIds: string[] };
   stages: Array<{ stage: string; invocationConsumed: boolean; sealedSubmission: boolean; recorded: boolean;
     traceRunId?: string | null;
     failure: string | null; usage: { modelCalls: number; totalPayloadBytes: number };
@@ -27,7 +32,12 @@ export type ConsumerRevalidationAttempt = {
       usage: { modelCalls: number; totalPayloadBytes: number }; remainingAllowance: { modelCalls: number; totalPayloadBytes: number } };
     execution?: { policy: string; planHash: string; scenario: string; status: string; invocationConsumed: boolean;
       sealedSubmission: boolean; failure: string | null; recovery: unknown; usage: { modelCalls: number; totalPayloadBytes: number };
-      callsWithoutProgress: number; stallWindowCalls: number; draftCount: number };
+      callsWithoutProgress: number; stallWindowCalls: number; draftCount: number;
+      transportRecoveryCandidate?: Awaited<ReturnType<typeof inspectConsumerTransportRecoveryCandidate>>;
+      transportRecoveryHash?: string;
+      providerResumptionCandidate?: Awaited<ReturnType<typeof inspectWorkProviderCandidate>>;
+      providerResumption?: { hash: string; status: string; invocationConsumed: boolean; sealedSubmission: boolean; failure: string | null;
+        usage: { modelCalls: number; totalPayloadBytes: number }; remainingAllowance: { modelCalls: number; totalPayloadBytes: number } } };
     hostRecoveryCandidate?: { scopeHash: string; stage: "consumer-revalidation"; failedTraceRunId: string; failureHash: string; cause: "request-size" | "source-search-contract"; currentMaxRequestBytes: number };
     hostRecovery?: { hash: string; status: string; request: ConsumerHostRecovery["request"]; failure: string | null; traceRunId: string | null;
       providerResumption?: { status: string; preflight: ReturnType<typeof consumerRecoveryPreflight>; invocationConsumed: boolean; sealedSubmission: boolean;
@@ -153,8 +163,11 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
       let execution: ConsumerRevalidationAttempt["stages"][number]["execution"];
       let bindingRecovery: ConsumerRevalidationAttempt["stages"][number]["bindingRecovery"];
       if (plan) {
-        const [b, i, c, f, preflight] = await Promise.all(["budget", "invocation", "session-checkpoint", "failure", "preflight"]
+        const [b, i, c, f, legacyPreflight, wirePreflight] = await Promise.all(["budget", "invocation", "session-checkpoint", "failure", "preflight", "preflight-message-v1"]
           .map(suffix => maybe(path.join(workDirectory, `${stage}.${suffix}.json`))));
+        const preflight = wirePreflight ?? legacyPreflight;
+        if (wirePreflight && (wirePreflight.measurementPolicy !== "pi-message-context/v1" || wirePreflight.planHash !== contentHash(plan)))
+          throw prerequisiteStop("Consumer admission receipt changed its exact plan or transport policy; inspect the same source/task/ref, no dispatch or retry");
         const u = { modelCalls: b?.state?.usage?.modelCalls ?? 0, totalPayloadBytes: b?.state?.usage?.totalPayloadBytes ?? 0 };
         if (plan.scopeHash !== scopeHash || plan.stage !== stage || (b && (b.executionPlanHash !== contentHash(plan)
           || b.originalBudgetHash !== scope.originalBudgetHash || contentHash(b.policy) !== contentHash(workBudgetPolicy(plan))
@@ -166,7 +179,25 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
           status: c ? "sealed" : f ? f.recovery?.kind ?? "BREAK" : i ? "RUNNING" : preflight?.status ?? "prepared",
           invocationConsumed: Boolean(i), sealedSubmission: Boolean(c), failure: f?.reason ?? null, recovery: f?.recovery ?? null, usage: u,
           callsWithoutProgress: u.modelCalls - (b?.state?.progress?.lastProgressCall ?? 0), stallWindowCalls: plan.limits.maxModelCalls,
-          draftCount: (await fs.readdir(workDirectory)).filter(name => name.startsWith(`${stage}.draft-`)).length };
+          draftCount: (await fs.readdir(workDirectory)).filter(name => name.startsWith(`${stage}.draft-`)).length,
+          transportRecoveryCandidate: await inspectConsumerTransportRecoveryCandidate(root, sourceId, scopeHash, workDirectory, stage, f),
+          providerResumptionCandidate: await inspectWorkProviderCandidate(root, sourceId, scopeHash, workDirectory, stage, f),
+          ...(c?.transportRecoveryHash ? { transportRecoveryHash: c.transportRecoveryHash } : {}) };
+        const providerDirectory = consumerWorkProviderDirectory(workDirectory, stage), providerRaw = await maybe(path.join(providerDirectory, "recovery.json"));
+        if (providerRaw) {
+          const recovery = consumerWorkProviderRecoverySchema.parse(providerRaw), resumedPlan = deriveWorkProviderPlan(plan, recovery);
+          const [rb, ri, rc, rf] = await Promise.all(["budget", "invocation", "session-checkpoint", "failure"].map(suffix => maybe(path.join(providerDirectory, `${stage}.${suffix}.json`))));
+          const ru = { modelCalls: rb?.state?.usage?.modelCalls ?? 0, totalPayloadBytes: rb?.state?.usage?.totalPayloadBytes ?? 0 };
+          if (rb && (rb.providerResumptionHash !== contentHash(recovery) || rb.executionPlanHash !== contentHash(resumedPlan)
+            || contentHash(rb.limits) !== contentHash(recovery.limits) || contentHash(rb.priorUsage) !== contentHash(recovery.priorUsage)
+            || contentHash(rb.policy) !== contentHash(workBudgetPolicy(resumedPlan)))
+            || ri && (ri.providerResumptionHash !== contentHash(recovery) || ri.executionPlanHash !== contentHash(resumedPlan))
+            || Object.values(ru).some(v => !Number.isSafeInteger(v) || v < 0)) throw prerequisiteStop("Provider continuation status lost its exact proof or charges; no retry");
+          cumulative.modelCalls += ru.modelCalls; cumulative.totalPayloadBytes += ru.totalPayloadBytes;
+          execution.providerResumption = { hash: contentHash(recovery), status: rc ? "sealed" : rf ? "BREAK" : ri ? "RUNNING" : "prepared",
+            invocationConsumed: Boolean(ri), sealedSubmission: Boolean(rc), failure: rf?.reason ?? null, usage: ru,
+            remainingAllowance: { modelCalls: Math.max(0, recovery.limits.maxModelCalls - ru.modelCalls), totalPayloadBytes: Math.max(0, recovery.limits.maxTotalPayloadBytes - ru.totalPayloadBytes) } };
+        }
         const recoveredDirectory = bindingRecoveryDirectory(workDirectory), recoveryRaw = stage === "consumer-revalidation-check" ? await maybe(path.join(recoveredDirectory, "recovery.json")) : null;
         if (recoveryRaw) {
           const recovery = consumerBindingRecoverySchema.parse(recoveryRaw), recoveredPlan = deriveBindingRecoveryPlan(plan, recovery);
@@ -196,7 +227,10 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
           totalPayloadBytes: Math.max(0, hostRecovery ? hostRecovery.proposalLimits.maxTotalPayloadBytes - hostRecovery.usage.totalPayloadBytes - (hostRecovery.providerResumption?.usage.totalPayloadBytes ?? 0)
             : limits.maxTotalPayloadBytes - usage.totalPayloadBytes - (continuation?.usage.totalPayloadBytes ?? 0)) } });
     }
+    const gap = await inspectConsumerEvidenceGap(root, scope, retained);
     attempts.push({ id: entry.name, ref: scope.ref, scopeHash, directory, compilerCorrection: scope.compilerCorrection ?? null,
+      ...(gap ? { evidenceCorrection: { policy: gap.policy, evidenceGapHash: contentHash(gap),
+        missingSegmentIds: [...new Set(gap.stages.flatMap(s => s.missingSegmentIds))].sort() } } : {}),
       status: state?.status ?? "FROZEN", reason: state?.reason ?? null, recordedStages: retained.length,
       semanticJudgmentPending: retained.length < 2, cumulative, stages,
       verification: "host-snapshot-only", executionAuthority: false, parentResumeAllowed: false });

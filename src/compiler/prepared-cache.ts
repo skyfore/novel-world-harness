@@ -1737,7 +1737,10 @@ async function assertPreparedCompilerSnapshotEvidence(
     for (const segment of manifest.segments) payloads.set(`source-segment:${segment.id}`, segment);
     for (const segment of snapshot.structure.discourseSegments) payloads.set(`structural-discourse:${segment.id}`, segment);
     for (const binding of snapshot.evidenceBindings) for (const assertion of binding.assertions) payloads.set(`evidence-assertion:${assertion.id}`, assertion);
-    await assertUpstreamRepairCheckpointState(snapshot.upstreamRepairCheckpoint!, snapshot.upstreamRepairJournal ?? [], source.id, source.contentSha256, bytes, payloads);
+    const hasGoalRepair = snapshot.upstreamRepairJournal?.some(r => r.payload.kind === "planned" && r.payload.plan.goalLifecycle);
+    const goalInputs = hasGoalRepair ? { definitions: snapshot.requirementDefinitions ?? [],
+      catalog: (await import("./requirement-service.js")).frozenSceneCatalog(bundle) } : undefined;
+    await assertUpstreamRepairCheckpointState(snapshot.upstreamRepairCheckpoint!, snapshot.upstreamRepairJournal ?? [], source.id, source.contentSha256, bytes, payloads, goalInputs);
   }
   for (const expression of bundle.canonical.utteranceExpressions ?? []) {
     const binding = bundle.compilerSnapshot.evidenceBindings.find(item => item.artifactKind === "utterance-expression" && item.artifactId === expression.id);

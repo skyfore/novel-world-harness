@@ -1087,6 +1087,9 @@ export class CompilerCommitService {
   async accept(kind: CanonicalProposalKind, id: string): Promise<CompilerValidation> {
     const schema = schemaFor(kind);
     const proposal = await this.proposals.read("pending", id, schema);
+    const goalRepair = kind === "character-goal" ? await (await import("./upstream-repair-finish.js")).goalRepairCommitPermit(this.workspaceRoot, proposal) : undefined;
+    if (goalRepair && !goalRepair.ready) return { accepted: false, warnings: [], errors: [issue("GOAL_REPAIR_FINISH_REQUIRED",
+      "Goal is staged under an upstream repair. Inspect requirements inspect-upstream for the same source and recover its original finish; do not retry acceptance unchanged.")] };
     const validation = await this.validateProposal(
       id,
       kind,
@@ -1102,6 +1105,7 @@ export class CompilerCommitService {
       evidence: proposal.evidence,
       evidenceAssertions: proposal.evidenceAssertions ?? [],
       createdAt: proposal.createdAt,
+      goalRepair,
     });
     return validation;
   }
@@ -1121,7 +1125,13 @@ export class CompilerCommitService {
       }
       const schema = schemaFor(proposal.kind);
       const envelope = await this.proposals.read("pending", proposal.id, schema);
+      const goalRepair = proposal.kind === "character-goal" ? await (await import("./upstream-repair-finish.js")).goalRepairCommitPermit(this.workspaceRoot, envelope) : undefined;
+      if (goalRepair && !goalRepair.ready) {
+        staging.push({ id: proposal.id, kind: proposal.kind });
+        continue;
+      }
       candidates.push({
+        goalRepair,
         id: proposal.id,
         kind: proposal.kind,
         payload: envelope.payload,
@@ -1135,6 +1145,8 @@ export class CompilerCommitService {
     let processed = 0;
     onProgress?.({ phase: "load", processed, total, accepted: 0, blocked: 0 });
     const deduplicated = selectLogicalCandidates(candidates);
+    if (deduplicated.superseded.some(({ candidate, selectedId }) => candidate.goalRepair || candidates.some(c => c.id === selectedId && c.goalRepair)))
+      throw new Error("Managed goal repair has a competing pending revision. Inspect the original same-source goal and finish receipt before convergence; do not supersede or retry either draft unchanged.");
     const eligible = deduplicated.selected;
     const expressionGroup = expressionDependencyGroup(eligible);
     const expressionGroupIds = new Set(expressionGroup.map(candidate => candidate.id));
@@ -1172,6 +1184,9 @@ export class CompilerCommitService {
         addToCatalog(catalog, candidate.kind, candidate.payload);
         accepted.push({ id: candidate.id, kind: candidate.kind });
       } catch (error) {
+        // A receipt-backed goal may have written its artifact before its evidence binding.
+        // Leave the original envelope pending so convergence can finish that exact write.
+        if (candidate.goalRepair) throw error;
         blocked.push({
           id: candidate.id,
           kind: candidate.kind,
@@ -1197,6 +1212,10 @@ export class CompilerCommitService {
     const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
       const validation = await validateCandidate(candidate);
       if (!validation.accepted) {
+        if (candidate.goalRepair) {
+          const { upstreamRepairHostError } = await import("./upstream-repair-preflight.js");
+          throw upstreamRepairHostError(`Frozen goal proposal ${candidate.id} failed canonical validation: ${validation.errors.map(e => e.code + ": " + e.message).join("; ")}`);
+        }
         blockCandidate(candidate, validation.errors);
       } else {
         await commitCandidate(candidate);
@@ -1719,6 +1738,7 @@ export class CompilerCommitService {
 
   private async commitParsed(candidate: PendingCanonicalProposal): Promise<void> {
     const { kind, id, payload } = candidate;
+    if (candidate.goalRepair) await (await import("./upstream-repair-finish.js")).verifyGoalRepairCommit(this.workspaceRoot, id, candidate.goalRepair);
     if (kind === "entity") await this.canon.putEntity(entitySchema.parse(payload));
     else if (kind === "proposition") await this.canon.putProposition(propositionSchema.parse(payload));
     else if (kind === "attribution") await this.canon.putAttribution(attributionSchema.parse(payload));
@@ -1754,6 +1774,7 @@ export class CompilerCommitService {
 }
 
 type PendingCanonicalProposal = {
+  goalRepair?: Awaited<ReturnType<typeof import("./upstream-repair-finish.js").goalRepairCommitPermit>>;
   id: string;
   kind: CanonicalProposalKind;
   payload: unknown;

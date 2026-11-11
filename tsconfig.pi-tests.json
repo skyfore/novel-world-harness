@@ -26,6 +26,7 @@
     "test/identity-consumer-queue.test.ts",
     "test/consumer-evidence-coverage.test.ts",
     "test/consumer-review-contract.test.ts",
+    "test/goal-lifecycle-repair.test.ts",
     "test/entry-presence-repair.test.ts",
     "test/entry-presence-ledger.test.ts",
     "test/entry-state-repair.test.ts",

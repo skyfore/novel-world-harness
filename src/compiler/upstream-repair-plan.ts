@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
+import { characterGoalSchema } from "../world/actors.js";
+import { goalLifecycleReadKeys, goalLifecycleRepairSchema } from "./goal-lifecycle-repair.js";
 import { canonicalEventSchema, entitySchema, eventParticipationSchema, idSchema, textAnchorSchema } from "../world/model.js";
 import { predicateReferences, stateOperationReferences } from "../world/state-references.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
@@ -18,8 +20,18 @@ import {
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const text = z.string().trim().min(1);
-export const upstreamRepairKindSchema = z.enum(["entity", "initial-world", "entity-mention", "event-mention", "quotation", "discourse-segment", "entity-resolution", "event-resolution", "canonical-event", "event-participation"]);
+export const upstreamRepairKindSchema = z.enum(["entity", "initial-world", "entity-mention", "event-mention", "quotation", "discourse-segment", "entity-resolution", "event-resolution", "canonical-event", "event-participation", "character-goal"]);
 export type UpstreamRepairKind = z.infer<typeof upstreamRepairKindSchema>;
+export function upstreamProposalTool(kind: UpstreamRepairKind): string {
+  return "propose_" + kind.replaceAll("-", "_");
+}
+export function isUpstreamWorldKind(kind: string): kind is "entity" | "initial-world" | "canonical-event" | "event-participation" | "character-goal" {
+  return kind === "entity" || kind === "initial-world" || kind === "canonical-event" || kind === "event-participation" || kind === "character-goal";
+}
+export function upstreamProposalStore(kind: string) {
+  if (kind === "entity-resolution" || kind === "event-resolution") return kind;
+  return isUpstreamWorldKind(kind) ? "world" : "annotation";
+}
 const fields: Record<UpstreamRepairKind, readonly string[]> = {
   // Stable identity/kind and operational capabilities are outside this revision.
   entity: ["canonicalName", "aliases", "evidence", "identityConsumption"],
@@ -35,6 +47,7 @@ const fields: Record<UpstreamRepairKind, readonly string[]> = {
   // implied by the creation capability.
   "canonical-event": [],
   "event-participation": [],
+  "character-goal": ["completion"],
 };
 /** Discovery only; field support does not grant an artifact revision. */
 export function upstreamRepairRevisionFields(kind: UpstreamRepairKind): readonly string[] { return [...fields[kind]]; }
@@ -62,6 +75,7 @@ export const upstreamRepairWriteSchema = refSchema.extend({ pointers: z.array(te
 const identitySchema = z.object({
   version: z.literal(1), planId: idSchema, batchId: idSchema,
   requirementSetHash: hash, requirementIds: z.array(text).min(1).max(128),
+  goalLifecycle: goalLifecycleRepairSchema.optional(),
   proposalObligation: sourcePatternUpstreamAuthoritySchema.optional(),
   identityRequirements: z.object({ taskId: hash, intentHash: hash, recordHashes: z.array(hash).min(4).max(130),
     consumerRepair: z.object({ findingId: hash, recordHashes: z.array(hash).length(2), entityId: idSchema,
@@ -108,6 +122,15 @@ export const upstreamRepairPlanSchema = identitySchema.extend({ planHash: hash }
   for (const values of [plan.requirementIds, plan.predecessorReceiptRefs, plan.sourceScope.segmentIds, plan.citableEvidenceRefs, plan.postconditionIds,
     plan.baselineRefs.map(key), plan.allowedWrites.map(key), plan.allowedCreations.map(key), plan.readableRefs.map(key)]) if (!unique(values)) fail("Duplicate repair plan member");
   if (!plan.allowedWrites.length && !plan.allowedCreations.length) fail("Repair plan has no bounded mutation");
+  if (plan.goalLifecycle || plan.allowedWrites.some(w => w.kind === "character-goal") || plan.allowedCreations.some(c => c.kind === "character-goal")) {
+    const goal = plan.goalLifecycle, write = plan.allowedWrites[0];
+    if (!goal || plan.allowedWrites.length !== 1 || write?.kind !== "character-goal" || write.id !== goal.goalId
+      || write.pointers.length !== 1 || write.pointers[0] !== "/completion" || plan.allowedCreations.length
+      || plan.identityRequirements || plan.sourceRepresentation || plan.proposalObligation || plan.semanticEventCreations?.length
+      || plan.resolutionAbsences?.length || plan.resolutionRevisions?.length
+      || !plan.baselineRefs.some(ref => ref.kind === "entity" && ref.id === goal.actorId))
+      fail("Goal lifecycle authority requires one existing goal, its actor and the completion field only");
+  }
   if (plan.identityRequirements) {
     const consumer = plan.identityRequirements.consumerRepair, revalidation = plan.identityRequirements.consumerRevalidation;
     if (revalidation) {
@@ -237,6 +260,7 @@ export function assertUpstreamResolutionAbsences(plan: UpstreamRepairPlan, paylo
 }
 
 export function parseUpstreamRepairPayload(kind: UpstreamRepairKind, raw: unknown) {
+  if (kind === "character-goal") return characterGoalSchema.parse(raw);
   if (kind === "initial-world") return initialWorldSchema.parse(raw);
   if (kind === "entity") return entitySchema.parse(raw);
   if (kind === "entity-resolution") return identityResolutionSchema.parse(raw);
@@ -249,6 +273,7 @@ export function parseUpstreamRepairPayload(kind: UpstreamRepairKind, raw: unknow
 }
 
 export function upstreamRepairReferencedKeys(kind: UpstreamRepairKind, raw: unknown): string[] {
+  if (kind === "character-goal") return goalLifecycleReadKeys(characterGoalSchema.parse(raw));
   if (kind === "initial-world") return initialWorldRepairReferences(raw);
   const refs: string[] = [];
   const add = (type: string, ids: readonly (string | undefined)[]) => { for (const id of ids) if (id) refs.push(`${type}:${id}`); };

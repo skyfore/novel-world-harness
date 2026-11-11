@@ -19,6 +19,9 @@ import { readAccountingBatchSegments } from "./accounting-review.js";
 import { buildRepresentationRepairPlan, representationRecordsFromJournal } from "./source-representation-upstream.js";
 import { ProposalStore } from "../world/canonical-model.js";
 import { evidenceAssertionSchema } from "../world/model.js";
+import { characterGoalSchema } from "../world/actors.js";
+import { requirementInputs } from "./requirement-service.js";
+import { failingGoalCases, goalEvidenceHash, goalLifecycleReadKeys, goalLifecycleSpec, isCompletionEvidence, type GoalLifecycleReview } from "./goal-lifecycle-repair.js";
 
 /** Restore only evidence bindings owned by an exact receipt-backed revision.
  * New assertions in that accepted envelope are outputs too, not unrelated
@@ -92,6 +95,7 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   if (crypto.createHash("sha256").update(bytes).digest("hex") !== plan.sourceScope.sourceSha256 || source.contentSha256 !== plan.sourceScope.sourceSha256) throw upstreamRepairHostError("Immutable source changed");
   const ledger = new RequirementLedger(root, sourceId);
   let requirementIds: string[];
+  let goalReview: GoalLifecycleReview | undefined;
   let identityContext: Awaited<ReturnType<typeof import("./identity-requirement-upstream.js").readIdentityAuthority>> | undefined;
   if (plan.identityRequirements) {
     identityContext = await (await import("./identity-requirement-upstream.js")).readIdentityAuthority(root, plan);
@@ -121,8 +125,14 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
     const scene = (await ledger.definitions()).find(item => item.revisionHash === plan.requirementSetHash);
     const core = (await ledger.coreRoleDefinitionHistory()).at(-1);
     if (scene) {
-      const catalog = Object.fromEntries(sceneCatalogKeys.map(key => [key, new Map()])) as SceneReviewCatalog;
-      requirementIds = evaluateRequirementSet(scene, bytes, catalog).requirements.map(item => item.id);
+      if (plan.goalLifecycle) {
+        const spec = goalLifecycleSpec(plan, scene);
+        goalReview = { spec, catalog: (await requirementInputs(root, sourceId)).catalog };
+        requirementIds = spec.cases.map(c => c.id + ":case-validation");
+      } else {
+        const catalog = Object.fromEntries(sceneCatalogKeys.map(key => [key, new Map()])) as SceneReviewCatalog;
+        requirementIds = evaluateRequirementSet(scene, bytes, catalog).requirements.map(item => item.id);
+      }
     } else if (core?.revisionHash === plan.requirementSetHash) {
       assertCoreRoleDefinitionEvidence(core, bytes);
       const roster = await new RoleRosterStore(root).read(sourceId);
@@ -134,6 +144,9 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   const manifest = await new SegmentStore(root).readManifest(sourceId);
   if (!manifest || contentHash(manifest) !== contentHash(await segmentSource(root, source))) throw upstreamRepairHostError("Source segment layout is missing or stale");
   if (plan.sourceScope.segmentIds.some(id => !manifest.segments.some(segment => segment.id === id))) throw upstreamRepairHostError("Plan segment is outside the immutable source layout");
+  if (plan.goalLifecycle && (!goalReview || goalReview.spec.cases.some(c => c.evidence.some(a => !manifest.segments.some(s =>
+    plan.citableEvidenceRefs.includes(s.id) && s.startByte <= a.startByte && s.endByte >= a.endByte)))))
+    throw upstreamRepairHostError("Goal lifecycle repair requires the exact registered case anchors inside its citable source scope");
   if (plan.proposalObligation) {
     const originalBatchSegments = await readAccountingBatchSegments(root, sourceId, plan.proposalObligation.batchId);
     if (plan.proposalObligation.originalEvidenceSegmentIds.some(id => !originalBatchSegments.some(segment => segment.id === id))) {
@@ -148,10 +161,45 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
   for (const item of await new EntityResolutionStore(root).list(sourceId)) payloads.set(`entity-resolution:${item.id}`, item);
   for (const item of await new EventResolutionStore(root).list(sourceId)) payloads.set(`event-resolution:${item.id}`, item);
   for (const item of manifest.segments) payloads.set(`source-segment:${item.id}`, item);
-  for (const record of await loadCompilerArtifactRecords(root, sourceId)) {
+  const goalOutput = recoveryProposals.find(p => p.artifactKind === "character-goal" && p.artifactId === plan.goalLifecycle?.goalId);
+  const goalBaseline = plan.baselineRefs.find(ref => ref.kind === "character-goal" && ref.id === plan.goalLifecycle?.goalId);
+  const recoveringGoal = goalOutput && goalBaseline
+    ? { id: goalOutput.artifactId, predecessorHash: goalBaseline.revisionHash, outputHash: goalOutput.payloadHash } : undefined;
+  for (const record of await loadCompilerArtifactRecords(root, sourceId, undefined, recoveringGoal)) {
     if (record.status !== "canonical") continue;
     payloads.set(`${record.kind}:${record.logicalId}`, record.payload);
     for (const assertion of record.evidenceAssertions) payloads.set(`evidence-assertion:${assertion.id}`, assertion);
+    if (plan.goalLifecycle && goalReview && record.kind === "character-goal" && record.logicalId === plan.goalLifecycle.goalId) {
+      const k = "character-goal:" + record.logicalId;
+      const outputActive = committedOutputs.get(k) === contentHash(record.payload);
+      const predecessor = outputActive ? recoveryBaselines.find(r => r.kind === record.kind && r.id === record.logicalId)?.payload : record.payload;
+      const prior = characterGoalSchema.parse(predecessor);
+      const originalCatalog = { ...goalReview.catalog, goals: new Map(goalReview.catalog.goals).set(prior.id, prior) };
+      const cases = goalReview.spec.cases.filter(c => c.kind === "goal-lifecycle");
+      const requiredKeys = [...goalLifecycleReadKeys(prior, cases, goalReview.catalog.actionSchemas), k].sort();
+      const refKeys = (refs: UpstreamRepairPlan["readableRefs"]) => refs.map(ref => ref.kind + ":" + ref.id).sort();
+      if (prior.actorId !== plan.goalLifecycle.actorId || contentHash(requiredKeys) !== contentHash(refKeys(plan.baselineRefs))
+        || contentHash(requiredKeys) !== contentHash(refKeys(plan.readableRefs)))
+        throw upstreamRepairHostError("Goal predecessor, owner or scenario dependency differs from the frozen repair");
+      if (!failingGoalCases(goalReview.spec, bytes, originalCatalog).length)
+        throw upstreamRepairHostError("The frozen predecessor has no independently reproduced goal lifecycle mismatch");
+      let expectedEvidence = plan.goalLifecycle.baselineEvidenceHash;
+      if (outputActive && goalOutput) {
+        const proposals = new ProposalStore(root);
+        let accepted = true;
+        const envelope = await proposals.readEnvelope("accepted", goalOutput.proposalId).catch(error => {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          accepted = false;
+          return proposals.readEnvelope("pending", goalOutput.proposalId);
+        });
+        if (contentHash(envelope) !== goalOutput.proposalHash) throw upstreamRepairHostError("Goal evidence recovery lost the original finish envelope");
+        if (accepted || goalEvidenceHash(record.evidenceAssertions) !== expectedEvidence)
+          expectedEvidence = goalEvidenceHash(evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []));
+      }
+      if (goalEvidenceHash(record.evidenceAssertions) !== expectedEvidence
+        || goalEvidenceHash(record.evidenceAssertions.filter(a => !isCompletionEvidence(a))) !== plan.goalLifecycle.retainedEvidenceHash)
+        throw upstreamRepairHostError("The goal's frozen evidence binding changed outside this completion repair");
+    }
   }
   const activeRevisions = new Map([...payloads].map(([key, value]) => [key, contentHash(value)]));
   // Retained predecessor payloads are readable audit evidence, never active decisions.
@@ -224,5 +272,5 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
     const receipt = receipts.find(item => item.receipt.fingerprint === fingerprint)?.receipt;
     if (!receipt || receipt.state !== "completed" || receipt.identity.sourceSha256 !== source.contentSha256) throw upstreamRepairHostError("Predecessor receipt is missing, incomplete or from another source revision");
   }
-  return { plan, source, bytes, activeRevisions, retainedRevisions, payloads };
+  return { plan, source, bytes, activeRevisions, retainedRevisions, payloads, goalReview };
 }

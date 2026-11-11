@@ -2427,6 +2427,9 @@ the reviewed missing-event creation DAG.
 
 Currently supported diagnostic policies are:
 
+- `GOAL_COMPLETION_REVISION` binds one existing character goal to a registered
+  `goal-lifecycle` source review. The original goal must fail a reviewed cut.
+  The frozen plan permits one `/completion` revision for that goal and owner.
 - `QUOTATION_ANCHOR_INCOMPLETE`: an exact current quotation revision plus a
   host-reviewed `expectedAnchor` that strictly extends its original-byte range.
   The expected range must fit the explicit citable evidence. The generated policy
@@ -2446,6 +2449,30 @@ Currently supported diagnostic policies are:
   identity, resolution relation or participation event/entity bindings.
 - `SEMANTIC_MODULE_REQUIRED`: returns `needs-host-review`, no plan and exit 2.
   A mixed review containing unsupported semantics grants no partial authority.
+
+#### 修订目标的完成条件
+
+1. 独立审阅原文，在同一 `goal-lifecycle` 规格中给出目标仍有效且未完成、目标已完成且退出的两个切面和原文锚点。
+   用 `review-scenes --spec <file> --register <set-id>` 登记。退出码 2 时用
+   `requirements inspect --source <id>` 核对已登记的 `definitions[].revisionHash` 和失败用例。
+   原文只支持中止、失败或未知时，保留该缺口供来源复核，停止当前完成条件修订。
+2. 从同一来源的 `requirements discover-upstream-repairs --source <id>` 复制单个
+   `goalLifecycleFindings[]` 项。将 `diagnostic` 放入宿主审阅的 `diagnostics`，
+   复制 `requirementSetHash`、全部 `requirementIds` 与 `sourceSegmentIds`，填写
+   `segmentIds`、`citableEvidenceRefs` 和本次授权、预算引用。用
+   `requirements plan-upstream-repair --review <file>` 生成计划，通过上方生命周期命令登记、授权并暂存。
+3. 在 `read_upstream_repair_context` 中复制目标的 `readable[].id` 和 `readable[].payload`。
+   在 `propose_character_goal` 中保留原目标字段，省略宿主管理的证据字段。
+   每条新谓词均须在 `/completion/<index>` 提供一条 `supports` 绑定，强度为
+   `explicit` 或 `strong-inference`。从 `evidence[].segmentId` 复制段 ID，
+   从 `completionEvidenceRanges` 内复制原文。宿主保留其他字段的历史证据。
+   ID 或选择器写错时，从同一工具复制返回字段，最多纠正一次。前驱或规格漂移、范围冲突、
+   已消费调用或预算耗尽时停止并交宿主处理，保留原回执、草稿和失败记录。
+4. `requirements finish-upstream-plan` 冻结并核验草稿。随后用
+   `compile-novel converge --source <id>` 接受世界提案，再用
+   `requirements evaluate-upstream --source <id>` 在已提交目录上重验原规格。
+   在目标写入与证据绑定之间中断时，凭原回执恢复同一提案，无需重跑模型。
+   单项目标的评估与严格候选构建各自返回结果。后者报告其余仍阻塞整卷的工件。
 
 The host derives baseline hashes and readable refs from current typed objects,
 then runs the original plan/source/definition/receipt preflight. The review hash

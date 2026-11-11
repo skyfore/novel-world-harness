@@ -1,4 +1,3 @@
-import { recoverUpstreamResolutionBaselines, assertUpstreamResolutionAbsences } from "./upstream-repair-plan.js";
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
 import { ProposalStore } from "../world/canonical-model.js";
@@ -12,12 +11,16 @@ import { upstreamRepairHostError } from "./upstream-repair-preflight.js";
 import { COMPILER_PIPELINE_VERSION } from "./batch-progress.js";
 import { compilerProposalLogicalIdentity, compilerProposalSchemas } from "./proposals.js";
 import { loadCompilerArtifactRecords } from "./artifact-retrieval.js";
-import type { UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import { upstreamProposalStore, recoverUpstreamResolutionBaselines, assertUpstreamResolutionAbsences, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import type { UpstreamRepairFinishIntent } from "./upstream-repair-finish-intent.js";
+import { goalLifecycleSpec } from "./goal-lifecycle-repair.js";
+import type { SceneReviewCatalog } from "../eval/scene-capabilities.js";
+import type { RequirementSet } from "./requirement-ledger.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const common = { planHash: hash, attemptRef: hash, status: z.enum(["pending", "accepted"]) };
 const worldEnvelopeSchema = z.discriminatedUnion("kind", [
+  artifactProposalSchema(compilerProposalSchemas["character-goal"]).extend({ kind: z.literal("character-goal") }),
   artifactProposalSchema(compilerProposalSchemas.entity).extend({ kind: z.literal("entity") }),
   artifactProposalSchema(compilerProposalSchemas["initial-world"]).extend({ kind: z.literal("initial-world") }),
   artifactProposalSchema(compilerProposalSchemas["canonical-event"]).extend({ kind: z.literal("canonical-event") }),
@@ -37,8 +40,7 @@ type Draft = UpstreamRepairCheckpoint["drafts"][number];
 function sourceStoreFor(root: string, store: Exclude<Draft["store"], "world">) {
   return store === "annotation" ? new SourceAnnotationStore(root) : store === "entity-resolution" ? new EntityResolutionStore(root) : new EventResolutionStore(root);
 }
-const storeForKind = (kind: string): Draft["store"] => kind === "entity-resolution" || kind === "event-resolution" ? kind
-  : kind === "entity" || kind === "initial-world" || kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
+
 const draftKind = (draft: Draft): string => draft.store === "world" ? draft.envelope.kind
   : draft.store === "annotation" ? draft.envelope.payload.annotationType : draft.store;
 const draftId = (draft: Draft): string => draft.store === "world"
@@ -63,7 +65,7 @@ export function assertUpstreamRepairCheckpoint(input: UpstreamRepairCheckpoint, 
     const staged = records.find(record => record.payload.kind === "attempt-staged" && record.payload.attemptRef === draft.attemptRef)?.payload;
     const validated = records.find(record => record.payload.kind === "attempt-validated" && record.payload.attemptRef === draft.attemptRef)?.payload;
     if (seen.has(key) || started?.kind !== "attempt-started" || started.planHash !== draft.planHash || started.proposalId !== draft.envelope.id || started.artifactId !== draftId(draft)
-      || storeForKind(started.artifactKind) !== draft.store
+      || upstreamProposalStore(started.artifactKind) !== draft.store
       || (draft.store === "world" && started.artifactKind !== draft.envelope.kind)
       || (draft.store === "annotation" && started.artifactKind !== draft.envelope.payload.annotationType)
       || (draft.store !== "world" && draft.envelope.payload.sourceId !== sourceId) || staged?.kind !== "attempt-staged" || staged.proposalHash !== contentHash(draft.envelope)
@@ -102,7 +104,7 @@ export async function captureUpstreamRepairCheckpoint(root: string, sourceId: st
         const { recoverUpstreamRepairStage } = await import("./upstream-repair-staging.js");
         await recoverUpstreamRepairStage(root, sourceId, current.plan.planHash, attempt.attemptRef);
       }
-      const store = storeForKind(attempt.started.artifactKind);
+      const store = upstreamProposalStore(attempt.started.artifactKind);
       let status: "pending" | "accepted" = "pending", envelope;
       if (store === "world") {
         const proposals = new ProposalStore(root);
@@ -208,7 +210,8 @@ export function retainedConsumerResolutionBaselines(plan: UpstreamRepairPlan, ac
 }
 
 /** Validate incoming active revisions and field/evidence authority before any materialization write. */
-export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRepairCheckpoint, journal: readonly UpstreamRepairRecord[], sourceId: string, sourceSha256: string, bytes: Buffer, payloads: Map<string, unknown>) {
+export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRepairCheckpoint, journal: readonly UpstreamRepairRecord[], sourceId: string, sourceSha256: string, bytes: Buffer, payloads: Map<string, unknown>,
+  goalInputs?: { definitions: readonly RequirementSet[]; catalog: SceneReviewCatalog }) {
   assertUpstreamRepairCheckpoint(checkpoint, journal, sourceId);
   const state = inspectUpstreamRepairJournal(journal), actual = new Map([...payloads].map(([key, value]) => [key, contentHash(value)]));
   const { checkUpstreamRepairMutation } = await import("./upstream-repair-staging.js");
@@ -240,7 +243,9 @@ export async function assertUpstreamRepairCheckpointState(checkpoint: UpstreamRe
     for (const draft of drafts) {
       const kind = draftKind(draft);
       if ((draft.status === "accepted" || (draft.store !== "world" && receipt?.state === "completed")) && actual.get(`${kind}:${draftId(draft)}`) !== contentHash(draft.envelope.payload)) throw upstreamRepairHostError("Checkpoint accepted proposal differs from its active artifact");
-      checkUpstreamRepairMutation({ plan, bytes, payloads: original, retainedRevisions,
+      const goalReview = plan.goalLifecycle && goalInputs
+        ? { catalog: goalInputs.catalog, spec: goalLifecycleSpec(plan, goalInputs.definitions.find(s => s.revisionHash === plan.requirementSetHash)) } : undefined;
+      checkUpstreamRepairMutation({ plan, bytes, payloads: original, retainedRevisions, goalReview,
         activeRevisions: new Map([...original].filter(([key]) => !retained.has(key)).map(([key, value]) => [key, contentHash(value)])) }, kind as import("./upstream-repair-plan.js").UpstreamRepairKind, draftId(draft), draft.envelope.payload, outputs,
         draft.store === "world" ? draft.envelope.evidenceAssertions : []);
     }

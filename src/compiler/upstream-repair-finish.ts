@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
-import { ProposalStore } from "../world/canonical-model.js";
+import { proposalEvidenceSourceIds, ProposalStore } from "../world/canonical-model.js";
 import { SourceAnnotationStore } from "./annotations.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
 import { EventResolutionStore } from "./event-resolution.js";
@@ -13,20 +13,43 @@ import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
 import { verifyUpstreamRepairPlan, upstreamRepairHostError } from "./upstream-repair-preflight.js";
 import { checkUpstreamRepairMutation, recoverUpstreamRepairStage } from "./upstream-repair-staging.js";
 import { UpstreamRepairFinishValidationError, freezeUpstreamRepairFinishIntent, type UpstreamRepairFinishIntent } from "./upstream-repair-finish-intent.js";
-import type { UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import { upstreamProposalStore, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import { isCompletedUpstreamRecovery } from "./upstream-convergence-recovery.js";
+import type { ArtifactProposal } from "../world/model.js";
 
-const upstreamStore = (kind: UpstreamRepairFinishIntent["proposals"][number]["artifactKind"]) =>
-  kind === "entity-resolution" || kind === "event-resolution" ? kind
-    : kind === "entity" || kind === "initial-world" || kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
 function envelopeEvidenceAssertions(envelope: unknown): readonly unknown[] {
   if (!envelope || typeof envelope !== "object") return [];
   const assertions = (envelope as { evidenceAssertions?: unknown }).evidenceAssertions;
   return Array.isArray(assertions) ? assertions : [];
 }
 
+/** Single-proposal acceptance and bulk convergence share the managed goal's finish boundary. */
+export async function goalRepairCommitPermit(root: string, envelope: ArtifactProposal<unknown>) {
+  const batchId = envelope.generatedBy.compilerBatchId;
+  if (!batchId) return;
+  const sources = proposalEvidenceSourceIds(envelope);
+  if (sources.length > 1) throw upstreamRepairHostError("Goal proposal mixes sources. Inspect its original evidence before acceptance");
+  const sourceId = sources[0];
+  if (!sourceId) return;
+  const state = await new UpstreamRepairLedger(root, sourceId).inspect();
+  const current = state.plans.find(item => item.plan.batchId === batchId && item.plan.goalLifecycle);
+  if (!current) return;
+  const ready = current.state === "finished" && Boolean(current.finishedReceipt);
+  return { sourceId, batchId, planHash: current.plan.planHash, fingerprint: current.finishedReceipt, ready };
+}
+
+export async function verifyGoalRepairCommit(root: string, proposalId: string, permit: NonNullable<Awaited<ReturnType<typeof goalRepairCommitPermit>>>) {
+  const receipts = new CompilerFinishReceipts(root, permit.sourceId, permit.batchId);
+  const receipt = await receipts.read();
+  const intent = receipt?.identity.upstreamRepairIntent;
+  if (!permit.ready || !receipt || receipt.state !== "completed" || receipt.fingerprint !== permit.fingerprint
+    || intent?.planHash !== permit.planHash || intent.proposals.length !== 1 || intent.proposals[0]?.proposalId !== proposalId)
+    throw upstreamRepairHostError("Goal commit requires the exact completed repair receipt. Inspect requirements inspect-upstream for this source and recover its original finish");
+  await receipts.verify(receipt);
+}
+
 export async function assertUpstreamRepairFinishInventory(root: string, plan: UpstreamRepairPlan, proposals: UpstreamRepairFinishIntent["proposals"], intent?: UpstreamRepairFinishIntent) {
-  const sourceId = plan.sourceScope.sourceId, expected = new Set(proposals.map(item => `${upstreamStore(item.artifactKind)}:${item.proposalId}`));
+  const sourceId = plan.sourceScope.sourceId, expected = new Set(proposals.map(item => `${upstreamProposalStore(item.artifactKind)}:${item.proposalId}`));
   const world = new ProposalStore(root), worldBatch = [];
   for (const status of ["pending", "accepted"] as const) for (const item of await world.list(status, sourceId)) {
     const envelope = await world.readEnvelope(status, item.id), generatedBy = envelope.generatedBy as { compilerBatchId?: string } | undefined;
@@ -92,7 +115,7 @@ export async function verifyUpstreamRepairFinish(root: string, sourceId: string,
   if (receipt && (receipt.identity.batchId !== plan.batchId || contentHash(receipt.identity.upstreamRepairIntent ?? null) !== contentHash(intent))) throw upstreamRepairHostError("Restored receipt differs from frozen authorization");
   const committedOutputs = new Map<string, string>(), outputs = new Map<string, unknown>(), assertions = new Map<string, readonly unknown[]>();
   for (const proposal of intent.proposals) {
-    const store = upstreamStore(proposal.artifactKind) === "world" ? new ProposalStore(root)
+    const store = upstreamProposalStore(proposal.artifactKind) === "world" ? new ProposalStore(root)
       : proposal.artifactKind === "entity-resolution" ? new EntityResolutionStore(root)
         : proposal.artifactKind === "event-resolution" ? new EventResolutionStore(root) : new SourceAnnotationStore(root);
     let envelope;
@@ -111,7 +134,7 @@ export async function verifyUpstreamRepairFinish(root: string, sourceId: string,
     if (receipt) committedOutputs.set(key, proposal.payloadHash);
   }
   const verified = await verifyUpstreamRepairPlan(root, plan, committedOutputs, restoringReceipt);
-  if (requireCommitted) for (const proposal of intent.proposals) if (upstreamStore(proposal.artifactKind) !== "world"
+  if (requireCommitted) for (const proposal of intent.proposals) if (upstreamProposalStore(proposal.artifactKind) !== "world"
     && verified.activeRevisions.get(`${proposal.artifactKind}:${proposal.artifactId}`) !== proposal.payloadHash) throw upstreamRepairHostError("Completed finish output is no longer active");
   // Re-run the field and source guard against the original baselines, never
   // against a partially committed proposal masquerading as its own baseline.

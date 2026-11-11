@@ -12,13 +12,13 @@ import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { TraceRecorder } from "../trace/recorder.js";
 import { TraceStore } from "../trace/store.js";
 import { contentHash } from "../world/canonical.js";
-import { canonicalEventSchema, eventParticipationSchema } from "../world/model.js";
+import { compilerProposalSchemas } from "../compiler/proposals.js";
 import { SegmentStore } from "../compiler/segments.js";
 import { resolveTextSelectorAnchor, modelTextSelectorSchema, textAnchorForByteRange } from "../compiler/text-anchors.js";
 import { sourceAnnotationSchema, annotationAnchors } from "../compiler/annotations.js";
 import { identityResolutionSchema } from "../compiler/entity-resolution.js";
 import { eventResolutionSchema } from "../compiler/event-resolution.js";
-import { upstreamRepairKindSchema, parseUpstreamRepairPayload } from "../compiler/upstream-repair-plan.js";
+import { isUpstreamWorldKind, upstreamRepairKindSchema, parseUpstreamRepairPayload } from "../compiler/upstream-repair-plan.js";
 import { RequirementLedger } from "../compiler/requirement-ledger.js";
 import { prerequisiteStop } from "../compiler/role-source-prerequisites.js";
 import { beginCoreRoleDependencyReview, type RoleDependencyReviewInput, type prepareCoreRoleDependencyReview } from "../compiler/role-dependency-review-service.js";
@@ -152,7 +152,12 @@ async function executeRoleSemanticScope(options: SemanticScopeOptions, correctio
           async execute(_id, raw) { return guarded("dependencies", raw, async () => {
             const a = dependencyRequest.parse(raw);
             if ([a.query, a.refs, a.schemaKind].filter(Boolean).length > 1 || ((a.refs || a.schemaKind) && a.offset)) throw new Error("Choose catalog discovery, refs, or schemaKind; correct once using returned fields.");
-            if (a.schemaKind) return result({ kind: a.schemaKind, schema: z.toJSONSchema(a.schemaKind === "entity-resolution" ? identityResolutionSchema : a.schemaKind === "event-resolution" ? eventResolutionSchema : a.schemaKind === "canonical-event" ? canonicalEventSchema : a.schemaKind === "event-participation" ? eventParticipationSchema : sourceAnnotationSchema) });
+            if (a.schemaKind) {
+              const kind = a.schemaKind;
+              const schema = isUpstreamWorldKind(kind) ? compilerProposalSchemas[kind]
+                : kind === "entity-resolution" ? identityResolutionSchema : kind === "event-resolution" ? eventResolutionSchema : sourceAnnotationSchema;
+              return result({ kind, schema: z.toJSONSchema(schema) });
+            }
             if (a.refs) {
               const selected = a.refs.map(ref => { const c = catalog.find(c => `${c.kind}:${c.id}` === ref); if (!c) throw new Error("Discover read_semantic_dependencies offset=0/query; copy items[].ref into refs and correct once."); return c; });
               if (Buffer.byteLength(JSON.stringify(selected)) > 240000) throw new Error("Read fewer discovered refs in one corrected request; full payload limit is 240000 bytes.");

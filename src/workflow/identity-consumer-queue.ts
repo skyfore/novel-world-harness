@@ -6,6 +6,8 @@ import { contentHash } from "../world/canonical.js";
 import { identityRequirementDirectory } from "../compiler/identity-requirements.js";
 import { RequirementLedger } from "../compiler/requirement-ledger.js";
 import { inspectIdentityRepairHandoff } from "../compiler/identity-repair-handoff.js";
+import { currentConsumerPayload, currentConsumerRepair } from "../compiler/identity-consumer-revalidation.js";
+import { withIdentityAuthorityVerification } from "../compiler/identity-requirement-upstream.js";
 import { consumerProviderResumptionSchema, type ConsumerProviderResumption } from "../compiler/identity-consumer-stage-recovery.js";
 import { prerequisiteStop } from "../compiler/role-source-prerequisites.js";
 import { withWorkspaceOperationLock, inspectProcessLiveness, linuxHostIdentity } from "../util/workspace-lock.js";
@@ -53,7 +55,7 @@ export async function inspectConsumerQueue(root: string, sourceId: string, taskI
 export async function runIdentityConsumerQueue(options: {
   root: string; sourceId: string; taskId: string; authorizationRef: string; shard?: number; limit?: number;
   providerResumption?: ConsumerProviderResumption; onProgress?: (event: unknown) => void;
-}, dependencies = { inspect: inspectIdentityRepairHandoff, review: runIdentityConsumerRevalidation }) {
+}, dependencies = { inspect: inspectIdentityRepairHandoff, review: runIdentityConsumerRevalidation, currentRepair: currentConsumerRepair }) {
   if (options.shard !== undefined && (!Number.isSafeInteger(options.shard) || options.shard < 0)
     || options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 1)) throw stop("Queue shard/limit must be nonnegative/positive integers");
   return withWorkspaceOperationLock(options.root, "compiler", async () => {
@@ -86,20 +88,28 @@ export async function runIdentityConsumerQueue(options: {
     const request = options.providerResumption ? consumerProviderResumptionSchema.parse(options.providerResumption) : undefined;
     if (request) await retainPiArtifact(path.join(directory, `continuation-${request.scopeHash}.json`), request);
     let dispatched = 0;
+    let target: Awaited<ReturnType<typeof currentConsumerRepair>> | undefined;
     try {
       await save();
       for (const ref of refs) {
         const fresh = await dependencies.inspect(root, sourceId, { taskId, ref });
         if (!("selected" in fresh) || fresh.intentHash !== plan.intentHash || fresh.inventoryHash !== plan.inventoryHash || fresh.selected.ref !== ref)
           throw stop("Current consumer discovery changed its frozen queue scope");
-        const reviews = fresh.summary.consumerRevalidation.currentReviews ?? fresh.summary.consumerRevalidation.reviews;
-        const review = reviews.findLast(r => r.ref === ref), attempts = fresh.summary.consumerRevalidation.attempts.filter(a => a.ref === ref);
-        if (review && review.status !== "awaiting-independent-check") {
-          state.items.push({ ref, status: ["unaffected", "revalidated"].includes(review.status) ? "recorded" : "blocked", result: review.status });
+        if (fresh.selected.reason !== "typed-consumer" || ref === `roster/${sourceId}`) {
+          state.items.push({ ref, status: "blocked", reason: "Original source-review owner must resolve this consumer; it cannot be replaced by a typed consumer review." });
           await save(); continue;
         }
-        if (fresh.selected.reason !== "typed-consumer") {
-          state.items.push({ ref, status: "blocked", reason: "Original source-review owner must resolve this consumer; it cannot be replaced by a typed consumer review." });
+        // The queue owns the compiler lock. Its review stages append judgments
+        // without changing the upstream receipt or its canonical inputs.
+        target ??= await withIdentityAuthorityVerification(() => dependencies.currentRepair(root, sourceId, taskId));
+        const { receipt, upstream, current } = target;
+        const revision = contentHash(currentConsumerPayload(fresh.selected, current));
+        const matches = (r: { ref: string; upstreamPlanHash: string; receiptFingerprint: string; currentRevisionHash: string }) =>
+          r.ref === ref && r.upstreamPlanHash === upstream.plan.planHash && r.receiptFingerprint === receipt.fingerprint && r.currentRevisionHash === revision;
+        const reviews = fresh.summary.consumerRevalidation.currentReviews ?? fresh.summary.consumerRevalidation.reviews;
+        const review = reviews.findLast(matches), attempts = fresh.summary.consumerRevalidation.attempts.filter(matches);
+        if (review && review.status !== "awaiting-independent-check") {
+          state.items.push({ ref, status: ["unaffected", "revalidated"].includes(review.status) ? "recorded" : "blocked", result: review.status });
           await save(); continue;
         }
         if (dispatched >= (options.limit ?? plan.refs.length)) { state.status = "yielded"; break; }

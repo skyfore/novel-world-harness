@@ -6,15 +6,28 @@ import { predicatesEntail } from "../world/predicate-implication.js";
  * Existing independently registered scene requirements remain the only way to
  * supply expectations. This projection adds no alternate semantic ledger. */
 export function inspectSemanticCoverage(sourceId: string, catalog: Pick<SceneReviewCatalog, "events" | "goals">, specs: readonly SceneCapabilitySpec[]) {
-  const cases = specs.filter(s => s.sourceId === sourceId).flatMap(s => s.cases.map(c => ({ specHash: contentHash(s), test: c })));
+  type EventCase = Extract<SceneCapabilitySpec["cases"][number], { kind: "event-effects" }>;
+  const reviewsByEvent = new Map<string, Array<{ specHash: string; caseId: string; disposition: EventCase["expectation"]["kind"] }>>();
+  const reviewedGoals = new Set<string>();
+  for (const spec of specs) {
+    if (spec.sourceId !== sourceId) continue;
+    const specHash = contentHash(spec);
+    for (const test of spec.cases) {
+      if (test.kind === "goal-lifecycle") reviewedGoals.add(test.goalId);
+      if (test.kind !== "event-effects") continue;
+      const reviews = reviewsByEvent.get(test.eventId) ?? [];
+      reviews.push({ specHash, caseId: test.id, disposition: test.expectation.kind });
+      reviewsByEvent.set(test.eventId, reviews);
+    }
+  }
   const belongs = (value: { evidence: Array<{ span: { sourceId: string } }> }) => value.evidence.length > 0 && value.evidence.every(e => e.span.sourceId === sourceId);
   const events = [...catalog.events.values()].filter(belongs).sort((a, b) => a.id.localeCompare(b.id)).map(event => {
-    const reviews = cases.flatMap(c => c.test.kind === "event-effects" && c.test.eventId === event.id ? [{ specHash: c.specHash, caseId: c.test.id, disposition: c.test.expectation.kind }] : []);
+    const reviews = reviewsByEvent.get(event.id) ?? [];
     return { ref: `event:${event.id}`, revisionHash: contentHash(event), stateOperations: event.observedOutcome.operations.length,
       knowledgeOperations: event.observedKnowledge?.operations.length ?? 0, reviews, reviewRequired: reviews.length === 0 };
   });
   const goals = [...catalog.goals?.values() ?? []].filter(belongs).sort((a, b) => a.id.localeCompare(b.id)).map(goal => ({
-    ref: `goal:${goal.id}`, revisionHash: contentHash(goal), reviewRequired: !cases.some(c => c.test.kind === "goal-lifecycle" && c.test.goalId === goal.id),
+    ref: `goal:${goal.id}`, revisionHash: contentHash(goal), reviewRequired: !reviewedGoals.has(goal.id),
     activationEntailsCompletion: Boolean(goal.completion?.length && goal.completion.every(p => predicatesEntail(goal.activation?.preconditions ?? [], p))),
   }));
   const missing = [...events, ...goals].filter(item => item.reviewRequired).map(item => item.ref);

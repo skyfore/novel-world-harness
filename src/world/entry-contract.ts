@@ -3,6 +3,7 @@ import { applyStateDelta, DEFAULT_STATE_FIELDS, emptyWorldState, StateSchemaRegi
 import type { EntryProjectionSeed, KnowledgeDelta, ParticipantPresence, StateDelta, StateValue, ValidationIssue } from "./model.js";
 
 export const ENTRY_CONTRACT_VERSION = "entry-capability/v2";
+export const ENTRY_ACTION_WITNESS_VERSION = 2;
 export type EntryState = { delta: StateDelta; participantPresence?: readonly ParticipantPresence[]; knowledge?: KnowledgeDelta; projectionSeed?: EntryProjectionSeed };
 export type EntryStateAssessment = {
   contractVersion: typeof ENTRY_CONTRACT_VERSION;

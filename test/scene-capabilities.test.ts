@@ -71,6 +71,23 @@ function review(c: SceneReviewCatalog, cases: unknown[]) {
 }
 const eventCase = { ...basis, kind: "event-effects", eventId: "gift", initiatorId: "hero", requiresMechanism: true, expectation: { kind: "delta", delta: gift } };
 
+it("uses the scenario clock and the goal actor's participation for lifecycle cuts", () => {
+  const c = catalog(), dawn = { kind: "ordinal" as const, label: "Dawn", orderHint: 1 };
+  const goal = characterGoalSchema.parse({ id: "dawn-goal", actorId: "hero", description: "Act after seeing the gift at dawn", priority: 1,
+    requiresKnowledge: [], evidence, activation: { storyWindow: dawn, afterExperiencedCanonicalEventIds: ["gift"], preconditions: [{ op: "after-step", step: 0 }] },
+    completion: [{ op: "after-step", step: 1 }] });
+  c.goals = new Map([[goal.id, goal]]);
+  c.events.set("gift", event("gift"));
+  const scenarios = [1, 2].map(step => ({ label: String(step), seed: { delta: empty, elapsedDays: 0, step, storyTime: dawn },
+    knownClaimIds: [], realizedEventIds: ["gift"], experiencedEventIds: ["gift"], expectedActive: step === 1, expectedComplete: step === 2 }));
+  const cases = [{ ...basis, kind: "goal-lifecycle", goalId: goal.id, scenarios }];
+  expect(review(c, cases).verified).toBe(true);
+  for (const presence of [{ participants: ["mo-yan"] }, { participantPresence: [{ entityId: "hero", mode: "unresolved" as const }] }]) {
+    c.events.set("gift", { ...event("gift"), ...presence });
+    expect(review(c, cases).cases[0]!.issues).toContainEqual(expect.objectContaining({ message: expect.stringContaining("actor's participation") }));
+  }
+});
+
 it("rejects a formally consistent empty event/schema against an independent nonempty source expectation", () => {
   const c = catalog();
   c.events.set("gift", event("gift"));

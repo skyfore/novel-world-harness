@@ -667,7 +667,7 @@ program.command("web")
     const globalOptions = program.opts();
     return webCommand({
       root: rootFor(options),
-      configPath: configFor(options),
+      configPath: options.config ? configFor(options) : undefined,
       model: options.model ?? globalOptions.model,
       host: options.host,
       port: options.port,

@@ -1,3 +1,5 @@
+import { compileNovelCommand } from "../src/commands/compile-novel.js";
+import { NovelCompilationRunStore } from "../src/workflow/novel-compilation.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -164,6 +166,10 @@ it("projects prepared accounting from active evidence after artifact assertion s
   expect(projected.updatedAt).toBe(historicalManifest.updatedAt);
   expect((await accounting.read(fixture.source.id))!.records.find(record => record.unitId === uncoveredUnit.id))
     .toMatchObject({ status: "represented", evidenceAssertionIds: [historicalAssertion.id] });
+  await expect(compileNovelCommand({ root, sourceId: fixture.source.id, phase: "closure", onProgress() {} })).rejects.toThrow("COMPILATION_CLOSURE_BLOCKED");
+  const closure = (await new NovelCompilationRunStore(root).read(fixture.source.id))!.closure!;
+  expect(closure.gates.find(g => g.dimension === "accounting")).toMatchObject({ state: "blocked", refs: [uncoveredUnit.id] });
+  expect(closure.accounting).toMatchObject({ blocking: 1, represented: 1 });
   const issues = validateFrozenAccounting(bundle);
   expect(issues.some(issue => issue.code === "SOURCE_UNIT_UNACCOUNTED" && issue.path === uncoveredUnit.id)).toBe(true);
   expect(issues.some(issue => issue.code === "SOURCE_REPRESENTATION_REFERENCE_INVALID")).toBe(false);

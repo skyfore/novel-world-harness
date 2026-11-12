@@ -6,7 +6,9 @@ import { expect, it } from "vitest";
 import { contentHash as h } from "../src/world/canonical.js";
 import { CONSUMER_EVIDENCE_COVERAGE, consumerEvidenceCoverage, consumerEvidenceSubjects, assertConsumerEvidenceRead,
   consumerEvidenceReads } from "../src/compiler/consumer-evidence-coverage.js";
-import { createConsumerWorkPlan, consumerWorkInput, type ConsumerWorkBaseInput } from "../src/compiler/consumer-work-plan.js";
+import { createConsumerWorkPlan, consumerWorkDirectory, consumerWorkInput, consumerWorkProviderDirectory, type ConsumerWorkBaseInput } from "../src/compiler/consumer-work-plan.js";
+import { entryRepairParentContext, resolveEntryRepairEvidence } from "../src/compiler/consumer-work-evidence.js";
+import { segmentSource } from "../src/compiler/segments.js";
 import { inspectConsumerEvidenceGap } from "../src/compiler/consumer-evidence-correction.js";
 import { consumerRevalidationDirectory, type ConsumerRevalidationScope, type ConsumerRevalidationRecord } from "../src/compiler/identity-consumer-revalidation-model.js";
 import { identityRequirementDirectory } from "../src/compiler/identity-requirements.js";
@@ -116,5 +118,68 @@ it("discovers an original delivery gap but refuses to relabel a check that actua
     ];
     await fs.writeFile(path.join(directory, "consumer-revalidation-check.messages.jsonl"), messages.map((message, i) => JSON.stringify({ sequence: i + 1, message })).join("\n") + "\n");
     expect(await inspectConsumerEvidenceGap(root, scope, records)).toBeUndefined();
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+it("restores the resumed proposal and the complete source delivered to either entry-repair parent", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entry-parent-evidence-"));
+  try {
+    const bytes = Buffer.from("Chapter 1\nAda arrives.\nChapter 2\nZoë opens the door.\nChapter 3\nThe bell rings.\nChapter 4\nUnrelated.\n");
+    const file = path.join(root, "novel.txt");
+    await fs.writeFile(file, bytes);
+    const source = await (await WorkspaceStore.create(root)).registerSource(file);
+    const manifest = await segmentSource(root, source);
+    const [opening, door, bell] = manifest.segments;
+    expect(manifest.segments).toHaveLength(4);
+    const f = fixture();
+    const scope = { ...f.args.scope, sourceId: source.id, sourceHash: source.contentSha256,
+      taskId: h("task"), receiptFingerprint: h("receipt"), executionPolicy: "consumer-work/v1" } as ConsumerRevalidationScope;
+    const input = { ...f.args.input, scope, scopeHash: h(scope), requiredSourceSegmentIds: [opening!.id] };
+    const contextDirectory = identityRequirementDirectory(root, source.id, scope.taskId);
+    const baseDirectory = consumerWorkDirectory(consumerRevalidationDirectory(root, scope));
+    await fs.mkdir(baseDirectory, { recursive: true });
+    await fs.writeFile(path.join(contextDirectory, "context.json"), JSON.stringify({ manifest }));
+    const records: ConsumerRevalidationRecord[] = [];
+    for (const stage of ["consumer-revalidation", "consumer-revalidation-check"] as const) {
+      const proposal = stage === "consumer-revalidation";
+      const plan = createConsumerWorkPlan({ ...f.args, scope, stage, input, bytes, segments: manifest.segments,
+        extraSources: proposal ? [] : [bell!.id] });
+      const directory = proposal ? consumerWorkProviderDirectory(baseDirectory, stage) : baseDirectory;
+      if (proposal) {
+        plan.providerResumptionHash = h("resumption");
+        plan.providerResumption = { originalSessionId: "original", requiredSourceSegmentIds: [door!.id], requiredArtifactRefs: [] };
+        await fs.writeFile(path.join(baseDirectory, `${stage}.input.json`), JSON.stringify({ abandoned: true }));
+      }
+      const wire = consumerWorkInput(plan);
+      const messages = proposal ? [
+        { role: "assistant", content: [{ type: "toolCall", id: "read", name: "read_consumer_revalidation",
+          arguments: { collection: "source", segmentIds: [door!.id] } }] },
+        { role: "toolResult", toolCallId: "read", toolName: "read_consumer_revalidation", content: [{ type: "text",
+          text: JSON.stringify({ segments: [{ id: door!.id, text: bytes.subarray(door!.startByte, door!.endByte).toString(), complete: true }] }) }] },
+      ] : [{ role: "user", content: "independent check" }];
+      await fs.mkdir(directory, { recursive: true });
+      await fs.writeFile(path.join(directory, `${stage}.plan.json`), JSON.stringify(plan));
+      await fs.writeFile(path.join(directory, `${stage}.input.json`), JSON.stringify(wire));
+      await fs.writeFile(path.join(directory, `${stage}.messages.jsonl`),
+        messages.map((message, i) => JSON.stringify({ sequence: i + 1, message })).join("\n") + "\n");
+      records.push({ scope, executionPlanHash: h(plan), inputHash: h(wire),
+        ...(proposal ? { providerResumptionHash: plan.providerResumptionHash } : {}),
+        predecessorRecordHash: proposal ? null : h(records[0]), output: { phase: stage } } as ConsumerRevalidationRecord);
+    }
+    const context = await entryRepairParentContext(root, records);
+    expect(h(context.originalInput)).toBe(records[0]!.inputHash);
+    expect(context.additionalSources).toEqual([door!, bell!].map(({ id, startByte, endByte }) => {
+      const text = bytes.subarray(startByte, endByte).toString("utf8");
+      return { id, startByte, endByte, text, textHash: h(text) };
+    }));
+    expect(context.negativeJudgments).toEqual(records.map(r => r.output));
+    const stop = (reason: string) => new Error(reason);
+    const [found] = await resolveEntryRepairEvidence(root, scope, context, [{ segment_id: door!.id, exact: "Zoë" }], stop);
+    expect(found!.anchor).toMatchObject({ sourceId: source.id, exactHash: sha(Buffer.from("Zoë")) });
+    await expect(resolveEntryRepairEvidence(root, scope, context, [{ segment_id: manifest.segments[3]!.id, exact: "Unrelated" }], stop))
+      .rejects.toThrow(/escaped the supplied original evidence/);
+    const resumed = consumerWorkProviderDirectory(baseDirectory, "consumer-revalidation");
+    await fs.writeFile(path.join(resumed, "consumer-revalidation.input.json"), "{}");
+    await expect(entryRepairParentContext(root, records)).rejects.toThrow(/exact input/);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

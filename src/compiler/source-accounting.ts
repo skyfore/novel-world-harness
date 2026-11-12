@@ -642,43 +642,7 @@ export class SourceAccountingStore {
 
   async summarize(structure: SourceStructureManifest): Promise<SourceAccountingSummary> {
     const manifest = await this.read(structure.sourceId);
-    const records = manifest
-      && manifest.sourceSha256 === structure.sourceSha256
-      && manifest.structureVersion === structure.structureVersion
-      ? manifest.records
-      : [];
-    const byUnit = new Map(records.map((record) => [record.unitId, record]));
-    const base = baseStructuralUnits(structure);
-    const statusCounts = emptyStatusCounts();
-    let accountedBytes = 0;
-    const missingUnitIds: string[] = [];
-    const blockingUnitIds: string[] = [];
-    for (const unit of base) {
-      const record = byUnit.get(unit.id);
-      if (!record) {
-        missingUnitIds.push(unit.id);
-        continue;
-      }
-      statusCounts[record.status] += 1;
-      accountedBytes += unit.anchor.endByte - unit.anchor.startByte;
-      if (record.status === "unresolved" || record.status === "intentionally-deferred") {
-        blockingUnitIds.push(unit.id);
-      }
-    }
-    return {
-      sourceId: structure.sourceId,
-      totalUnits: base.length,
-      accountedUnits: base.length - missingUnitIds.length,
-      unaccountedUnits: missingUnitIds.length,
-      blockingUnits: blockingUnitIds.length,
-      accountedBytes,
-      totalBytes: structure.sourceBytes,
-      unitCoverage: base.length ? (base.length - missingUnitIds.length) / base.length : 1,
-      byteCoverage: structure.sourceBytes ? accountedBytes / structure.sourceBytes : 1,
-      statusCounts,
-      missingUnitIds,
-      blockingUnitIds,
-    };
+    return summarizeSourceAccounting(structure, manifest);
   }
 
   async remove(sourceId: string): Promise<void> {
@@ -754,6 +718,46 @@ export function projectSourceAccountingCurrentCoverage(
       annotationSpans,
     }),
   });
+}
+
+export function summarizeSourceAccounting(structure: SourceStructureManifest, manifest: SourceAccountingManifest | null): SourceAccountingSummary {
+  const records = manifest
+    && manifest.sourceSha256 === structure.sourceSha256
+    && manifest.structureVersion === structure.structureVersion
+    ? manifest.records
+    : [];
+  const byUnit = new Map(records.map((record) => [record.unitId, record]));
+  const base = baseStructuralUnits(structure);
+  const statusCounts = emptyStatusCounts();
+  let accountedBytes = 0;
+  const missingUnitIds: string[] = [];
+  const blockingUnitIds: string[] = [];
+  for (const unit of base) {
+    const record = byUnit.get(unit.id);
+    if (!record) {
+      missingUnitIds.push(unit.id);
+      continue;
+    }
+    statusCounts[record.status] += 1;
+    accountedBytes += unit.anchor.endByte - unit.anchor.startByte;
+    if (record.status === "unresolved" || record.status === "intentionally-deferred") {
+      blockingUnitIds.push(unit.id);
+    }
+  }
+  return {
+    sourceId: structure.sourceId,
+    totalUnits: base.length,
+    accountedUnits: base.length - missingUnitIds.length,
+    unaccountedUnits: missingUnitIds.length,
+    blockingUnits: blockingUnitIds.length,
+    accountedBytes,
+    totalBytes: structure.sourceBytes,
+    unitCoverage: base.length ? (base.length - missingUnitIds.length) / base.length : 1,
+    byteCoverage: structure.sourceBytes ? accountedBytes / structure.sourceBytes : 1,
+    statusCounts,
+    missingUnitIds,
+    blockingUnitIds,
+  };
 }
 
 /** Latest explicit review per unit, including unresolved work even when a

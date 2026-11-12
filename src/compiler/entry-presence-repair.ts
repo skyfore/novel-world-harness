@@ -5,15 +5,12 @@ import { contentHash } from "../world/canonical.js";
 import { artifactProposalSchema, canonicalEventSchema, eventParticipationSchema, evidenceAssertionSchema } from "../world/model.js";
 import { ProposalStore } from "../world/canonical-model.js";
 import { RequirementLedger, type LedgerRecord } from "./requirement-ledger.js";
-import { SegmentStore } from "./segments.js";
-import { WorkspaceStore } from "../storage/workspace-store.js";
-import { readSourceMaterial } from "../storage/source-material-store.js";
+import { entryRepairParentContext, resolveEntryRepairEvidence } from "./consumer-work-evidence.js";
 import { loadCompilerArtifactRecords } from "./artifact-retrieval.js";
 import { prepareConsumerRevalidation, revalidationRecords, verifyConsumerRevalidationRecord } from "./identity-consumer-revalidation.js";
 import { consumerRevalidationDirectory, consumerRevalidationId } from "./identity-consumer-revalidation-model.js";
 import { revalidatedConsumerBudgetOrigin } from "./identity-consumer-revalidated-plan.js";
 import { verifyIdentityUpstreamSession } from "./identity-upstream-session.js";
-import { resolveTextSelectorAnchor } from "./text-anchors.js";
 import { compilerPayloadEvidence } from "./proposals.js";
 import { assertReviewPreviewAllowance } from "./review-preview-allowance.js";
 import { ENTRY_PRESENCE_REPAIR, ENTRY_PRESENCE_LIMITS, entryPresenceCriteria, entryPresenceIntentSchema, entryPresenceRepairId,
@@ -24,7 +21,7 @@ export const readPresenceFile = async (file: string) => JSON.parse(await fs.read
 export const maybePresenceFile = async (file: string) => { try { return await readPresenceFile(file); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; } };
 export const entryPresenceRecords = (history: readonly LedgerRecord[], taskId: string) => history.flatMap(r =>
   r.payload.kind === "entry-presence-repair" && r.payload.record.intent.taskId === taskId ? [r.payload.record] : []);
-const implementationFiles = ["./entry-presence-repair-model.ts", "./entry-presence-repair.ts", "./entry-presence.ts", "../workflow/entry-presence-repair.ts",
+const implementationFiles = ["./consumer-work-evidence.ts", "./entry-presence-repair-model.ts", "./entry-presence-repair.ts", "./entry-presence.ts", "../workflow/entry-presence-repair.ts",
   "../world/model.ts", "../world/entry-agency.ts", "./validator.ts", "./proposals.ts", "./requirement-ledger.ts", "./review-preview-allowance.ts"];
 export async function entryPresenceImplementationHash() {
   // Both src/ and dist/ entry points bind the same retained source implementation.
@@ -74,9 +71,7 @@ export async function prepareEntryPresenceRepair(root: string, sourceId: string,
     && (r.payload as any).eventId === eventId && (r.payload as any).entityId === actorId)
     .map(r => ({ kind: r.kind, id: r.logicalId, revisionHash: contentHash(r.payload), payload: r.payload, evidenceAssertions: r.evidenceAssertions }))
     .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
-  const parentInput = await readPresenceFile(path.join(consumerRevalidationDirectory(root, parent.scope), "execution-v1", "consumer-revalidation.input.json"));
-  if (contentHash(parentInput) !== parents[0]?.inputHash) throw entryPresenceStop("Original complete evidence packet is missing");
-  const context = { originalInput: parentInput, negativeJudgments: parents.map(r => r.output) };
+  const context = await entryRepairParentContext(root, parents);
   const origin = await revalidatedConsumerBudgetOrigin(root, parents);
   const intent = entryPresenceIntentSchema.parse({ version: 1, policy: ENTRY_PRESENCE_REPAIR, sourceId, sourceHash: parent.scope.sourceHash,
     taskId, ref, actorId, eventId, identityIntentHash: parent.scope.identityIntentHash, originalBudgetHash: parent.scope.originalBudgetHash,
@@ -90,17 +85,8 @@ export async function prepareEntryPresenceRepair(root: string, sourceId: string,
 }
 
 export async function presenceEvidence(root: string, intent: EntryPresenceIntent, selectors: Extract<EntryPresenceRecord, { phase: "entry-presence-proposal" }>["output"]["evidence"]) {
-  const manifest = await new SegmentStore(root).readManifest(intent.sourceId);
-  const source = await WorkspaceStore.openReadOnly(root).getSource(intent.sourceId);
-  if (!source || source.contentSha256 !== intent.sourceHash || !manifest)
-    throw entryPresenceStop("Original immutable source unavailable");
-  await readSourceMaterial(root, source);
   const context = await readPresenceFile(path.join(entryPresenceRepairDirectory(root, intent), "context.json"));
-  return Promise.all(selectors.map(async selector => {
-    const segment = manifest.segments.find(s => s.id === selector.segment_id);
-    if (!segment || !context.originalInput.requiredSourceSegmentIds.includes(segment.id)) throw entryPresenceStop("Selector escaped the supplied original evidence; copy originalInput.evidencePacket.sources[].id once");
-    return { selector, anchor: await resolveTextSelectorAnchor(root, segment, selector) };
-  }));
+  return resolveEntryRepairEvidence(root, intent, context, selectors, entryPresenceStop);
 }
 
 export function entryPresenceInput(intent: EntryPresenceIntent, context: unknown, previous: EntryPresenceRecord[]) {
@@ -146,6 +132,8 @@ export async function verifyEntryPresenceRecord(root: string, record: EntryPrese
   const parents = revalidationRecords(ledger, s.taskId).filter(r => consumerRevalidationId(r.scope) === s.parentReviewId);
   if (contentHash(context.originalInput) !== parents[0]?.inputHash || contentHash(context.negativeJudgments) !== contentHash(parents.map(r => r.output)))
     throw entryPresenceStop("Presence context changed its original source packet or negative judgments");
+  if (context.additionalSources !== undefined && contentHash(context) !== contentHash(await entryRepairParentContext(root, parents)))
+    throw entryPresenceStop("The delivered evidence differs from the sealed parent reviews");
   if ("output" in record) {
     const previous = records.slice(0, -1), input = entryPresenceInput(s, context, previous);
     if (record.inputHash !== contentHash(input) || contentHash(await readPresenceFile(path.join(directory, `${record.phase}.input.json`))) !== record.inputHash

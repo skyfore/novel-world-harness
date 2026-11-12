@@ -129,7 +129,10 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
   issues.push(...roleReviewFinishIssues(bundle.compilerSnapshot.reconciliationObligations ?? [], bundle.compilerSnapshot.roleRoster, bundle.source.id));
   issues.push(...coreRoleAttemptHistoryIssues((bundle.compilerSnapshot.reconciliationObligations ?? []).map(item => item.receipt), bundle.compilerSnapshot.coreRoleRequirementDefinitions ?? [], bundle.source.id));
   issues.push(...requirementJournalBindingIssues(bundle.compilerSnapshot, bundle.source.id, bundle.source.contentSha256, true));
-  issues.push(...requirementResultIssues(activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []), assessment.requirementResults ?? [], frozenSceneCatalog(bundle)));
+  const sets = activeRequirementSets(bundle.compilerSnapshot.requirementDefinitions ?? []);
+  const catalog = frozenSceneCatalog(bundle);
+  issues.push(...inspectSemanticCoverage(bundle.source.id, catalog, sets.map(set => set.spec)).issues);
+  issues.push(...requirementResultIssues(sets, assessment.requirementResults ?? [], catalog));
   if (bundle.compilerSnapshot.roleRoster) issues.push(...validateRoleDevelopmentExpectations(bundle.compilerSnapshot.roleRoster).map(issue => `${issue.code}: ${issue.path}`));
   if (preparedSubjectHash(bundle) !== assessment.subjectSnapshotHash) issues.push("ENTRY_CUT_STALE: prepared inputs changed after entry evaluation");
   if (assessment.sourceId !== bundle.source.id || assessment.sourceSha256 !== bundle.source.contentSha256) issues.push("WORLD_SOURCE_MISMATCH: certificate belongs to another source");

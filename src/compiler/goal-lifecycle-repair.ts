@@ -49,6 +49,7 @@ export function goalLifecycleReadKeys(goal: CharacterGoal, cases: ReturnType<typ
   refs.delete("character-goal:" + goal.id);
   for (const item of cases) for (const scenario of item.scenarios) {
     for (const key of worldRepairReferenceKeys(scenario.seed.delta)) refs.add(key);
+    if (scenario.seed.storyTime?.kind === "relative") refs.add("canonical-event:" + scenario.seed.storyTime.anchorEventId);
     for (const id of scenario.knownClaimIds) refs.add("claim:" + id);
     for (const id of [...scenario.realizedEventIds, ...scenario.experiencedEventIds]) refs.add("canonical-event:" + id);
   }

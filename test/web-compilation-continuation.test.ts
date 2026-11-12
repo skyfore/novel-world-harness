@@ -52,7 +52,7 @@ it.each([false, true])("continues repair/delivery through the full supervised co
   expect(await f.traceStore.peekRuns()).toEqual([]);
 });
 
-it("the real Web continuation preserves a supervisor BREAK and all counters before any model or worker dispatch", async () => {
+it.each([false, true])("the real Web continuation preserves a supervisor BREAK and all counters with explicit default config=%s", async explicitDefault => {
   const f = await fixture();
   // Create an ordinary retained host stop through the real supervisor. The
   // offline child only supplies an unverified-source diagnostic, never a grant.
@@ -67,7 +67,8 @@ it("the real Web continuation preserves a supervisor BREAK and all counters befo
   const supervision = inspectCompileLoop(f.root, f.source.id)!, stateFile = path.join(supervision.directory, "state.json");
   const before = await fs.readFile(stateFile, "utf8");
   const worker = vi.spyOn(childProcess, "runLoopChild"), model = vi.spyOn(PiAgentSession, "create");
-  const service = new PreparationApplicationService(f), snapshot = await service.inspect(f.source.id);
+  const service = new PreparationApplicationService({ ...f, configPath: explicitDefault ? path.join(f.root, "novel-harness.yaml") : undefined });
+  const snapshot = await service.inspect(f.source.id);
   expect(snapshot.repairReasons).toContain(`BREAK: ${stopped.reason}`);
   const accepted = await service.start(f.source.id, { mode: "all", clientRequestId: "cannot-renew-break" });
   const result = await f.operations.wait(accepted.operation.id);

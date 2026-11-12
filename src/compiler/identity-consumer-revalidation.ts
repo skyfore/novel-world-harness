@@ -27,7 +27,7 @@ import { prepareConsumerWorkExecution, prepareConsumerWorkRecord, verifyRecorded
 import { CONSUMER_REVIEW_CORRECTION, deriveConsumerReviewContract, consumerReviewCapability, consumerReviewCorrectionContract } from "./consumer-review-contract.js";
 import { consumerReviewCorrectionHash } from "./identity-consumer-correction.js";
 import { consumerEvidenceCorrectionHash } from "./identity-consumer-correction.js";
-import { CONSUMER_EVIDENCE_COVERAGE, consumerEvidenceCorrectionContract, consumerEvidenceStop, consumerEvidenceCoverage,
+import { CONSUMER_EVIDENCE_COVERAGE, consumerEvidenceCorrectionContract, consumerEvidenceStop, consumerEvidenceCoverage, consumerEvidenceRanges,
   assertConsumerEvidenceRead, additionalConsumerEvidenceSubjects, createConsumerEvidenceReads, acceptConsumerEvidenceRead, type ConsumerReadRequest } from "./consumer-evidence-coverage.js";
 import { consumerWorkRecordDirectory, readConsumerWorkRecordEvidence } from "./consumer-work-evidence.js";
 import { inspectConsumerEvidenceGap } from "./consumer-evidence-correction.js";
@@ -144,22 +144,27 @@ export async function inheritConsumerRevalidationBudgets(upstreamDirectory: stri
   return { priorUsage, priorBudgetFiles };
 }
 
-/** The completed upstream receipt is a changed dependency, never permission to
- * invoke an old consumed review. Current and original payloads remain separate. */
-async function prepareOriginalConsumerRevalidation(root: string, sourceId: string, taskId: string, ref: string, authorizationRef: string) {
-  const ledger = new RequirementLedger(root, sourceId), history = await ledger.history(), original = await ledger.identityRequirements(taskId);
+export async function currentConsumerRepair(root: string, sourceId: string, taskId: string) {
   const plans = await new UpstreamRepairLedger(root, sourceId).inspect();
   const upstream = plans.plans.findLast(p => p.plan.identityRequirements?.taskId === taskId && p.plan.identityRequirements.consumerRepair);
   if (!upstream || !["converged", "evaluated"].includes(upstream.state) || !upstream.finishedReceipt || plans.modelSessions.some(s => !s.closed))
     throw prerequisiteStop("Consumer revalidation requires the same task's settled accepted entity repair; inspect requirements inspect-upstream, copy plans[].plan.planHash, no unchanged retry");
-  const { prepared } = await readIdentityAuthority(root, upstream.plan);
-  const consumer = prepared.inventory.consumers.find(c => c.ref === ref);
-  if (!consumer) throw prerequisiteStop("Unknown consumer; inspect-identity-repairs with the same source/task, copy availableRefs[] to --ref once, no guessing");
   const receipt = await new CompilerFinishReceipts(root, sourceId, upstream.plan.batchId).read();
   if (!receipt || receipt.state !== "completed" || receipt.fingerprint !== upstream.finishedReceipt || !receipt.identity.upstreamRepairIntent)
     throw prerequisiteStop("Original entity repair has no exact completed receipt; stop, preserve its history");
   const acceptance = await verifyIdentityUpstreamAcceptance(root, upstream.plan);
   const current = await verifyUpstreamRepairPlan(root, upstream.plan, new Map(receipt.identity.upstreamRepairIntent.proposals.map(p => [`${p.artifactKind}:${p.artifactId}`, p.payloadHash])));
+  return { upstream, receipt, current, acceptance };
+}
+
+/** The completed upstream receipt is a changed dependency, never permission to
+ * invoke an old consumed review. Current and original payloads remain separate. */
+async function prepareOriginalConsumerRevalidation(root: string, sourceId: string, taskId: string, ref: string, authorizationRef: string) {
+  const ledger = new RequirementLedger(root, sourceId), history = await ledger.history(), original = await ledger.identityRequirements(taskId);
+  const { upstream, receipt, current, acceptance } = await currentConsumerRepair(root, sourceId, taskId);
+  const { prepared } = await readIdentityAuthority(root, upstream.plan);
+  const consumer = prepared.inventory.consumers.find(c => c.ref === ref);
+  if (!consumer) throw prerequisiteStop("Unknown consumer; inspect-identity-repairs with the same source/task, copy availableRefs[] to --ref once, no guessing");
   // Historical resolution baselines remain readable, explicitly distinguished
   // from active decisions. Source-review consumers keep their original owners.
   const catalog = consumerDependencyCatalog([...current.payloads].filter(([key]) => !key.startsWith("source-segment:")).map(([key, payload]) => ({
@@ -236,15 +241,17 @@ export function consumerRevalidationInput(p: Awaited<ReturnType<typeof prepareCo
     if (c) dependencyKeys.add(`${c.kind}:${c.id}`);
   }
   const reviewSourceIds = new Set<string>();
-  for (const owner of p.scope.reviewContract?.ownerRefs ?? []) {
-    const artifact = findConsumerArtifact(p.catalog, owner.ref);
-    if (!artifact?.current || artifact.revisionHash !== owner.revisionHash) throw prerequisiteStop("Entry review owner changed; inspect the same source/task/ref owning event and execution, no repinning or unchanged retry");
-    dependencyKeys.add(owner.ref);
-    for (const { span } of (artifact.payload as { evidence?: Array<{ span: { sourceId: string; startByte: number; endByte: number } }> }).evidence ?? []) {
-      const segments = p.prepared.manifest.segments.filter(s => s.startByte < span.endByte && span.startByte < s.endByte);
-      if (span.sourceId !== p.scope.sourceId || !segments.length)
-        throw prerequisiteStop("Entry owner evidence is outside the original source manifest; inspect the exact owning event evidence, no guessed source or retry");
-      segments.forEach(s => reviewSourceIds.add(s.id));
+  const owners = p.scope.reviewContract?.ownerRefs ?? [];
+  if (owners.length) {
+    const rangeFor = consumerEvidenceRanges(p.scope.sourceId, p.prepared.bytes, p.prepared.manifest.segments);
+    for (const owner of owners) {
+      const artifact = findConsumerArtifact(p.catalog, owner.ref);
+      if (!artifact?.current || artifact.revisionHash !== owner.revisionHash) throw prerequisiteStop("Entry review owner changed; inspect the same source/task/ref owning event and execution, no repinning or unchanged retry");
+      dependencyKeys.add(owner.ref);
+      // Keep envelope order when reconstructing a previously sealed byte-bound review.
+      for (const { span } of (artifact.payload as Pick<CanonicalEvent, "evidence">).evidence) {
+        for (const id of rangeFor(span, owner.ref).segmentIds) reviewSourceIds.add(id);
+      }
     }
   }
   return { scope: consumerRevalidationModelScope(p.scope), scopeHash: contentHash(p.scope), definition: p.original[0]!.output, definitionCheck: p.original[1]!.output,

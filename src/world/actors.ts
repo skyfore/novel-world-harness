@@ -580,7 +580,7 @@ export type DeterministicActorProposalOptions = {
   excludedActorIds?: ReadonlySet<string>;
   /** Additional host selection constraints, checked after engine validation but
    * before actor deduplication. Rejections share the original preview budget. */
-  acceptCandidate?: (candidate: ActorProposalCandidate, preview: CommitProposalResult) => boolean;
+  acceptCandidate?: (candidate: ActorProposalCandidate, preview: CommitProposalResult) => boolean | Promise<boolean>;
 };
 
 export function deterministicActorProposalSource(engine: WorldEngine, actors: ActorModelStore, options: DeterministicActorProposalOptions = {}): ActorProposalSource {
@@ -811,7 +811,7 @@ async function selectExecutableActorCandidates(engine: WorldEngine, candidates: 
       rejected.push(`${candidate.proposal.proposalId}[${result.report.errors.map(issue => issue.code).join("|")}]`);
       continue;
     }
-    if (acceptCandidate && !acceptCandidate(candidate, result)) {
+    if (acceptCandidate && !await acceptCandidate(candidate, result)) {
       rejected.push(`${candidate.proposal.proposalId}[HOST_SELECTION_CONSTRAINT]`);
       continue;
     }

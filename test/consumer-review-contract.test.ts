@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import { contentHash as h } from "../src/world/canonical.js";
 import { canonicalEventSchema, characterEntryCheckpointSchema } from "../src/world/model.js";
@@ -9,14 +10,14 @@ import type { ConsumerRevalidationScope } from "../src/compiler/identity-consume
 import { remainingConsumerReviewLimits } from "../src/compiler/identity-consumer-correction.js";
 import { consumerRevalidationInput } from "../src/compiler/identity-consumer-revalidation.js";
 
-function fixture() {
+function fixture(lineOnly = false) {
   const payload = characterEntryCheckpointSchema.parse({ actorId: "ada", readerSetup: "Ada's later arrival.",
     actorObservation: "You wait before the meeting.", participantPresence: [{ entityId: "ada", mode: "physical" }],
     delta: { version: 1, operations: [] } });
   const event = canonicalEventSchema.parse({ id: "later-meeting", title: "Later meeting", participants: ["ada"],
     characterEntryCheckpoints: [payload], storyTime: { kind: "ordinal", label: "later afternoon", orderHint: 30 },
     preconditions: [], observedOutcome: { version: 1, operations: [{ op: "set", entityId: "ada", field: "character.alive", value: false }] },
-    evidence: [{ span: { sourceId: "src", startByte: 20, endByte: 30, startLine: 2, endLine: 2, quoteHash: h("Ada waits.") }, strength: "explicit" }],
+    evidence: [{ span: { sourceId: "src", ...(lineOnly ? {} : { startByte: 20, endByte: 30 }), startLine: 2, endLine: 2, quoteHash: createHash("sha256").update("Ada waits.").digest("hex") }, strength: "explicit" }],
     causalParents: [], confidence: 1 });
   const catalog = [{ kind: "canonical-event", id: event.id, payload: event, revisionHash: h(event), current: true }];
   const args = { sourceId: "src", ref: "entry/ada/later-meeting", current: { payload, revisionHash: h(payload) }, catalog };
@@ -75,12 +76,13 @@ it("does not guess time from reader order or accept a missing or stale owning re
     .toMatchObject({ storyTime: { kind: "unknown" }, position: "before-event" });
 });
 
-it("delivers the exact owner and its full source segment while retaining original criteria and denominator", () => {
-  const f = fixture(), prepared: any = { scope: f.scope, catalog: f.args.catalog, original: [{ output: { original: true } }, { output: { checked: true } }],
+it.each([false, true])("delivers the owner and its full source segment (line-only=%s)", lineOnly => {
+  const f = fixture(lineOnly), prepared: any = { scope: f.scope, catalog: f.args.catalog, original: [{ output: { original: true } }, { output: { checked: true } }],
     consumer: { ref: f.scope.ref }, current: f.args.current, acceptance: { output: {} }, prepared: { intent: { requiredSourceSegmentIds: ["opening-source"], targets: [] },
       review: { scope: { questions: ["unresolved global identity"] } }, semantic: [{ output: { retained: true } }],
       inventory: { consumers: [{ ref: f.scope.ref }], candidateIds: ["ada"], sourcePages: [0, 1], originalQuestionIds: [h("global")] },
-      manifest: { segments: [{ id: "opening-source", startByte: 0, endByte: 10 }, { id: "later-source", startByte: 10, endByte: 40 }] } } };
+      bytes: Buffer.from("0123456789012345678\nAda waits."),
+      manifest: { segments: [{ id: "opening-source", startByte: 0, endByte: 20 }, { id: "later-source", startByte: 20, endByte: 30 }] } } };
   const input = consumerRevalidationInput(prepared, [], false);
   expect(input.requiredSourceSegmentIds).toEqual(["opening-source", "later-source"]);
   expect(input.artifactReadRefs.map(r => r.ref)).toEqual(["canonical-event:later-meeting"]);

@@ -3,6 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { auditCompiler } from "../src/compiler/audit.js";
+import { SourceAnnotationStore, SOURCE_ANNOTATION_ONTOLOGY_VERSION } from "../src/compiler/annotations.js";
+import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
+import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { contentHash } from "../src/world/canonical.js";
 import { prepareCompilerBatches } from "../src/compiler/batches.js";
 import { EvidenceVerifier } from "../src/compiler/evidence.js";
 import { SegmentStore } from "../src/compiler/segments.js";
@@ -114,6 +118,9 @@ describe("source observation structure and accounting", () => {
       derivation: { runId: "accounting-test", worker: "test", ontologyVersion: "evidence-v1" },
     });
     const accounting = new SourceAccountingStore(root);
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") });
+    await new EvidenceAssertionStore(root).replaceForArtifact("entity", "hero", contentHash(await canon.getEntity("hero")), [heroEvidence]);
     await accounting.recordBatchReview({
       source: fixture.source,
       structure: structure!,
@@ -145,6 +152,11 @@ describe("source observation structure and accounting", () => {
       blockingUnits: 0,
       statusCounts: { represented: 2, "background-only": 1, unresolved: 0 },
     });
+    expect((await auditCompiler(root, { sourceId: fixture.source.id })).observations.blockingUnits).toBe(1);
+    await new SourceAnnotationStore(root).replaceCurrent(fixture.source.id, [{
+      version: 1, id: "observation-rain", sourceId: fixture.source.id, annotationType: "discourse-segment", kind: "scene",
+      anchors: [rainAnchor], confidence: 1, derivation: { runId: "accounting-test", worker: "test", ontologyVersion: SOURCE_ANNOTATION_ONTOLOGY_VERSION },
+    }]);
     expect((await auditCompiler(root, { sourceId: fixture.source.id })).readiness.accounting).toBe("ready");
   });
 });

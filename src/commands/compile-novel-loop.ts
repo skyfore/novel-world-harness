@@ -35,8 +35,10 @@ export async function compileNovelWithLoop(options: SupervisedCompileOptions) {
   }
   const directory = activeCompileLoopDirectory(root, source.id), policyFile = path.join(directory, "policy.json");
   const retained = existsSync(policyFile) ? read<{ request: WorkerRequest; engineerModel: string }>(policyFile) : undefined;
+  const configPath = options.configPath ? path.resolve(root, options.configPath) : undefined;
   const explicit: WorkerRequest = { root, sourceId: source.id, model: options.model,
-    configPath: options.configPath ? path.resolve(root, options.configPath) : undefined, branchId: options.branchId,
+    configPath: retained && !retained.request.configPath && configPath === path.join(root, "novel-harness.yaml") ? undefined : configPath,
+    branchId: options.branchId,
     rebuild: options.rebuild || retained?.request.rebuild, cacheRoot: options.cacheRoot,
     evaluationPlanFile: options.evaluationPlanFile ? path.resolve(root, options.evaluationPlanFile) : undefined,
     evaluationPlanHash: options.evaluationPlanHash, upstreamRepairPlan: options.upstreamRepairPlan,

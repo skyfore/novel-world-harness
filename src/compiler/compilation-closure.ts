@@ -7,7 +7,7 @@ import { inspectCompilerStatus } from "./status.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
 import { RequirementLedger } from "./requirement-ledger.js";
 import { settleSourceRequirements } from "./requirement-service.js";
-import { SourceAccountingStore, isBlockingSourceAccountingStatus } from "./source-accounting.js";
+import { isNovelScaleCompilation } from "./scale.js";
 import { loadCurrentRoleRoster } from "./role-roster-tools.js";
 import { validateRoleRoster } from "./role-roster.js";
 import { roleReviewFinishIssues } from "./role-review-finish.js";
@@ -48,7 +48,7 @@ type SourceStatus = Awaited<ReturnType<typeof inspectCompilerStatus>>["sources"]
 export function compilationClosureReport(input: {
   source: SourceStatus; fingerprint: unknown; audit: CompilerAuditReport;
   unverifiedBatchIds: string[]; receiptErrors: string[];
-  requirementIssues: string[]; requirementHead: string | null;
+  requirementIssues: string[]; requirementHead: string | null; semanticRequirementsVerified?: boolean;
   roleIssues: string[];
   blockedUnitIds: string[]; handoffBlockers: string[]; upstreamIssues?: string[];
 }): CompilationClosure {
@@ -73,8 +73,12 @@ export function compilationClosureReport(input: {
     outstanding.map(w => w.planHash), [...input.roleIssues, ...outstanding.map(w => `${w.planHash}: ${w.auditedSources}/${w.sourceWorks} source audits closed; ${w.openQuestions} open questions.`)]);
   gate("upstream-handoff", source.identityReviews.inspection === "unknown" ? "unknown"
     : input.handoffBlockers.length || input.upstreamIssues?.length ? "blocked" : "passed", "repair", input.handoffBlockers, input.upstreamIssues);
+  // The audit reserves its aggregate density checks for novel-scale sources.
+  // Short works can establish semantics through independently verified cases.
+  const shortSourceReviewed = !isNovelScaleCompilation(source.bytes, audit.canonical.events) && input.semanticRequirementsVerified;
   for (const dimension of ["structural", "evidence", "accounting", "resolution", "semantic"] as const) {
-    const state = audit.readiness[dimension];
+    const audited = audit.readiness[dimension];
+    const state = dimension === "semantic" && audited === "unknown" && shortSourceReviewed ? "ready" : audited;
     const missingBindings = audit.evidence.missingExactBindings ?? [];
     const reasons = dimension === "evidence"
       ? [...audit.evidence.errors.map(e => `${e.artifact}: ${e.code}: ${e.message}`),
@@ -111,9 +115,9 @@ export async function checkCompilationClosure(root: string, sourceId: string): P
 
 async function checkLockedCompilationClosure(root: string, sourceId: string): Promise<CompilationClosure> {
   const requirements = await settleSourceRequirements(root, sourceId);
-  const [status, audit, accounting, history, obligations] = await Promise.all([
+  const [status, audit, history, obligations] = await Promise.all([
     inspectCompilerStatus(root, sourceId), auditCompiler(root, { sourceId }),
-    new SourceAccountingStore(root).read(sourceId), new RequirementLedger(root, sourceId).history(),
+    new RequirementLedger(root, sourceId).history(),
     captureReconciliationObligations(root, sourceId),
   ]);
   const source = status.sources[0]!, unverifiedBatchIds: string[] = [], receiptErrors: string[] = [];
@@ -150,9 +154,11 @@ async function checkLockedCompilationClosure(root: string, sourceId: string): Pr
     }
   }
   return compilationClosureReport({ source, fingerprint: status.compilerFingerprint, audit, unverifiedBatchIds, receiptErrors,
+    semanticRequirementsVerified: (requirements.coverage.events.length > 0 || requirements.coverage.goals.length > 0)
+      && requirements.sets.length > 0 && !requirements.coverage.issues.length && !requirements.issues.length,
     requirementIssues: [...requirements.issues, ...requirements.coverage.issues, ...reconciliationObligationIssues(obligations, sourceId, source.sourceSha256)],
     requirementHead: history.at(-1)?.hash ?? null, roleIssues,
-    blockedUnitIds: accounting?.records.filter(r => isBlockingSourceAccountingStatus(r.status)).map(r => r.unitId) ?? [],
+    blockedUnitIds: audit.observations.accountingGapUnitIds,
     handoffBlockers: handoff.tasks.filter(t => t.kind !== "phase" && t.kind !== "semantic-review").map(t => t.id), upstreamIssues });
 }
 

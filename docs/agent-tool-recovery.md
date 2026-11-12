@@ -171,7 +171,10 @@ replace it. A missing ID permits one same-scope discovery correction, never
 guessing or unchanged retries.
 
 The queue invokes the existing consumer proposal and independent-check stages
-under the compiler lock. Supported blocked/repair-required dispositions remain
+under the compiler lock. A completed review or resumable attempt must match the
+current upstream plan, finish receipt, and consumer revision. The retained role
+roster stays with its owning source audit and the queue advances to the next ref.
+Supported blocked/repair-required dispositions remain
 blocked while other independent consumers can proceed. An unsettled call,
 scope/revision change, failed preflight or consumed failed attempt stops the
 queue. Partial proposals still require their independent check. Historical
@@ -4329,7 +4332,8 @@ Entry capability contract recovery 入口核验旧会话并登记一次契约转
 
 `preview_entry_state_repair` 和 `submit_entry_state_repair` 只保存提案或独立检查。
 从输入 `stateOperations[]` 复制 `index`、`operationHash`，从
-`context.originalInput.evidencePacket.sources[]` 复制原文段 ID 和 exact。
+`context.originalInput.evidencePacket.sources[]` 或 `context.additionalSources[]` 复制对应的
+`id` 和原文。修复使用封存提案和独立检查实际读取的段，包括获准续接后返回的证据。
 删除仅限该角色的意图或定性身体状态操作；新增仅限既有 `character.plan` 和定性身体字段，
 每项都须有精确证据、支持强度及解释。字段／选择器错误最多一次实质纠正；有效 preview
 之后在独立的一轮中单独提交原样草稿。SDK 参数拒绝同样计数。范围、宿主、预算、已消耗阶段
@@ -4396,8 +4400,9 @@ Entry capability contract recovery 入口核验旧会话并登记一次契约转
 blocked 角色入口复验；`--inspect` 不调用模型或写状态。用
 `requirements inspect-identity-repairs --source <id> --task <hash>` 发现范围，复制
 `consumerRevalidation.reviews[].ref`（详细结果中位于 `summary` 内），不得猜测 actor/event。
-字段或原文选择器错误最多允许一次有实质修正的 preview；必须从已提供的完整原文段复制
-segment ID 和 exact。范围、宿主状态、预算、single-use 或 circuit-breaker 错误立即停止，
+字段或原文选择器错误最多允许一次有实质修正的 preview。从
+`context.originalInput.evidencePacket.sources[]` 或 `context.additionalSources[]` 复制
+`id` 及对应原文作为 `segment_id` 和 `exact`。范围、宿主状态、预算、single-use 或 circuit-breaker 错误立即停止，
 不得改名重试、清空记录或重置预算。已封存而未登记的结果只能零生成恢复。
 
 纠错次数按保存的真实工具结果核对，包括 Pi SDK 在 execute 之前拒绝的参数。

@@ -12,6 +12,8 @@ import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { compileNovelCommand } from "../src/commands/compile-novel.js";
+import { NovelCompilationRunStore } from "../src/workflow/novel-compilation.js";
 import { validateAssessmentRevision } from "../src/compiler/certification.js";
 import { contentHash } from "../src/world/canonical.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
@@ -56,6 +58,20 @@ it("persists separate unresolved requirements across restart and idempotent reev
   // A changed repair namespace is not a ledger identity or reset mechanism.
   await fs.mkdir(path.join(worldStorageRoot(f.root), "compiler", "reconciliation", "another-namespace"), { recursive: true });
   expect((await settleSourceRequirements(f.root, f.sourceId)).issues).toEqual(first.issues);
+});
+
+it("passes the semantic gate of a reviewed short work and preserves missing or failed cases", async () => {
+  const f = await setup();
+  const run = async () => {
+    await expect(compileNovelCommand({ root: f.root, sourceId: f.sourceId, phase: "closure", onProgress() {} })).rejects.toThrow("COMPILATION_CLOSURE_BLOCKED");
+    const saved = await new NovelCompilationRunStore(f.root).read(f.sourceId);
+    return saved!.closure!.gates.find(gate => gate.dimension === "semantic")!.state;
+  };
+  expect(await run()).toBe("unknown");
+  const set = await f.register();
+  expect(await run()).toBe("passed");
+  await f.register({ ...f.spec, cases: [{ ...f.spec.cases[0], requiresMechanism: true }] }, set.revisionHash);
+  expect(await run()).not.toBe("passed");
 });
 
 it("requires exact predecessor for scope changes and retains superseded definitions", async () => {
@@ -210,6 +226,12 @@ it("freezes requirements in real candidate snapshots, checks certificates and pr
   await expect(cache.restoreCompilerCheckpoint(f.fixture.source, archive.bundleHash!)).rejects.toThrow("forget current obligations");
   expect(contentHash(candidate.bundle)).toBe(oldHash);
   expect(await f.canon.listEvents()).toEqual([f.event]);
+
+  await f.canon.putEvent({ ...f.event, id: "another-event" });
+  const uncovered = await cache.inspectCandidate(f.fixture.source);
+  const legacyAssessment = { ...uncovered.assessment, issues: [], fullNovelReady: true };
+  expect(validateAssessmentRevision(uncovered.bundle, legacyAssessment))
+    .toContainEqual(expect.stringContaining("SEMANTIC_SOURCE_REVIEW_REQUIRED: event:another-event"));
 });
 
 it("transports the complete scene journal, resumes a prefix import and rejects lost evaluations or bad source bytes", async () => {

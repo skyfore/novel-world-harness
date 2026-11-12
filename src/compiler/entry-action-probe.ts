@@ -3,20 +3,22 @@ import { ActorAlternativeBudgetError, ActorModelStore, deterministicActorProposa
 import { declaredActionStateDelta } from "../world/action-ontology.js";
 import { deriveAdHocAction, normalizeActorProposal } from "../world/action-invocation.js";
 import { contentHash } from "../world/canonical.js";
-import { ENTRY_CONTRACT_VERSION } from "../world/entry-contract.js";
+import { ENTRY_ACTION_WITNESS_VERSION, ENTRY_CONTRACT_VERSION } from "../world/entry-contract.js";
 import type { CharacterGoal } from "../world/actors.js";
 import type { ActionSchema } from "../world/action-ontology.js";
 import type { WorldEngine } from "../world/engine.js";
 import { KnowledgeProjector, isActionableKnowledge } from "../world/knowledge.js";
 import { mechanismIsDisclosed } from "../world/mechanism-visibility.js";
 import { committedEventSchema, stateDeltaSchema, knowledgeDeltaSchema, branchSemanticDeltaSchema, processDeltaSchema, normDeltaSchema, worldCommitSchema, type EventProposal } from "../world/model.js";
+import { copyActorOutcome } from "../world/actor-outcome.js";
+import { buildActorScopedActionContext, playerActionCandidateSchema, validateCompiledPlayerAction } from "../world/player-action.js";
 import { validateCommittedProgress } from "../world/progress.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const effectsSchema = z.object({ stateDelta: stateDeltaSchema.optional(), knowledgeDelta: knowledgeDeltaSchema.optional(),
   semanticDelta: branchSemanticDeltaSchema.optional(), processDelta: processDeltaSchema.optional(), normDelta: normDeltaSchema.optional() }).strict();
 export const entryActionWitnessSchema = z.object({
-  version: z.literal(1), contractVersion: z.string(), sourceId: z.string(), subjectSnapshotHash: hash, entryCutHash: hash, actorId: z.string(),
+  version: z.union([z.literal(1), z.literal(ENTRY_ACTION_WITNESS_VERSION)]), contractVersion: z.string(), sourceId: z.string(), subjectSnapshotHash: hash, entryCutHash: hash, actorId: z.string(),
   entryHead: hash, resultingHead: hash, commit: worldCommitSchema, eventHash: hash, event: committedEventSchema, effects: effectsSchema,
   origin: z.object({ kind: z.enum(["compiled-goal", "self-schema"]), id: z.string(), revisionHash: hash }).strict(),
 }).strict();
@@ -30,7 +32,7 @@ const materialAction = (certificate: EntryActionWitness["event"]["progressCertif
 export function entryActionWitnessIssues(witness: EntryActionWitness | undefined, scope: EntryActionScope): string[] {
   if (!witness) return ["ENTRY_ACTION_NOT_EVALUATED"];
   const issues: string[] = [];
-  if (witness.contractVersion !== ENTRY_CONTRACT_VERSION) issues.push("ENTRY_ACTION_CONTRACT_STALE");
+  if (witness.version !== ENTRY_ACTION_WITNESS_VERSION || witness.contractVersion !== ENTRY_CONTRACT_VERSION) issues.push("ENTRY_ACTION_CONTRACT_STALE");
   if (witness.sourceId !== scope.sourceId || witness.subjectSnapshotHash !== scope.subjectSnapshotHash
     || witness.entryCutHash !== scope.entryCutHash || witness.actorId !== scope.actorId) issues.push("ENTRY_ACTION_SCOPE_STALE");
   if (witness.entryHead === witness.resultingHead || witness.commit.parentCommitId !== witness.entryHead
@@ -73,11 +75,23 @@ export async function probeEntryAction(engine: WorldEngine, scratch: string, inp
   const context = await engine.contextForCommit(input.head), state = await engine.projector.project(input.head);
   const candidates: { proposal: EventProposal; origin: EntryActionWitness["origin"] }[] = [];
   const rejected: string[] = [];
+  const scoped = await buildActorScopedActionContext(engine, input.actorId, input.head, undefined, input.sourceId);
+  const withinPlayerScope = async (proposal: EventProposal) => {
+    const { title, participants, preconditions, proposedDelta, proposedKnowledge, timeAdvance } = proposal;
+    const candidate = playerActionCandidateSchema.safeParse({ title, participants, preconditions, proposedDelta, proposedKnowledge,
+      action: normalizeActorProposal(proposal).action, ...copyActorOutcome(proposal),
+      ...(timeAdvance ? { intent: { kind: "act", summary: title, requestedTimeAdvance: timeAdvance } } : {}) });
+    if (!candidate.success) { rejected.push(`${proposal.proposalId}: invalid player action`); return false; }
+    const issues = await validateCompiledPlayerAction(engine, candidate.data, scoped, input.head, input.sourceId, proposal.spokenUtterances);
+    if (issues.length) rejected.push(`${proposal.proposalId}: ${issues.map(issue => issue.code).join(",")}`);
+    return issues.length === 0;
+  };
   let incomplete = false;
   const exclude = new Set([...context.entities.keys()].filter(id => id !== input.actorId));
   try {
     const source = deterministicActorProposalSource(engine, new ActorModelStore(scratch), { excludedActorIds: exclude,
-      acceptCandidate: (_candidate, preview) => Boolean(preview.progressCertificate && materialAction(preview.progressCertificate)) });
+      acceptCandidate: async (candidate, preview) => Boolean(preview.progressCertificate && materialAction(preview.progressCertificate))
+        && await withinPlayerScope(candidate.proposal) });
     for (const candidate of await source({ branchId: input.branchId, commitId: input.head, maxActors: 1 })) {
       const goal = context.actorGoals?.find(goal => goal.id === candidate.goalId && goal.actorId === input.actorId);
       if (goal) candidates.push({ proposal: normalizeActorProposal(candidate.proposal), origin: { kind: "compiled-goal", id: goal.id, revisionHash: contentHash(goal) } });
@@ -110,6 +124,7 @@ export async function probeEntryAction(engine: WorldEngine, scratch: string, inp
         rejected.push(`${origin.id}: action mechanism not disclosed to this actor`); continue;
       }
     }
+    if (origin.kind === "self-schema" && !await withinPlayerScope(proposal)) continue;
     const preview = await engine.previewProposal(proposal);
     if (!preview.report.accepted || !preview.progressCertificate || !materialAction(preview.progressCertificate)) {
       rejected.push(`${origin.id}: ${preview.report.errors.map(issue => issue.code).join(",") || "no material effect"}`);
@@ -123,7 +138,7 @@ export async function probeEntryAction(engine: WorldEngine, scratch: string, inp
     if (event.effects.semanticDeltaHash) effects.semanticDelta = await engine.objects.getSemanticDelta(event.effects.semanticDeltaHash);
     if (event.effects.processDeltaHash) effects.processDelta = await engine.objects.getProcessDelta(event.effects.processDeltaHash);
     if (event.effects.normDeltaHash) effects.normDelta = await engine.objects.getNormDelta(event.effects.normDeltaHash);
-    const witness = entryActionWitnessSchema.parse({ version: 1, contractVersion: ENTRY_CONTRACT_VERSION,
+    const witness = entryActionWitnessSchema.parse({ version: ENTRY_ACTION_WITNESS_VERSION, contractVersion: ENTRY_CONTRACT_VERSION,
       sourceId: input.sourceId, subjectSnapshotHash: input.subjectSnapshotHash, entryCutHash: input.entryCutHash, actorId: input.actorId,
       entryHead: input.head, resultingHead: result.newHead, commit: await engine.objects.getCommit(result.newHead),
       eventHash: result.eventHash, event, effects, origin });

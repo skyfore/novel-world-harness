@@ -20,6 +20,7 @@ import { consumerWorkProviderDirectory } from "./consumer-work-plan.js";
 import { consumerWorkProviderRecoverySchema, deriveWorkProviderPlan, inspectWorkProviderCandidate } from "./consumer-work-provider-resumption.js";
 
 export type ConsumerRevalidationAttempt = {
+  upstreamPlanHash: string; receiptFingerprint: string; currentRevisionHash: string;
   id: string; ref: string; scopeHash: string; directory: string;
   compilerCorrection: ConsumerRevalidationScope["compilerCorrection"] | null;
   status: string; reason: string | null; recordedStages: number; semanticJudgmentPending: boolean;
@@ -241,6 +242,7 @@ export async function inspectConsumerRevalidationAttempts(root: string, sourceId
     const gap = await inspectConsumerEvidenceGap(root, scope, retained);
     const activity = stages.map(s => s.execution?.providerResumption?.status ?? s.bindingRecovery?.status ?? s.execution?.status).find(s => s === "orphaned" || s === "liveness-unknown");
     attempts.push({ id: entry.name, ref: scope.ref, scopeHash, directory, compilerCorrection: scope.compilerCorrection ?? null,
+      upstreamPlanHash: scope.upstreamPlanHash, receiptFingerprint: scope.receiptFingerprint, currentRevisionHash: scope.currentRevisionHash,
       ...(gap ? { evidenceCorrection: { policy: gap.policy, evidenceGapHash: contentHash(gap),
         missingSegmentIds: [...new Set(gap.stages.flatMap(s => s.missingSegmentIds))].sort() } } : {}),
       status: retained.length < 2 && activity ? activity : state?.status ?? "FROZEN", reason: state?.reason ?? null, recordedStages: retained.length,

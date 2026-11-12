@@ -5,9 +5,7 @@ import { contentHash } from "../world/canonical.js";
 import { artifactProposalSchema, canonicalEventSchema, evidenceAssertionSchema } from "../world/model.js";
 import { ProposalStore } from "../world/canonical-model.js";
 import { RequirementLedger, type LedgerRecord } from "./requirement-ledger.js";
-import { SegmentStore } from "./segments.js";
-import { WorkspaceStore } from "../storage/workspace-store.js";
-import { readSourceMaterial } from "../storage/source-material-store.js";
+import { entryRepairParentContext, resolveEntryRepairEvidence } from "./consumer-work-evidence.js";
 import { loadCompilerArtifactRecords } from "./artifact-retrieval.js";
 import { inheritConsumerRevalidationBudgets, prepareConsumerRevalidation, revalidationRecords, verifyConsumerRevalidationRecord } from "./identity-consumer-revalidation.js";
 import { identityUpstreamDirectory } from "./identity-requirement-acceptance.js";
@@ -15,7 +13,6 @@ import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
 import { consumerRevalidationDirectory, consumerRevalidationId } from "./identity-consumer-revalidation-model.js";
 import { revalidatedConsumerBudgetOrigin } from "./identity-consumer-revalidated-plan.js";
 import { verifyIdentityUpstreamSession } from "./identity-upstream-session.js";
-import { resolveTextSelectorAnchor } from "./text-anchors.js";
 import { compilerPayloadEvidence } from "./proposals.js";
 import { entryDeltaBindingContext } from "./entry-delta-binding.js";
 import { entryDeltaBindingEnvelopes } from "./entry-delta-binding-repair.js";
@@ -28,7 +25,7 @@ export const readStateFile = async (file: string) => JSON.parse(await fs.readFil
 export const maybeStateFile = async (file: string) => { try { return await readStateFile(file); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; } };
 export const entryStateRecords = (history: readonly LedgerRecord[], taskId: string) => history.flatMap(r =>
   r.payload.kind === "entry-state-repair" && r.payload.record.intent.taskId === taskId ? [r.payload.record] : []);
-const implementationFiles = ["./entry-state-repair-model.ts", "./entry-state-repair.ts", "./entry-state.ts", "./entry-wording.ts", "./entry-delta-binding.ts", "./entry-delta-binding-repair.ts", "../world/event-execution.ts", "./entry-presence-repair-model.ts", "./entry-repair-catalog.ts", "../world/entry-contract.ts", "../world/bodily-state.ts", "../workflow/entry-state-repair.ts",
+const implementationFiles = ["./consumer-work-evidence.ts", "./entry-state-repair-model.ts", "./entry-state-repair.ts", "./entry-state.ts", "./entry-wording.ts", "./entry-delta-binding.ts", "./entry-delta-binding-repair.ts", "../world/event-execution.ts", "./entry-presence-repair-model.ts", "./entry-repair-catalog.ts", "../world/entry-contract.ts", "../world/bodily-state.ts", "../workflow/entry-state-repair.ts",
   "../world/model.ts", "../world/entry-agency.ts", "./validator.ts", "./proposals.ts", "./requirement-ledger.ts", "./review-preview-allowance.ts"];
 export async function entryStateImplementationHash() {
   // Both src/ and dist/ entry points bind the same retained source implementation.
@@ -78,9 +75,7 @@ export async function prepareEntryStateRepair(root: string, sourceId: string, ta
     || policy === ENTRY_DELTA_BINDING_REPAIR && r.kind === "event-execution" && (r.payload as any).canonicalEventId === eventId && (r.payload as any).entryCheckpoint?.actorId === actorId)
     .map(r => ({ kind: r.kind, id: r.logicalId, revisionHash: contentHash(r.payload), payload: r.payload, evidenceAssertions: r.evidenceAssertions }))
     .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
-  const parentInput = await readStateFile(path.join(consumerRevalidationDirectory(root, parent.scope), "execution-v1", "consumer-revalidation.input.json"));
-  if (contentHash(parentInput) !== parents[0]?.inputHash) throw entryStateStop("Original complete evidence packet is missing");
-  const context = { originalInput: parentInput, negativeJudgments: parents.map(r => r.output) };
+  const context = await entryRepairParentContext(root, parents);
   const origin = await revalidatedConsumerBudgetOrigin(root, parents);
   const upstream = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(p => p.plan.planHash === parent.scope.upstreamPlanHash);
   if (!upstream) throw entryStateStop("Original receipt-bound upstream plan is missing");
@@ -100,17 +95,8 @@ export async function prepareEntryStateRepair(root: string, sourceId: string, ta
 }
 
 export async function stateEvidence(root: string, intent: EntryStateIntent, selectors: Extract<EntryStateRecord, { phase: "entry-state-proposal" }>["output"]["evidence"]) {
-  const manifest = await new SegmentStore(root).readManifest(intent.sourceId);
-  const source = await WorkspaceStore.openReadOnly(root).getSource(intent.sourceId);
-  if (!source || source.contentSha256 !== intent.sourceHash || !manifest)
-    throw entryStateStop("Original immutable source unavailable");
-  await readSourceMaterial(root, source);
   const context = await readStateFile(path.join(entryStateRepairDirectory(root, intent), "context.json"));
-  return Promise.all(selectors.map(async selector => {
-    const segment = manifest.segments.find(s => s.id === selector.segment_id);
-    if (!segment || !context.originalInput.requiredSourceSegmentIds.includes(segment.id)) throw entryStateStop("Selector escaped the supplied original evidence; copy originalInput.evidencePacket.sources[].id once");
-    return { selector, anchor: await resolveTextSelectorAnchor(root, segment, selector) };
-  }));
+  return resolveEntryRepairEvidence(root, intent, context, selectors, entryStateStop);
 }
 
 export function entryStateInput(intent: EntryStateIntent, context: unknown, previous: EntryStateRecord[]) {
@@ -189,6 +175,8 @@ export async function verifyEntryStateRecord(root: string, record: EntryStateRec
   const parents = revalidationRecords(ledger, s.taskId).filter(r => consumerRevalidationId(r.scope) === s.parentReviewId);
   if (contentHash(context.originalInput) !== parents[0]?.inputHash || contentHash(context.negativeJudgments) !== contentHash(parents.map(r => r.output)))
     throw entryStateStop("State context changed its original source packet or negative judgments");
+  if (context.additionalSources !== undefined && contentHash(context) !== contentHash(await entryRepairParentContext(root, parents)))
+    throw entryStateStop("The delivered evidence differs from the sealed parent reviews");
   if ("output" in record) {
     const previous = records.slice(0, -1), input = entryStateInput(s, context, previous);
     if (record.inputHash !== contentHash(input) || contentHash(await readStateFile(path.join(directory, `${record.phase}.input.json`))) !== record.inputHash

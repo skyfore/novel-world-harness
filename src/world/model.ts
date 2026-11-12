@@ -304,6 +304,13 @@ export const participantPresenceSchema = z.object({
 }).strict();
 export type ParticipantPresence = z.infer<typeof participantPresenceSchema>;
 
+/** Legacy occurrences may identify participants without recording a presence mode. */
+export function eventAvailableToActor(event: Pick<CanonicalEvent, "participants" | "participantPresence">, actorId: string): boolean {
+  if (!event.participants.includes(actorId)) return false;
+  const mode = event.participantPresence?.find(item => item.entityId === actorId)?.mode;
+  return mode === undefined || mode === "physical" || mode === "remote" || mode === "dream" || mode === "memory";
+}
+
 /**
  * Typed semantic participation is independent from the legacy participant
  * inventory. It records the entity's role in an occurrence; presence remains

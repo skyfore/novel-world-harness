@@ -17,7 +17,7 @@ import { selectOpeningDriverActor } from "./opening-driver.js";
 import { ActorModelStore, actorActionHasMaterialEffect, characterGoalHasDevelopmentBoundary, characterGoalSchema, characterModelSchema, evaluateCharacterGoal } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
-import type { CanonicalEvent, ControlledWorldRule, EvidenceRef, EventRelation, Predicate, StoryTime, WorldState } from "../world/model.js";
+import type { CanonicalEvent, ControlledWorldRule, EvidenceAssertion, EvidenceRef, EventRelation, Predicate, StoryTime, WorldState } from "../world/model.js";
 import { SegmentStore } from "./segments.js";
 import { EvidenceVerifier } from "./evidence.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -33,11 +33,12 @@ import {
 } from "./evidence-assertions.js";
 import { evidenceSourceIds } from "../world/source-scope.js";
 import { SourceStructureStore, baseStructuralUnits, type SourceStructureManifest } from "./structure.js";
-import { SourceAccountingStore, type SourceAccountingStatus } from "./source-accounting.js";
+import { SourceAccountingStore, projectSourceAccountingCurrentCoverage, summarizeSourceAccounting, type SourceAccountingStatus } from "./source-accounting.js";
 import {
   SourceAnnotationStore,
   annotationAnchors,
   validateSourceAnnotationClosure,
+  type SourceAnnotation,
 } from "./annotations.js";
 import { inspectEntityResolutionCoverage } from "./entity-resolution.js";
 import { inspectEventResolutionCoverage } from "./event-resolution.js";
@@ -120,6 +121,7 @@ export type CompilerAuditReport = {
     accountedUnits: number;
     unaccountedUnits: number;
     blockingUnits: number;
+    accountingGapUnitIds: string[];
     invalidAnchors: number;
     unitCoverage: number | null;
     byteCoverage: number | null;
@@ -426,16 +428,13 @@ export async function auditCompiler(
       segmentCount += manifest.segments.length;
       indexedBytes += manifest.segments.reduce((sum, segment) => sum + segment.bytes, 0);
     }
-    try {
-      await readSourceMaterial(workspaceRoot, source);
-    } catch {
-      changedSinceIngest.push(source.id);
-    }
   }
   const structureStore = new SourceStructureStore(workspaceRoot);
   const accountingStore = new SourceAccountingStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const structures: SourceStructureManifest[] = [];
+  const structures = new Map<string, { structure: SourceStructureManifest; annotations: SourceAnnotation[] }>();
+  const currentAssertions: EvidenceAssertion[] = [];
+  const accountingGapUnitIds: string[] = [];
   let structuralUnits = 0;
   let baseUnits = 0;
   let entityMentions = 0;
@@ -546,7 +545,7 @@ export async function auditCompiler(
     }
     const structure = await structureStore.read(source.id);
     if (!structure || structure.sourceSha256 !== source.contentSha256) continue;
-    structures.push(structure);
+    structures.set(source.id, { structure, annotations });
     structuralUnits += structure.units.length;
     baseUnits += baseStructuralUnits(structure).length;
     for (const unit of structure.units) {
@@ -564,15 +563,6 @@ export async function auditCompiler(
           observationErrors.push({ observation: `discourse-segment:${discourse.id}`, code: issue.code, message: issue.message });
         }
       }
-    }
-    const summary = await accountingStore.summarize(structure);
-    accountedUnits += summary.accountedUnits;
-    unaccountedUnits += summary.unaccountedUnits;
-    blockingUnits += summary.blockingUnits;
-    accountedObservationBytes += summary.accountedBytes;
-    observationBytes += summary.totalBytes;
-    for (const status of Object.keys(accountingStatusCounts) as SourceAccountingStatus[]) {
-      accountingStatusCounts[status] += summary.statusCounts[status];
     }
   }
 
@@ -815,7 +805,33 @@ export async function auditCompiler(
     invalidAssertions += exactIssues.length;
     if (artifact.kind === "world-rule") worldRuleExactEvidenceIssues += exactIssues.length;
     for (const issue of exactIssues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
-    if (!exactIssues.length) validExactBindings += 1;
+    if (!exactIssues.length) {
+      validExactBindings += 1;
+      currentAssertions.push(...binding.assertions);
+    }
+  }
+  for (const source of sources) {
+    let bytes: Buffer | undefined;
+    try { bytes = await readSourceMaterial(workspaceRoot, source); }
+    catch { changedSinceIngest.push(source.id); }
+    const observed = structures.get(source.id);
+    if (!observed) continue;
+    const { structure, annotations } = observed;
+    const manifest = await accountingStore.read(source.id);
+    const projected = bytes && manifest && manifest.sourceSha256 === structure.sourceSha256 && manifest.structureVersion === structure.structureVersion
+      ? projectSourceAccountingCurrentCoverage(manifest, structure, bytes, currentAssertions,
+        annotations.map(annotation => ({ id: annotation.id, anchors: annotationAnchors(annotation) })))
+      : null;
+    const summary = summarizeSourceAccounting(structure, projected);
+    accountingGapUnitIds.push(...summary.blockingUnitIds, ...summary.missingUnitIds);
+    accountedUnits += summary.accountedUnits;
+    unaccountedUnits += summary.unaccountedUnits;
+    blockingUnits += summary.blockingUnits;
+    accountedObservationBytes += summary.accountedBytes;
+    observationBytes += summary.totalBytes;
+    for (const status of Object.keys(accountingStatusCounts) as SourceAccountingStatus[]) {
+      accountingStatusCounts[status] += summary.statusCounts[status];
+    }
   }
 
   const epistemicErrors: CompilerAuditReport["epistemic"]["errors"] = [];
@@ -1426,7 +1442,7 @@ export async function auditCompiler(
   const exactBindingRatio = evidenceArtifacts.length ? validExactBindings / evidenceArtifacts.length : null;
   const structuralReadiness: CompilerReadinessState = !sources.length
     ? "not-ready"
-    : changedSinceIngest.length || segmented !== sources.length || structures.length !== sources.length || observationErrors.length
+    : changedSinceIngest.length || segmented !== sources.length || structures.size !== sources.length || observationErrors.length
       ? "not-ready"
       : "ready";
   const evidenceReadiness: CompilerReadinessState = evidenceArtifacts.length === 0
@@ -1467,7 +1483,7 @@ export async function auditCompiler(
         : runtimeRatios.every((value) => value === 1)
           ? "ready"
           : "unknown";
-  const accountingReadiness: CompilerReadinessState = !sources.length || structures.length !== sources.length
+  const accountingReadiness: CompilerReadinessState = !sources.length || structures.size !== sources.length
     ? "unknown"
     : unaccountedUnits > 0
       ? "unknown"
@@ -1539,7 +1555,7 @@ export async function auditCompiler(
       pendingByKind,
     },
     observations: {
-      structuredSources: structures.length,
+      structuredSources: structures.size,
       structuralUnits,
       baseUnits,
       entityMentions,
@@ -1550,6 +1566,7 @@ export async function auditCompiler(
       accountedUnits,
       unaccountedUnits,
       blockingUnits,
+      accountingGapUnitIds,
       invalidAnchors: invalidObservationAnchors,
       unitCoverage: baseUnits ? accountedUnits / baseUnits : null,
       byteCoverage: observationBytes ? accountedObservationBytes / observationBytes : null,

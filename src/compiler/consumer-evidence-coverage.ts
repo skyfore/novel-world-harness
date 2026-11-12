@@ -19,9 +19,8 @@ export function consumerEvidenceSubjects(input: { scope: { ref: string }; curren
     .map(a => ({ ref: artifactRef(a), revisionHash: a.revisionHash, payload: a.payload }))];
 }
 
-export function consumerEvidenceCoverage(sourceId: string, bytes: Uint8Array, segments: readonly EvidenceSegment[], subjects: readonly EvidenceSubject[]): ConsumerEvidenceCoverage {
+export function consumerEvidenceRanges(sourceId: string, bytes: Uint8Array, segments: readonly EvidenceSegment[]) {
   const buffer = Buffer.from(bytes), ordered = [...segments].sort((a, b) => a.startByte - b.startByte || a.endByte - b.endByte);
-  const all = new Set<string>(), seen = new Set<string>();
   const segmentIds = new Set<string>(); let previousEnd = 0;
   for (const s of ordered) {
     if (!s.id || segmentIds.has(s.id) || !Number.isSafeInteger(s.startByte) || !Number.isSafeInteger(s.endByte)
@@ -41,6 +40,39 @@ export function consumerEvidenceCoverage(sourceId: string, bytes: Uint8Array, se
     }
     return lineStarts;
   };
+  return (v: Record<string, unknown>, ref: string) => {
+    if (v.sourceId !== sourceId) throw consumerEvidenceStop(`Consumer evidence belongs to another source: ${ref}`);
+    let start = v.startByte, end = v.endByte;
+    const byteBound = start !== undefined || end !== undefined;
+    if (!byteBound) {
+      const a = v.startLine, b = v.endLine;
+      if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || (a as number) < 1 || (b as number) < (a as number)
+        || (b as number) > lines().length) throw consumerEvidenceStop(`Invalid consumer evidence line range: ${ref}`);
+      start = lines()[(a as number) - 1]; end = lines()[b as number] ?? buffer.length;
+    }
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || (start as number) < 0 || (end as number) <= (start as number)
+      || (end as number) > buffer.length || (buffer[start as number]! & 0xc0) === 0x80 || (buffer[end as number]! & 0xc0) === 0x80)
+      throw consumerEvidenceStop(`Invalid consumer evidence byte range: ${ref}`);
+    // A legacy line-only reference selects full lines for navigation. Its
+    // quote may be a substring; exact quote validation remains separate.
+    if (byteBound && v.quoteHash !== undefined && v.quoteHash !== createHash("sha256").update(buffer.subarray(start as number, end as number)).digest("hex"))
+      throw consumerEvidenceStop(`Consumer evidence quote hash changed: ${ref}`);
+    let cursor = start as number;
+    const matching = ordered.filter(s => s.startByte < (end as number) && (start as number) < s.endByte);
+    for (const s of matching) {
+      if (!Number.isSafeInteger(s.startByte) || !Number.isSafeInteger(s.endByte) || s.startByte < 0 || s.endByte <= s.startByte
+        || s.endByte > buffer.length || s.startByte > cursor || !s.id)
+        throw consumerEvidenceStop(`Consumer evidence has a missing or invalid source segment: ${ref}`);
+      cursor = Math.max(cursor, s.endByte);
+    }
+    if (cursor < (end as number)) throw consumerEvidenceStop(`Consumer evidence is not fully covered by the source manifest: ${ref}`);
+    return { startByte: start as number, endByte: end as number, segmentIds: matching.map(s => s.id) };
+  };
+}
+
+export function consumerEvidenceCoverage(sourceId: string, bytes: Uint8Array, segments: readonly EvidenceSegment[], subjects: readonly EvidenceSubject[]): ConsumerEvidenceCoverage {
+  const rangeFor = consumerEvidenceRanges(sourceId, bytes, segments);
+  const all = new Set<string>(), seen = new Set<string>();
   const result: ConsumerEvidenceCoverage["subjects"] = [];
   for (const subject of subjects) {
     const key = `${subject.ref}:${subject.revisionHash}`;
@@ -52,33 +84,9 @@ export function consumerEvidenceCoverage(sourceId: string, bytes: Uint8Array, se
       if (Array.isArray(value)) { value.forEach(visit); return; }
       const v = value as Record<string, unknown>;
       if ("sourceId" in v && ("startByte" in v || "endByte" in v || "startLine" in v || "endLine" in v)) {
-        if (v.sourceId !== sourceId) throw consumerEvidenceStop(`Consumer evidence belongs to another source: ${subject.ref}`);
-        let start = v.startByte, end = v.endByte;
-        const byteBound = start !== undefined || end !== undefined;
-        if (!byteBound) {
-          const a = v.startLine, b = v.endLine;
-          if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || (a as number) < 1 || (b as number) < (a as number)
-            || (b as number) > lines().length) throw consumerEvidenceStop(`Invalid consumer evidence line range: ${subject.ref}`);
-          start = lines()[(a as number) - 1]; end = lines()[b as number] ?? buffer.length;
-        }
-        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || (start as number) < 0 || (end as number) <= (start as number)
-          || (end as number) > buffer.length || (buffer[start as number]! & 0xc0) === 0x80 || (buffer[end as number]! & 0xc0) === 0x80)
-          throw consumerEvidenceStop(`Invalid consumer evidence byte range: ${subject.ref}`);
-        // A legacy line-only reference selects full lines for navigation. Its
-        // quote may be a substring; exact quote validation remains separate.
-        if (byteBound && v.quoteHash !== undefined && v.quoteHash !== createHash("sha256").update(buffer.subarray(start as number, end as number)).digest("hex"))
-          throw consumerEvidenceStop(`Consumer evidence quote hash changed: ${subject.ref}`);
-        let cursor = start as number;
-        const matching = ordered.filter(s => s.startByte < (end as number) && (start as number) < s.endByte);
-        for (const s of matching) {
-          if (!Number.isSafeInteger(s.startByte) || !Number.isSafeInteger(s.endByte) || s.startByte < 0 || s.endByte <= s.startByte
-            || s.endByte > buffer.length || s.startByte > cursor || !s.id)
-            throw consumerEvidenceStop(`Consumer evidence has a missing or invalid source segment: ${subject.ref}`);
-          cursor = Math.max(cursor, s.endByte);
-        }
-        if (cursor < (end as number)) throw consumerEvidenceStop(`Consumer evidence is not fully covered by the source manifest: ${subject.ref}`);
-        const segmentIds = matching.map(s => s.id); segmentIds.forEach(id => all.add(id));
-        ranges.set(`${start}:${end}`, { startByte: start as number, endByte: end as number, segmentIds });
+        const range = rangeFor(v, subject.ref);
+        range.segmentIds.forEach(id => all.add(id));
+        ranges.set(`${range.startByte}:${range.endByte}`, range);
         return;
       }
       Object.values(v).forEach(visit);

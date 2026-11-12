@@ -83,6 +83,7 @@ it.each(["candidateAction", "actionPatterns"] as const)("proves an executable %s
   const source = await createEvidenceFixture(root, "Hero decides to wait.\n"), canon = new CanonicalModelStore(root);
   const evidence = source.evidence("Hero decides to wait.");
   await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+  await canon.putEntity({ id: "stranger", kind: "character", canonicalName: "Stranger", aliases: [], evidence });
   await canon.putClaim({ id: "old-detail", subject: "hero", predicate: "waits", object: true, epistemicType: "explicit-fact", evidence });
   const action = { title: "Decide to wait", preconditions: [], proposedDelta: { version: 1 as const,
     operations: [{ op: "set" as const, entityId: "hero", field: "character.plan", value: "wait" }] } };
@@ -94,10 +95,15 @@ it.each(["candidateAction", "actionPatterns"] as const)("proves an executable %s
     candidateAction: { ...action, title: "Continue deciding for a minute", timeAdvance: { amount: 1, unit: "minute" },
       proposedDelta: { version: 1, operations: [] },
       proposedKnowledge: { version: 1, operations: [{ op: "forget", actorId: "hero", claimId: "old-detail" }] } } };
-  context.actorGoals = [timedGoal, goal];
+  const privateGoal: CharacterGoal = { ...goal, id: "watch-stranger", priority: 0.8, actionPatterns: [],
+    candidateAction: { ...action, title: "Respond to the sleeper", preconditions: [
+      { op: "fact-equals", entityId: "stranger", field: "character.wakefulness", value: "asleep" }],
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "follow" }] } } };
+  context.actorGoals = [timedGoal, privateGoal, goal];
   const engine = new WorldEngine(root, context), head = await engine.createBranch("probe", "Probe", { version: 1, operations: [
     { op: "set", entityId: "hero", field: "character.alive", value: true },
     { op: "set", entityId: "hero", field: "character.plan", value: "decide" },
+    { op: "set", entityId: "stranger", field: "character.wakefulness", value: "asleep" },
   ] }, undefined, source.source.id, undefined, evidence, {}, { participantPresence: [{ entityId: "hero", mode: "physical" }] });
   const candidates = await deterministicActorProposalSource(engine, new ActorModelStore(root))({ branchId: "probe", commitId: head, maxActors: 1 });
   expect(candidates).toHaveLength(1);
@@ -112,6 +118,7 @@ it.each(["candidateAction", "actionPatterns"] as const)("proves an executable %s
   expect(witness.origin).toMatchObject({ kind: "compiled-goal", id: goal.id, revisionHash: contentHash(goal) });
   expect(witness.event.action).toMatchObject({ lane: "ad-hoc", actionKindId: "act", description: action.title });
   expect(entryActionWitnessIssues(witness, scope)).toEqual([]);
+  expect(entryActionWitnessIssues({ ...witness, version: 1 }, scope)).toContain("ENTRY_ACTION_CONTRACT_STALE");
   expect(entryActionDependencyIssues(witness, { goals: [goal], actionSchemas: [] })).toEqual([]);
   expect((await engine.projector.project(witness.resultingHead)).values.hero?.["character.plan"]).toBe("wait");
   const altered = structuredClone(witness);

@@ -7,6 +7,8 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { PiAgentSession } from "../src/agent/pi-session.js";
 import { mockPiProvider } from "./helpers/pi-provider.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { SegmentStore } from "../src/compiler/segments.js";
+import { identityRequirementDirectory } from "../src/compiler/identity-requirements.js";
 import { contentHash as h } from "../src/world/canonical.js";
 import { canonicalEventSchema, characterEntryCheckpointSchema, eventParticipationSchema } from "../src/world/model.js";
 import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
@@ -44,7 +46,11 @@ async function fixture() {
   const scope: any = { sourceId: f.source.id, sourceHash: f.source.contentSha256, taskId: h("task"), ref: "entry/boy/encounter", identityIntentHash: h("identity"),
     originalBudgetHash: h("budget"), receiptFingerprint: h("receipt"), upstreamPlanHash: h("plan"), requirementIds: ["identity"], currentRevisionHash: h(event.characterEntryCheckpoints![0]),
     reviewContract: { target: { kind: "character-entry" }, ownerRefs: [{ ref: "canonical-event:encounter", revisionHash: h(event) }] } };
-  const originalInput = { requiredSourceSegmentIds: [f.segmentId], evidencePacket: { sources: [{ id: f.segmentId, text }] } };
+  const identityDirectory = identityRequirementDirectory(root, scope.sourceId, scope.taskId);
+  await fs.mkdir(identityDirectory, { recursive: true });
+  await fs.writeFile(path.join(identityDirectory, "context.json"), JSON.stringify({ manifest: await new SegmentStore(root).readManifest(f.source.id) }));
+  const originalInput = { requiredSourceSegmentIds: [f.segmentId], evidencePacket: {
+    sources: [{ id: f.segmentId, startByte: 0, endByte: Buffer.byteLength(text), text, textHash: h(text) }] } };
   const parents = [{ scope, inputHash: h(originalInput), sessionId: "parent-proposal", traceRunId: "parent-proposal-trace",
     output: { phase: "consumer-revalidation", disposition: "blocked", retainedQuestionIds: [h("question")] } },
     { scope, sessionId: "parent-check", traceRunId: "parent-check-trace", output: { phase: "consumer-revalidation-check", verdict: "supported" } }] as ConsumerRevalidationRecord[];

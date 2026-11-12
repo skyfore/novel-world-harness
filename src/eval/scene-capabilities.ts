@@ -2,7 +2,7 @@ import { buildSceneRequirementAssessment, SCENE_REQUIREMENT_EVALUATOR_VERSION } 
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { contentHash } from "../world/canonical.js";
-import { idSchema, textAnchorSchema, stateDeltaSchema, predicateSchema, schemaBoundActionInvocationSchema, knowledgeStatusSchema,
+import { eventAvailableToActor, idSchema, logicalTimeSchema, textAnchorSchema, stateDeltaSchema, predicateSchema, schemaBoundActionInvocationSchema, knowledgeStatusSchema,
   type StateDelta, type WorldState } from "../world/model.js";
 import { resolveActionInvocation } from "../world/action-ontology.js";
 import { validateEventExecutions } from "../world/event-execution.js";
@@ -16,7 +16,9 @@ import crypto from "node:crypto";
 import { evaluateCharacterGoal } from "../world/actors.js";
 
 const basis = { id: idSchema, scene: z.string().trim().min(1), rationale: z.string().trim().min(1), evidence: z.array(textAnchorSchema).min(1) };
-const seedSchema = z.object({ delta: stateDeltaSchema, elapsedDays: z.number().finite().nonnegative() }).strict();
+const seedSchema = logicalTimeSchema.partial({ step: true }).extend({
+  delta: stateDeltaSchema, elapsedDays: z.number().finite().nonnegative(),
+});
 const effectExpectation = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("delta"), delta: stateDeltaSchema.refine((delta) => delta.operations.length > 0, "state expectations must be nonempty") }).strict(),
   z.object({ kind: z.literal("no-change"), justification: z.string().trim().min(1) }).strict(),
@@ -74,8 +76,10 @@ export function evaluateReviewedSceneCapabilities(specInput: unknown, catalog: S
   const spec = sceneCapabilitySpecSchema.parse(specInput);
   const registry = new StateSchemaRegistry(DEFAULT_STATE_FIELDS);
   const makeState = (seed: z.infer<typeof seedSchema>) => {
-    const state = emptyWorldState(contentHash(seed)); state.logicalTime.elapsedDays = seed.elapsedDays;
-    return applyStateDelta(state, seed.delta, registry, catalog.entities, catalog.rules);
+    const { delta, step, ...clock } = seed;
+    const state = emptyWorldState(contentHash(seed), step ?? 0);
+    Object.assign(state.logicalTime, clock);
+    return applyStateDelta(state, delta, registry, catalog.entities, catalog.rules);
   };
   const cases = spec.cases.map((test) => {
     const issues: SceneCapabilityIssue[] = [];
@@ -123,13 +127,17 @@ export function evaluateReviewedSceneCapabilities(specInput: unknown, catalog: S
         if (!goal || !goal.evidence.length || goal.evidence.some(e => e.span.sourceId !== spec.sourceId))
           fail("SCENE_GOAL_MISSING", "Discover the exact source-scoped goal before lifecycle review.", "source-review", [test.goalId]);
         else observations.scenarios = test.scenarios.map(scenario => {
-          for (const id of [...scenario.realizedEventIds, ...scenario.experiencedEventIds]) {
+          const anchors = scenario.seed.storyTime?.kind === "relative" ? [scenario.seed.storyTime.anchorEventId] : [];
+          for (const id of [...scenario.realizedEventIds, ...scenario.experiencedEventIds, ...anchors]) {
             const event = catalog.events.get(id);
             if (!event?.evidence.length || event.evidence.some(e => e.span.sourceId !== spec.sourceId)) throw new Error(`Unknown or foreign goal cut event ${id}`);
           }
           if (scenario.experiencedEventIds.some(id => !scenario.realizedEventIds.includes(id))) throw new Error("Personal experience must be in the supplied realized history");
+          if (scenario.experiencedEventIds.some(id => !eventAvailableToActor(catalog.events.get(id)!, goal.actorId)))
+            throw new Error("Personal experience requires this actor's participation in the reviewed occurrence");
           for (const id of scenario.knownClaimIds) if (!catalog.claims.get(id)?.evidence.every(e => e.span.sourceId === spec.sourceId)) throw new Error(`Unknown or foreign goal claim ${id}`);
-          const result = evaluateCharacterGoal(goal, { state: makeState(scenario.seed), entities: catalog.entities, identityCatalog: { ...catalog, eventParticipations: [...catalog.eventParticipations.values()] },
+          const state = makeState(scenario.seed);
+          const result = evaluateCharacterGoal(goal, { state, storyTime: state.logicalTime.storyTime, entities: catalog.entities, identityCatalog: { ...catalog, eventParticipations: [...catalog.eventParticipations.values()] },
             knownClaimIds: new Set(scenario.knownClaimIds), realizedCanonicalEventIds: new Set(scenario.realizedEventIds), experiencedCanonicalEventIds: new Set(scenario.experiencedEventIds) });
           if (result.active !== scenario.expectedActive || result.complete !== scenario.expectedComplete)
             fail("SCENE_GOAL_LIFECYCLE_MISMATCH", `${scenario.label}: expected active=${scenario.expectedActive}, complete=${scenario.expectedComplete}; observed active=${result.active}, complete=${result.complete}.`, "semantic", [goal.id]);

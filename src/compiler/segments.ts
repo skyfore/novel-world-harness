@@ -125,7 +125,7 @@ const segmentManifestSchema = z.object({
   }
 });
 
-function parseSegmentManifest(value: unknown, expectedSourceId?: string): SegmentManifest {
+export function parseSegmentManifest(value: unknown, expectedSourceId?: string): SegmentManifest {
   const manifest = segmentManifestSchema.parse(value) as SegmentManifest;
   if (expectedSourceId && manifest.sourceId !== expectedSourceId) {
     throw new Error(`Segment manifest source '${manifest.sourceId}' does not match requested source '${expectedSourceId}'.`);

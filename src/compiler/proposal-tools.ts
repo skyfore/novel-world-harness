@@ -10,6 +10,8 @@ import { validateUtteranceExpressionProposalTrace } from "./utterance-expression
 import { UpstreamRepairFinishValidationError } from "./upstream-repair-finish-intent.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { contentHash } from "../world/canonical.js";
+import { isUpstreamWorldKind, upstreamProposalTool } from "./upstream-repair-plan.js";
+import { restoreGoalCompletion } from "./goal-lifecycle-repair.js";
 import { reconciliationReviewIssues } from "./reconciliation-review.js";
 import { readKnowledgeRepairPlan, knowledgeRepairScopeIssues } from "./knowledge-repair.js";
 import { validateToolArguments } from "@earendil-works/pi-ai";
@@ -1055,7 +1057,7 @@ function safeTextSuffix(text: string, maxChars: number): string {
 export function createCompilerProposalToolset(
   workspaceRoot: string,
   generatedBy: { provider?: string; model?: string } = {},
-  hostOptions: { recoverPreparedFinish?: boolean; hostObligationCorrection?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; retainedEntityEvidence?: { id: string; evidence: EvidenceRef[]; assertions: EvidenceAssertion[] }; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown, evidenceAssertions?: readonly EvidenceAssertion[]) => Promise<void> } } = {},
+  hostOptions: { recoverPreparedFinish?: boolean; hostObligationCorrection?: boolean; upstreamFinish?: import("./upstream-repair-finish-intent.js").UpstreamRepairFinishIntent; upstreamRepair?: { planHash: string; retainedGoal?: { goal: import("../world/actors.js").CharacterGoal; assertions: EvidenceAssertion[] }; retainedEntityEvidence?: { id: string; evidence: EvidenceRef[]; assertions: EvidenceAssertion[] }; beforeStage: (kind: import("./upstream-repair-plan.js").UpstreamRepairKind, id: string, payload: unknown, evidenceAssertions?: readonly EvidenceAssertion[]) => Promise<void> } } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
@@ -1076,7 +1078,7 @@ export function createCompilerProposalToolset(
   let compilerBatchId: string | undefined;
   let activeSourceId: string | undefined;
   let activeReviewScope: Awaited<ReturnType<typeof reconciliationReviewScope>>;
-  let managedUpstream = false;
+  let managedUpstream: ReadonlySet<string> | undefined;
   let batchReady = true;
   let activeBoundaryCalibration: BoundaryCalibrationRequest | undefined;
   let pendingChapterSplitPlan: ChapterSplitPlan | undefined;
@@ -1434,6 +1436,11 @@ export function createCompilerProposalToolset(
       payload = injectHostWorldRuleEvidence(payload, supportingSemanticEvidence, counterEvidence);
     }
     const retained = kind === "entity" ? hostOptions.upstreamRepair?.retainedEntityEvidence : undefined;
+    const retainedGoal = kind === "character-goal" ? hostOptions.upstreamRepair?.retainedGoal : undefined;
+    if (retainedGoal) {
+      payload = restoreGoalCompletion(retainedGoal.goal, input.payload);
+      evidenceAssertions.unshift(...retainedGoal.assertions);
+    }
     if (retained && (payload as { id: string }).id === retained.id) {
       // A marker-only revision does not re-author the entity's historical source
       // support. Keep the host-verified original evidence and exact bindings.
@@ -2244,7 +2251,7 @@ export function createCompilerProposalToolset(
             ...(compilerBatchId ? { compilerBatchId } : {}),
           },
           ...(hostOptions.upstreamRepair ? { beforeWrite: async (payload: unknown, evidenceAssertions: readonly EvidenceAssertion[]) => {
-            if (kind !== "entity" && kind !== "initial-world" && kind !== "canonical-event" && kind !== "event-participation") throw finishHostError("managed semantic upstream repair attempted an unauthorized world proposal kind");
+            if (!isUpstreamWorldKind(kind)) throw finishHostError("managed semantic upstream repair attempted an unauthorized world proposal kind");
             await hostOptions.upstreamRepair!.beforeStage(kind, kind === "initial-world" ? "singleton" : compilerProposalArtifactId(kind, payload, input.proposal_id), payload, evidenceAssertions);
           } } : {}),
         });
@@ -3468,7 +3475,7 @@ export function createCompilerProposalToolset(
     ].map(trackProposal).map((tool): CompilerToolDefinition => {
       const run = async (invoke: () => ReturnType<ToolDefinition["execute"]>) => {
         if (!batchReady) throw finishHostError("compiler batch initialization did not complete; stop tool calls and preserve the original scope for host review");
-        if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !["propose_entity", "propose_initial_world", "propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(tool.name))) {
+        if (managedUpstream && (hostOptions.upstreamFinish ? tool.name !== "finish_compiler_batch" : !managedUpstream.has(tool.name))) {
           throw finishHostError(hostOptions.upstreamFinish
             ? "frozen upstream finish authorizes only the original host finish; preserve its receipt and drafts, and stop other tool calls"
             : "managed upstream repair batches currently authorize only host-guarded staging; ordinary finish, metadata and world writes are forbidden");
@@ -3496,7 +3503,7 @@ export function createCompilerProposalToolset(
   return {
     tools,
     async executeHostProposal(name, callId, input) {
-      if (!managedUpstream || !["propose_entity", "propose_initial_world", "propose_entity_mention", "propose_event_mention", "propose_quotation", "propose_discourse_segment", "propose_entity_resolution", "propose_event_resolution", "propose_canonical_event", "propose_event_participation"].includes(name)) {
+      if (!managedUpstream?.has(name)) {
         throw finishHostError("host proposal execution requires an authorized upstream staging scope and an exact proposal tool; do not retry in a model session");
       }
       const tool = tools.find(candidate => candidate.name === name);
@@ -3522,7 +3529,7 @@ export function createCompilerProposalToolset(
       validatedSourceSegments = [];
       compilerBatchId = nextCompilerBatchId;
       activeSourceId = sourceId;
-      managedUpstream = false;
+      managedUpstream = undefined;
       if (activeSourceId && compilerBatchId) {
         const { UpstreamRepairLedger } = await import("./upstream-repair-ledger.js");
         const managed = (await new UpstreamRepairLedger(workspaceRoot, activeSourceId).inspect()).plans.find(item => item.plan.batchId === compilerBatchId);
@@ -3530,7 +3537,7 @@ export function createCompilerProposalToolset(
           const finishPermit = hostOptions.upstreamFinish && managed.finishIntent && isDeepStrictEqual(hostOptions.upstreamFinish, managed.finishIntent) && ["finish-frozen", "finished", "converged", "evaluated"].includes(managed.state);
           const stagePermit = hostOptions.upstreamRepair?.planHash === managed.plan.planHash && ["authorized", "staging", "finish-revising"].includes(managed.state);
           if ((!finishPermit && !stagePermit) || (hostOptions.upstreamFinish && hostOptions.upstreamRepair)) throw finishHostError("managed upstream batch requires its exact active host authorization; preserve its ledger and stop ordinary batch recovery");
-          managedUpstream = true;
+          managedUpstream = new Set([...managed.plan.allowedWrites, ...managed.plan.allowedCreations].map(slot => upstreamProposalTool(slot.kind)));
         } else if (hostOptions.upstreamRepair || hostOptions.upstreamFinish) throw finishHostError("upstream authorization has no retained source-local plan");
       } else if (hostOptions.upstreamRepair || hostOptions.upstreamFinish) throw finishHostError("upstream staging requires its exact source and batch");
       activeReviewScope = activeSourceId && compilerBatchId

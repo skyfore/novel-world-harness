@@ -8,6 +8,7 @@ import { sourcePatternObligationRequirementId, sourcePatternObligationRequiremen
 import { representationRequirementDefinition } from "./source-representation-upstream.js";
 import { representationRequirementId } from "./source-representation.js";
 import { identityRequirementDefinition } from "./identity-requirement-authority.js";
+import { goalLifecycleSpec } from "./goal-lifecycle-repair.js";
 
 /** Bind retained host plans to frozen original definitions and receipt identities, not live revisions. */
 export function upstreamRepairSnapshotIssues(snapshot: {
@@ -45,6 +46,10 @@ export function upstreamRepairSnapshotIssues(snapshot: {
       if (plan.requirementSetHash !== sourcePatternObligationRequirementSetHash(plan.proposalObligation)) issues.push("UPSTREAM_REPAIR_OBLIGATION_AUTHORITY_MISMATCH");
     } else {
       const scene = snapshot.requirementDefinitions?.find(item => item.revisionHash === plan.requirementSetHash);
+      if (plan.goalLifecycle) {
+        try { goalLifecycleSpec(plan, scene); }
+        catch { issues.push("UPSTREAM_REPAIR_GOAL_SPEC_MISMATCH"); }
+      }
       const core = snapshot.coreRoleRequirementDefinitions?.find(item => item.revisionHash === plan.requirementSetHash);
       if (scene) requirementIds = buildSceneRequirementAssessment(scene.spec, [], { sourceId: scene.spec.sourceId, sourceSha256: scene.spec.sourceSha256,
         specHash: contentHash(scene.spec), catalogHash: contentHash({}), evaluatorVersion: SCENE_REQUIREMENT_EVALUATOR_VERSION }).requirements.requirements.map(item => item.id);

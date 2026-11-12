@@ -1,7 +1,8 @@
 import { contentHash } from "../world/canonical.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
+import { readSourceMaterial } from "../storage/source-material-store.js";
 import { inspectUpstreamRepairJournal, UpstreamRepairLedger } from "./upstream-repair-ledger.js";
-import { activeRequirementSets, requirementResultSchema, resultFromReport, type RequirementResult } from "./requirement-ledger.js";
+import { activeRequirementSets, evaluateRequirementSet, requirementResultSchema, resultFromReport, type RequirementResult } from "./requirement-ledger.js";
 import { evaluateReviewedSceneCapabilities } from "../eval/scene-capabilities.js";
 import { frozenSceneCatalog } from "./requirement-service.js";
 import { evaluateCoreRoleCapabilities } from "./core-role-capabilities.js";
@@ -15,9 +16,10 @@ import { sourcePatternObligationRequirementId } from "./proposal-obligations.js"
 import { representationRequirementResult } from "./source-representation-upstream.js";
 import { identitySemanticHash } from "./identity-requirements.js";
 import { identityRequirementDefinition } from "./identity-requirement-authority.js";
+import { goalLifecycleSpec } from "./goal-lifecycle-repair.js";
 
 type AssessmentInputs = Pick<NovelClosureAssessment, "subjectSnapshotHash" | "roster" | "playability" | "requirementResults" | "coreRoleResult">;
-const localRepairPostconditions = (plan: UpstreamRepairPlan) => Boolean(plan.identityRequirements || plan.sourceRepresentation || plan.proposalObligation);
+const localRepairPostconditions = (plan: UpstreamRepairPlan) => Boolean(plan.identityRequirements || plan.sourceRepresentation || plan.proposalObligation || plan.goalLifecycle);
 
 /** Local artifact postconditions need the complete verified compiler snapshot,
  * not role play probes. Those still run in their existing certification stage. */
@@ -27,6 +29,12 @@ export async function inspectUpstreamRepairEvaluationInputs(root: string, source
   if (plans.some(plan => !localRepairPostconditions(plan))) return cache.inspectRepairCandidate(source);
   const snapshot = await cache.repairCandidateSnapshot(source);
   const assessment: AssessmentInputs = { subjectSnapshotHash: preparedSubjectHash(snapshot.bundle), roster: null, playability: null };
+  const goalSets = new Set(plans.filter(plan => plan.goalLifecycle).map(plan => plan.requirementSetHash));
+  if (goalSets.size) {
+    const bytes = await readSourceMaterial(root, source), catalog = frozenSceneCatalog(snapshot.bundle);
+    assessment.requirementResults = activeRequirementSets(snapshot.bundle.compilerSnapshot.requirementDefinitions ?? [])
+      .filter(set => goalSets.has(set.revisionHash)).map(set => evaluateRequirementSet(set, bytes, catalog));
+  }
   return { ...snapshot, assessment };
 }
 
@@ -53,6 +61,7 @@ export function upstreamRepairRequirementResult(bundle: PreparedNovelBundle, ass
   const core = bundle.compilerSnapshot.coreRoleRequirementDefinitions?.at(-1);
   let result: RequirementResult;
   if (scene) {
+    if (plan.goalLifecycle) goalLifecycleSpec(plan, scene);
     const catalog = frozenSceneCatalog(bundle);
     result = resultFromReport(scene, evaluateReviewedSceneCapabilities(scene.spec, catalog), catalog);
     if (contentHash(result) !== contentHash(assessment.requirementResults?.find(item => item.setId === scene.id) ?? null)) throw upstreamRepairHostError("Source-verified requirement assessment differs from recomputed scene result");
@@ -158,9 +167,7 @@ export async function prepareUpstreamRepairEvaluation(root: string, sourceId: st
   const { bundle, assessment, baselineIssues } = await inspectUpstreamRepairEvaluationInputs(root, source, [current.plan]).catch(error => {
     throw upstreamRepairHostError(`Evaluation inputs cannot be frozen: ${String(error)}; inspect the original source workflow, then use requirements evaluate-upstream --source ${sourceId} after host repair`);
   });
-  // Identity/source representation and proposal-obligation postconditions inspect
-  // their exact committed artifacts. Executable scene/role requirements retain
-  // the complete valid-baseline prerequisite.
+  // A bounded postcondition can settle while a different artifact blocks the strict candidate.
   if (baselineIssues.length && !localRepairPostconditions(current.plan))
     throw upstreamRepairHostError(`Executable requirement evaluation has a blocked baseline: ${baselineIssues.map(i => i.message).join("; ")}`);
   return upstreamRepairEvaluationSchema.parse({ version: 1, evaluatorVersion: UPSTREAM_REPAIR_EVALUATOR_VERSION,

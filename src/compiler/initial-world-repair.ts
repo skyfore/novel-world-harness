@@ -1,6 +1,5 @@
 import { initialWorldSchema } from "../world/initial.js";
-import { worldArtifactReferences } from "../world/artifact-references.js";
-import { DEFAULT_STATE_FIELDS } from "../world/state.js";
+import { worldRepairReferenceKeys } from "./world-repair-references.js";
 
 /** The canonical seed is a singleton, not an entity with a model-assigned ID. */
 export const INITIAL_WORLD_REPAIR_ID = "singleton";
@@ -18,12 +17,6 @@ export function initialWorldRepairReferences(raw: unknown): string[] {
     if (op.op === "record-acquisition") locals.add(`acquisition:${op.acquisition.id}`);
     if (op.op === "open-goal") locals.add(`character-goal:${op.goal.id}`);
   }
-  const fields = new Map(DEFAULT_STATE_FIELDS.map(f => [f.key, f]));
-  const kinds: Readonly<Record<string, string>> = { event: "canonical-event", rule: "world-rule", action: "action-schema",
-    goal: "character-goal", process: "process-template", norm: "norm-template", frame: "event-frame", scene: "scene-occurrence", constraint: "action-constraint" };
-  for (const ref of worldArtifactReferences(initial, fields)) {
-    const key = `${kinds[ref.kind] ?? ref.kind}:${ref.id}`;
-    if (!locals.has(key)) refs.add(key);
-  }
+  for (const key of worldRepairReferenceKeys(initial)) if (!locals.has(key)) refs.add(key);
   return [...refs].sort();
 }

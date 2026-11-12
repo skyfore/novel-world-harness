@@ -8,7 +8,7 @@ import { createCompilerProposalToolset } from "./proposal-tools.js";
 import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
 import { stageUpstreamRepair, recoverUpstreamRepairStage, upstreamRepairSlotContext } from "./upstream-repair-staging.js";
 import { upstreamRepairHostError } from "./upstream-repair-preflight.js";
-import type { UpstreamRepairKind } from "./upstream-repair-plan.js";
+import { upstreamProposalTool, type UpstreamRepairKind } from "./upstream-repair-plan.js";
 
 type Session = Pick<PiAgentSession, "promptWithReport" | "dispose"> & Partial<Pick<PiAgentSession, "abort">>;
 export type UpstreamRepairModelOptions = Pick<PiAgentSessionOptions, "profile" | "model" | "onText" | "onThinking" | "onTool" | "onToolResult" | "onEvent" | "onRetry" | "trace" | "requestBudget"> & { timeoutMs?: number; signal?: AbortSignal };
@@ -22,7 +22,7 @@ export async function runUpstreamRepairModelSlot(root: string, sourceId: string,
   if ((context.plan.sourceRepresentation || context.plan.identityRequirements) && (options.model !== "openai-codex/gpt-6.1-sol" || !options.requestBudget)) throw upstreamRepairHostError("Reviewed upstream staging requires the pinned Pi subscription model and a retained request budget");
   const prior = state.attempts.findLast(item => item.started.artifactKind === target.kind && item.started.artifactId === target.id && state.plans.find(plan => plan.plan.planHash === item.started.planHash)!.plan.requirementIds.some(id => context.plan.requirementIds.includes(id)));
   const proposalId = prior?.failed ? prior.started.proposalId : `upstream-${contentHash({ planHash, target }).slice(0, 48)}`;
-  const original = createCompilerProposalToolset(root).tools.find(tool => tool.name === `propose_${target.kind.replaceAll("-", "_")}`)!;
+  const original = createCompilerProposalToolset(root).tools.find(tool => tool.name === upstreamProposalTool(target.kind))!;
   const prompt = JSON.stringify({ task: "Repair the exact host slot, then stop after successful staging. If reviewedSourceAnnotation is present, its payload is the independently reviewed exact source-only content: translate it into the original tool argument schema without changing any semantic field, optional reference, array order or uncertainty. Use its anchor/selector pairs exactly; host derivation is supplied separately. This does not answer the original critical/blocked role questions. For semantic event mentions, copy reviewedOccurrences.triggerExact, extentExact and ALL participant mention IDs literally; these fields are frozen host decisions. Never paraphrase, shorten or normalize whitespace in an exact selector. For event/effect/participation assertions, cite only inside extentExact. An event participant need not be its initiator: assign roles from evidence, not the slot order. Canonical events explicitly project one presence mode for every character participant and none for artifacts or other non-characters. Event-participation presence must exactly match that staged event projection for characters and must be omitted for non-characters.", proposalId, originalArgumentSchema: original.parameters, originalToolGuidelines: original.promptGuidelines ?? [], context });
   if (prompt.length > 240_000) throw upstreamRepairHostError("Frozen repair context exceeds the bounded model input; host must narrow the original plan before invocation");
   const timeoutMs = options.timeoutMs ?? 120_000;

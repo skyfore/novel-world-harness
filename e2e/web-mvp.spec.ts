@@ -99,6 +99,7 @@ test("blocks uncertified publication and verifies browser continuation with an i
   await page.addInitScript(() => window.localStorage.setItem("novel-world-harness.locale", "en"));
   await page.goto(origin);
   await expect(page.getByRole("heading", { name: "World control room" })).toBeVisible();
+  await captureSurface(page, "overview-empty.png");
   await page.getByRole("button", { name: "中文" }).click();
   await expect(page.getByRole("heading", { name: "世界控制台" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
@@ -112,6 +113,7 @@ test("blocks uncertified publication and verifies browser continuation with an i
   await page.setViewportSize({ width: 1280, height: 720 });
 
   await page.getByRole("link", { name: /Register novel/ }).first().click();
+  await captureSurface(page, "import.png");
   await page.getByPlaceholder("novel.txt").fill("browser-mvp.txt");
   await page.getByPlaceholder("Paste the complete novel text here…").fill(SOURCE_TEXT);
   await page.getByRole("button", { name: "Register and inspect" }).click();
@@ -126,6 +128,7 @@ test("blocks uncertified publication and verifies browser continuation with an i
   await page.getByRole("button", { name: "Validate and accept" }).click();
   await expect(page.getByText("New play certification incomplete", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Create world instance" })).toBeDisabled();
+  await captureSurface(page, "compiler.png");
 
   const branchInput = page.getByLabel("New instance branch ID");
   await expect(branchInput).toHaveValue("main");
@@ -147,11 +150,16 @@ test("blocks uncertified publication and verifies browser continuation with an i
   await page.getByText("Show future canon as possibility").click();
   await expect(page.getByRole("table", { name: "Ontology nodes" })).toContainText("Mara considers the Garden");
   await page.getByRole("link", { name: "World model" }).click();
+  const scopedGraph = new URL(page.url()).searchParams;
+  await page.getByRole("navigation", { name: "Novel workspace" }).getByRole("link", { name: "World explorer" }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("branchId")).toBe(scopedGraph.get("branchId"));
+  await expect.poll(() => new URL(page.url()).searchParams.get("atCommit")).toBe(scopedGraph.get("atCommit"));
   const maraRow = page.locator(".ontology-table-row").filter({ hasText: "Mara" }).first();
   await expect(maraRow).toBeVisible();
   await maraRow.click();
   await expect(page.locator(".ontology-inspector")).toContainText("Source evidence");
   await expect(page.locator(".ontology-inspector blockquote").first()).toContainText("Mara waits in the Hall");
+  await captureSurface(page, "world-explorer.png");
 
   // Browser fixtures exercise an already committed private world; they never mint a live novel certificate.
   const rolesResponse = await page.request.get(`${origin}/api/v1/novels/${sourceId}/play-roles`);
@@ -171,6 +179,7 @@ test("blocks uncertified publication and verifies browser continuation with an i
   await page.setViewportSize({ width: 1280, height: 720 });
 
   await expect(page.locator(".message-scene").last()).toContainText("斑驳的窗影");
+  await captureSurface(page, "play.png");
   await expect(page.getByRole("button", { name: "Re-establish scene" })).toHaveCount(0);
   await expect(page.locator(".operation-panel")).toContainText("succeeded");
   await page.reload();
@@ -324,6 +333,9 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
   await expect(drawer).toBeVisible();
   await expect(page).toHaveURL(playUrl);
   await expect(drawer.getByRole("heading", { name: "player-move trajectory" })).toBeVisible();
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog", { name: "Search workspace", exact: true })).toBeHidden();
+  await captureSurface(page, "trace-drawer.png");
   await expect(drawer.locator(".trace-ledger-panel")).toContainText("Trajectory ledger");
   await expect(drawer.getByRole("tab")).toHaveCount(7);
   await drawer.getByRole("tab", { name: "Tools" }).click();
@@ -342,6 +354,118 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
   await expect(page.locator(".play-edge-panel")).toBeInViewport();
   await page.getByRole("button", { name: "Close session controls" }).last().click();
   await expect(openSessionControls).toHaveAttribute("aria-expanded", "false");
+});
+
+test("filters the library and navigates the workspace with keyboard search on desktop and mobile", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => window.localStorage.setItem("novel-world-harness.locale", "en"));
+  for (const title of ["Atlas of tides", "Atlas of stars"]) {
+    await page.goto(`${origin}/novels/new`);
+    await page.getByPlaceholder("novel.txt").fill(title);
+    await page.getByPlaceholder("Paste the complete novel text here…").fill(`${title}\n${SOURCE_TEXT}`);
+    await page.getByRole("button", { name: "Register and inspect" }).click();
+    await expect(page).toHaveURL(/\/novels\/[a-f0-9]{20}\/compile$/);
+  }
+  await page.goto(origin);
+  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
+  await page.getByLabel("Search library", { exact: true }).fill("Atlas");
+  await expect(page.locator(".library-novel")).toHaveCount(2);
+  await page.getByLabel("Sort novels").selectOption("title");
+  await expect(page.locator(".library-novel h3")).toHaveText(["Atlas of stars", "Atlas of tides"]);
+  await page.getByRole("button", { name: "With worlds", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "No novels match these filters" })).toBeVisible();
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await page.getByRole("button", { name: "Sources only", exact: true }).click();
+  await page.getByLabel("Search library", { exact: true }).fill("Atlas");
+  await expect(page.locator(".library-novel")).toHaveCount(2);
+  await page.getByRole("button", { name: "All novels", exact: true }).click();
+  await page.getByLabel("Search library", { exact: true }).fill("");
+  await captureSurface(page, "library-desktop.png");
+
+  await page.keyboard.press("Control+k");
+  const search = page.getByRole("dialog", { name: "Search workspace", exact: true });
+  const input = search.getByRole("combobox");
+  await expect(input).toBeFocused();
+  await input.fill("No such story exists");
+  await expect(search.getByText("No matches found")).toBeVisible();
+  await input.fill("Atlas of");
+  await expect(search.getByRole("option")).toHaveCount(2);
+  const nextTitle = await search.getByRole("option").nth(1).locator("strong").innerText();
+  await page.keyboard.press("ArrowDown");
+  await expect(search.getByRole("option").nth(1)).toHaveAttribute("aria-selected", "true");
+  await captureSurface(page, "workspace-search.png");
+  await page.keyboard.press("Enter");
+  await expect(search).toBeHidden();
+  await expect(page.getByRole("heading", { name: nextTitle, exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Novel workspace" }).getByRole("link", { name: "Compile & review" }).click();
+  await expect(page).toHaveURL(/\/compile$/);
+  await page.keyboard.press("Control+k");
+  await input.fill("Model catalog");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Models & credentials" })).toBeVisible();
+  // Exercise catalog discovery beyond the previous hard-coded 100-model limit.
+  await page.route("**/api/v1/bootstrap", async (route) => {
+    const response = await route.fetch();
+    const bootstrap = await response.json();
+    await route.fulfill({ response, json: {
+      ...bootstrap,
+      modelCatalog: { ...bootstrap.modelCatalog, models: Array.from({ length: 125 }, (_, index) => ({
+        id: `browser-model-${index}`, providerId: "browser-fixture", name: `Browser model ${index}`,
+        api: "browser-fixture", reasoning: false, input: ["text"], contextWindow: 8192, maxTokens: 1024, available: false,
+      })) },
+    } });
+  });
+  await page.reload();
+  const models = page.getByRole("table", { name: "Known Pi models" });
+  await expect(models.getByRole("row")).toHaveCount(50);
+  await page.getByRole("button", { name: "Show more models" }).click();
+  await expect(models.getByRole("row")).toHaveCount(100);
+  await page.getByLabel("Search models", { exact: true }).fill("Browser model 124");
+  await expect(models.getByRole("row")).toHaveCount(1);
+  await expect(models).toContainText("Browser model 124");
+  await page.getByLabel("Search models", { exact: true }).fill("missing-model");
+  await expect(page.getByText("No models match", { exact: true })).toBeVisible();
+  await page.getByLabel("Search models", { exact: true }).fill("");
+  await expect(models.getByRole("row")).toHaveCount(50);
+  await captureSurface(page, "model-settings.png");
+  await page.unroute("**/api/v1/bootstrap");
+
+  await page.goto(origin);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByLabel("Search library", { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await captureSurface(page, "library-mobile.png");
+  await page.getByRole("button", { name: "Search workspace", exact: true }).click();
+  await expect(input).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(search).toBeHidden();
+  await expect(page.getByRole("button", { name: "Search workspace", exact: true })).toBeFocused();
+  const openNavigation = page.getByRole("button", { name: "Open navigation" });
+  const sidebar = page.locator(".sidebar");
+  await openNavigation.click();
+  await expect(sidebar).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sidebar).toBeHidden();
+  await expect(openNavigation).toBeFocused();
+
+  await openNavigation.click();
+  await sidebar.getByRole("link", { name: "Model catalog" }).click();
+  await expect(page).toHaveURL(`${origin}/settings/models`);
+  await expect(sidebar).toBeHidden();
+  await expect(page.getByRole("main")).toBeFocused();
+
+  await openNavigation.click();
+  await page.keyboard.press("Control+k");
+  await expect(search).toBeHidden();
+  await sidebar.getByRole("link", { name: /Novel World/ }).press("Enter");
+  await expect(page.getByRole("heading", { name: "World control room" })).toBeVisible();
+  await expect(sidebar).toBeHidden();
+  await page.getByRole("button", { name: "中文", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "我的书库" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "从小说到世界" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
 });
 
 /** Internal test setup only: production fresh creation remains behind the unmodified certificate gate. */
@@ -798,4 +922,9 @@ async function readDirectoryTree(root: string): Promise<string> {
   }
   await visit(root);
   return values.join("\n");
+}
+
+async function captureSurface(page: Page, filename: string) {
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  await page.screenshot({ path: test.info().outputPath(filename), fullPage: true, animations: "disabled" });
 }

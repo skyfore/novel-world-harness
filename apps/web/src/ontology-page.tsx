@@ -654,8 +654,8 @@ function graphOption(
       trigger: "item",
       renderMode: "richText",
       confine: true,
-      backgroundColor: "#111815f2",
-      borderColor: "#43544c",
+      backgroundColor: "#273855f5",
+      borderColor: "#c9d4e9",
       padding: 10,
       formatter: (params) => {
         const item = Array.isArray(params) ? params[0] : params;
@@ -671,8 +671,8 @@ function graphOption(
         return node ? `${tooltipText(node.label)}\n${tooltipText(translate(humanize(node.kind)))} · ${tooltipText(translate(node.status))}` : "";
       },
       textStyle: {
-        color: "#d7e1da",
-        fontFamily: "DM Mono",
+        color: "#ffffff",
+        fontFamily: "Lato, sans-serif",
         fontSize: 10,
       },
     },
@@ -698,7 +698,7 @@ function graphOption(
         const position = positions.get(node.id) ?? { x: 0, y: 0 };
         const focus = node.id === graph.focusNodeId;
         const opacity = node.status === "rejected" ? .42 : node.status === "inactive" ? .62 : 1;
-        const fontSize = focus ? 12 : graph.focused ? 10 : 9;
+        const fontSize = focus ? 13 : graph.focused ? 12 : 11;
         const labelBox = graphLabelBox(node.label, fontSize, graph.focused ? 168 : 132);
         return {
           id: node.id,
@@ -723,8 +723,8 @@ function graphOption(
             formatter: node.label,
             position: "bottom",
             distance: focus ? 10 : 7,
-            color: focus ? "#ffffff" : "#dce6df",
-            fontFamily: "Manrope",
+            color: focus ? "#273855" : "#3e4c69",
+            fontFamily: "Lato, sans-serif",
             fontSize,
             fontWeight: focus ? 750 : 650,
             width: labelBox.width,
@@ -733,7 +733,7 @@ function graphOption(
             overflow: "break",
             lineOverflow: "truncate",
             ellipsis: "…",
-            backgroundColor: "#101713e8",
+            backgroundColor: "#ffffffed",
             borderColor: focus ? statusColors[node.status] : "transparent",
             borderWidth: focus ? 1 : 0,
             borderRadius: 5,
@@ -745,7 +745,7 @@ function graphOption(
             label: {
               show: true,
               formatter: node.label,
-              color: "#ffffff",
+              color: "#273855",
               fontSize: 11,
               width: graphLabelBox(node.label, 11, 184).width,
               height: graphLabelBox(node.label, 11, 184).height,
@@ -753,11 +753,11 @@ function graphOption(
               overflow: "break",
               lineOverflow: "truncate",
               ellipsis: "…",
-              backgroundColor: "#111a16f2",
+              backgroundColor: "#f1f4fff5",
               padding: [4, 7],
               borderRadius: 5,
             },
-            itemStyle: { borderColor: "#ffffff", borderWidth: 3, opacity: 1, shadowBlur: 18, shadowColor: `${nodeColor(node)}bb` },
+            itemStyle: { borderColor: "#273855", borderWidth: 3, opacity: 1, shadowBlur: 18, shadowColor: `${nodeColor(node)}bb` },
           },
           blur: { itemStyle: { opacity: .12 }, label: { show: false } },
         };
@@ -781,8 +781,8 @@ function graphOption(
           label: {
             show: graph.focused && labels.edgeIds.has(edge.id),
             formatter: edge.label,
-            color: "#f1f8f3",
-            fontFamily: "DM Mono",
+            color: "#425774",
+            fontFamily: "Lato, sans-serif",
             fontSize: 8,
             width: edgeBox.width,
             height: edgeBox.height,
@@ -790,7 +790,7 @@ function graphOption(
             overflow: "break" as const,
             lineOverflow: "truncate" as const,
             ellipsis: "…",
-            backgroundColor: "#111916f2",
+            backgroundColor: "#ffffffed",
             borderColor: statusColors[edge.status],
             borderWidth: 1,
             borderRadius: 3,
@@ -801,7 +801,7 @@ function graphOption(
             label: {
               show: !labels.dense && graph.edges.length <= 24,
               formatter: edge.label,
-              color: "#ffffff",
+              color: "#273855",
               fontSize: 9,
               width: graphLabelBox(edge.label, 9, 148).width,
               height: graphLabelBox(edge.label, 9, 148).height,
@@ -809,7 +809,7 @@ function graphOption(
               overflow: "break" as const,
               lineOverflow: "truncate" as const,
               ellipsis: "…",
-              backgroundColor: "#17211eff",
+              backgroundColor: "#f1f4ff",
               padding: [4, 6],
             },
             lineStyle: { width: 3, opacity: 1 },

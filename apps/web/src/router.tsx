@@ -54,6 +54,8 @@ import {
 } from "./trace-pages";
 import { MaintenanceControl } from "./maintenance-dialog";
 import { LanguageSwitcher, useI18n } from "./i18n";
+import { Icon, NovelWorkspaceNav } from "./workspace-ui";
+import { WorkspaceSearch } from "./workspace-search";
 import { narrationStreamStore, useNarrationStream } from "./narration-stream-store";
 import { canRetrySameRequest, recoveryInstruction, webErrorDetail } from "./recovery";
 import {
@@ -124,11 +126,47 @@ function RootLayout() {
   const [connection, setConnection] = useState<"connecting" | "online" | "offline">("connecting");
   const [showArchivedSessions, setShowArchivedSessions] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const navigationTrigger = useRef<HTMLButtonElement>(null);
+  const navigationPanel = useRef<HTMLElement>(null);
+  const mainContent = useRef<HTMLElement>(null);
   const operations = useQuery({
     queryKey: ["operations"],
     queryFn: ({ signal }) => fetchOperations(undefined, signal),
     refetchInterval: 2_000,
   });
+
+  useEffect(() => {
+    if (!navigationOpen) return;
+    const mobileViewport = window.matchMedia("(max-width: 1100px)");
+    if (!mobileViewport.matches) { setNavigationOpen(false); return; }
+    const onViewportChange = () => { if (!mobileViewport.matches) setNavigationOpen(false); };
+    mobileViewport.addEventListener("change", onViewportChange);
+    navigationPanel.current?.querySelector<HTMLAnchorElement>("a")?.focus();
+    const unsubscribe = router.subscribe("onBeforeNavigate", () => {
+      setNavigationOpen(false);
+      mainContent.current?.focus({ preventScroll: true });
+    });
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setNavigationOpen(false);
+        navigationTrigger.current?.focus();
+      }
+      if (event.key === "Tab") {
+        const items = Array.from(navigationPanel.current?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled)') ?? [])
+          .filter((element) => element.getClientRects().length > 0);
+        const first = items[0];
+        const last = items.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("keydown", onKey);
+      mobileViewport.removeEventListener("change", onViewportChange);
+    };
+  }, [navigationOpen]);
 
   useEffect(() => {
     const source = new EventSource("/api/v1/events");
@@ -200,16 +238,20 @@ function RootLayout() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">{t("Skip to content")}</a>
-      <button className={navigationOpen ? "sidebar-backdrop sidebar-backdrop-visible" : "sidebar-backdrop"} type="button" aria-label={t("Close navigation")} onClick={() => setNavigationOpen(false)} />
-      <aside className={navigationOpen ? "sidebar sidebar-open" : "sidebar"}>
+      {navigationOpen && <button className="sidebar-backdrop sidebar-backdrop-visible" type="button" tabIndex={-1} aria-label={t("Close navigation")} onClick={() => {
+        setNavigationOpen(false);
+        navigationTrigger.current?.focus();
+      }} />}
+      <aside ref={navigationPanel} id="workspace-sidebar" className={navigationOpen ? "sidebar sidebar-open" : "sidebar"}
+        role={navigationOpen ? "dialog" : undefined} aria-modal={navigationOpen || undefined} aria-label={t("Workspace")}>
         <Link to="/" className="brand" activeOptions={{ exact: true }}>
-          <span className="brand-mark">NW</span>
-          <span><strong>Novel World</strong><small>Harness</small></span>
+          <span className="brand-mark"><Icon name="book" size={22} /></span>
+          <span><strong>Novel World</strong><small>{t("A world beyond the page")}</small></span>
         </Link>
-        <nav aria-label={t("Workspace")} className="primary-nav" onClick={(event) => { if ((event.target as HTMLElement).closest("a")) setNavigationOpen(false); }}>
-          <NavSection label={t("Workspace")}><Link to="/" activeOptions={{ exact: true }} className="nav-link">{t("Overview")}</Link></NavSection>
+        <nav aria-label={t("Workspace")} className="primary-nav">
+          <NavSection label={t("Workspace")}><Link to="/" activeOptions={{ exact: true }} className="nav-link"><Icon name="grid" />{t("Overview")}</Link></NavSection>
           <NavSection label={t("Story worlds")} count={data?.catalog.novels.length}>
-            <Link to="/novels/new" className="nav-link nav-link-new"><span>＋ {t("Register novel")}</span></Link>
+            <Link to="/novels/new" className="nav-link nav-link-new"><Icon name="plus" size={17} /><span>{t("Register novel")}</span></Link>
             <StoryWorldNavigation
               novels={data?.catalog.novels ?? []}
               instances={data?.catalog.instances ?? []}
@@ -220,21 +262,22 @@ function RootLayout() {
           </NavSection>
         </nav>
         <div className="sidebar-footer">
-          <Link to="/traces" className="nav-link">{t("Trace ledger")}</Link>
-          <Link to="/settings/models" className="nav-link">{t("Model catalog")}</Link>
-          <div className={`connection connection-${connection}`}><span />{t(connection)}</div>
+          <Link to="/traces" className="nav-link"><Icon name="activity" />{t("Trace ledger")}</Link>
+          <Link to="/settings/models" className="nav-link"><Icon name="sliders" />{t("Model catalog")}</Link>
+          <div className="sidebar-workspace"><span className="workspace-avatar">NW</span><div><strong>{t("Local workspace")}</strong><div className={`connection connection-${connection}`}><span />{t(connection)}</div></div><span className="local-badge">LOCAL</span></div>
         </div>
       </aside>
-      <main className="workspace" id="main-content" tabIndex={-1}>
+      <main ref={mainContent} className="workspace" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <div className="topbar-leading">
-            <button className="mobile-nav-trigger" type="button" aria-label={t("Open navigation")} aria-expanded={navigationOpen} onClick={() => setNavigationOpen(true)}><span /><span /><span /></button>
+            <button ref={navigationTrigger} className="mobile-nav-trigger" type="button" aria-label={t("Open navigation")} aria-haspopup="dialog" aria-controls="workspace-sidebar" aria-expanded={navigationOpen} onClick={() => setNavigationOpen(true)}><span /><span /><span /></button>
             <div><span className="eyebrow">{t("Local workspace")}</span><strong>{data?.workspace.displayName ?? "Loading…"}</strong></div>
           </div>
-          <div className="topbar-actions"><div className="topbar-meta"><span>API {data?.apiVersion ?? "v1"}</span><span>Pi-backed</span><span>{t("No app login")}</span></div><LanguageSwitcher /></div>
+          <div className="topbar-actions"><WorkspaceSearch data={data} /><LanguageSwitcher /></div>
         </header>
         {activeOperations.length > 0 && <OperationTray operations={activeOperations} csrfToken={data?.csrfToken ?? ""} />}
         <section className="page">
+          <NovelWorkspaceNav />
           {query.isPending ? <LoadingState /> : query.isError ? <ErrorState error={query.error} retry={() => void query.refetch()} /> : <Outlet />}
         </section>
       </main>
@@ -440,40 +483,74 @@ function routeResourceId(pathname: string, resource: "novels" | "instances" | "p
 }
 
 function DashboardPage() {
-  const { t } = useI18n();
+  const { t, localeTag } = useI18n();
   const { data } = useBootstrap();
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "worlds" | "sources">("all");
+  const [sort, setSort] = useState("recent");
   if (!data) return null;
   const configuredProviders = data.modelCatalog.providers.filter((provider) => provider.configured).length;
+  const novels = data.catalog.novels.filter((novel) => novel.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
+    && (filter === "all" || (filter === "worlds" ? novel.instanceCount > 0 : novel.instanceCount === 0)))
+    .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title, localeTag) : b.updatedAt.localeCompare(a.updatedAt));
+  const recentSessions = data.catalog.playSessions.filter((session) => session.status === "active" || session.status === "idle")
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 3);
+  const recentInstances = [...data.catalog.instances].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 4);
   return (
-    <>
-      <PageHeading eyebrow={t("Executable novel workspace")} title={t("World control room")} description={t("Inspect compiled worlds, enter a character, and follow every Pi-backed play operation from one local interface.")} />
-      <div className="metric-grid">
-        <Metric label={t("Novels")} value={data.catalog.novels.length} note={t("registered sources")} />
-        <Metric label={t("Instances")} value={data.catalog.instances.length} note={t("committed branches")} />
-        <Metric label={t("Play sessions")} value={data.catalog.playSessions.length} note={t("recoverable contexts")} />
-        <Metric label={t("Providers")} value={configuredProviders} note={t("{count} known models", { count: data.modelCatalog.models.length })} />
+    <div className="dashboard">
+      <header className="dashboard-heading">
+        <div><span className="eyebrow">{t("Executable novel workspace")}</span><h1>{t("World control room")}</h1><p>{t("Build a world from the page. Make the next move your own.")}</p></div>
+        <Link to="/novels/new" className="primary-button"><Icon name="plus" size={18} />{t("Register novel")}</Link>
+      </header>
+      <div className="workspace-stats" aria-label={t("Workspace overview")}>
+        <div><span className="stat-icon stat-indigo"><Icon name="book" size={20} /></span><span><strong>{data.catalog.novels.length}</strong><small>{t("Novels")}</small></span></div>
+        <div><span className="stat-icon stat-teal"><Icon name="branch" size={20} /></span><span><strong>{data.catalog.instances.length}</strong><small>{t("World instances")}</small></span></div>
+        <div><span className="stat-icon stat-plum"><Icon name="play" size={20} /></span><span><strong>{data.catalog.playSessions.filter((session) => session.status === "active" || session.status === "idle").length}</strong><small>{t("Ongoing stories")}</small></span></div>
+        <Link to="/settings/models"><span className="stat-icon stat-slate"><Icon name="sliders" size={20} /></span><span><strong>{configuredProviders}</strong><small>{t("Connected providers")}</small></span><Icon name="chevron" size={14} /></Link>
       </div>
-      <div className="content-grid">
-        <Panel title={t("Recent instances")} action={<span className="panel-tag">{t("world truth")}</span>}>
-          {data.catalog.instances.length ? data.catalog.instances.slice(0, 5).map((instance) => <InstanceRow key={instance.branchId} instance={instance} />) : <EmptyState title={t("No playable world yet")} body={t("Prepare a registered novel to create its first committed branch.")} />}
-        </Panel>
-        <Panel title={t("Delivery map")} action={<span className="panel-tag">MVP</span>}>
-          <div className="feature-list">
-            {data.features.map((feature) => (
-              <div className="feature-row" key={feature.id}>
-                <span className={`status-dot status-${feature.status}`} /><strong>{feature.id.replace("-", " ")}</strong><span>{t("Phase {phase}", { phase: feature.phase })}</span><small>{t(feature.status)}</small>
-              </div>
-            ))}
+
+      {recentSessions.length > 0 && <section className="resume-section" aria-labelledby="resume-title">
+        <div className="section-title"><h2 id="resume-title">{t("Continue your story")}</h2><span>{t("Pick up where you left off")}</span></div>
+        <div className="resume-grid">{recentSessions.map((session) => {
+          const instance = data.catalog.instances.find((item) => item.branchId === session.branchId);
+          return <Link key={session.id} to="/play/$sessionId" params={{ sessionId: session.id }} className="resume-card">
+            <span className="character-avatar">{Array.from(session.actorName ?? session.actorId)[0]}</span>
+            <span className="resume-copy"><strong>{session.actorName ?? session.actorId}</strong><small>{instance?.sourceTitle ?? session.title}</small><span>{t("Step")} {instance?.logicalStep ?? "—"} · {formatDate(session.updatedAt, localeTag)}</span></span>
+            <span className="resume-play"><Icon name="play" size={16} /></span>
+          </Link>;
+        })}</div>
+      </section>}
+
+      <div className="dashboard-columns">
+        <section className="library-section" aria-labelledby="library-title">
+          <div className="section-title"><h2 id="library-title">{t("Your library")} <span className="count-badge">{data.catalog.novels.length}</span></h2><label className="library-sort"><span className="sr-only">{t("Sort novels")}</span><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="recent">{t("Recently updated")}</option><option value="title">{t("Title A–Z")}</option></select></label></div>
+          <div className="library-toolbar">
+            <div className="segmented-control" role="group" aria-label={t("Filter novels")}>{([
+              ["all", "All novels"], ["worlds", "With worlds"], ["sources", "Sources only"],
+            ] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(label)}</button>)}</div>
+            <label className="library-search"><Icon name="search" size={16} /><input aria-label={t("Search library")} placeholder={t("Find a novel…")} value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button type="button" onClick={() => setSearch("")} aria-label={t("Clear search")}><Icon name="close" size={14} /></button>}</label>
           </div>
-        </Panel>
+          {novels.length > 0 ? <div className="library-grid">{novels.map((novel) => <NovelCard key={novel.id} novel={novel} />)}</div>
+            : data.catalog.novels.length > 0 ? <div className="library-empty"><Icon name="search" size={30} /><h3>{t("No novels match these filters")}</h3><p>{t("Try another title or show all your novels.")}</p><button type="button" className="secondary-button" onClick={() => { setSearch(""); setFilter("all"); }}>{t("Reset filters")}</button></div>
+              : <div className="library-empty library-first"><span className="empty-book"><Icon name="book" size={34} /></span><span className="eyebrow">{t("Every world starts with a story")}</span><h3>{t("Bring your first novel to life")}</h3><p>{t("Import your source text, review its world, and step into a character’s story.")}</p><Link to="/novels/new" className="primary-button"><Icon name="upload" size={16} />{t("Register the first novel")}</Link><small>{t("UTF-8 text · Stored in your local workspace")}</small></div>}
+          <p className="library-footnote"><Icon name="book" size={13} />{t("Source evidence stays immutable. Every story takes its own branch.")}</p>
+        </section>
+
+        <aside className="dashboard-aside">
+          <section className="workflow-guide">
+            <span className="eyebrow">{t("The creative process")}</span><h2>{t("From novel to world")}</h2><p>{t("One source. Many possible stories.")}</p>
+            <ol>
+              <li><span className="workflow-node"><Icon name="upload" size={17} /></span><div><strong>{t("Import source text")}</strong><p>{t("Start with the novel’s original words.")}</p></div></li>
+              <li><span className="workflow-node"><Icon name="layers" size={17} /></span><div><strong>{t("Compile & review")}</strong><p>{t("Ground the world in evidence and check it for play.")}</p></div></li>
+              <li><span className="workflow-node"><Icon name="branch" size={17} /></span><div><strong>{t("Enter the story")}</strong><p>{t("Choose a character. Take a new direction.")}</p></div></li>
+            </ol>
+            <div className="workflow-note"><Icon name="check" size={15} /><span>{t("Play opens after world certification.")}</span></div>
+          </section>
+          {recentInstances.length > 0 && <section className="recent-worlds"><div className="section-title"><h2>{t("Recent instances")}</h2><Icon name="branch" size={16} /></div>{recentInstances.map((instance) => <Link key={instance.branchId} to="/instances/$branchId" params={{ branchId: instance.branchId }}><span className="world-dot" /><span><strong>{instance.name}</strong><small>{instance.sourceTitle ?? instance.branchId}</small></span><span>{t("Step")} {instance.logicalStep}</span></Link>)}</section>}
+          {!configuredProviders && <Link to="/settings/models" className="provider-setup"><Icon name="sliders" size={19} /><div><strong>{t("Connect a model provider")}</strong><p>{t("Set up a model for compilation and narration.")}</p></div><Icon name="arrow" size={16} /></Link>}
+        </aside>
       </div>
-      <Panel title={t("Registered novels")} action={<span className="panel-tag">{t("source evidence")}</span>}>
-        <div className="card-grid">
-          {data.catalog.novels.map((novel) => <NovelCard key={novel.id} novel={novel} />)}
-          {!data.catalog.novels.length && <Link to="/novels/new" className="empty-action-card"><span>＋</span><strong>{t("Register the first novel")}</strong><p>{t("Upload UTF-8 text or paste source evidence directly in the browser.")}</p></Link>}
-        </div>
-      </Panel>
-    </>
+    </div>
   );
 }
 
@@ -1287,11 +1364,14 @@ function OperationResult({ result }: { result: ReturnType<typeof playOperationRe
 function ModelsPage() {
   const { t } = useI18n();
   const { data } = useBootstrap();
+  const [modelSearch, setModelSearch] = useState("");
+  const [modelLimit, setModelLimit] = useState(50);
   const queryClient = useQueryClient();
   const profiles = useQuery({ queryKey: ["model-profiles"], queryFn: ({ signal }) => fetchModelProfiles(signal) });
   const operations = useQuery({ queryKey: ["operations"], queryFn: ({ signal }) => fetchOperations(undefined, signal), refetchInterval: 1_000 });
   if (!data) return null;
   const loginOperations = (operations.data ?? []).filter((operation) => operation.kind === "provider-login");
+  const filteredModels = data.modelCatalog.models.filter((model) => `${model.name} ${model.id} ${model.providerId}`.toLocaleLowerCase().includes(modelSearch.trim().toLocaleLowerCase()));
   return (
     <>
       <PageHeading eyebrow={t("Pi runtime")} title={t("Models & credentials")} description={t("Provider login stays inside Pi. API keys are write-only; this page receives status metadata, prompts, and redacted progress only.")} />
@@ -1310,13 +1390,16 @@ function ModelsPage() {
         {profiles.isPending ? <InlineLoading label={t("Reading model routes…")} /> : profiles.isError ? <InlineError error={profiles.error} /> : <><div className="profile-config-path"><span>{t("Configuration")}</span><code>{profiles.data.configPath}</code></div><div className="model-profile-grid">{profiles.data.roles.map((profile) => <ModelProfileEditor key={profile.role} profile={profile} models={data.modelCatalog.models} csrfToken={data.csrfToken} onSaved={(next) => queryClient.setQueryData(["model-profiles"], next)} />)}</div></>}
       </Panel>
       <Panel title={t("Known models")} action={<span className="panel-tag">{data.modelCatalog.models.length}</span>}>
+        <div className="model-catalog-toolbar"><label className="library-search"><Icon name="search" size={16} /><input aria-label={t("Search models")} placeholder={t("Find a model or provider…")} value={modelSearch} onChange={(event) => { setModelSearch(event.target.value); setModelLimit(50); }} /></label><span role="status">{t("Showing {shown} of {total} models", { shown: Math.min(modelLimit, filteredModels.length), total: filteredModels.length })}</span></div>
         <div className="model-table" role="table" aria-label={t("Known Pi models")}>
-          {data.modelCatalog.models.slice(0, 100).map((model) => (
+          {filteredModels.slice(0, modelLimit).map((model) => (
             <div className="model-row" role="row" key={`${model.providerId}/${model.id}`}>
               <span><strong>{model.name}</strong><small>{model.providerId}/{model.id}</small></span><span>{model.api}</span><span>{formatNumber(model.contextWindow)} {t("ctx")}</span><span>{model.reasoning ? t("reasoning") : t("standard")}</span>
             </div>
           ))}
         </div>
+        {!filteredModels.length && <EmptyState title={t("No models match")} body={t("Try another model name or provider.")} />}
+        {filteredModels.length > modelLimit && <button type="button" className="secondary-button" onClick={() => setModelLimit((value) => value + 50)}>{t("Show more models")}</button>}
       </Panel>
     </>
   );
@@ -1426,7 +1509,14 @@ function Panel({ title, action, children }: { title: string; action?: ReactNode;
 }
 function NovelCard({ novel }: { novel: NovelSummary }) {
   const { t, localeTag } = useI18n();
-  return <Link to="/novels/$sourceId" params={{ sourceId: novel.id }} className="novel-card"><span className="book-spine" /><div><span className="eyebrow">{t("{count} instances", { count: novel.instanceCount })}</span><h3>{novel.title}</h3><p>{novel.sourcePath}</p><small>{formatBytes(novel.bytes)} · {formatDate(novel.updatedAt, localeTag)}</small></div></Link>;
+  const cover = Array.from(novel.id).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 5;
+  return <article className={`library-novel cover-${cover}`}>
+    <Link to="/novels/$sourceId" params={{ sourceId: novel.id }} className="library-novel-main">
+      <div className="novel-cover" aria-hidden="true"><Icon name="book" size={16} /><span>{Array.from(novel.title.replace(/\.[^.]+$/, ""))[0]}</span><i /><small>NOVEL WORLD</small></div>
+      <div className="novel-card-copy"><span className="novel-source-label">{t("Source evidence")}</span><h3>{novel.title}</h3><small>{formatBytes(novel.bytes)} · {formatDate(novel.updatedAt, localeTag)}</small><span className={novel.instanceCount ? "novel-world-count" : "novel-world-count no-worlds"}><Icon name="branch" size={13} />{t("{count} instances", { count: novel.instanceCount })}</span></div>
+    </Link>
+    <footer><Link to="/novels/$sourceId/compile" params={{ sourceId: novel.id }}><Icon name="layers" size={14} />{t("Compile & review")}</Link><Link to="/novels/$sourceId" params={{ sourceId: novel.id }}>{t("Open novel")}<Icon name="arrow" size={14} /></Link></footer>
+  </article>;
 }
 function InstanceRow({ instance }: { instance: InstanceSummary }) {
   const { t } = useI18n();

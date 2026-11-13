@@ -5,6 +5,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./router";
 import { I18nProvider } from "./i18n";
 import "./styles.css";
+import "./workspace.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

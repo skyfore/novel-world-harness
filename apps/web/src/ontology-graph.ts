@@ -45,29 +45,29 @@ export type RenderableGraph = {
 };
 
 export const statusColors: Record<OntologyStatus, string> = {
-  canonical: "#d6ff72",
-  active: "#75e6a4",
-  inactive: "#697169",
-  "branch-committed": "#75bff2",
-  possibility: "#f4bf63",
-  proposal: "#cc9ee7",
-  contested: "#ff9f6e",
-  rejected: "#ff756f",
+  canonical: "#5064bb",
+  active: "#287d60",
+  inactive: "#7b879c",
+  "branch-committed": "#287d9a",
+  possibility: "#a77820",
+  proposal: "#8b5da8",
+  contested: "#b46d39",
+  rejected: "#bc5263",
 };
 
 export const familyVisuals: Record<NodeFamily, { color: string; label: string }> = {
-  character: { color: "#ff9c7a", label: "Characters" },
-  place: { color: "#55c7e8", label: "Places" },
-  collective: { color: "#9ca8ff", label: "Groups" },
-  artifact: { color: "#e7ba61", label: "Artifacts" },
-  relationship: { color: "#ef83b6", label: "Relationships" },
-  event: { color: "#bc91ff", label: "Events" },
-  knowledge: { color: "#72d9c2", label: "Knowledge" },
-  model: { color: "#8fb8ff", label: "Character model" },
-  rule: { color: "#a8d66d", label: "Rules" },
-  possibility: { color: "#f2a85d", label: "Possibilities" },
-  provenance: { color: "#c59ad9", label: "Evidence & compile" },
-  other: { color: "#9aa39c", label: "Other" },
+  character: { color: "#b27355", label: "Characters" },
+  place: { color: "#36869a", label: "Places" },
+  collective: { color: "#677bb3", label: "Groups" },
+  artifact: { color: "#a0803a", label: "Artifacts" },
+  relationship: { color: "#a66286", label: "Relationships" },
+  event: { color: "#8b6bb5", label: "Events" },
+  knowledge: { color: "#408b7d", label: "Knowledge" },
+  model: { color: "#5e80b5", label: "Character model" },
+  rule: { color: "#6b8b48", label: "Rules" },
+  possibility: { color: "#ae7c3e", label: "Possibilities" },
+  provenance: { color: "#8b6fa0", label: "Evidence & compile" },
+  other: { color: "#778499", label: "Other" },
 };
 
 /**

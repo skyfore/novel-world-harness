@@ -139,6 +139,7 @@ export async function loadCompilerArtifactRecords(
   workspaceRoot: string,
   sourceId: string,
   proposalHistoryStatus?: ProposalHistoryStatus,
+  recoveringGoal?: { id: string; predecessorHash: string; outputHash: string },
 ): Promise<ArtifactRecord[]> {
   const canon = new CanonicalModelStore(workspaceRoot);
   const actors = new ActorModelStore(workspaceRoot);
@@ -243,12 +244,17 @@ export async function loadCompilerArtifactRecords(
   await Promise.all(records.map(async (record) => {
     const artifactId = record.kind === "initial-world" ? "initial-world" : record.logicalId;
     const binding = await exactEvidence.bindingForArtifact(record.kind, artifactId);
-    if (binding && binding.artifactHash !== contentHash(record.payload)) {
+    if (!binding) return;
+    const artifactHash = contentHash(record.payload);
+    // A receipt-backed goal commit writes the goal ref before the exact evidence ref.
+    const interruptedGoal = record.kind === "character-goal" && recoveringGoal?.id === record.logicalId
+      && recoveringGoal.outputHash === artifactHash && recoveringGoal.predecessorHash === binding.artifactHash;
+    if (binding.artifactHash !== artifactHash && !interruptedGoal) {
       throw new Error(
         `Canonical ${record.kind} ${record.logicalId} has a stale exact-evidence binding for another semantic revision.`,
       );
     }
-    record.evidenceAssertions = binding?.assertions ?? [];
+    record.evidenceAssertions = binding.assertions;
     const exactSourceIds = evidenceAssertionSourceIds(record.evidenceAssertions);
     if (exactSourceIds.length && (exactSourceIds.length !== 1 || exactSourceIds[0] !== sourceId)) {
       throw new Error(

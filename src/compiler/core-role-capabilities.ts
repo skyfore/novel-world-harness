@@ -3,7 +3,7 @@ import { characterModelSchema, type CharacterModel } from "../world/actors.js";
 import { CHARACTER_ONTOLOGY_VERSION, characterOntologyEvidence, resolveCharacterOntology,
   validateCharacterOntologyReferences, validateCharacterOntologyEvidenceAssertions, type DevelopmentEpisode } from "../world/character-ontology.js";
 import { compareStoryTime } from "../world/time.js";
-import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, type EvidenceRef } from "../world/model.js";
+import { eventAvailableToActor, WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, type EvidenceRef } from "../world/model.js";
 import { baseStructuralUnits } from "./structure.js";
 import { majorRoleCandidates, reviewedRoleDevelopmentRequirements, validateRoleRoster, type RoleRoster, type RoleDevelopmentExpectation } from "./role-roster.js";
 import { assessSemanticRequirements, type RequirementObservation } from "./semantic-requirements.js";
@@ -139,8 +139,8 @@ function probeDevelopmentTransition(bundle: PreparedNovelBundle, model: Characte
   const addAncestors = (id: string) => { for (const parent of events.get(id)?.causalParents ?? []) if (!past.has(parent) && !episode.triggerEventIds.includes(parent)) { past.add(parent); addAncestors(parent); } };
   episode.triggerEventIds.forEach(addAncestors);
   const experiencedByActor = (world: Set<string>) => new Set([...world].filter(id => {
-    const event = events.get(id), presence = event?.participantPresence?.find(item => item.entityId === model.actorId)?.mode;
-    return event?.participants.includes(model.actorId) && presence !== "mentioned" && presence !== "represented";
+    const event = events.get(id);
+    return event && eventAvailableToActor(event, model.actorId);
   }));
   const resolve = (world: Set<string>, experienced = experiencedByActor(world), storyTime = episode.startsAt) => resolveCharacterOntology(model, { realizedCanonicalEventIds: world,
     experiencedCanonicalEventIds: experienced, storyTime }).dispositions;

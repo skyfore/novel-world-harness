@@ -107,6 +107,7 @@ it("keeps photos, unknown/paused sessions, other actors and same-event starts fr
   const f = await fixture();
   for (const proposal of [
     { ...f.speech, participantPresence: [{ entityId: "voice", mode: "represented" as const }] },
+    { ...f.speech, participantPresence: [{ entityId: "voice", mode: "unresolved" as const }] },
     { ...f.speech, participantPresence: [{ entityId: "voice", mode: "physical" as const }] },
     { ...f.speech, actorId: "photo", participants: [...f.speech.participants, "photo"], spokenUtterances: undefined, proposedDelta: { version: 1 as const, operations: [{ op: "set" as const, entityId: "crate", field: "artifact.owner", value: "peer" }] } },
     { ...f.speech, spokenUtterances: [{ ...f.speech.spokenUtterances![0]!, channelBinding: undefined }] },
@@ -125,6 +126,18 @@ it("keeps photos, unknown/paused sessions, other actors and same-event starts fr
   const denied = await f.engine.commitProposal({ ...f.speech, expectedParentCommit: paused.newHead });
   expect(denied.report.errors.some(error => error.code === "AGENCY_CHANNEL_UNAVAILABLE")).toBe(true);
   expect(denied.newHead).toBe(paused.newHead);
+});
+
+it("requires live presence even for an actor changing only their own plan", async () => {
+  const f = await fixture();
+  const intent: EventProposal = { ...f.base, proposalId: "choose", expectedParentCommit: f.started.newHead,
+    actorId: "peer", source: "player", participants: ["peer"], participantPresence: [{ entityId: "peer", mode: "unresolved" }],
+    proposedDelta: { version: 1, operations: [{ op: "set", entityId: "peer", field: "character.plan", value: "stay" }] } };
+  const denied = await f.engine.commitProposal(intent);
+  expect(denied.report.errors).toContainEqual(expect.objectContaining({ code: "AGENCY_NOT_LIVE" }));
+  expect(denied.newHead).toBe(f.started.newHead);
+  const allowed = await f.engine.commitProposal({ ...intent, participantPresence: [{ entityId: "peer", mode: "physical" }] });
+  expect(allowed.report.errors).toEqual([]);
 });
 
 it("projects only visible running channels and maps their handles at the actor boundary", async () => {
@@ -322,7 +335,7 @@ it.each(scenes.flatMap(scene => [false, true].map(later => ({ ...scene, later, t
     const binding = (await evidenceStore.bindingForArtifact("event-execution", "later-entry"))!;
     await evidenceStore.replaceForArtifact("event-execution", "later-entry", binding.artifactHash, []);
     expect((await auditCompiler(f.root, { sourceId: f.source.source.id })).evidence.errors.some(item => item.code === "ENTRY_AGENCY_EVIDENCE_REQUIRED")).toBe(true);
-    await expect(cache.candidateSnapshot(f.source.source)).rejects.toThrow("Remote entry exact evidence");
+    await expect(cache.candidateSnapshot(f.source.source)).rejects.toThrow("Entry/body exact evidence");
     await evidenceStore.replaceForArtifact("event-execution", "later-entry", binding.artifactHash, binding.assertions);
   }
   const initialBinding = (await evidenceStore.bindingForArtifact("initial-world", "initial-world"))!;

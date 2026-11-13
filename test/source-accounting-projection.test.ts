@@ -1,3 +1,5 @@
+import { compileNovelCommand } from "../src/commands/compile-novel.js";
+import { NovelCompilationRunStore } from "../src/workflow/novel-compilation.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +10,7 @@ import { validateFrozenAccounting } from "../src/compiler/certification.js";
 import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { SegmentStore } from "../src/compiler/segments.js";
-import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
+import { SourceAccountingStore, projectSourceAccountingCurrentCoverage } from "../src/compiler/source-accounting.js";
 import { baseStructuralUnits, ensureSourceStructure } from "../src/compiler/structure.js";
 import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
 import { canonicalJson, contentHash } from "../src/world/canonical.js";
@@ -25,6 +27,53 @@ async function temporaryRoot(prefix: string) {
   roots.push(root);
   return root;
 }
+
+it.each(["unresolved", "intentionally-deferred"] as const)("retains an explicit %s capability gap when new evidence overlaps its unit", async status => {
+  const root = await temporaryRoot("nwh-accounting-retained-gap-");
+  const cacheRoot = await temporaryRoot("nwh-accounting-retained-gap-cache-");
+  const text = "Hero waits for a signal.\n";
+  const fixture = await createEvidenceFixture(root, text);
+  const structure = await ensureSourceStructure(root, fixture.source);
+  const unit = baseStructuralUnits(structure).find(u => u.kind !== "non-scene")!;
+  const segments = await new SegmentStore(root).list(fixture.source.id);
+  const store = new SourceAccountingStore(root);
+  const decision = { unitId: unit.id, status, reason: "The identity annotation does not explain the required signal mechanism." };
+  const review = { source: fixture.source, structure, batchId: "original-review",
+    reviews: segments.map(segment => ({ segment, disposition: "proposed" as const, summary: decision.reason })), unitDecisions: [decision] };
+  const retained = await store.recordBatchReview(review);
+  const canonical = new CanonicalModelStore(root);
+  await canonical.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") });
+  await new InitialWorldStore(root).put({ version: 1, evidence: fixture.evidence("Hero waits for a signal."),
+    delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] } });
+  const anchor = textAnchorForByteRange(fixture.source.id, Buffer.from(text), 0, 4);
+  const assertion = { version: 1 as const, id: "hero-name", target: { artifactKind: "entity", artifactId: "hero", jsonPointer: "/canonicalName" },
+    anchors: [anchor], relation: "supports" as const, strength: "explicit" as const,
+    derivation: { runId: "later-identity-review", worker: "test", ontologyVersion: "evidence-v1" as const } };
+  await new EvidenceAssertionStore(root).replaceForArtifact("entity", "hero", contentHash(await canonical.getEntity("hero")), [assertion]);
+  const batches = await prepareCompilerBatches(root, fixture.source);
+  await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map(batch => batch.id));
+  const bundle = await new PreparedNovelCache(root, cacheRoot).candidateSnapshot(fixture.source);
+  const current = bundle.compilerSnapshot.accounting!.records.find(r => r.unitId === unit.id)!;
+  expect(current).toMatchObject({ status, reason: decision.reason, evidenceAssertionIds: [assertion.id] });
+  expect(await store.read(fixture.source.id)).toEqual(retained);
+  expect(validateFrozenAccounting(bundle)).toContainEqual(expect.objectContaining({ code: "SOURCE_UNIT_UNACCOUNTED", path: unit.id }));
+  // A previously frozen projection may contain valid overlap while having
+  // hidden its negative review. It still cannot pass the current validator.
+  const suppressed = structuredClone(bundle);
+  suppressed.compilerSnapshot.accounting!.records.find(r => r.unitId === unit.id)!.status = "represented";
+  expect(validateFrozenAccounting(suppressed)).toContainEqual(expect.objectContaining({ code: "SOURCE_ACCOUNTING_BLOCKER_SUPPRESSED", path: unit.id }));
+  // The same invariant applies to new batch receipts and to annotation-only
+  // coverage; it is not specific to the snapshot or the type of evidence.
+  const sameBatch = await store.recordBatchReview({ ...review, annotations: [{ id: "partial-mention", anchors: [anchor] }] });
+  expect(sameBatch.records.find(r => r.unitId === unit.id)).toMatchObject({ status, annotationIds: ["partial-mention"] });
+  // An explicit later disposition remains effective; retained history is not
+  // an immutable blocker once a source review actually resolves it.
+  const revised = await store.recordBatchReview({ ...review, batchId: "resolved-review", unitDecisions: [{ unitId: unit.id,
+    status: "duplicate-description", reason: "Reviewed against the completed signal semantics; this unit adds no independent missing capability." }] });
+  const projected = projectSourceAccountingCurrentCoverage(revised, structure, Buffer.from(text), [assertion], []);
+  expect(projected.records.find(r => r.unitId === unit.id)?.status).toBe("represented");
+  expect(projected.batchReviews.some(r => r.unitDecisions.some(d => d.status === status))).toBe(true);
+});
 
 it("projects prepared accounting from active evidence after artifact assertion supersession", async () => {
   const root = await temporaryRoot("nwh-accounting-active-projection-");
@@ -117,6 +166,10 @@ it("projects prepared accounting from active evidence after artifact assertion s
   expect(projected.updatedAt).toBe(historicalManifest.updatedAt);
   expect((await accounting.read(fixture.source.id))!.records.find(record => record.unitId === uncoveredUnit.id))
     .toMatchObject({ status: "represented", evidenceAssertionIds: [historicalAssertion.id] });
+  await expect(compileNovelCommand({ root, sourceId: fixture.source.id, phase: "closure", onProgress() {} })).rejects.toThrow("COMPILATION_CLOSURE_BLOCKED");
+  const closure = (await new NovelCompilationRunStore(root).read(fixture.source.id))!.closure!;
+  expect(closure.gates.find(g => g.dimension === "accounting")).toMatchObject({ state: "blocked", refs: [uncoveredUnit.id] });
+  expect(closure.accounting).toMatchObject({ blocking: 1, represented: 1 });
   const issues = validateFrozenAccounting(bundle);
   expect(issues.some(issue => issue.code === "SOURCE_UNIT_UNACCOUNTED" && issue.path === uncoveredUnit.id)).toBe(true);
   expect(issues.some(issue => issue.code === "SOURCE_REPRESENTATION_REFERENCE_INVALID")).toBe(false);

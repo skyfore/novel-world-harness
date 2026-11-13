@@ -322,18 +322,40 @@ export class TraceStore {
   async peekRuns(filter: TraceRunFilter = {}): Promise<TraceRunManifest[]> {
     const limit = filter.limit ?? 200;
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("Trace run limit must be an integer between 1 and 1000.");
+    return this.readIndexedManifests((await this.matchingRunEntries(filter)).slice(0, limit));
+  }
+
+  /** Complete read-only history for provenance, uniqueness and recovery gates.
+   * Recent-run discovery must not be used to prove absence of an invocation. */
+  async peekAllRuns(filter: Omit<TraceRunFilter, "limit"> = {}): Promise<TraceRunManifest[]> {
+    return this.readIndexedManifests(await this.matchingRunEntries(filter));
+  }
+
+  /** Exact operation lookup over the complete source history, newest first. */
+  async peekRunsByOperation(sourceId: string, operationId: string): Promise<TraceRunManifest[]> {
+    return (await this.peekAllRuns({ sourceId })).filter(run => run.sourceId === sourceId && run.operationId === operationId);
+  }
+
+  private async matchingRunEntries(filter: Omit<TraceRunFilter, "limit">) {
     let index: z.infer<typeof runIndexSchema>;
     try { index = await this.readIndex(); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
-    const selected = index.runs
+    return index.runs
       .filter((entry) => !filter.sourceId || entry.sourceId === filter.sourceId)
       .filter((entry) => !filter.playSessionId || entry.playSessionId === filter.playSessionId)
       .filter((entry) => !filter.branchId || entry.branchId === filter.branchId)
       .filter((entry) => !filter.kind || entry.kind === filter.kind)
       .filter((entry) => !filter.status || entry.status === filter.status)
-      .sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt) || right.id.localeCompare(left.id))
-      .slice(0, limit);
-    return Promise.all(selected.map(async (entry) => structuredClone(await this.readManifestAt(entry.relativePath))));
+      .sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt) || right.id.localeCompare(left.id));
+  }
+
+  private async readIndexedManifests(entries: z.infer<typeof runIndexEntrySchema>[]): Promise<TraceRunManifest[]> {
+    const manifests: TraceRunManifest[] = [];
+    for (let offset = 0; offset < entries.length; offset += 32) {
+      manifests.push(...await Promise.all(entries.slice(offset, offset + 32).map(async entry =>
+        structuredClone(await this.readManifestAt(entry.relativePath)))));
+    }
+    return manifests;
   }
 
   async countRuns(filter: Omit<TraceRunFilter, "limit"> = {}): Promise<number> {

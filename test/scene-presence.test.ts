@@ -4,12 +4,33 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
-import { projectActorScene } from "../src/world/scene.js";
+import { experiencedCanonicalEvents, projectActorScene, type CommittedHistoryEntry } from "../src/world/scene.js";
+import { characterModelSchema, resolveCharacterModel } from "../src/world/actors.js";
+import type { ParticipantPresenceMode } from "../src/world/model.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
 describe("participant presence", () => {
+  it.each(["unresolved", "mentioned", "represented", "physical", "remote", "dream", "memory"] as ParticipantPresenceMode[])(
+    "keeps %s presence from granting unsupported experience or development", mode => {
+      const event = { participants: ["visitor"], participantPresence: [{ entityId: "visitor", mode }], realizesCanonicalEventIds: ["encounter"] };
+      const history = [{ event }] as unknown as CommittedHistoryEntry[];
+      const expected = ["physical", "remote", "dream", "memory"].includes(mode);
+      const evidence = [{ span: { sourceId: "source", startByte: 0, endByte: 10, startLine: 1, endLine: 1, quoteHash: "a".repeat(64) }, strength: "explicit" as const }];
+      for (const catalog of [undefined, new Map([["encounter", event]])]) {
+        const experienced = experiencedCanonicalEvents(history, "visitor", catalog);
+        expect(experienced.has("encounter")).toBe(expected);
+        const model = characterModelSchema.parse({ actorId: "visitor", traits: {}, decisionBiases: {}, evidence,
+          developmentPhases: [{ id: "after-encounter", label: "Changed by the encounter", evidence,
+            activation: { preconditions: [], afterCanonicalEventIds: [], afterExperiencedCanonicalEventIds: ["encounter"], requiresKnowledge: [] },
+            traitModifiers: {}, decisionBiasModifiers: {} }] });
+        const resolved = resolveCharacterModel(model, { state: { atCommit: "head", logicalTime: { step: 1 }, values: {}, activeRuleIds: [] }, knownClaimIds: new Set(),
+          realizedCanonicalEventIds: new Set(["encounter"]), experiencedCanonicalEventIds: experienced });
+        expect(resolved.activePhaseIds).toEqual(expected ? ["after-encounter"] : []);
+      }
+    });
+
   it("uses opening physical presence for co-location without narrating a generic Genesis record", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-opening-presence-"));
     roots.push(root);

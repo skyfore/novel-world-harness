@@ -1,18 +1,20 @@
 import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
 import { agencyPresenceIssues, projectAgencyChannels } from "./agency-profile.js";
 import { applyProcessDelta, emptyProcessState } from "./process-effects.js";
+import { bodilyStateEvidenceIssues } from "./bodily-state.js";
 import type { ActionSchema } from "./action-ontology.js";
 import type { ProcessTemplate } from "./process-ontology.js";
 import type { CanonicalEvent, EventParticipation, Entity, EntryProjectionSeed, EvidenceAssertion, KnowledgeDelta, ParticipantPresence, ValidationIssue } from "./model.js";
 
 export type EntryAgencyCatalog = { entities: ReadonlyMap<string, Entity>; processTemplates?: ReadonlyMap<string, ProcessTemplate>; actionSchemas?: ReadonlyMap<string, ActionSchema>; sourceId?: string; acquisitions?: ReadonlyMap<string, { reception: { understood: boolean } }> };
-type Entry = { participantPresence?: readonly ParticipantPresence[]; projectionSeed?: EntryProjectionSeed; knowledge?: KnowledgeDelta };
+type Entry = { participantPresence?: readonly ParticipantPresence[]; projectionSeed?: EntryProjectionSeed; knowledge?: KnowledgeDelta; admission?: { status: "blocked" } };
 const stop = " Preserve the head and stop for host source/checkpoint review; do not invent a session, relabel presence, widen scope or retry unchanged.";
 
 /** Presence alone never turns an image, mention or remote identity into a playable agent. */
 export function entryAgencyIssues(actorId: string, entry: Entry, context: EntryAgencyCatalog): ValidationIssue[] {
   const actor = context.entities.get(actorId), presence = entry.participantPresence?.find(item => item.entityId === actorId)?.mode;
   const fail = (message: string): ValidationIssue[] => [{ code: "ENTRY_AGENCY_UNPROVEN", path: "participantPresence", message: message + stop }];
+  if (entry.admission?.status === "blocked") return fail("The source explicitly leaves this entry's presence unresolved; retained uncertainty cannot grant executable agency.");
   if (!actor || actor.kind !== "character") return fail("Entry actor is not a character in this source.");
   if (presence !== "physical" && presence !== "remote") return fail("Entry requires bodily presence or an evidenced live channel, not a representation.");
   const agency = agencyPresenceIssues(actor, presence);
@@ -62,15 +64,21 @@ export function entryArtifactEvidenceIssues(kind: string, payload: unknown, asse
   const artifact = payload as { characterEntryCheckpoints?: (Entry & { actorId: string })[]; entryCheckpoint?: Entry & { actorId: string } };
   const entries = kind === "canonical-event" ? (artifact.characterEntryCheckpoints ?? []).map((entry, i) => ({ entry, prefix: `/characterEntryCheckpoints/${i}` }))
     : kind === "event-execution" && artifact.entryCheckpoint ? [{ entry: artifact.entryCheckpoint, prefix: "/entryCheckpoint" }] : [];
-  return entries.flatMap(({ entry, prefix }) => {
+  return [...(kind === "initial-world" ? [] : bodilyStateEvidenceIssues(payload, assertions)), ...entries.flatMap(({ entry, prefix }) => {
     const issues = remoteEntryEvidenceIssues(entry, assertions, prefix);
+    if (entry.admission) {
+      const actorIndex = entry.participantPresence?.findIndex(p => p.entityId === entry.actorId);
+      for (const target of [`${prefix}/admission`, `${prefix}/participantPresence/${actorIndex}/mode`])
+        if (!assertions.some(a => a.target.jsonPointer === target && a.relation === "supports" && a.strength !== "weak-inference" && a.anchors.length))
+          issues.push({ code: "ENTRY_UNCERTAINTY_EVIDENCE_REQUIRED", path: target, message: "Blocked unresolved presence needs exact source support; inspect the same source occurrence and copy its exact selector once. Missing evidence requires stopping, no physical/dream/remote relabeling." });
+    }
     if (!entry.participantPresence?.some(item => item.entityId === entry.actorId && item.mode === "remote")) return issues;
     const paths = [`${prefix}/actorId`, ...(kind === "event-execution" ? ["/actorId", "/canonicalEventId"] : [])];
     for (const path of paths) if (!assertions.some(item => item.target.jsonPointer === path && item.relation === "supports" && item.strength !== "weak-inference" && item.anchors.length)) {
       issues.push({ code: "ENTRY_AGENCY_EVIDENCE_REQUIRED", path, message: "Remote checkpoint identity and occurrence require exact source support at the pre-event cut. Inspect the named source field and correct once; otherwise stop without guessing or relabelling." });
     }
     return issues;
-  });
+  })];
 }
 
 /** A remote checkpoint cannot convert a depiction in the occurrence into live participation. */

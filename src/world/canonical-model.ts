@@ -458,7 +458,7 @@ function parseProposalRejectionReport(value: unknown, expectedProposalId: string
   };
 }
 
-function proposalEvidenceSourceIds(value: Record<string, unknown>): string[] {
+export function proposalEvidenceSourceIds(value: Record<string, unknown>): string[] {
   const payload = value.payload && typeof value.payload === "object" && !Array.isArray(value.payload)
     ? value.payload as Record<string, unknown>
     : undefined;

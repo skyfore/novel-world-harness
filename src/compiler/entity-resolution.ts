@@ -712,7 +712,12 @@ export async function validateCommittedEntityResolutionTrace(
   ]);
   const resolutions = new Map(currentResolutions.map((resolution) => [resolution.mentionId, resolution]));
   const canonicalIds = new Set((await sourceCanonicalEntities(workspaceRoot, sourceId)).map((candidate) => candidate.id));
-  return entityTraceIssues([entity], mentions, resolutions, canonicalIds, acceptedCreationResolutions);
+  const issues = entityTraceIssues([entity], mentions, resolutions, canonicalIds, acceptedCreationResolutions);
+  if (entity.identityConsumption) {
+    const { validateCommittedIdentityConsumption } = await import("./entity-identity-consumption.js");
+    issues.push(...(await validateCommittedIdentityConsumption(workspaceRoot, entity)).map(i => `${i.code}: ${i.message}`));
+  }
+  return issues;
 }
 
 export type EntityResolutionCoverage = {
@@ -803,6 +808,16 @@ function entityTraceIssues(
 ): string[] {
   const issues: string[] = [];
   for (const entity of entities) {
+    if (entity.identityConsumption) {
+      const basis = entity.identityConsumption, current = resolutions.get(basis.mentionId), mention = mentions.get(basis.mentionId);
+      if (!canonicalIds.has(entity.id) || !mention || mention.sourceId !== basis.sourceId || !mention.kindCandidates.includes(entity.kind)
+        || !current || current.id !== basis.resolutionId || contentHash(current) !== basis.resolutionRevisionHash || current.status !== "unresolved"
+        || !acceptedCreationResolutions.some(r => basis.supersedesResolutionIds.includes(r.id) && r.entityId === entity.id && r.mentionId === basis.mentionId))
+        issues.push(`Entity ${entity.id} quarantine lacks its retained creation and exact current unresolved source decision.`);
+      // The label remains historical source evidence; it is not a claim of
+      // resolved identity. Typed binding and consumer gates remain mandatory.
+      continue;
+    }
     const traces = [...mentions.values()].flatMap((mention) => {
       const resolution = resolutions.get(mention.id);
       return resolution

@@ -3,6 +3,7 @@ import { activeRequirementSets } from "./requirement-ledger.js";
 import { contentHash } from "../world/canonical.js";
 import { predicateSchema, stateOperationSchema, validationIssueSchema } from "../world/model.js";
 import { predicateReferences, stateOperationReferences } from "../world/state-references.js";
+import { worldReferenceFields } from "../world/artifact-references.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { annotationAnchors } from "./annotations.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
@@ -23,20 +24,31 @@ const key = (value: { kind: string; id: string }) => `${value.kind}/${value.id}`
 
 /** An explicit reference vocabulary, not an ID-suffix heuristic or a free-text scan. */
 const referenceFields: Readonly<Record<string, ClosureKind>> = {
-  acquisitionId: "acquisition", priorAcquisitionId: "acquisition", premiseAcquisitionIds: "acquisition", actualSourceActorId: "entity", believedSourceActorId: "entity",
-  processTemplateId: "process",
-  perceptionId: "perception-observation", observerId: "entity", observerMentionId: "annotation", eventMentionId: "annotation", observerResolutionId: "entity-resolution", eventResolutionId: "event-resolution",
-  documentId: "entity", speakerId: "entity", addresseeIds: "entity", expressionId: "utterance-expression", expressionIds: "utterance-expression", quotationId: "annotation",
-  entityId: "entity", actorId: "entity", subjectEntityId: "entity", holderEntityId: "entity", fromActorId: "entity", toActorId: "entity", debtorActorId: "entity", creditorActorId: "entity", beneficiaryActorId: "entity", sourceActorId: "entity", authorityEntityId: "entity", focalActorId: "entity", viewpointActorId: "entity", fromLocationId: "entity", toLocationId: "entity", containerLocationId: "entity", containedLocationId: "entity", locationId: "entity",
-  entityIds: "entity", participants: "entity", targetEntityIds: "entity", targetIds: "entity", presentActorIds: "entity", viewpointActorIds: "entity", jurisdictionEntityIds: "entity", locationIds: "entity",
-  propositionId: "proposition", attributionId: "attribution", sourceAttributionId: "attribution", claimId: "claim", knownByClaimIds: "claim", requiresKnowledge: "claim", requiredKnowledgeClaimIds: "claim", blockedByKnowledge: "claim", forbidsKnowledge: "claim", focalKnowledgeClaimIds: "claim",
-  afterCanonicalEventIds: "event", afterExperiencedCanonicalEventIds: "event", triggerEventIds: "event", reversalEventIds: "event",
-  eventId: "event", canonicalEventId: "event", fromEventId: "event", toEventId: "event", anchorEventId: "event", beforeCanonicalEventId: "event", eventIds: "event", supportingEventIds: "event", establishedByEventIds: "event", retiredByEventIds: "event", causalParents: "event",
-  sceneOccurrenceIds: "scene", frameId: "frame", schemaId: "action", actionSchemaId: "action", ruleId: "rule", activeRuleIds: "rule", overridesRuleIds: "rule", overridesConstraintIds: "constraint", overridesTemplateIds: "norm",
-  goalId: "goal", parentGoalId: "goal",
-  unitIds: "unit", reviewedUnitIds: "unit", basisUnitIds: "unit", resolutionIds: "entity-resolution",
-  speakerMentionId: "annotation", viewpointMentionId: "annotation",
-  mentionId: "annotation", mentionIds: "annotation", participantMentionIds: "annotation", speakerMentionIds: "annotation", addresseeMentionIds: "annotation", viewpointMentionIds: "annotation", eventMentionIds: "annotation", quotationIds: "annotation", basisMentionIds: "annotation", basisEventMentionIds: "annotation", executionId: "event-execution", discourseSegmentId: "discourse", discourseSegmentIds: "discourse", sceneId: "discourse",
+  ...worldReferenceFields,
+  observerMentionId: "annotation",
+  eventMentionId: "annotation",
+  observerResolutionId: "entity-resolution",
+  eventResolutionId: "event-resolution",
+  quotationId: "annotation",
+  unitIds: "unit",
+  reviewedUnitIds: "unit",
+  basisUnitIds: "unit",
+  resolutionIds: "entity-resolution",
+  speakerMentionId: "annotation",
+  viewpointMentionId: "annotation",
+  mentionId: "annotation",
+  mentionIds: "annotation",
+  participantMentionIds: "annotation",
+  speakerMentionIds: "annotation",
+  addresseeMentionIds: "annotation",
+  viewpointMentionIds: "annotation",
+  eventMentionIds: "annotation",
+  quotationIds: "annotation",
+  basisMentionIds: "annotation",
+  basisEventMentionIds: "annotation",
+  discourseSegmentId: "discourse",
+  discourseSegmentIds: "discourse",
+  sceneId: "discourse",
 };
 
 /** Also accepts a read-only live inventory; building a graph never archives or activates it. */
@@ -223,6 +235,13 @@ export function buildPreparedClosure(bundle: ClosureInput): ClosureGraph {
       const entity = nodes.get(`entity/${resolution.entityId}`);
       if (entity) link(entity, "entity-resolution", resolution.id);
     }
+  }
+  for (const entity of canonical.entities) if (entity.identityConsumption) {
+    const basis = entity.identityConsumption, node = nodes.get(`entity/${entity.id}`)!;
+    link(node, "entity-resolution", basis.resolutionId, "/identityConsumption/resolutionId");
+    const current = snapshot.entityResolutions.find(r => r.mentionId === basis.mentionId && r.sourceId === basis.sourceId);
+    if (!current || current.id !== basis.resolutionId || contentHash(current) !== basis.resolutionRevisionHash || current.status !== "unresolved")
+      issues.push({ code: "ENTITY_IDENTITY_CONSUMPTION_INVALID", path: `entity/${entity.id}/identityConsumption`, message: "Quarantined identity lost its exact current unresolved resolution; retain history and block consumption." });
   }
   for (const resolution of snapshot.eventResolutions) {
     const event = nodes.get(`event/${resolution.canonicalEventId}`);

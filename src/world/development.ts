@@ -8,7 +8,8 @@ import {
 import type { WorldEngine } from "./engine.js";
 import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
 import type { LogicalTime, ProgressChannel, StoryTime } from "./model.js";
-import { committedHistory, realizedCanonicalEvents } from "./scene.js";
+import { committedHistory, experiencedCanonicalEvents, realizedCanonicalEvents } from "./scene.js";
+import { eventAvailableToActor } from "./model.js";
 import { evaluatePredicate } from "./state.js";
 import { observeCommittedEvent } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
@@ -89,19 +90,12 @@ export async function projectCharacterDevelopment(
   const scopedHistory = history.filter((entry) => !entry.event.evidence.length
     || evidenceBelongsExclusivelyToSource(entry.event.evidence, effectiveSourceId));
   const realized = realizedCanonicalEvents(scopedHistory);
-  const actorCanExperienceCanonical = (eventId: string) => {
-    const event = context.events?.get(eventId);
-    if (!event?.participants.includes(actorId)) return false;
-    const presence = event.participantPresence?.find((item) => item.entityId === actorId)?.mode;
-    return presence ? presence !== "mentioned" && presence !== "represented" : true;
-  };
-  const experiencedEntries = scopedHistory.filter((entry) => {
-    if (!entry.event.participants.includes(actorId)) return false;
+  const actorEntries = scopedHistory.filter(entry => eventAvailableToActor(entry.event, actorId));
+  const experiencedCanonical = experiencedCanonicalEvents(actorEntries, actorId, context.events);
+  const experiencedEntries = actorEntries.filter((entry) => {
     const canonicalIds = entry.event.realizesCanonicalEventIds ?? [];
-    return !canonicalIds.length || canonicalIds.some(actorCanExperienceCanonical);
+    return !canonicalIds.length || canonicalIds.some(id => experiencedCanonical.has(id));
   });
-  const experiencedCanonical = new Set(experiencedEntries.flatMap((entry) =>
-    (entry.event.realizesCanonicalEventIds ?? []).filter(actorCanExperienceCanonical)));
   const recentLivedExperiences = experiencedEntries
     .filter((entry) => entry.event.title !== "Genesis")
     .slice(-12)
@@ -141,7 +135,7 @@ export async function projectCharacterDevelopment(
     .filter((goal) => goal.actorId === actorId)
     .filter((goal) => evidenceBelongsExclusivelyToSource(goal.evidence, effectiveSourceId));
   for (const goal of goals) {
-    const activation = evaluateCharacterGoal(goal, {
+    const activation = evaluateCharacterGoal(goal, { entities: context.entities, identityCatalog: context,
       state,
       knownClaimIds,
       realizedCanonicalEventIds: realized,

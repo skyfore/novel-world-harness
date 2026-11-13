@@ -24,6 +24,8 @@ export async function reviewNovelRoles(options: Omit<CompileCommandOptions, "pro
       await recoverCompilerFinish(options.root, options.sourceId, receipt.identity.batchId);
     }
   }
+  const { assertRoleCompilationHandoff } = await import("../compiler/compilation-handoff.js");
+  await assertRoleCompilationHandoff(options.root, options.sourceId);
   let stagedBatchId: string | undefined;
   const revisions = await new RequirementLedger(options.root, options.sourceId).roleReviewRevisions();
   const retiredBatches = new Set(revisions.flatMap(revision => revision.workMigration ? [revision.workMigration.priorPlan.batchId] : []));

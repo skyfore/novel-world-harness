@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   evidenceRefSchema,
+  eventAvailableToActor,
   idSchema,
   storyTimeSchema,
   type CanonicalEvent,
@@ -672,15 +673,6 @@ function validateStoryAnchor(
   if (time?.kind === "relative" && !events.has(time.anchorEventId)) {
     issues.push(issue("UNKNOWN_RELATIONSHIP_TIME_ANCHOR", `Relationship policy story time references unknown event ${time.anchorEventId}`, `${path}.anchorEventId`));
   }
-}
-
-function eventAvailableToActor(
-  event: Pick<CanonicalEvent, "participants" | "participantPresence">,
-  actorId: string,
-): boolean {
-  if (!event.participants.includes(actorId)) return false;
-  const presence = event.participantPresence?.find((item) => item.entityId === actorId)?.mode;
-  return presence ? presence !== "mentioned" && presence !== "represented" : true;
 }
 
 function sameRelationshipPair(left: RelationshipPair, right: RelationshipPair): boolean {

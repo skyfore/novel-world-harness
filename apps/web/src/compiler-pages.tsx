@@ -232,7 +232,7 @@ export function CompilerWorkbenchPage({
     mutationFn: (mode: "next" | "all") => startPreparation(sourceId, {
       mode,
       ...(model ? { model } : {}),
-      ...(branchId ? { branchId } : {}),
+      ...(branchId && branchId !== preparation.data?.branchId ? { branchId } : {}),
       clientRequestId: requestId(`prepare-${mode}`),
     }, csrfToken),
     onSuccess: (accepted) => {
@@ -337,6 +337,7 @@ export function CompilerWorkbenchPage({
             <button className="primary-button" disabled={busy || prepareMutation.isPending} onClick={() => prepareMutation.mutate("all")}>{t("Compile all remaining")}</button>
           </>}
           {snapshot.stage === "needs-initial-world" && <button className="primary-button" disabled={busy || prepareMutation.isPending} onClick={() => prepareMutation.mutate("next")}>{t("Generate opening-world proposal")}</button>}
+          {snapshot.stage === "repair" && <button className="primary-button" disabled={busy || prepareMutation.isPending} onClick={() => prepareMutation.mutate("all")}>{t("Continue compilation")}</button>}
           {snapshot.stage === "review" && <button className="primary-button" disabled={!snapshot.proposalCounts.pending || convergeMutation.isPending} onClick={() => window.confirm(t("Accept every proposal that passes deterministic validation? Blocked proposals will remain pending for review.")) && convergeMutation.mutate()}>{t("Converge all valid")}</button>}
           {snapshot.stage === "create-branch" && <>
             <input className="branch-id-input" aria-label={t("New instance branch ID")} value={branchId} onChange={(event) => setBranchId(event.target.value)} />
@@ -345,7 +346,7 @@ export function CompilerWorkbenchPage({
         </div>
       </section>}
 
-      {snapshot.stage === "repair" && <section className="repair-barrier"><span>{t("Repair barrier")}</span><div><strong>{t("Publication is blocked by deterministic checks")}</strong>{snapshot.repairReasons.map((reason) => <p key={reason}>{reason}</p>)}</div></section>}
+      {snapshot.repairReasons.length > 0 && <section className="repair-barrier"><span>{t("Repair barrier")}</span><div><strong>{t("Publication is blocked by deterministic checks")}</strong>{snapshot.repairReasons.map((reason) => <p key={reason}>{reason}</p>)}</div></section>}
       {snapshot.closure && <section className="repair-barrier" aria-label={t("Novel certification")}>
         <span>{t("Novel certification")}</span>
         <div>
@@ -353,7 +354,7 @@ export function CompilerWorkbenchPage({
           <p>{t("Major entry probes")}: {snapshot.closure.readyTotal}/{snapshot.closure.majorTotal} · {t("Independent evaluation")}: {t(snapshot.closure.evaluation)}</p>
           {snapshot.closure.issues.map((issue, index) => <p key={`${issue.code}-${index}`}>{issue.message}</p>)}
           <details><summary>{t("All character readiness")}</summary>{snapshot.closure.roles.map((role) => <p key={role.rosterEntryId}><strong>{role.canonicalName}</strong> · {t(role.status)} — {role.issues.map((issue) => issue.message).join("; ")}</p>)}</details>
-          {!snapshot.closure.fullNovelReady && <button className="secondary-button" disabled={busy || prepareMutation.isPending} onClick={() => prepareMutation.mutate("all")}>{t("Review roles and inspect closure")}</button>}
+          {!snapshot.closure.fullNovelReady && <button className="secondary-button" disabled={busy || prepareMutation.isPending} onClick={() => prepareMutation.mutate("all")}>{t("Continue compilation")}</button>}
         </div>
       </section>}
 
@@ -724,7 +725,7 @@ function PreparationHeader({ snapshot }: { snapshot: PreparationSnapshot }) {
         <span><small>{t("Entities")}</small><strong>{audit?.canonical.entities ?? "—"}</strong></span>
         <span><small>{t("Events")}</small><strong>{audit?.canonical.events ?? "—"}</strong></span>
         <span><small>{t("Rules")}</small><strong>{audit?.canonical.rules ?? "—"}</strong></span>
-        <span><small>{t("Publication")}</small><strong>{t(snapshot.closure ? snapshot.closure.fullNovelReady ? "passed" : "blocked" : "unknown")}</strong></span>
+        <span><small>{t("Publication")}</small><strong>{t(snapshot.stage === "repair" || snapshot.audit?.readiness.publication === "not-ready" ? "blocked" : snapshot.closure ? snapshot.closure.fullNovelReady ? "passed" : "blocked" : "unknown")}</strong></span>
       </div>
     </section>
   );

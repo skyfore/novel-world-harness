@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
-async function world(presence?: "physical" | "mentioned"): Promise<{ engine: WorldEngine; turningPoint: CanonicalEvent }> {
+async function world(presence?: "physical" | "mentioned" | "unresolved"): Promise<{ engine: WorldEngine; turningPoint: CanonicalEvent }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-world-time-"));
   roots.push(root);
   const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence };
@@ -185,8 +185,10 @@ describe("world time and character development", () => {
     expect(development.model?.decisionBiases.caution).toBeCloseTo(0.8);
   });
 
-  it("does not treat a merely mentioned canonical participant as lived experience", async () => {
-    const { engine } = await world("mentioned");
+  it.each([
+    ["mentioned", undefined], ["unresolved", undefined], ["physical", "unresolved"],
+  ] as const)("excludes unsupported experience with canonical %s and committed %s presence", async (canonical, committedMode) => {
+    const { engine } = await world(canonical);
     const genesis = await engine.createBranch("main", "Main", {
       version: 1,
       operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
@@ -198,6 +200,7 @@ describe("world time and character development", () => {
       source: "canon-candidate",
       title: "Others mention Hero while describing the turning point",
       participants: ["hero"],
+      ...(committedMode ? { participantPresence: [{ entityId: "hero", mode: committedMode }] } : {}),
       proposedTime: { kind: "exact", value: "2001", precision: "year" },
       preconditions: [],
       proposedDelta: { version: 1, operations: [] },

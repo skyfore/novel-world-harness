@@ -20,6 +20,18 @@
     "test/identity-real-chain.test.ts",
     "test/identity-repair-handoff.test.ts",
     "test/identity-session-persistence.test.ts",
+    "test/identity-consumer-revalidation.test.ts",
+    "test/consumer-work-plan.test.ts",
+    "test/consumer-work-interruption.test.ts",
+    "test/identity-consumer-queue.test.ts",
+    "test/consumer-evidence-coverage.test.ts",
+    "test/consumer-review-contract.test.ts",
+    "test/goal-lifecycle-repair.test.ts",
+    "test/entry-presence-repair.test.ts",
+    "test/entry-presence-ledger.test.ts",
+    "test/entry-state-repair.test.ts",
+    "test/entry-state-ledger.test.ts",
+    "test/scene-presence.test.ts",
     "test/lossless-json-context.test.ts",
     "test/manual/pi-upgrade-live.ts"
   ]

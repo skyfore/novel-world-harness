@@ -29,6 +29,7 @@
     "dev:web:all": "pnpm run --parallel \"/^dev:web(?::server)?$/\"",
     "dev:web:server": "pnpm run build:web && pnpm dev web --no-open",
     "test": "vitest run",
+    "demo:compilation-completion": "vitest run test/compilation-completion.demo.test.ts",
     "test:wakeup": "node --test test/compiler-wakeup.native.mjs",
     "test:semantic-contracts": "node --experimental-strip-types --test test/contracts/*.native.mjs",
     "test:e2e": "pnpm run build && playwright test"

@@ -15,6 +15,7 @@ export { roleRosterEntrySchema, roleDevelopmentExpectationSchema, type RoleDevel
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const roleCandidateSchema = z.object({
   id: idSchema, name: z.string().min(1), entityId: idSchema.optional(),
+  identityStatus: z.enum(["quarantined", "source-local"]).optional(),
   mentionIds: z.array(idSchema), resolutionIds: z.array(idSchema),
 }).strict();
 export type RoleCandidate = z.infer<typeof roleCandidateSchema>;
@@ -48,7 +49,8 @@ export function buildRoleRoster(input: {
   const candidates = new Map<string, RoleCandidate>();
   for (const entity of input.entities.filter((x) => x.kind === "character" && x.evidence.some((e) => e.span.sourceId === input.sourceId))) {
     const id = `role-${contentHash({ sourceId: input.sourceId, entityId: entity.id }).slice(0, 24)}`;
-    candidates.set(id, { id, name: entity.canonicalName, entityId: entity.id, mentionIds: [], resolutionIds: [] });
+    candidates.set(id, { id, name: entity.canonicalName, entityId: entity.id, mentionIds: [], resolutionIds: [],
+      ...(entity.identityConsumption ? { identityStatus: entity.identityConsumption.mode } : {}) });
   }
   const byEntity = new Map([...candidates.values()].map((x) => [x.entityId, x]));
   const resolutions = new Map(input.resolutions.filter((x) => x.sourceId === input.sourceId).map((x) => [x.mentionId, x]));
@@ -56,7 +58,12 @@ export function buildRoleRoster(input: {
     if (mention.sourceId !== input.sourceId || mention.annotationType !== "entity-mention" || !mention.kindCandidates.includes("character")) continue;
     const resolution = resolutions.get(mention.id);
     if (resolution?.status === "non-referential") continue;
-    const matched = resolution?.entityId ? byEntity.get(resolution.entityId) : undefined;
+    const quarantined = input.entities.find(entity => entity.identityConsumption?.mentionId === mention.id
+      && entity.identityConsumption.sourceId === input.sourceId && resolution?.status === "unresolved"
+      && entity.identityConsumption.resolutionId === resolution.id && entity.identityConsumption.resolutionRevisionHash === contentHash(resolution));
+    // Retain the original candidate and its historical entity reference. The
+    // unresolved mention does not create another person or a playable actor.
+    const matched = resolution?.entityId ? byEntity.get(resolution.entityId) : quarantined ? byEntity.get(quarantined.id) : undefined;
     if (matched) {
       matched.mentionIds.push(mention.id); matched.resolutionIds.push(resolution!.id); continue;
     }
@@ -179,7 +186,7 @@ export function validateRoleRoster(roster: RoleRoster): ValidationIssue[] {
     issues.push(...validateRosterReview(accumulated, review)); accumulated.reviews.push(review);
   }
   if (!majorRoleCandidates(roster).length) issues.push({ code: "ROSTER_NO_MAJOR_CHARACTERS", message: "No major character has been established by source review" });
-  for (const candidate of majorRoleCandidates(roster)) if (!candidate.entityId) issues.push({ code: "ROSTER_MAJOR_IDENTITY_UNRESOLVED", message: `Major character ${candidate.name} lacks a resolved entity identity`, path: candidate.id });
+  for (const candidate of majorRoleCandidates(roster)) if (!candidate.entityId || candidate.identityStatus === "quarantined") issues.push({ code: "ROSTER_MAJOR_IDENTITY_UNRESOLVED", message: `Major character ${candidate.name} lacks a resolved entity identity`, path: candidate.id });
   return issues;
 }
 

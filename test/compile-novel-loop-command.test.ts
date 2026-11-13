@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import * as supervisor from "../src/runtime/compile-loop/supervisor.js";
 import * as compiler from "../src/commands/compile-novel.js";
 import { compileNovelWithLoop } from "../src/commands/compile-novel-loop.js";
+import { activeCompileLoopDirectory } from "../src/runtime/compile-loop/state.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -32,7 +33,31 @@ it("forwards an explicit rebuild token and rejects incompatible stage invocation
   }
   expect(run).toHaveBeenCalledOnce();
 });
-it.each([{ phase: "status" as const }, { phase: "roles" as const }, { loop: false }])("%j keeps explicit single-invocation semantics", async selection => {
+
+it("preserves the retained compile policy across CLI and Web continuations", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-loop-config-")); roots.push(root);
+  const { source } = await createEvidenceFixture(root, "Ada waits.");
+  const options = { root, sourceId: source.id };
+  const run = vi.spyOn(supervisor, "runCompileLoop").mockResolvedValue({ phase: "DONE" } as never);
+  await compileNovelWithLoop(options);
+  const [{ request, engineerModel }] = run.mock.calls[0]!;
+  expect(request).not.toHaveProperty("configPath");
+  const directory = activeCompileLoopDirectory(root, source.id);
+  await fs.mkdir(directory, { recursive: true });
+  const policy = path.join(directory, "policy.json");
+  await fs.writeFile(policy, JSON.stringify({ request, engineerModel }));
+  await compileNovelWithLoop({ ...options, configPath: path.join(root, "novel-harness.yaml") });
+  expect(run.mock.lastCall![0].request).toEqual(request);
+
+  const customRequest = { ...request, configPath: path.join(root, "custom.yaml") };
+  await fs.writeFile(policy, JSON.stringify({ request: customRequest, engineerModel }));
+  await compileNovelWithLoop(options);
+  expect(run.mock.lastCall![0].request).toEqual(customRequest);
+  await compileNovelWithLoop({ ...options, configPath: "override.yaml" });
+  expect(run.mock.lastCall![0].request.configPath).toBe(path.join(root, "override.yaml"));
+});
+
+it.each([{ phase: "status" as const }, { phase: "plan" as const }, { phase: "closure" as const }, { phase: "roles" as const }, { loop: false }])("%j keeps explicit single-invocation semantics", async selection => {
   const run = vi.spyOn(supervisor, "runCompileLoop").mockRejectedValue(new Error("must not start supervision"));
   const direct = vi.spyOn(compiler, "compileNovelCommand").mockResolvedValue(undefined);
   await compileNovelWithLoop({ root: "/unused", sourceId: "source-1", ...selection });

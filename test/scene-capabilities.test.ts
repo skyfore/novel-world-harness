@@ -7,11 +7,54 @@ import { eventExecutionSchema } from "../src/world/event-execution.js";
 import { normTemplateSchema } from "../src/world/norm-ontology.js";
 import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
 import { giftSchema, giftSilverKey, moneyTransferSchema, transferThree } from "./helpers/actions.js";
+import { characterGoalSchema } from "../src/world/actors.js";
+import { predicatesEntail } from "../src/world/predicate-implication.js";
+import { inspectSemanticCoverage } from "../src/compiler/semantic-coverage.js";
+import { sceneCatalogHash } from "../src/compiler/requirement-ledger.js";
+import { CompilerValidator } from "../src/compiler/validator.js";
+import { CanonicalModelStore } from "../src/world/canonical-model.js";
 
 const bytes = Buffer.from("Hero gives Mo Yan the key. The gate is open. Permission lasts one day.");
 const sourceId = "scene-source", anchor = textAnchorForByteRange(sourceId, bytes, 0, bytes.length);
 const evidence = [{ span: { sourceId, startByte: anchor.startByte, endByte: anchor.endByte, startLine: anchor.startLine, endLine: anchor.endLine, quoteHash: anchor.exactHash }, strength: "explicit" as const }];
 const empty: StateDelta = { version: 1, operations: [] };
+
+it("checks a source-defined unfinished goal before success, catches premature completion, and accepts the distinct accomplished state", async () => {
+  const c = catalog();
+  c.entities.set("gate", { ...c.entities.get("gate")!, kind: "location" });
+  const goal = characterGoalSchema.parse({ id: "receive-key", actorId: "mo-yan", description: "Receive the key after the gate opens", priority: 1,
+    requiresKnowledge: [], activation: { preconditions: [{ op: "fact-equals", entityId: "gate", field: "location.open", value: true }] },
+    completion: [{ op: "fact-exists", entityId: "gate", field: "location.open" }], evidence });
+  c.goals = new Map([[goal.id, goal]]);
+  const scenario = { seed: { delta: { version: 1, operations: [{ op: "set", entityId: "gate", field: "location.open", value: true }] }, elapsedDays: 0 },
+    knownClaimIds: [], realizedEventIds: [], experiencedEventIds: [] };
+  const test = { ...basis, kind: "goal-lifecycle", goalId: goal.id, scenarios: [
+    { ...scenario, label: "Ready but not done", expectedActive: true, expectedComplete: false },
+    { ...scenario, label: "Key delivered", seed: { ...scenario.seed, delta: { version: 1, operations: [...scenario.seed.delta.operations,
+      { op: "set", entityId: "silver-key", field: "artifact.owner", value: "mo-yan" }] } }, expectedActive: false, expectedComplete: true },
+  ] };
+  expect(predicatesEntail(goal.activation!.preconditions, goal.completion![0]!)).toBe(true);
+  const validator = new CompilerValidator(new CanonicalModelStore("/tmp/nwh-goal-validator-read-only-fixture"));
+  const fullCatalog = { ...await validator.loadCatalog(), ...c };
+  expect(validator.validateWithCatalog("character-goal", goal, fullCatalog).errors).toContainEqual(expect.objectContaining({ code: "GOAL_ACTIVE_AND_COMPLETE" }));
+  expect(review(c, [test]).cases[0]!.issues).toContainEqual(expect.objectContaining({ code: "SCENE_GOAL_LIFECYCLE_MISMATCH" }));
+  expect(inspectSemanticCoverage(sourceId, c, []).goals[0]).toMatchObject({ reviewRequired: true, activationEntailsCompletion: true });
+  const legacyHash = sceneCatalogHash(c);
+  c.goals.set(goal.id, { ...goal, completion: [...goal.activation!.preconditions, { op: "fact-equals", entityId: "silver-key", field: "artifact.owner", value: "mo-yan" }] });
+  expect(sceneCatalogHash(c)).toBe(legacyHash); // unrelated historical cases keep their exact hash vocabulary
+  expect(review(c, [test]).verified).toBe(true);
+  expect(validator.validateWithCatalog("character-goal", c.goals.get(goal.id)!, fullCatalog).errors.some(e => e.code === "GOAL_ACTIVE_AND_COMPLETE")).toBe(false);
+  expect(predicatesEntail(goal.activation!.preconditions, { op: "all", items: c.goals.get(goal.id)!.completion! })).toBe(false);
+});
+
+it("keeps missing source review distinct from explicit unknown and no-state-change expectations", () => {
+  const c = catalog(); c.events.set("gift", event("gift"));
+  expect(inspectSemanticCoverage(sourceId, c, []).missingReviewRefs).toEqual(["event:gift"]);
+  const unknown = review(c, [{ ...eventCase, initiatorId: undefined, requiresMechanism: false, expectation: { kind: "unknown", missingEvidence: "The passage leaves the physical outcome unspecified" } }]);
+  expect(unknown.verified).toBe(false); expect(unknown.cases[0]!.status).toBe("unknown");
+  expect(unknown.requirements.requirements.find(r => r.capability === "case-validation")?.state).toBe("unknown");
+  expect(review(c, [{ ...eventCase, initiatorId: undefined, requiresMechanism: false, expectation: { kind: "no-state-change", justification: "No physical transition in the independently reviewed source" } }]).verified).toBe(true);
+});
 const gift: StateDelta = { version: 1, operations: [{ op: "set", entityId: "silver-key", field: "artifact.owner", value: "mo-yan" }] };
 const basis = { id: "case", scene: "A source-reviewed scene", rationale: "Independent expected transition", evidence: [anchor] };
 function catalog(): SceneReviewCatalog {
@@ -27,6 +70,23 @@ function review(c: SceneReviewCatalog, cases: unknown[]) {
     review: { method: "independent-source-review", reviewer: "source-fixture-author", reviewedAt: "2026-09-08T00:00:00Z", auditRef: "test-source-spec" }, cases }, bytes, c);
 }
 const eventCase = { ...basis, kind: "event-effects", eventId: "gift", initiatorId: "hero", requiresMechanism: true, expectation: { kind: "delta", delta: gift } };
+
+it("uses the scenario clock and the goal actor's participation for lifecycle cuts", () => {
+  const c = catalog(), dawn = { kind: "ordinal" as const, label: "Dawn", orderHint: 1 };
+  const goal = characterGoalSchema.parse({ id: "dawn-goal", actorId: "hero", description: "Act after seeing the gift at dawn", priority: 1,
+    requiresKnowledge: [], evidence, activation: { storyWindow: dawn, afterExperiencedCanonicalEventIds: ["gift"], preconditions: [{ op: "after-step", step: 0 }] },
+    completion: [{ op: "after-step", step: 1 }] });
+  c.goals = new Map([[goal.id, goal]]);
+  c.events.set("gift", event("gift"));
+  const scenarios = [1, 2].map(step => ({ label: String(step), seed: { delta: empty, elapsedDays: 0, step, storyTime: dawn },
+    knownClaimIds: [], realizedEventIds: ["gift"], experiencedEventIds: ["gift"], expectedActive: step === 1, expectedComplete: step === 2 }));
+  const cases = [{ ...basis, kind: "goal-lifecycle", goalId: goal.id, scenarios }];
+  expect(review(c, cases).verified).toBe(true);
+  for (const presence of [{ participants: ["mo-yan"] }, { participantPresence: [{ entityId: "hero", mode: "unresolved" as const }] }]) {
+    c.events.set("gift", { ...event("gift"), ...presence });
+    expect(review(c, cases).cases[0]!.issues).toContainEqual(expect.objectContaining({ message: expect.stringContaining("actor's participation") }));
+  }
+});
 
 it("rejects a formally consistent empty event/schema against an independent nonempty source expectation", () => {
   const c = catalog();

@@ -14,6 +14,7 @@ import { SourceMaterialStore } from "../storage/source-material-store.js";
 import { CompilerValidator } from "../compiler/validator.js";
 import { compilerProposalSchemas, type CompilerProposalKind } from "../compiler/proposals.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
+import { ActorModelStore } from "../world/actors.js";
 
 export async function reviewScenes(root: string, specInput: unknown) {
   const spec = sceneCapabilitySpecSchema.parse(specInput);
@@ -21,9 +22,9 @@ export async function reviewScenes(root: string, specInput: unknown) {
   if (!source || source.contentSha256 !== spec.sourceSha256) throw new Error("Independent scene review does not match a registered immutable source.");
   const bytes = await new SourceMaterialStore().read(source);
   if (!bytes) throw new Error("Archived source bytes are missing; scene review cannot repair storage.");
-  const catalog = await new CompilerValidator(new CanonicalModelStore(root)).loadCatalog();
+  const catalog = await new CompilerValidator(new CanonicalModelStore(root), undefined, new ActorModelStore(root)).loadCatalog();
   const mapping: Partial<Record<CompilerProposalKind, keyof SceneReviewCatalog>> = { entity: "entities", proposition: "propositions", attribution: "attributions", claim: "claims",
-    "canonical-event": "events", "event-participation": "eventParticipations", "event-execution": "eventExecutions", "action-schema": "actionSchemas", "norm-template": "normTemplates", "world-rule": "rules" };
+    "canonical-event": "events", "event-participation": "eventParticipations", "event-execution": "eventExecutions", "action-schema": "actionSchemas", "norm-template": "normTemplates", "world-rule": "rules", "character-goal": "goals" };
   for (const key of Object.values(mapping)) {
     const values = catalog[key] as Map<string, { evidence: Array<{ span: { sourceId: string } }> }> | undefined;
     for (const [id, value] of values ?? []) if (value.evidence.length && value.evidence.some((ref) => ref.span.sourceId !== source.id)) values!.delete(id);

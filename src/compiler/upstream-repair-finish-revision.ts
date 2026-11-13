@@ -13,20 +13,15 @@ import {
   type UpstreamRepairFinishRevisionIntent,
 } from "./upstream-repair-finish-revision-intent.js";
 import { UpstreamRepairLedger, upstreamRepairFinishGraphHash } from "./upstream-repair-ledger.js";
-import type { UpstreamRepairKind, UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import { upstreamProposalStore, type UpstreamRepairKind, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import { upstreamRepairHostError, verifyUpstreamRepairPlan } from "./upstream-repair-preflight.js";
 import { continueUpstreamRepairStage, recoverUpstreamRepairStage, stageUpstreamRepair } from "./upstream-repair-staging.js";
 
 type StoredEnvelope = { status: "pending" | "accepted" | "rejected"; envelope: Record<string, unknown> };
 export type UpstreamRepairFinishRevisionReview = Omit<UpstreamRepairFinishRevisionIntent, "revisionHash">;
 
-function storeKind(kind: UpstreamRepairKind): "world" | "annotation" | "entity-resolution" | "event-resolution" {
-  if (kind === "entity-resolution" || kind === "event-resolution") return kind;
-  return kind === "canonical-event" || kind === "event-participation" ? "world" : "annotation";
-}
-
 async function readStoredEnvelopes(root: string, sourceId: string, kind: UpstreamRepairKind, proposalId: string): Promise<StoredEnvelope[]> {
-  const selected = storeKind(kind), found: StoredEnvelope[] = [];
+  const selected = upstreamProposalStore(kind), found: StoredEnvelope[] = [];
   for (const status of ["pending", "accepted", "rejected"] as const) {
     try {
       const envelope = selected === "world" ? await new ProposalStore(root).readEnvelope(status, proposalId)
@@ -45,7 +40,7 @@ async function rejectOriginalDraft(root: string, sourceId: string, correction: U
   const found = await readStoredEnvelopes(root, sourceId, correction.artifactKind, correction.originalProposalId);
   if (found.length !== 1 || contentHash(found[0]!.envelope) !== proposalHash || found[0]!.status === "accepted") throw upstreamRepairHostError("Finish revision original draft is missing, ambiguous, accepted or changed");
   if (found[0]!.status === "rejected") return;
-  const selected = storeKind(correction.artifactKind);
+  const selected = upstreamProposalStore(correction.artifactKind);
   if (selected === "world") {
     await new ProposalStore(root).reject(correction.originalProposalId, [{
       code: "UPSTREAM_FINISH_REVISION_SUPERSEDED",

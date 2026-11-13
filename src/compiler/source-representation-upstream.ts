@@ -73,7 +73,9 @@ export function buildRepresentationRepairPlan(prerequisites: PrerequisiteRecord[
   });
 }
 
-export function representationRequirementResult(journal: LedgerRecord[], annotations: SourceAnnotation[], plan: UpstreamRepairPlan) {
+/** Frozen definition binding is shared by candidate loading and live evaluation.
+ * Loading a historical plan must not require its postconditions to be current. */
+export function representationRequirementDefinition(journal: LedgerRecord[], plan: UpstreamRepairPlan) {
   const authority = plan.sourceRepresentation;
   if (!authority) throw prerequisiteStop("Missing representation authority");
   const { prerequisites, records } = representationRecordsFromJournal(journal, authority.taskId);
@@ -81,10 +83,18 @@ export function representationRequirementResult(journal: LedgerRecord[], annotat
   if (!representationIsReady(records) || contentHash(records[0]) !== authority.planRecordHash || contentHash(records[1]) !== authority.checkRecordHash) throw prerequisiteStop("Representation evaluation lacks its exact independent review");
   const output = records[0]!.output;
   if (output.phase !== "representation-plan") throw prerequisiteStop("Missing representation output");
+  const source = records[0]!.scope.prerequisiteScope;
+  if (source.sourceId !== plan.sourceScope.sourceId || source.sourceHash !== plan.sourceScope.sourceSha256)
+    throw prerequisiteStop("Representation requirement source scope drifted");
   if (contentHash(authority.semanticSlots) !== contentHash(output.annotations.map(a => ({ id: a.payload.id, payloadHash: representationSemanticHash(a.payload) })))
     || contentHash(plan.allowedCreations.map(c => [c.kind, c.id]).sort()) !== contentHash(output.annotations.map(a => [a.payload.annotationType, a.payload.id]).sort())) throw prerequisiteStop("Representation evaluation changed its exact reviewed mutation inventory");
   const expectedHash = contentHash({ scope: records[0]!.scope, specification: prerequisites[0]!.output });
   if (expectedHash !== plan.requirementSetHash || contentHash(plan.requirementIds.slice().sort()) !== contentHash(output.coverage.map(q => representationRequirementId(q.questionId)).sort())) throw prerequisiteStop("Representation requirement scope drifted");
+  return output;
+}
+
+export function representationRequirementResult(journal: LedgerRecord[], annotations: SourceAnnotation[], plan: UpstreamRepairPlan) {
+  const output = representationRequirementDefinition(journal, plan);
   const bad = output.annotations.filter(({ payload }) => {
     const active = annotations.find(a => a.id === payload.id);
     return !active || representationSemanticHash(active) !== representationSemanticHash(payload);
@@ -92,7 +102,7 @@ export function representationRequirementResult(journal: LedgerRecord[], annotat
   for (const ref of plan.baselineRefs.filter(r => r.kind !== "source-segment")) {
     if (contentHash(annotations.find(a => a.id === ref.id) ?? null) !== ref.revisionHash) bad.push(ref.id);
   }
-  return requirementResultSchema.parse({ setId: representationBatchId(authority.taskId), revisionHash: plan.requirementSetHash,
+  return requirementResultSchema.parse({ setId: representationBatchId(plan.sourceRepresentation!.taskId), revisionHash: plan.requirementSetHash,
     catalogHash: contentHash(annotations), evaluatorVersion: "source-representation-only/v1",
     requirements: output.coverage.map(q => ({ id: representationRequirementId(q.questionId), definitionHash: contentHash(q),
       state: bad.length ? "blocked" : "satisfied", blockedBy: bad,

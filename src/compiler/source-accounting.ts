@@ -178,6 +178,14 @@ export function sourceAccountingProposalIdentityHash(proposalInput: SourceAccoun
   return contentHash(proposalIdentity(sourceAccountingProposalSchema.parse(proposalInput)));
 }
 
+/** Only the validated, hash-linked successor may discharge a blocking review. */
+export function sourceAccountingRefinedUnitIds(proposals: readonly ActiveSourceAccountingProposal[]): Set<string> {
+  const byId = new Map(proposals.map(item => [item.proposal.id, item.proposal]));
+  return new Set(projectSourceAccountingProposalDecisions(proposals).filter(decision =>
+    byId.get(decision.proposalId!)?.refinements?.some(refinement => refinement.unitIds.includes(decision.unitId)))
+    .map(decision => decision.unitId));
+}
+
 export const sourceAccountingRecordSchema = z.object({
   version: z.literal(1),
   unitId: idSchema,
@@ -307,6 +315,9 @@ export class SourceAccountingStore {
         throw new Error(`Accounting semantic span ${span.id} exceeds source ${input.source.id}.`);
       }
     }
+    const accepted = (await this.listProposals(input.source.id, "accepted"))
+      .filter(proposal => proposal.compilerBatchId === input.batchId)
+      .map(proposal => ({ proposal, proposalStatus: "accepted" as const }));
     const reviewIssues = this.validateBatchReview({
       structure: input.structure,
       sourceBytes,
@@ -314,6 +325,7 @@ export class SourceAccountingStore {
       evidenceAssertions: input.evidenceAssertions,
       annotations: input.annotations,
       unitDecisions: input.unitDecisions,
+      refinedUnitIds: sourceAccountingRefinedUnitIds(accepted),
     });
     if (reviewIssues.length) {
       throw new Error(`Invalid source accounting review ${input.batchId}: ${reviewIssues.join(" ")}`);
@@ -365,6 +377,7 @@ export class SourceAccountingStore {
     evidenceAssertions?: readonly EvidenceAssertion[];
     annotations?: ReadonlyArray<{ id: string; anchors: readonly TextAnchor[] }>;
     unitDecisions?: readonly SourceUnitAccountingDecision[];
+    refinedUnitIds?: ReadonlySet<string>;
     requireExplicitSemanticDisposition?: boolean;
   }): string[] {
     if (input.sourceBytes.byteLength !== input.structure.sourceBytes) {
@@ -409,7 +422,9 @@ export class SourceAccountingStore {
       const represented = [...evidenceSpans, ...annotationSpans].some((span) =>
         span.sourceId === input.structure.sourceId
         && rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
-      if (represented) {
+      // A partial annotation may coexist with an explicit missing capability.
+      // Coverage alone cannot discharge that review's semantic obligation.
+      if (represented && !isBlockingSourceAccountingStatus(decision.status) && !input.refinedUnitIds?.has(decision.unitId)) {
         issues.push(decision.proposalId
           ? `Source unit ${decision.unitId} overlaps exact semantic evidence and is host-derived as represented; withdraw source-accounting proposal '${decision.proposalId}'.`
           : `Source unit ${decision.unitId} overlaps exact semantic evidence and is host-derived as represented; withdraw its model disposition.`);
@@ -627,43 +642,7 @@ export class SourceAccountingStore {
 
   async summarize(structure: SourceStructureManifest): Promise<SourceAccountingSummary> {
     const manifest = await this.read(structure.sourceId);
-    const records = manifest
-      && manifest.sourceSha256 === structure.sourceSha256
-      && manifest.structureVersion === structure.structureVersion
-      ? manifest.records
-      : [];
-    const byUnit = new Map(records.map((record) => [record.unitId, record]));
-    const base = baseStructuralUnits(structure);
-    const statusCounts = emptyStatusCounts();
-    let accountedBytes = 0;
-    const missingUnitIds: string[] = [];
-    const blockingUnitIds: string[] = [];
-    for (const unit of base) {
-      const record = byUnit.get(unit.id);
-      if (!record) {
-        missingUnitIds.push(unit.id);
-        continue;
-      }
-      statusCounts[record.status] += 1;
-      accountedBytes += unit.anchor.endByte - unit.anchor.startByte;
-      if (record.status === "unresolved" || record.status === "intentionally-deferred") {
-        blockingUnitIds.push(unit.id);
-      }
-    }
-    return {
-      sourceId: structure.sourceId,
-      totalUnits: base.length,
-      accountedUnits: base.length - missingUnitIds.length,
-      unaccountedUnits: missingUnitIds.length,
-      blockingUnits: blockingUnitIds.length,
-      accountedBytes,
-      totalBytes: structure.sourceBytes,
-      unitCoverage: base.length ? (base.length - missingUnitIds.length) / base.length : 1,
-      byteCoverage: structure.sourceBytes ? accountedBytes / structure.sourceBytes : 1,
-      statusCounts,
-      missingUnitIds,
-      blockingUnitIds,
-    };
+    return summarizeSourceAccounting(structure, manifest);
   }
 
   async remove(sourceId: string): Promise<void> {
@@ -741,6 +720,58 @@ export function projectSourceAccountingCurrentCoverage(
   });
 }
 
+export function summarizeSourceAccounting(structure: SourceStructureManifest, manifest: SourceAccountingManifest | null): SourceAccountingSummary {
+  const records = manifest
+    && manifest.sourceSha256 === structure.sourceSha256
+    && manifest.structureVersion === structure.structureVersion
+    ? manifest.records
+    : [];
+  const byUnit = new Map(records.map((record) => [record.unitId, record]));
+  const base = baseStructuralUnits(structure);
+  const statusCounts = emptyStatusCounts();
+  let accountedBytes = 0;
+  const missingUnitIds: string[] = [];
+  const blockingUnitIds: string[] = [];
+  for (const unit of base) {
+    const record = byUnit.get(unit.id);
+    if (!record) {
+      missingUnitIds.push(unit.id);
+      continue;
+    }
+    statusCounts[record.status] += 1;
+    accountedBytes += unit.anchor.endByte - unit.anchor.startByte;
+    if (record.status === "unresolved" || record.status === "intentionally-deferred") {
+      blockingUnitIds.push(unit.id);
+    }
+  }
+  return {
+    sourceId: structure.sourceId,
+    totalUnits: base.length,
+    accountedUnits: base.length - missingUnitIds.length,
+    unaccountedUnits: missingUnitIds.length,
+    blockingUnits: blockingUnitIds.length,
+    accountedBytes,
+    totalBytes: structure.sourceBytes,
+    unitCoverage: base.length ? (base.length - missingUnitIds.length) / base.length : 1,
+    byteCoverage: structure.sourceBytes ? accountedBytes / structure.sourceBytes : 1,
+    statusCounts,
+    missingUnitIds,
+    blockingUnitIds,
+  };
+}
+
+/** Latest explicit review per unit, including unresolved work even when a
+ * later artifact happens to overlap its source bytes. Historical snapshots
+ * must not hide these obligations behind their materialized coverage. */
+export function retainedSourceAccountingDecisions(manifest: SourceAccountingManifest) {
+  const decisions = new Map<string, SourceUnitAccountingDecision>();
+  for (const review of [...manifest.batchReviews].sort((a, b) =>
+    b.reviewedAt.localeCompare(a.reviewedAt) || b.batchId.localeCompare(a.batchId))) {
+    for (const decision of review.unitDecisions) if (!decisions.has(decision.unitId)) decisions.set(decision.unitId, decision);
+  }
+  return decisions;
+}
+
 function deriveAccountingRecords(
   structure: SourceStructureManifest,
   sourceBytes: Buffer,
@@ -788,13 +819,15 @@ function deriveAccountingRecords(
       .map((span) => span.id));
     const represented = unitEvidence.length > 0 || unitAnnotations.length > 0;
     const allBackground = overlapping.every(({ disposition }) => disposition === "no-artifacts");
-    const status: SourceAccountingStatus = represented
-      ? "represented"
-      : explicitDecision?.status
-        ? explicitDecision.status
-        : allBackground
-          ? "background-only"
-          : "unresolved";
+    const status: SourceAccountingStatus = explicitDecision && isBlockingSourceAccountingStatus(explicitDecision.status)
+      ? explicitDecision.status
+      : represented
+        ? "represented"
+        : explicitDecision?.status
+          ? explicitDecision.status
+          : allBackground
+            ? "background-only"
+            : "unresolved";
     const latestReview = [...new Set(overlapping.map(({ review }) => review))]
       .sort((left, right) => right.reviewedAt.localeCompare(left.reviewedAt))[0]!;
     records.push(sourceAccountingRecordSchema.parse({

@@ -4,6 +4,7 @@ import { buildRoleRoster, majorRoleCandidates } from "../compiler/role-roster.js
 import { contentHash } from "./canonical.js";
 import { deriveCharacterEntryOptions, deriveCharacterEntrySeed } from "./entry-context.js";
 import { preparedPlayRoleSchema, type PreparedPlayRole } from "./play-role-schema.js";
+import { ENTRY_ACTION_WITNESS_VERSION, ENTRY_CONTRACT_VERSION } from "./entry-contract.js";
 
 /** One projection for CLI, Web and diagnostics; missing entries never shrink the roster. */
 export function describePreparedRoles(bundle: PreparedNovelBundle, assessment: NovelClosureAssessment | null = bundle.readiness): PreparedPlayRole[] {
@@ -13,13 +14,16 @@ export function describePreparedRoles(bundle: PreparedNovelBundle, assessment: N
   const major = majorRoleCandidates(roster), majorIds = new Set(major.map((role) => role.id));
   const candidates = [...new Map([...roster.candidates, ...major].map((role) => [role.id, role])).values()];
   const entries = deriveCharacterEntryOptions(bundle);
-  const current = assessment?.subjectSnapshotHash === preparedSubjectHash(bundle) && assessment.playability?.rosterHash === contentHash(roster);
+  const current = assessment?.subjectSnapshotHash === preparedSubjectHash(bundle) && assessment.playability?.rosterHash === contentHash(roster)
+    && assessment.playability.contractVersion === ENTRY_CONTRACT_VERSION;
   return candidates.map((candidate) => {
     const entry = entries.find((option) => option.actorId === candidate.entityId);
     const probe = current ? assessment.playability?.roles.find((role) => role.candidateId === candidate.id) : undefined;
     const issues = [...(probe?.issues ?? [])];
     if (!current) issues.push({ code: "ROLE_EVALUATION_NOT_CURRENT", message: "This role has not been evaluated against the current frozen inputs" });
     else if (!probe) issues.push({ code: "ROLE_NOT_CERTIFIED", message: "This role has no entry certification" });
+    else if (probe.status === "ready" && probe.actionWitness?.version !== ENTRY_ACTION_WITNESS_VERSION)
+      issues.push({ code: "ENTRY_ACTION_CONTRACT_STALE", message: "Re-evaluate the entry action under the player's current scope" });
     if (!assessment?.fullNovelReady) issues.push({ code: "NOVEL_NOT_CERTIFIED", message: "Complete the novel's independent semantic and live play evaluation before starting a new playthrough" });
     if (!entry) issues.push({ code: "ROLE_ENTRY_MISSING", message: "No grounded historical entry is available" });
     return preparedPlayRoleSchema.parse({ id: candidate.entityId ?? candidate.id, rosterEntryId: candidate.id,

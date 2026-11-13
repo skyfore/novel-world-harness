@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { idSchema, textAnchorSchema } from "../world/model.js";
 import { contentHash } from "../world/canonical.js";
+import { characterGoalSchema } from "../world/actors.js";
+import { RequirementLedger } from "./requirement-ledger.js";
+import { requirementInputs } from "./requirement-service.js";
+import { failingGoalCases, goalEvidenceHash, goalLifecycleCases, goalLifecycleReadKeys, isCompletionEvidence } from "./goal-lifecycle-repair.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
 import { EventResolutionStore } from "./event-resolution.js";
 import { loadCompilerArtifactRecords } from "./artifact-retrieval.js";
@@ -8,7 +12,7 @@ import { SourceAnnotationStore } from "./annotations.js";
 import { textAnchorForByteRange } from "./text-anchors.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
-import { freezeUpstreamRepairPlan, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
+import { freezeUpstreamRepairPlan, upstreamRepairReadableRefSchema, type UpstreamRepairPlan } from "./upstream-repair-plan.js";
 import { verifyUpstreamRepairPlan, upstreamRepairHostError } from "./upstream-repair-preflight.js";
 import {
   CompilerProposalObligations,
@@ -30,6 +34,7 @@ export const upstreamRepairReviewSchema = z.object({
   segmentIds: z.array(idSchema).min(1).max(128), citableEvidenceRefs: z.array(idSchema).min(1).max(128),
   authorizationRef: text, retryBudgetRef: idSchema,
   diagnostics: z.array(z.discriminatedUnion("code", [
+    z.object({ code: z.literal("GOAL_COMPLETION_REVISION"), goalId: idSchema, actorId: idSchema, revisionHash: hash, requirementId: text }).strict(),
     z.object({ code: z.literal("QUOTATION_ANCHOR_INCOMPLETE"), quotationId: idSchema, revisionHash: hash, expectedAnchor: textAnchorSchema, requirementId: text }).strict(),
     z.object({ code: z.literal("QUOTATION_SPEAKER_MENTION_MISSING"), quotationId: idSchema, revisionHash: hash, requirementId: text }).strict(),
     z.object({ code: z.literal("ENTITY_RESOLUTION_MISSING"), mentionId: idSchema, revisionHash: hash, requirementId: text, candidates }).strict(),
@@ -71,6 +76,7 @@ export async function planUpstreamRepair(root: string, raw: unknown) {
   const absences = new Map<string, NonNullable<UpstreamRepairPlan["resolutionAbsences"]>[number]>();
   const revisions: NonNullable<UpstreamRepairPlan["resolutionRevisions"]> = [];
   const semanticEventCreations: NonNullable<UpstreamRepairPlan["semanticEventCreations"]> = [];
+  let goalLifecycle: UpstreamRepairPlan["goalLifecycle"];
   const edges = new Map<string, UpstreamRepairPlan["dependencyEdges"][number]>();
   const edge = (from: string, to: string, purpose: UpstreamRepairPlan["dependencyEdges"][number]["purpose"]) => edges.set(`${from}\0${to}`, { from, to, purpose });
   const unsupported = review.diagnostics.filter(item => item.code === "SEMANTIC_MODULE_REQUIRED");
@@ -86,6 +92,33 @@ export async function planUpstreamRepair(root: string, raw: unknown) {
   }
   for (const diagnostic of review.diagnostics) {
     if (diagnostic.code === "SEMANTIC_MODULE_REQUIRED") continue;
+    if (diagnostic.code === "GOAL_COMPLETION_REVISION") {
+      const record = records.find(r => r.status === "canonical" && r.kind === "character-goal" && r.logicalId === diagnostic.goalId);
+      if (!record || contentHash(record.payload) !== diagnostic.revisionHash || review.diagnostics.length !== 1)
+        throw upstreamRepairHostError("Goal review requires a single current predecessor. Use requirements discover-upstream-repairs for the same source and copy goalLifecycleFindings[].diagnostic");
+      const goal = characterGoalSchema.parse(record.payload);
+      const set = (await new RequirementLedger(root, source.id).definitions()).find(s => s.revisionHash === review.requirementSetHash);
+      if (!set || goal.actorId !== diagnostic.actorId) throw upstreamRepairHostError("The goal owner or registered specification changed");
+      const cases = goalLifecycleCases(set, goal.id);
+      const { catalog } = await requirementInputs(root, source.id);
+      if (!failingGoalCases({ ...set.spec, cases }, bytes, catalog).some(id => id + ":case-validation" === diagnostic.requirementId))
+        throw upstreamRepairHostError("The selected diagnostic no longer reproduces a goal lifecycle mismatch. Inspect the current same-source discovery and its original review");
+      goalLifecycle = { version: 1, goalId: goal.id, actorId: goal.actorId, baselineEvidenceHash: goalEvidenceHash(record.evidenceAssertions),
+        retainedEvidenceHash: goalEvidenceHash(record.evidenceAssertions.filter(a => !isCompletionEvidence(a))) };
+      const target = `character-goal:${goal.id}`;
+      baselines.set(target, { kind: "character-goal", id: goal.id, revisionHash: diagnostic.revisionHash });
+      writes.set(target, { kind: "character-goal", id: goal.id, pointers: ["/completion"] });
+      for (const id of review.requirementIds) edge(`requirement:${id}`, target, "requirement");
+      const dependencies = new Map(records.filter(r => r.status === "canonical").map(r => [r.kind + ":" + r.logicalId, r]));
+      for (const key of goalLifecycleReadKeys(goal, cases, catalog.actionSchemas)) {
+        const item = dependencies.get(key);
+        if (!item) throw upstreamRepairHostError("Missing source-local goal or scenario dependency " + key + ". Inspect the original case and source before planning");
+        const kind = upstreamRepairReadableRefSchema.shape.kind.parse(item.kind);
+        baselines.set(key, { kind, id: item.logicalId, revisionHash: contentHash(item.payload) });
+        edge(target, key, "requirement");
+      }
+      continue;
+    }
     if (diagnostic.code === "CANONICAL_EVENT_MISSING") {
       const anchors = [diagnostic.triggerAnchor, ...diagnostic.extentAnchors];
       if (anchors.some(anchor => anchor.sourceId !== source.id
@@ -198,6 +231,7 @@ export async function planUpstreamRepair(root: string, raw: unknown) {
   }
   const ordered = <T extends { kind: string; id: string }>(items: Iterable<T>) => [...items].sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
   const plan = freezeUpstreamRepairPlan({ version: 1, planId: review.planId, batchId: review.batchId,
+    ...(goalLifecycle ? { goalLifecycle } : {}),
     requirementSetHash: review.requirementSetHash, requirementIds: review.requirementIds, predecessorReceiptRefs: review.predecessorReceiptRefs,
     ...(review.proposalObligation ? { proposalObligation: review.proposalObligation } : {}),
     sourceScope: { sourceId: source.id, sourceSha256: review.sourceSha256, segmentIds: review.segmentIds },

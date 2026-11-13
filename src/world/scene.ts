@@ -1,4 +1,5 @@
 import { contentHash } from "./canonical.js";
+import { eventAvailableToActor } from "./model.js";
 import type { WorldEngine } from "./engine.js";
 import type { CanonicalEvent, CommitId, CommittedEvent, Entity, EntityId, NarrativeProgress, StateDelta, StateValue } from "./model.js";
 import { observeCommittedEvent, projectActorVisibleState } from "./actor-visible.js";
@@ -247,17 +248,10 @@ export function experiencedCanonicalEvents(
   canonicalEvents?: ReadonlyMap<string, Pick<CanonicalEvent, "participants" | "participantPresence">>,
 ): ReadonlySet<string> {
   const experienced = new Set<string>();
-  const actorParticipates = (participants: readonly string[], presence: readonly { entityId: string; mode: string }[] | undefined) => {
-    if (!participants.includes(actorId)) return false;
-    const mode = presence?.find((item) => item.entityId === actorId)?.mode;
-    return mode ? mode !== "mentioned" && mode !== "represented" : true;
-  };
   for (const { event } of history) {
     for (const canonicalEventId of event.realizesCanonicalEventIds ?? []) {
       const canonical = canonicalEvents?.get(canonicalEventId);
-      if (canonical
-        ? actorParticipates(canonical.participants, canonical.participantPresence)
-        : actorParticipates(event.participants, event.participantPresence)) {
+      if (eventAvailableToActor(canonical ?? event, actorId)) {
         experienced.add(canonicalEventId);
       }
     }

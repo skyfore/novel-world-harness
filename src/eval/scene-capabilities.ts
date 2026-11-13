@@ -2,7 +2,7 @@ import { buildSceneRequirementAssessment, SCENE_REQUIREMENT_EVALUATOR_VERSION } 
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { contentHash } from "../world/canonical.js";
-import { idSchema, textAnchorSchema, stateDeltaSchema, predicateSchema, schemaBoundActionInvocationSchema, knowledgeStatusSchema,
+import { eventAvailableToActor, idSchema, logicalTimeSchema, textAnchorSchema, stateDeltaSchema, predicateSchema, schemaBoundActionInvocationSchema, knowledgeStatusSchema,
   type StateDelta, type WorldState } from "../world/model.js";
 import { resolveActionInvocation } from "../world/action-ontology.js";
 import { validateEventExecutions } from "../world/event-execution.js";
@@ -13,15 +13,25 @@ import { applyStateDelta, emptyWorldState, DEFAULT_STATE_FIELDS, StateSchemaRegi
 import { textAnchorForByteRange } from "../compiler/text-anchors.js";
 import type { CompilerValidationCatalog } from "../compiler/validator.js";
 import crypto from "node:crypto";
+import { evaluateCharacterGoal } from "../world/actors.js";
 
 const basis = { id: idSchema, scene: z.string().trim().min(1), rationale: z.string().trim().min(1), evidence: z.array(textAnchorSchema).min(1) };
-const seedSchema = z.object({ delta: stateDeltaSchema, elapsedDays: z.number().finite().nonnegative() }).strict();
+const seedSchema = logicalTimeSchema.partial({ step: true }).extend({
+  delta: stateDeltaSchema, elapsedDays: z.number().finite().nonnegative(),
+});
 const effectExpectation = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("delta"), delta: stateDeltaSchema.refine((delta) => delta.operations.length > 0, "state expectations must be nonempty") }).strict(),
   z.object({ kind: z.literal("no-change"), justification: z.string().trim().min(1) }).strict(),
+  z.object({ kind: z.literal("no-state-change"), justification: z.string().trim().min(1) }).strict(),
+  z.object({ kind: z.literal("unknown"), missingEvidence: z.string().trim().min(1) }).strict(),
   z.object({ kind: z.literal("unmapped"), concept: z.string().trim().min(1), affectedEntityIds: z.array(idSchema).min(1) }).strict(),
 ]);
 export const sceneCapabilityCaseSchema = z.discriminatedUnion("kind", [
+  z.object({ ...basis, kind: z.literal("goal-lifecycle"), goalId: idSchema, scenarios: z.array(z.object({
+    label: z.string().min(1), seed: seedSchema, knownClaimIds: z.array(idSchema), realizedEventIds: z.array(idSchema), experiencedEventIds: z.array(idSchema),
+    expectedActive: z.boolean(), expectedComplete: z.boolean(),
+  }).strict()).min(2).refine(s => s.some(x => x.expectedActive && !x.expectedComplete) && s.some(x => x.expectedComplete && !x.expectedActive),
+    "Goal lifecycle needs an active unfinished cut and a distinct completed cut") }).strict(),
   z.object({ ...basis, kind: z.literal("event-effects"), eventId: idSchema, initiatorId: idSchema.optional(),
     requiresMechanism: z.boolean(), expectation: effectExpectation }).strict(),
   z.object({ ...basis, kind: z.literal("knowledge-cut"), actorId: idSchema, acquisitionEventId: idSchema,
@@ -43,7 +53,7 @@ export const sceneCapabilitySpecSchema = z.object({
   cases: z.array(sceneCapabilityCaseSchema).min(1).max(128).refine((cases) => new Set(cases.map((item) => item.id)).size === cases.length, "case IDs must be unique"),
 }).strict();
 export type SceneCapabilitySpec = z.infer<typeof sceneCapabilitySpecSchema>;
-export type SceneReviewCatalog = Pick<CompilerValidationCatalog, "entities" | "events" | "eventParticipations" | "actionSchemas" | "eventExecutions" | "normTemplates" | "processTemplates" | "rules" | "claims" | "propositions" | "attributions" | "acquisitions" | "utteranceExpressions" | "perceptionObservations">;
+export type SceneReviewCatalog = Pick<CompilerValidationCatalog, "entities" | "events" | "eventParticipations" | "actionSchemas" | "eventExecutions" | "normTemplates" | "processTemplates" | "rules" | "claims" | "propositions" | "attributions" | "acquisitions" | "utteranceExpressions" | "perceptionObservations"> & Partial<Pick<CompilerValidationCatalog, "goals">>;
 export type SceneCapabilityIssue = { code: string; message: string; stage: "semantic" | "executable" | "source-review" | "ontology"; artifactIds: string[] };
 
 /** Expectations come from a separate source review file, never from the candidate schema under test. */
@@ -66,8 +76,10 @@ export function evaluateReviewedSceneCapabilities(specInput: unknown, catalog: S
   const spec = sceneCapabilitySpecSchema.parse(specInput);
   const registry = new StateSchemaRegistry(DEFAULT_STATE_FIELDS);
   const makeState = (seed: z.infer<typeof seedSchema>) => {
-    const state = emptyWorldState(contentHash(seed)); state.logicalTime.elapsedDays = seed.elapsedDays;
-    return applyStateDelta(state, seed.delta, registry, catalog.entities, catalog.rules);
+    const { delta, step, ...clock } = seed;
+    const state = emptyWorldState(contentHash(seed), step ?? 0);
+    Object.assign(state.logicalTime, clock);
+    return applyStateDelta(state, delta, registry, catalog.entities, catalog.rules);
   };
   const cases = spec.cases.map((test) => {
     const issues: SceneCapabilityIssue[] = [];
@@ -99,14 +111,38 @@ export function evaluateReviewedSceneCapabilities(specInput: unknown, catalog: S
               if (!event.observedOutcome.operations.some((actual) => isDeepStrictEqual(actual, expected))) fail("SCENE_SOURCE_OUTCOME_MISSING", `Independent source expectation is absent from the occurrence: ${JSON.stringify(expected)}`, "semantic", [event.id]);
               if (test.requiresMechanism && !resolved?.stateEffects.some((effect) => isDeepStrictEqual(effect.operation, expected))) fail("SCENE_SOURCE_EFFECT_UNBOUND", "The mechanism does not produce the independently expected state operation.", "executable", [event.id, ...(action ? [action.schemaId] : [])]);
             }
-          } else if (test.expectation.kind === "no-change") {
-            if (event.observedOutcome.operations.length || event.observedKnowledge?.operations.length || resolved?.stateEffects.length) fail("SCENE_UNEXPECTED_CHANGE", "Source-reviewed no-change event contains a state or knowledge effect.", "semantic", [event.id]);
+          } else if (test.expectation.kind === "no-change" || test.expectation.kind === "no-state-change") {
+            if (event.observedOutcome.operations.length || test.expectation.kind === "no-change" && event.observedKnowledge?.operations.length || resolved?.stateEffects.length) fail("SCENE_UNEXPECTED_CHANGE", "Event contains a change excluded by the independent source review.", "semantic", [event.id]);
+          } else if (test.expectation.kind === "unknown") {
+            status = "unknown";
+            fail("SCENE_SOURCE_EFFECT_UNKNOWN", test.expectation.missingEvidence, "source-review", [event.id]);
           } else {
             status = "unsupported";
             fail("SCENE_EFFECT_REPRESENTATION_REQUIRED", `Map the source concept explicitly before certification: ${test.expectation.concept}. Do not substitute an unrelated registered field.`, "ontology", [event.id, ...test.expectation.affectedEntityIds]);
             if (!event.observedOutcome.operations.length) fail("SCENE_SOURCE_OUTCOME_EMPTY", "A source-reviewed material transition has an empty occurrence outcome.", "semantic", [event.id]);
           }
         }
+      } else if (test.kind === "goal-lifecycle") {
+        const goal = catalog.goals?.get(test.goalId);
+        if (!goal || !goal.evidence.length || goal.evidence.some(e => e.span.sourceId !== spec.sourceId))
+          fail("SCENE_GOAL_MISSING", "Discover the exact source-scoped goal before lifecycle review.", "source-review", [test.goalId]);
+        else observations.scenarios = test.scenarios.map(scenario => {
+          const anchors = scenario.seed.storyTime?.kind === "relative" ? [scenario.seed.storyTime.anchorEventId] : [];
+          for (const id of [...scenario.realizedEventIds, ...scenario.experiencedEventIds, ...anchors]) {
+            const event = catalog.events.get(id);
+            if (!event?.evidence.length || event.evidence.some(e => e.span.sourceId !== spec.sourceId)) throw new Error(`Unknown or foreign goal cut event ${id}`);
+          }
+          if (scenario.experiencedEventIds.some(id => !scenario.realizedEventIds.includes(id))) throw new Error("Personal experience must be in the supplied realized history");
+          if (scenario.experiencedEventIds.some(id => !eventAvailableToActor(catalog.events.get(id)!, goal.actorId)))
+            throw new Error("Personal experience requires this actor's participation in the reviewed occurrence");
+          for (const id of scenario.knownClaimIds) if (!catalog.claims.get(id)?.evidence.every(e => e.span.sourceId === spec.sourceId)) throw new Error(`Unknown or foreign goal claim ${id}`);
+          const state = makeState(scenario.seed);
+          const result = evaluateCharacterGoal(goal, { state, storyTime: state.logicalTime.storyTime, entities: catalog.entities, identityCatalog: { ...catalog, eventParticipations: [...catalog.eventParticipations.values()] },
+            knownClaimIds: new Set(scenario.knownClaimIds), realizedCanonicalEventIds: new Set(scenario.realizedEventIds), experiencedCanonicalEventIds: new Set(scenario.experiencedEventIds) });
+          if (result.active !== scenario.expectedActive || result.complete !== scenario.expectedComplete)
+            fail("SCENE_GOAL_LIFECYCLE_MISMATCH", `${scenario.label}: expected active=${scenario.expectedActive}, complete=${scenario.expectedComplete}; observed active=${result.active}, complete=${result.complete}.`, "semantic", [goal.id]);
+          return { label: scenario.label, ...result };
+        });
       } else if (test.kind === "knowledge-cut") {
         const acquisition = catalog.events.get(test.acquisitionEventId);
         const learned = acquisition?.observedKnowledge?.operations.filter((op) => op.op === "learn" && op.actorId === test.actorId) ?? [];

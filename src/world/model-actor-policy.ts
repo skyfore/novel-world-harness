@@ -34,6 +34,7 @@ import {
   playerActionToKnowledgeAwareAction,
   playerIntentSchema,
   playerActionTranslationContext,
+  validateCompiledPlayerAction,
   validatePlayerActionGrounding,
   validatePlayerActionScope,
   validatePlayerActionSpatialScope,
@@ -231,7 +232,7 @@ export function modelActorProposalSource(
       const knownClaimIds = actionableKnowledgeClaimIds(rawActor, activeSourceId);
       if (goal.canonical) {
         const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
-        if (!evaluateCharacterGoal(goal.canonical, {
+        if (!evaluateCharacterGoal(goal.canonical, { entities: context.entities, identityCatalog: context,
           state,
           knownClaimIds,
           realizedCanonicalEventIds,
@@ -513,16 +514,7 @@ async function firstValidCompiledAction(input: {
       forbidsKnowledge: [],
     });
     if (!candidateHasMaterialEffect(candidate) && !spokenUtterances.length) continue;
-    const speechChannels = (input.scoped.decision?.agency?.channels ?? []).filter(channel => spokenUtterances.some(utterance =>
-      utterance.channelBinding?.channelId === channel.id && utterance.channelBinding.processId === channel.processId));
-    const onlyRemoteSpeech = spokenUtterances.length > 0 && spokenUtterances.every(utterance => Boolean(utterance.channelBinding))
-      && !action.timeAdvance && candidate.proposedDelta.operations.every(op => op.op === "set" && op.entityId === input.actorId && op.field === "character.plan")
-      && candidate.participants.every(id => id === input.actorId || speechChannels.some(channel => channel.peerEntityIds.includes(id) || channel.carrierEntityIds.includes(id)));
-    const issues = [
-      ...validatePlayerActionScope(candidate, input.scoped),
-      ...validatePlayerActionGrounding(candidate, input.scoped),
-      ...(onlyRemoteSpeech ? [] : await validatePlayerActionSpatialScope(input.engine, candidate, input.actorId, input.commitId, input.activeSourceId)),
-    ];
+    const issues = await validateCompiledPlayerAction(input.engine, candidate, input.scoped, input.commitId, input.activeSourceId, spokenUtterances);
     if (!issues.length) return {
       candidate,
       ...(spokenUtterances.length ? { spokenUtterances } : {}),

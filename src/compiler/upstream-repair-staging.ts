@@ -1,23 +1,22 @@
 import { contentHash } from "../world/canonical.js";
-import { canonicalEventSchema, eventParticipationSchema, evidenceRefSchema, textAnchorSchema } from "../world/model.js";
+import { canonicalEventSchema, entitySchema, eventParticipationSchema, evidenceAssertionSchema, evidenceRefSchema, textAnchorSchema } from "../world/model.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
-import { SourceAnnotationStore, annotationAnchors } from "./annotations.js";
+import { SourceAnnotationStore, annotationAnchors, sourceAnnotationSchema } from "./annotations.js";
 import { RequirementLedger } from "./requirement-ledger.js";
-import { EntityResolutionStore } from "./entity-resolution.js";
+import { EntityResolutionStore, identityResolutionSchema } from "./entity-resolution.js";
 import { EventResolutionStore } from "./event-resolution.js";
 import { createCompilerProposalToolset } from "./proposal-tools.js";
 import { UpstreamRepairLedger, type UpstreamStagedDependency } from "./upstream-repair-ledger.js";
-import { assertUpstreamRepairMutation, upstreamRepairReferencedKeys, type UpstreamRepairKind } from "./upstream-repair-plan.js";
+import { assertUpstreamRepairMutation, isUpstreamWorldKind, upstreamProposalTool, upstreamRepairReferencedKeys, type UpstreamRepairKind } from "./upstream-repair-plan.js";
 import { upstreamRepairHostError, verifyUpstreamRepairPlan } from "./upstream-repair-preflight.js";
 import { textAnchorForByteRange } from "./text-anchors.js";
 import type { SourceSegment } from "./segments.js";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
+import { validateIdentityConsumptionBinding } from "./entity-identity-consumption.js";
+import { EvidenceAssertionStore } from "./evidence-assertions.js";
+import { characterGoalSchema } from "../world/actors.js";
+import { checkGoalLifecycleDraft, isCompletionEvidence, type GoalLifecycleReview } from "./goal-lifecycle-repair.js";
 
-const toolNames: Record<UpstreamRepairKind, string> = {
-  "entity-mention": "propose_entity_mention", "event-mention": "propose_event_mention", quotation: "propose_quotation",
-  "discourse-segment": "propose_discourse_segment", "entity-resolution": "propose_entity_resolution", "event-resolution": "propose_event_resolution",
-  "canonical-event": "propose_canonical_event", "event-participation": "propose_event_participation",
-};
 function envelopeEvidenceAssertions(envelope: unknown): readonly unknown[] {
   if (!envelope || typeof envelope !== "object") return [];
   const assertions = (envelope as { evidenceAssertions?: unknown }).evidenceAssertions;
@@ -26,11 +25,11 @@ function envelopeEvidenceAssertions(envelope: unknown): readonly unknown[] {
 async function pending(root: string, sourceId: string, kind: UpstreamRepairKind, proposalId: string) {
   if (kind === "entity-resolution") return new EntityResolutionStore(root).readProposal(sourceId, "pending", proposalId);
   if (kind === "event-resolution") return new EventResolutionStore(root).readProposal(sourceId, "pending", proposalId);
-  if (kind === "canonical-event" || kind === "event-participation") return new ProposalStore(root).readEnvelope("pending", proposalId);
+  if (isUpstreamWorldKind(kind)) return new ProposalStore(root).readEnvelope("pending", proposalId);
   return new SourceAnnotationStore(root).readProposal(sourceId, "pending", proposalId);
 }
 function derivation(kind: UpstreamRepairKind, batchId: string) {
-  return { runId: batchId, compilerBatchId: batchId, worker: toolNames[kind], ontologyVersion: kind === "entity-resolution" ? "entity-resolution-v1" : kind === "event-resolution" ? "event-resolution-v1" : "observation-v1" };
+  return { runId: batchId, compilerBatchId: batchId, worker: upstreamProposalTool(kind), ontologyVersion: kind === "entity-resolution" ? "entity-resolution-v1" : kind === "event-resolution" ? "event-resolution-v1" : "observation-v1" };
 }
 
 /** Cross-record semantic presence guard run before a managed upstream proposal is written. */
@@ -58,7 +57,7 @@ export async function assertUpstreamSemanticPresenceProjection(root: string, kin
   if (entity.kind === "character" && (!participation.presence || participation.presence !== projected)) throw new Error(`Event participation ${participation.id} must copy staged event ${event.id} character presence for '${participation.entityId}' exactly (${projected ?? "missing"}). Correct this slot once; do not guess another mode`);
   if (entity.kind !== "character" && participation.presence !== undefined) throw new Error(`Event participation ${participation.id} assigns ${participation.presence} presence to non-character '${participation.entityId}' (${entity.kind}). Omit presence while preserving its event, entity and semantic role, then correct this exact slot once`);
 }
-export function checkUpstreamRepairMutation(verified: Pick<Awaited<ReturnType<typeof verifyUpstreamRepairPlan>>, "plan" | "bytes" | "payloads" | "activeRevisions">, kind: UpstreamRepairKind, id: string, payload: unknown, stagedDependencies: ReadonlyMap<string, unknown> = new Map(), evidenceAssertions: readonly unknown[] = []) {
+export function checkUpstreamRepairMutation(verified: Pick<Awaited<ReturnType<typeof verifyUpstreamRepairPlan>>, "plan" | "bytes" | "payloads" | "activeRevisions"> & { retainedRevisions?: ReadonlyMap<string, string>; goalReview?: GoalLifecycleReview }, kind: UpstreamRepairKind, id: string, payload: unknown, stagedDependencies: ReadonlyMap<string, unknown> = new Map(), evidenceAssertions: readonly unknown[] = []) {
   const { plan, bytes, payloads, activeRevisions } = verified;
   const anchors: Array<ReturnType<typeof textAnchorSchema.parse>> = [];
   const evidenceRefs: Array<ReturnType<typeof evidenceRefSchema.parse>> = [];
@@ -70,8 +69,16 @@ export function checkUpstreamRepairMutation(verified: Pick<Awaited<ReturnType<ty
     if (evidence.success) { evidenceRefs.push(evidence.data); return; }
     for (const child of Object.values(value)) collect(child);
   };
-  collect(payload);
-  for (const assertion of evidenceAssertions) collect(assertion);
+  if (kind === "character-goal") {
+    // Historical evidence outside this field can belong to other source segments.
+    // Its immutable hashes are checked separately from newly citable anchors.
+    const assertions = evidenceAssertionSchema.array().parse(evidenceAssertions);
+    checkGoalLifecycleDraft(plan, verified.goalReview, bytes, characterGoalSchema.parse(payload), assertions);
+    for (const assertion of assertions.filter(isCompletionEvidence)) collect(assertion);
+  } else {
+    collect(payload);
+    for (const assertion of evidenceAssertions) collect(assertion);
+  }
   if (kind.endsWith("resolution")) for (const ref of upstreamRepairReferencedKeys(kind, payload)) {
     if (/^(entity-mention|event-mention|evidence-assertion):/.test(ref)) collect(stagedDependencies.get(ref) ?? payloads.get(ref));
   }
@@ -107,7 +114,18 @@ export function checkUpstreamRepairMutation(verified: Pick<Awaited<ReturnType<ty
     }
   }
   assertUpstreamRepairMutation(plan, { kind, id, payload, baseline: payloads.get(`${kind}:${id}`) ?? null, activeRevisions,
+    retainedRevisions: verified.retainedRevisions,
     sourceSha256: plan.sourceScope.sourceSha256, requirementSetHash: plan.requirementSetHash, citedSegmentIds: [...cited], hostDerivation: derivation(kind, plan.batchId) });
+  if (kind === "entity") {
+    const entity = entitySchema.parse(payload), basis = entity.identityConsumption;
+    if (basis) {
+      const refs = new Map([...payloads, ...stagedDependencies]);
+      const decisions = [...refs].flatMap(([key, value]) => key.startsWith("entity-resolution:") ? [identityResolutionSchema.parse(value)] : []);
+      const mentions = [...refs].flatMap(([key, value]) => key.startsWith("entity-mention:") ? [sourceAnnotationSchema.parse(value)] : []);
+      const issues = validateIdentityConsumptionBinding(entity, decisions.filter(r => r.id === basis.resolutionId), mentions, decisions);
+      if (issues.length) throw upstreamRepairHostError(issues.map(i => `${i.code}: ${i.message}`).join("; "));
+    }
+  }
 }
 
 /** Read only the declared dependency DAG, verifying every prior intent and exact envelope. */
@@ -129,7 +147,7 @@ async function stagedDependencies(root: string, verified: Awaited<ReturnType<typ
       const envelope = await pending(root, plan.sourceScope.sourceId, slot.kind, attempt.started.proposalId).catch(error => { throw upstreamRepairHostError(`Declared staged dependency cannot be read: ${edge.to}; ${String(error)}`); });
       const staged = state.records.find(record => record.payload.kind === "attempt-staged" && record.payload.attemptRef === attempt.attemptRef)?.payload;
       if (staged?.kind !== "attempt-staged" || staged.proposalHash !== contentHash(envelope) || attempt.validatedHash !== contentHash(envelope.payload)
-        || contentHash(envelope.generatedBy) !== contentHash({ compilerBatchId: plan.batchId, worker: toolNames[slot.kind] })) throw upstreamRepairHostError(`Declared staged dependency differs from its original envelope: ${edge.to}`);
+        || contentHash(envelope.generatedBy) !== contentHash({ compilerBatchId: plan.batchId, worker: upstreamProposalTool(slot.kind) })) throw upstreamRepairHostError(`Declared staged dependency differs from its original envelope: ${edge.to}`);
       checkUpstreamRepairMutation(verified, slot.kind, slot.id, envelope.payload, children.payloads,
         envelopeEvidenceAssertions(envelope));
       for (const [key, payload] of children.payloads) payloads.set(key, payload);
@@ -191,7 +209,21 @@ async function executeUpstreamRepairStage(root: string, sourceId: string, planHa
     if (!object) throw new Error("Repair proposal must be one JSON object. Copy the provided typed tool schema and correct the payload once; do not repeat an unchanged input.");
     if (host && object.proposal_id !== undefined && object.proposal_id !== proposalId) throw upstreamRepairHostError("The model cannot change the host-reserved proposal ID");
     const input = host ? { ...object, proposal_id: proposalId } : object;
-    const tools = createCompilerProposalToolset(root, {}, { upstreamRepair: { planHash, beforeStage: async (kind, id, payload, evidenceAssertions = []) => {
+    let retainedEntityEvidence, retainedGoal;
+    if (target.kind === "character-goal" && current.plan.goalLifecycle) {
+      const verified = await verifyUpstreamRepairPlan(root, current.plan);
+      const goal = characterGoalSchema.parse(verified.payloads.get("character-goal:" + target.id));
+      const binding = await new EvidenceAssertionStore(root).bindingForArtifact("character-goal", goal.id);
+      retainedGoal = { goal, assertions: binding?.assertions.filter(a => !isCompletionEvidence(a)) ?? [] };
+    }
+    if (target.kind === "entity" && current.plan.identityRequirements?.consumerRepair?.entityId === target.id) {
+      const verified = await verifyUpstreamRepairPlan(root, current.plan);
+      const entity = entitySchema.parse(verified.payloads.get(`entity:${target.id}`));
+      const binding = await new EvidenceAssertionStore(root).bindingForArtifact("entity", entity.id);
+      if (binding && binding.artifactHash !== contentHash(entity)) throw upstreamRepairHostError("Original entity evidence binding changed; preserve it for host review");
+      retainedEntityEvidence = { id: entity.id, evidence: entity.evidence, assertions: binding?.assertions ?? [] };
+    }
+    const tools = createCompilerProposalToolset(root, {}, { upstreamRepair: { planHash, retainedGoal, ...(retainedEntityEvidence ? { retainedEntityEvidence } : {}), beforeStage: async (kind, id, payload, evidenceAssertions = []) => {
       if (kind !== target.kind || id !== target.id) throw upstreamRepairHostError("Proposed artifact differs from the reserved host slot");
       const verified = await verifyUpstreamRepairPlan(root, current.plan), dependencies = await stagedDependencies(root, verified, target);
       checkUpstreamRepairMutation(verified, kind, id, payload, dependencies.payloads, evidenceAssertions);
@@ -199,12 +231,13 @@ async function executeUpstreamRepairStage(root: string, sourceId: string, planHa
       await ledger.recordValidated(planHash, attemptRef, contentHash(payload), dependencies.refs);
     } } });
     await tools.beginBatch(current.plan.sourceScope.segmentIds, current.plan.batchId, sourceId);
-    const invoke = () => tools.executeHostProposal(toolNames[target.kind], attemptRef, input);
+    const tool = upstreamProposalTool(target.kind);
+    const invoke = () => tools.executeHostProposal(tool, attemptRef, input);
     const obligations = new CompilerProposalObligations(root, sourceId, current.plan.batchId);
     const result = current.hostCorrections?.some(item => item.inputHash === contentHash(input))
-      ? await obligations.withHostUpstreamCorrection(toolNames[target.kind], input, planHash, attemptRef, invoke)
+      ? await obligations.withHostUpstreamCorrection(tool, input, planHash, attemptRef, invoke)
       : current.finishRevision
-        ? await obligations.withHostUpstreamFinishRevision(toolNames[target.kind], input, planHash, attemptRef, invoke)
+        ? await obligations.withHostUpstreamFinishRevision(tool, input, planHash, attemptRef, invoke)
         : await invoke();
     if ((result as { isError?: boolean }).isError) throw new Error(result.content.filter(item => item.type === "text").map(item => item.text).join("\n"));
     const recovered = await recoverUpstreamRepairStage(root, sourceId, planHash, attemptRef);
@@ -233,7 +266,7 @@ export async function recoverUpstreamRepairStage(root: string, sourceId: string,
   const envelope = await pending(root, sourceId, attempt.started.artifactKind, attempt.started.proposalId).catch(error => {
     throw upstreamRepairHostError(`Original pending draft cannot be read: ${error instanceof Error ? error.message : String(error)}; inspect nwh requirements inspect-upstream --source ${sourceId}, copy attempts[].attemptRef, and preserve the reserved intent without model replay`);
   });
-  const generatedBy = { compilerBatchId: current.plan.batchId, worker: toolNames[attempt.started.artifactKind] };
+  const generatedBy = { compilerBatchId: current.plan.batchId, worker: upstreamProposalTool(attempt.started.artifactKind) };
   if (contentHash(envelope.payload) !== attempt.validatedHash || envelope.id !== attempt.started.proposalId || contentHash(envelope.generatedBy) !== contentHash(generatedBy)) throw upstreamRepairHostError("Pending repair draft differs from its original validated intent");
   const dependencies = await stagedDependencies(root, verified, { kind: attempt.started.artifactKind, id: attempt.started.artifactId });
   if (contentHash(attempt.dependencies ?? []) !== contentHash(dependencies.refs)) throw upstreamRepairHostError("Original validated repair dependency revisions changed");
@@ -250,6 +283,20 @@ export async function upstreamRepairSlotContext(root: string, sourceId: string, 
   const current = (await new UpstreamRepairLedger(root, sourceId).inspect()).plans.find(item => item.plan.planHash === planHash);
   if (!current || ![...current.plan.allowedWrites, ...current.plan.allowedCreations].some(item => item.kind === target.kind && item.id === target.id)) throw upstreamRepairHostError("Unknown authorized repair slot");
   const verified = await verifyUpstreamRepairPlan(root, current.plan), dependencies = await stagedDependencies(root, verified, target);
+  let reviewedIdentity;
+  if (current.plan.identityRequirements) {
+    const authority = await (await import("./identity-requirement-upstream.js")).readIdentityAuthority(root, current.plan);
+    const semantic = authority.prepared.semantic[0]!.output;
+    if (semantic.phase !== "semantic-scope-plan") throw upstreamRepairHostError("Original identity semantic proposal is missing");
+    const slot = semantic.operations.find(o => o.id === target.id);
+    reviewedIdentity = { definition: authority.records[0]!.output, definitionCheck: authority.records[1]!.output,
+      ...(slot ? { payload: JSON.parse(slot.payloadJson), semanticHash: current.plan.identityRequirements.semanticSlots.find(s => s.id === slot.id)!.payloadHash } : {}),
+      consumerRepair: authority.repairRecords?.map(r => r.output) ?? [],
+      ...(authority.revalidationRecords.length ? { consumerRevalidation: authority.revalidationRecords.map(r => r.output) } : {}),
+      instruction: authority.revalidationRecords.length
+        ? "Execute only the exact independently supported consumerRevalidation scope and requiredAction, preserving every original requirement and unresolved identity binding. Entity: revise only identityConsumption to source-local with exact evidence for mode and referentScope; preserve the source, decision hash and entire predecessor chain. Initial-world: revise only approved fields, reading the staged entity dependency first; retain its original checkpoint and every unapproved field. These are typed proposals pending independent acceptance, not permission to clear other consumers, source questions or certify compilation."
+        : "For an entity-resolution slot, copy the original reviewed payload exactly except host-owned derivation. For the existing entity, change only identityConsumption using the independently reviewed quarantine semantics. Copy the current staged resolution payloadHash, mentionId and complete supersedes chain; preserve the entity ID, kind, name, aliases and host-retained historical evidence. No other consumer is activated by this proposal." };
+  }
   let reviewedSourceAnnotation;
   if (current.plan.sourceRepresentation) {
     const record = (await new RequirementLedger(root, sourceId).sourceRepresentations(current.plan.sourceRepresentation.taskId))[0]!;
@@ -268,14 +315,17 @@ export async function upstreamRepairSlotContext(root: string, sourceId: string, 
   }
   return {
     plan: current.plan, target,
+    ...(current.plan.goalLifecycle ? { goalInstructions: "Read the exact character-goal in readable[].payload. Copy its logical ID and all fields except host-owned evidence. Revise completion only. For each predicate use target_path /completion/<index> with explicit or strong-inference supports evidence inside the reviewed anchors. Inspect evidence[].segmentId. If the source does not establish a distinct completion condition, stop for host review.",
+      completionEvidenceRanges: verified.goalReview!.spec.cases.flatMap(c => c.evidence) } : {}),
     ...(reviewedSourceAnnotation ? { reviewedSourceAnnotation } : {}),
+    ...(reviewedIdentity ? { reviewedIdentity } : {}),
     reviewedOccurrences: (current.plan.semanticEventCreations ?? []).map(item => ({
       ...item,
       triggerExact: verified.bytes.subarray(item.triggerAnchor.startByte, item.triggerAnchor.endByte).toString("utf8"),
       extentExact: item.extentAnchors.map(anchor => verified.bytes.subarray(anchor.startByte, anchor.endByte).toString("utf8")),
     })),
     readable: current.plan.readableRefs.map(ref => ({ ...ref, payload: verified.payloads.get(`${ref.kind}:${ref.id}`) })),
-    stagedDependencies: [...dependencies.payloads].map(([ref, payload]) => ({ ref, payload })),
+    stagedDependencies: [...dependencies.payloads].map(([ref, payload]) => ({ ref, payloadHash: contentHash(payload), payload })),
     evidence: current.plan.citableEvidenceRefs.map(segmentId => {
       const segment = verified.payloads.get(`source-segment:${segmentId}`) as SourceSegment;
       return { segmentId, startByte: segment.startByte, endByte: segment.endByte, text: verified.bytes.subarray(segment.startByte, segment.endByte).toString("utf8") };

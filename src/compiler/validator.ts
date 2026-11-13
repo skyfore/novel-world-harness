@@ -1,5 +1,6 @@
 import { entryArtifactEvidenceIssues, remoteEntryOccurrenceIssues } from "../world/entry-agency.js";
 import { entryAgencyIssues, playableEntryActorIds } from "../world/entry-agency.js";
+import { assessEntryState, groundedEntryActorIds } from "../world/entry-contract.js";
 import { validateIdentityName } from "../world/actor-recognition.js";
 import { validateProcessRecoveryEvidence } from "../world/event-execution.js";
 import { validateIncapacityEvidence } from "../world/process-capacity.js";
@@ -12,11 +13,13 @@ import { validateUtteranceExpressionTrace } from "./utterance-expression-trace.j
 import { utteranceExpressionSchema, validateUtteranceExpression, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
 import { validateGoalExpressions, validateGoalExpressionEvidence } from "../world/conditional-expression.js";
 import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { validateSourceLocalIdentityEvidence } from "../world/identity-consumption.js";
 import { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { applyEventExecutions, eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import type { z } from "zod";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
+import { predicatesEntail } from "../world/predicate-implication.js";
 import { CanonicalCompiler, CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import {
   InitialWorldStore,
@@ -364,7 +367,7 @@ export class CompilerValidator {
         rules: prospectiveRules,
       }));
     }
-    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors, catalog);
+    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors, catalog, warnings);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, propositions, claims, events, rules, goals, errors);
     return { accepted: errors.length === 0, errors, warnings };
@@ -556,16 +559,24 @@ export class CompilerValidator {
         errors.push(issue("DUPLICATE_CHARACTER_ENTRY", `Event ${event.id} has multiple entry checkpoints for ${checkpoint.actorId}`, `${prefix}.actorId`));
       }
       entryActors.add(checkpoint.actorId);
+      if (checkpoint.admission) {
+        for (const presence of checkpoint.participantPresence) if (!event.participants.includes(presence.entityId) || entities.get(presence.entityId)?.kind !== "character")
+          errors.push(issue("INVALID_ENTRY_PRESENCE", `Blocked entry presence ${presence.entityId} is not an event character`, `${prefix}.participantPresence`));
+        if (event.participantPresence?.find(p => p.entityId === checkpoint.actorId)?.mode !== "unresolved")
+          errors.push(issue("ENTRY_UNCERTAINTY_CONFLICT", "A blocked entry must retain unresolved presence in its owning occurrence too", `${prefix}.admission`));
+        // This is an explicit source gap, not a runnable checkpoint. Schema
+        // validation forbids state/knowledge projection; runtime and closure
+        // continue to require grounded entry agency.
+        continue;
+      }
       errors.push(...entryAgencyIssues(checkpoint.actorId, checkpoint, { ...catalog, sourceId: event.evidence[0]?.span.sourceId }).map(issue => ({ ...issue, path: `${prefix}.${issue.path}` })));
       errors.push(...remoteEntryOccurrenceIssues(checkpoint.actorId, checkpoint, event, catalog.eventParticipations.values()).map(issue => ({ ...issue, path: `${prefix}.${issue.path}` })));
       if (!checkpoint.projectionSeed && checkpoint.delta.operations.length > 16) {
         errors.push(issue("OVERSIZED_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} contains more than 16 state operations`, `${prefix}.delta.operations`));
       }
-      if (!checkpoint.delta.operations.some((operation) =>
-        "entityId" in operation
-        && operation.entityId === checkpoint.actorId
-        && ["character.location", "character.plan", "character.momentum"].includes(operation.field))) {
-        errors.push(issue("INACTIONABLE_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} must establish that actor's location, plan, or momentum before the event`, `${prefix}.delta.operations`));
+      const entryState = assessEntryState(checkpoint.actorId, checkpoint, { ...catalog, sourceId: event.evidence[0]?.span.sourceId }, this.stateSchema);
+      if (entryState.state !== "grounded") {
+        errors.push(issue("INACTIONABLE_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId}: ${entryState.issues.map(item => `${item.code}: ${item.message}`).join("; ")}`, `${prefix}.delta.operations`));
       }
       for (let presenceIndex = 0; presenceIndex < checkpoint.participantPresence.length; presenceIndex += 1) {
         const presence = checkpoint.participantPresence[presenceIndex]!;
@@ -650,6 +661,7 @@ export class CompilerValidator {
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
     catalog: CompilerValidationCatalog,
+    warnings: ValidationIssue[],
   ): void {
     if (!initial.evidence.length) errors.push(issue("MISSING_EVIDENCE", "Initial world has no source evidence", "evidence"));
     if (initial.checkpoint?.beforeCanonicalEventId && !events.has(initial.checkpoint.beforeCanonicalEventId)) {
@@ -840,24 +852,23 @@ export class CompilerValidator {
       .filter((entity) => entity.kind === "character")
       .filter((entity) => entity.evidence.some((reference) => initialSourceIds.has(reference.span.sourceId)))
       .map((entity) => entity.id);
-    const actionableOpening = initial.delta.operations.some((operation) =>
-      "entityId" in operation
-      && sourceCharacterIds.includes(operation.entityId)
-      && playableOpeningIds.has(operation.entityId)
-      && !explicitlyDead.has(operation.entityId)
-      && ["character.location", "character.plan", "character.momentum"].includes(operation.field)
-      && (operation.op !== "set" || operation.value !== null));
-    if (sourceCharacterIds.length > 1 && !playableOpeningIds.size) {
-      errors.push(issue(
+    const groundedActors = groundedEntryActorIds(initial, { ...catalog, sourceId: initial.evidence[0]?.span.sourceId }, this.stateSchema);
+    const actionableOpening = sourceCharacterIds.some(id => groundedActors.has(id));
+    // Legacy inventories may be archived as unproven compiler input. Only an
+    // explicit entry claims this contract; discovery and certification never
+    // use a sole-character/alive fallback to turn an inventory into an entry.
+    const entryIssues = initial.participantPresence?.length || initial.readerContext || initial.actorObservations?.length ? errors : warnings;
+    if (!playableOpeningIds.size) {
+      entryIssues.push(issue(
         "MISSING_OPENING_PRESENCE",
-        "A multi-character source must explicitly identify at least one bodily or channel-grounded opening role; identity, mention, or alive state is not presence.",
+        "An opening must explicitly identify at least one bodily or channel-grounded role; identity, mention, or alive state is not presence. Inspect same-source entry evidence; correct once only within scope, otherwise stop for host review.",
         "participantPresence",
       ));
     }
-    if (sourceCharacterIds.length > 1 && !actionableOpening) {
-      errors.push(issue(
+    if (!actionableOpening) {
+      entryIssues.push(issue(
         "INACTIONABLE_INITIAL_WORLD",
-        "A multi-character source must establish a bodily or channel-grounded opening role through a grounded location, plan, or momentum; a bare alive inventory cannot create a playable scene.",
+        "Opening requires a non-dead bodily or channel-grounded role with final source-supported operational context under the shared entry contract. Alive and presentation prose alone are insufficient. Inspect the state-field catalog and exact source; correct once within scope or stop for capability/source review, never invent a place, plan or number. Actual action and autonomous-driver proofs remain separate.",
         "delta.operations",
       ));
     }
@@ -905,8 +916,9 @@ export class CompilerValidator {
       ["expiry", goal.expiry ?? []],
     ] as const) {
       predicates.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
-      if (predicates.length && predicates.some((predicate) => (goal.activation?.preconditions ?? []).some((activation) => canonicalJson(activation) === canonicalJson(predicate)))) {
-        errors.push(issue("GOAL_ACTIVE_AND_COMPLETE", `Goal ${goal.id} uses the same predicate for activation and ${path}`, path));
+      const entailed = predicates.map(predicate => predicatesEntail(goal.activation?.preconditions ?? [], predicate));
+      if (entailed.length && (path === "completion" ? entailed.every(Boolean) : entailed.some(Boolean))) {
+        errors.push(issue("GOAL_ACTIVE_AND_COMPLETE", `Goal ${goal.id} activation already entails ${path}. Use find_compiler_artifacts for this same source and goal, copy results[].logicalId, and read its exact source evidence. Correct the goal once only when the existing typed scope permits distinct source-supported completion/expiry; otherwise stop for host semantic review. Do not invent a replacement predicate, widen scope or retry unchanged.`, path));
       }
     }
     for (let milestoneIndex = 0; milestoneIndex < (goal.milestones?.length ?? 0); milestoneIndex += 1) {
@@ -1075,6 +1087,9 @@ export class CompilerCommitService {
   async accept(kind: CanonicalProposalKind, id: string): Promise<CompilerValidation> {
     const schema = schemaFor(kind);
     const proposal = await this.proposals.read("pending", id, schema);
+    const goalRepair = kind === "character-goal" ? await (await import("./upstream-repair-finish.js")).goalRepairCommitPermit(this.workspaceRoot, proposal) : undefined;
+    if (goalRepair && !goalRepair.ready) return { accepted: false, warnings: [], errors: [issue("GOAL_REPAIR_FINISH_REQUIRED",
+      "Goal is staged under an upstream repair. Inspect requirements inspect-upstream for the same source and recover its original finish; do not retry acceptance unchanged.")] };
     const validation = await this.validateProposal(
       id,
       kind,
@@ -1090,6 +1105,7 @@ export class CompilerCommitService {
       evidence: proposal.evidence,
       evidenceAssertions: proposal.evidenceAssertions ?? [],
       createdAt: proposal.createdAt,
+      goalRepair,
     });
     return validation;
   }
@@ -1109,7 +1125,13 @@ export class CompilerCommitService {
       }
       const schema = schemaFor(proposal.kind);
       const envelope = await this.proposals.read("pending", proposal.id, schema);
+      const goalRepair = proposal.kind === "character-goal" ? await (await import("./upstream-repair-finish.js")).goalRepairCommitPermit(this.workspaceRoot, envelope) : undefined;
+      if (goalRepair && !goalRepair.ready) {
+        staging.push({ id: proposal.id, kind: proposal.kind });
+        continue;
+      }
       candidates.push({
+        goalRepair,
         id: proposal.id,
         kind: proposal.kind,
         payload: envelope.payload,
@@ -1123,6 +1145,8 @@ export class CompilerCommitService {
     let processed = 0;
     onProgress?.({ phase: "load", processed, total, accepted: 0, blocked: 0 });
     const deduplicated = selectLogicalCandidates(candidates);
+    if (deduplicated.superseded.some(({ candidate, selectedId }) => candidate.goalRepair || candidates.some(c => c.id === selectedId && c.goalRepair)))
+      throw new Error("Managed goal repair has a competing pending revision. Inspect the original same-source goal and finish receipt before convergence; do not supersede or retry either draft unchanged.");
     const eligible = deduplicated.selected;
     const expressionGroup = expressionDependencyGroup(eligible);
     const expressionGroupIds = new Set(expressionGroup.map(candidate => candidate.id));
@@ -1160,6 +1184,9 @@ export class CompilerCommitService {
         addToCatalog(catalog, candidate.kind, candidate.payload);
         accepted.push({ id: candidate.id, kind: candidate.kind });
       } catch (error) {
+        // A receipt-backed goal may have written its artifact before its evidence binding.
+        // Leave the original envelope pending so convergence can finish that exact write.
+        if (candidate.goalRepair) throw error;
         blocked.push({
           id: candidate.id,
           kind: candidate.kind,
@@ -1185,6 +1212,10 @@ export class CompilerCommitService {
     const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
       const validation = await validateCandidate(candidate);
       if (!validation.accepted) {
+        if (candidate.goalRepair) {
+          const { upstreamRepairHostError } = await import("./upstream-repair-preflight.js");
+          throw upstreamRepairHostError(`Frozen goal proposal ${candidate.id} failed canonical validation: ${validation.errors.map(e => e.code + ": " + e.message).join("; ")}`);
+        }
         blockCandidate(candidate, validation.errors);
       } else {
         await commitCandidate(candidate);
@@ -1633,7 +1664,8 @@ export class CompilerCommitService {
     const acquisitionEvidenceIssues = kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : [];
     const perceptionEvidenceIssues = kind === "perception-observation" ? [...validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions), ...await validatePerceptionObservationTrace(this.workspaceRoot, perceptionObservationSchema.parse(payload))] : [];
     const expressionEvidenceIssues = kind === "utterance-expression" ? [...validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions), ...await validateUtteranceExpressionTrace(this.workspaceRoot, utteranceExpressionSchema.parse(payload))] : kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(payload), evidenceAssertions) : [];
-    expressionEvidenceIssues.push(...(kind === "entity" ? validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions) : []));
+    expressionEvidenceIssues.push(...(kind === "entity" ? [...validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions),
+      ...validateSourceLocalIdentityEvidence(entitySchema.parse(payload), evidenceAssertions)] : []));
     const semanticEvidenceIssues = kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : [];
     const spatialEvidenceIssues = kind === "spatial-relation"
       ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)
@@ -1706,6 +1738,7 @@ export class CompilerCommitService {
 
   private async commitParsed(candidate: PendingCanonicalProposal): Promise<void> {
     const { kind, id, payload } = candidate;
+    if (candidate.goalRepair) await (await import("./upstream-repair-finish.js")).verifyGoalRepairCommit(this.workspaceRoot, id, candidate.goalRepair);
     if (kind === "entity") await this.canon.putEntity(entitySchema.parse(payload));
     else if (kind === "proposition") await this.canon.putProposition(propositionSchema.parse(payload));
     else if (kind === "attribution") await this.canon.putAttribution(attributionSchema.parse(payload));
@@ -1741,6 +1774,7 @@ export class CompilerCommitService {
 }
 
 type PendingCanonicalProposal = {
+  goalRepair?: Awaited<ReturnType<typeof import("./upstream-repair-finish.js").goalRepairCommitPermit>>;
   id: string;
   kind: CanonicalProposalKind;
   payload: unknown;

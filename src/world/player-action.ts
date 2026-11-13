@@ -1418,6 +1418,22 @@ export async function validatePlayerActionSpatialScope(
   return issues;
 }
 
+/** Compiled goal actions and entry witnesses use the same player-visible authority. */
+export async function validateCompiledPlayerAction(engine: WorldEngine, candidate: PlayerActionCandidate,
+  scoped: ActorScopedActionContext, commitId: CommitId, sourceId?: string,
+  spokenUtterances: NonNullable<EventProposal["spokenUtterances"]> = []): Promise<ValidationIssue[]> {
+  const speechChannels = (scoped.decision?.agency?.channels ?? []).filter(channel => spokenUtterances.some(utterance =>
+    utterance.channelBinding?.channelId === channel.id && utterance.channelBinding.processId === channel.processId));
+  const onlyRemoteSpeech = spokenUtterances.length > 0 && spokenUtterances.every(utterance => Boolean(utterance.channelBinding))
+    && !candidate.intent?.requestedTimeAdvance && candidate.proposedDelta.operations.every(op => op.op === "set" && op.entityId === scoped.actorId && op.field === "character.plan")
+    && candidate.participants.every(id => id === scoped.actorId || speechChannels.some(channel => channel.peerEntityIds.includes(id) || channel.carrierEntityIds.includes(id)));
+  return [
+    ...validatePlayerActionScope(candidate, scoped),
+    ...validatePlayerActionGrounding(candidate, scoped),
+    ...(onlyRemoteSpeech ? [] : await validatePlayerActionSpatialScope(engine, candidate, scoped.actorId, commitId, sourceId)),
+  ];
+}
+
 /** Construct the only EventProposal that may cross the world-engine boundary. */
 export function playerActionToKnowledgeAwareAction(input: {
   branchId: string;

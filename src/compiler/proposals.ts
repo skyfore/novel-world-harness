@@ -8,6 +8,7 @@ import { perceptionObservationSchema, validatePerceptionObservationEvidence, typ
 import { utteranceExpressionSchema, validateUtteranceExpressionEvidence, type UtteranceExpression } from "../world/utterance-expression.js";
 import { validateGoalExpressionEvidence } from "../world/conditional-expression.js";
 import { validateAgencyProfile, validateAgencyProfileEvidence } from "../world/agency-profile.js";
+import { validateSourceLocalIdentityEvidence } from "../world/identity-consumption.js";
 import { semanticEffectSchema, validateSemanticEffectEvidence, type SemanticEffect } from "../world/semantic-effect.js";
 import { eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import { z } from "zod";
@@ -259,6 +260,7 @@ export function compilerPayloadEvidence(payload: unknown): EvidenceRef[] {
     nested.relationshipChanges,
     nested.clauses,
     nested.exceptions,
+    ...(Array.isArray(nested.characterEntryCheckpoints) ? nested.characterEntryCheckpoints.map(c => c?.admission ? [c.admission] : []) : []),
   ].flatMap((candidate) => Array.isArray(candidate) ? candidate : []);
   return [record, ...semanticChildren].flatMap((candidate) => {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
@@ -308,7 +310,8 @@ export class CompilerProposalService {
     const artifactId = compilerProposalArtifactId(kind, payload, input.proposalId);
     const targetIssues = [...entryArtifactEvidenceIssues(kind, payload, evidenceAssertions), ...(kind === "event-execution" ? validateProcessRecoveryEvidence(eventExecutionSchema.parse(payload), evidenceAssertions) : []), ...validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions), ...(kind === "process-template" ? validateIncapacityEvidence(processTemplateSchema.parse(payload), evidenceAssertions) : []), ...(kind === "semantic-effect" ? validateSemanticEffectEvidence(semanticEffectSchema.parse(payload), evidenceAssertions) : []), ...(kind === "perception-observation" ? validatePerceptionObservationEvidence(perceptionObservationSchema.parse(payload), evidenceAssertions) : []), ...(kind === "acquisition" ? validateAcquisitionEvidence(acquisitionSchema.parse(payload), evidenceAssertions) : []), ...(kind === "utterance-expression" ? validateUtteranceExpressionEvidence(utteranceExpressionSchema.parse(payload), evidenceAssertions) : [])];
     targetIssues.push(...(kind === "character-goal" ? validateGoalExpressionEvidence(characterGoalSchema.parse(payload), evidenceAssertions) : []));
-    targetIssues.push(...(kind === "entity" ? validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions) : []));
+    targetIssues.push(...(kind === "entity" ? [...validateAgencyProfileEvidence(entitySchema.parse(payload), evidenceAssertions),
+      ...validateSourceLocalIdentityEvidence(entitySchema.parse(payload), evidenceAssertions)] : []));
     const characterEvidenceIssues = kind === "character-model"
       ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
       : [];

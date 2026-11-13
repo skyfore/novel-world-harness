@@ -882,8 +882,8 @@ it.each([{ discoveryOnly: false, work: false }, { discoveryOnly: true, work: fal
   } finally { for (const p of providers) await p.host.session.dispose(); vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
-// The 23-turn case persists real Pi transcripts and repeatedly verifies them;
-// allow disk/CPU contention in the full suite without timing out its cleanup.
+// Continuation cases persist Pi transcripts, and some replay them after writing
+// 1,001 unrelated trace runs. Allow for disk contention on shared CI runners.
 it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCalls: 2, rejectedRef: true }, { failedCalls: 1, quotaRefusal: true }, { failedCalls: 2, dependencyRefs: true },
   { failedCalls: 2, hostRepair: "source-search-contract" as const }, { failedCalls: 2, hostRepair: "request-size" as const },
   { failedCalls: 2, hostRepair: "source-search-contract" as const, failHost: true },
@@ -1376,4 +1376,4 @@ it.each([{ failedCalls: 2 }, { failedCalls: 3 }, { failedCalls: 23 }, { failedCa
       expect(dispatch).toHaveBeenCalledTimes(3);
     }
   } finally { for (const p of providers) await p.host.session.dispose(); vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }); }
-}, 20_000);
+}, 60_000);

@@ -52,5 +52,6 @@ jobs:
       - run: pnpm test:semantic-contracts
       - run: pnpm run check
       - run: pnpm run check:pi-tests
-      - run: pnpm test
+      # Disk-backed integration tests can exceed Vitest's five-second default on shared runners.
+      - run: pnpm test --testTimeout=30000
       - run: pnpm run build

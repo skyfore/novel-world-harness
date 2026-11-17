@@ -4,6 +4,7 @@
   "include": [
     "test/json-arguments.test.ts",
     "test/pi-session.test.ts",
+    "test/receipt-bound-pi-stage.test.ts",
     "test/pi-trace.test.ts",
     "test/pi-rendering.test.ts",
     "test/pi-request-policy.test.ts",
@@ -21,6 +22,7 @@
     "test/identity-repair-handoff.test.ts",
     "test/identity-session-persistence.test.ts",
     "test/identity-consumer-revalidation.test.ts",
+    "test/identity-consumer-artifacts.test.ts",
     "test/consumer-work-plan.test.ts",
     "test/consumer-work-interruption.test.ts",
     "test/identity-consumer-queue.test.ts",

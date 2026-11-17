@@ -15,6 +15,9 @@ import { prerequisiteStop } from "../compiler/role-source-prerequisites.js";
 import { assertIdentitySubmissionTurn, type IdentitySessionContract } from "../compiler/identity-session-integrity.js";
 import { sealIdentityUpstreamSession } from "../compiler/identity-upstream-session.js";
 
+const subscriptionProfile = { provider: "openai-codex", model: "gpt-6.1-sol", thinkingLevel: "medium" } as const;
+const subscriptionModel = `${subscriptionProfile.provider}/${subscriptionProfile.model}`;
+
 export const retainPiArtifact = async (file: string, value: unknown) => {
   try { await fs.writeFile(file, JSON.stringify(value, null, 2) + "\n", { flag: "wx", mode: 0o600 }); }
   catch (error) {
@@ -74,7 +77,7 @@ export async function runReceiptBoundPiStage<T>(options: {
   const observe = (phase: string, value: unknown) => fs.appendFile(requests, JSON.stringify({ phase, value }) + "\n");
   try {
     const value = await withCompilerSignals(signal => options.run(async args => {
-      session = await PiAgentSession.create({ ...args, model: "openai-codex/gpt-6.1-sol", requestBudget: budget,
+      session = await PiAgentSession.create({ ...args, model: subscriptionModel, profile: subscriptionProfile, requestBudget: budget,
         additionalTools: args.additionalTools?.map(t => ({ ...t, execute: async (...a: Parameters<typeof t.execute>) => { if (fatal) throw fatal; return t.execute(...a); } })) as ToolDefinition[],
         systemPromptOverride: losslessContextInstructions + (args.systemPromptOverride ?? ""), piAgentDir: getAgentDir(), saveSession: true,
         runtimeDir: path.join(directory, "sessions", stage), includeProjectInstructions: false, includeLocalTools: false, includeNwhExtension: false,
@@ -85,7 +88,7 @@ export async function runReceiptBoundPiStage<T>(options: {
           try { appendFileSync(messages, JSON.stringify({ sequence: ++sequence, message: event.message }) + "\n"); if (event.message.role === "assistant") assertIdentitySubmissionTurn(event.message, contract.terminalTool); }
           catch (error) { fatal ??= error; }
         } }, beforeModelRequest: async () => { if (fatal) throw fatal; await options.assertOriginal(); } });
-      if (session.model !== "openai-codex/gpt-6.1-sol") throw prerequisiteStop("Pi provider changed; no fallback");
+      if (session.model !== subscriptionModel) throw prerequisiteStop("Pi provider changed; no fallback");
       const actual = session.promptWithReport.bind(session);
       session.promptWithReport = async (text, config) => {
         prompt = text;

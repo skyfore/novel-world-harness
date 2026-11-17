@@ -3,6 +3,8 @@ import path from "node:path";
 import { contentHash } from "../world/canonical.js";
 import { canonicalEventSchema, idSchema, type CanonicalEvent } from "../world/model.js";
 import { applyEventExecutions, eventExecutionSchema, type EventExecution } from "../world/event-execution.js";
+import { discourseObservationSchema } from "./annotations.js";
+import { discourseSegmentSchema } from "./structure.js";
 import { RequirementLedger } from "./requirement-ledger.js";
 import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
@@ -59,9 +61,25 @@ export function discoverConsumerArtifacts<T extends { kind: string; id: string; 
 
 export function currentConsumerPayload(consumer: { ref: string; reason: string; payload: unknown }, current: {
   payloads: ReadonlyMap<string, unknown>; activeRevisions: ReadonlyMap<string, string>;
+  source?: { id: string };
 }) {
   if (consumer.reason !== "typed-consumer") throw prerequisiteStop("Source-review consumers require their original owning audit, not a world-payload revalidation. Inspect requirements inspect-identity-repairs for the same source/task and its sourceReviewCoverage; preserve the full denominator, no dispatch or unchanged retry");
   const [kind, ...idParts] = consumer.ref.split("/"), id = idParts.join("/");
+  if (kind === "discourse") {
+    // A closure discourse node is owned by either the structure manifest or a
+    // source annotation. Keep the retained owner when looking up its live revision.
+    const observation = discourseObservationSchema.safeParse(consumer.payload);
+    const owner = observation.success ? "discourse-segment" : "structural-discourse";
+    const retained = observation.success ? observation : discourseSegmentSchema.safeParse(consumer.payload);
+    const key = `${owner}:${id}`, payload = current.payloads.get(key);
+    const live = observation.success ? discourseObservationSchema.safeParse(payload) : discourseSegmentSchema.safeParse(payload);
+    if (!retained.success || retained.data.id !== id || !live.success || live.data.id !== id
+      || live.data.sourceId !== retained.data.sourceId || (current.source && live.data.sourceId !== current.source.id)
+      || current.activeRevisions.get(key) !== contentHash(payload)
+      || (observation.success && current.activeRevisions.has(`structural-discourse:${id}`)))
+      throw prerequisiteStop(`Discourse consumer ${consumer.ref} has no matching active ${owner} revision. Inspect requirements inspect-identity-repairs with the same --source and --task. Copy the original items[].ref into --ref once and check selected.payload against its current source annotation or structure manifest. A missing, changed-owner or unverified revision requires host inspection; no frozen-payload fallback or unchanged dispatch`);
+    return payload;
+  }
   if (kind === "entry") {
     const stop = (reason: string) => prerequisiteStop(`${reason}. Inspect requirements inspect-identity-repairs with the same --source/--task and --ref ${consumer.ref}, and its owning canonical-event/event-execution revisions. Resolve the active dependency before dispatch; no frozen-payload fallback, guessed ref or unchanged retry`);
     const [actorId, eventId] = idParts;

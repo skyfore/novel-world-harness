@@ -154,7 +154,7 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
     }
   }
   const payloads = new Map<string, unknown>();
-  const structure = plan.readableRefs.some(ref => ref.kind === "structural-discourse")
+  const structure = identityContext || plan.readableRefs.some(ref => ref.kind === "structural-discourse")
     ? await new SourceStructureStore(root).read(sourceId) : null;
   if (structure?.sourceId === sourceId && structure.sourceSha256 === source.contentSha256) for (const item of structure.discourseSegments) payloads.set(`structural-discourse:${item.id}`, item);
   for (const item of await new SourceAnnotationStore(root).list(sourceId)) payloads.set(`${item.annotationType}:${item.id}`, item);
@@ -247,7 +247,7 @@ export async function verifyUpstreamRepairPlan(root: string, raw: UpstreamRepair
       .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
     if (contentHash(currentCatalog) !== (preceding ? contentHash(preceding.catalog) : p.intent.catalogHash)) throw upstreamRepairHostError("Identity consumer catalog changed outside exact receipt-backed outputs");
     if (contentHash(await new RoleRosterStore(root).read(sourceId)) !== contentHash(p.review.priorRoster)
-      || contentHash(await new SourceStructureStore(root).read(sourceId)) !== p.review.priorPlan.structureHash) throw upstreamRepairHostError("Identity consumer roster or source structure changed");
+      || contentHash(structure) !== p.review.priorPlan.structureHash) throw upstreamRepairHostError("Identity consumer roster or source structure changed");
     const { RoleReviewWorkStore } = await import("./role-review-work.js");
     const entries = new RoleReviewWorkStore(root, p.review.priorPlan).stagedEntries();
     const expected = p.inventory.consumers.filter(c => c.ref.startsWith("staged-role/"));

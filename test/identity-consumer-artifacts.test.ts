@@ -4,6 +4,29 @@ import { findConsumerArtifact, discoverConsumerArtifacts } from "../src/compiler
 import { consumerDependencyCatalog, consumerArtifactPages, consumerArtifactReadHint, ConsumerArtifactReadTracker,
   encodeConsumerArtifact, decodeConsumerArtifact, type ConsumerArtifact } from "../src/compiler/identity-consumer-artifacts.js";
 import { identityFixture } from "./helpers/identity-fixture.js";
+import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
+
+it.each(["discourse-segment", "structural-discourse"])("discovers discourse aliases only for their original %s owner and source", kind => {
+  const { inventory } = identityFixture();
+  const source = { sourceId: "src", sourceHash: contentHash("source") };
+  const segment = { version: 1, sourceId: "src", id: "dream", kind: "dream", confidence: 1,
+    anchors: [textAnchorForByteRange("src", Buffer.from("Dream"), 0, 5)] };
+  const observation = { ...segment, annotationType: "discourse-segment",
+    derivation: { worker: "test", runId: "run", ontologyVersion: "observation-v1" } };
+  const structural = { ...segment, proposedBy: "human", evidenceAssertionIds: [] };
+  const catalog: ConsumerArtifact[] = [
+    { kind: "discourse-segment", payload: observation }, { kind: "structural-discourse", payload: structural },
+  ].map(item => ({ ...item, id: "dream", revisionHash: contentHash(item.payload), current: true }));
+  const payload = kind === "discourse-segment" ? observation : structural;
+  const consumer = { ref: "discourse/dream", payload, revisionHash: contentHash(payload), reason: "typed-consumer" as const, dependencies: [] };
+  inventory.consumers = [consumer];
+  const bound = consumerDependencyCatalog(catalog, source, inventory, undefined);
+  expect(findConsumerArtifact(bound, "discourse/dream")).toMatchObject({ kind, id: "dream", payload });
+  expect(findConsumerArtifact(bound, "discourse:dream")).toBe(findConsumerArtifact(bound, "discourse/dream"));
+  expect(findConsumerArtifact(consumerDependencyCatalog(catalog, { ...source, sourceId: "other" }, inventory, undefined), "discourse/dream")).toBeUndefined();
+  inventory.consumers = [{ ...consumer, ref: "discourse/guessed" }];
+  expect(findConsumerArtifact(consumerDependencyCatalog(catalog, source, inventory, undefined), "discourse/guessed")).toBeUndefined();
+});
 
 it("maps exact source-owned graph dependencies and distinguishes retained roster evidence from active world data", () => {
   const { inventory } = identityFixture(), source = { sourceId: "src", sourceHash: contentHash("source") };

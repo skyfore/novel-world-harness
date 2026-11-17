@@ -2,6 +2,8 @@ import { contentHash } from "../world/canonical.js";
 import { safeTextPageEnd } from "../util/text-pages.js";
 import { prerequisiteStop } from "./role-source-prerequisites.js";
 import type { IdentityInventory } from "./identity-requirements.js";
+import { discourseObservationSchema } from "./annotations.js";
+import { discourseSegmentSchema } from "./structure.js";
 
 const kinds: Record<string, string> = { initial: "initial-world", event: "canonical-event", participation: "event-participation",
   spatial: "spatial-relation", scene: "scene-occurrence", frame: "event-frame", action: "action-schema", constraint: "action-constraint",
@@ -13,6 +15,12 @@ export function consumerArtifactKey(ref: string, payload: unknown, sourceId: str
   const [kind, ...parts] = ref.split("/"), id = parts.join("/");
   if (!id || kind === "entry") return undefined;
   if (kind === "initial" || kind === "roster") return id === sourceId ? `${kind === "initial" ? "initial-world:singleton" : `role-roster:${id}`}` : undefined;
+  if (kind === "discourse") {
+    const observation = discourseObservationSchema.safeParse(payload);
+    const retained = observation.success ? observation : discourseSegmentSchema.safeParse(payload);
+    return retained.success && retained.data.id === id && retained.data.sourceId === sourceId
+      ? `${observation.success ? "discourse-segment" : "structural-discourse"}:${id}` : undefined;
+  }
   const annotation = kind === "annotation" && payload && typeof payload === "object" && "annotationType" in payload
     ? String(payload.annotationType) : undefined;
   if (kind === "annotation" && !annotation) return undefined;

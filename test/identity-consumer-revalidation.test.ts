@@ -42,6 +42,7 @@ import * as workPlans from "../src/compiler/consumer-work-plan.js";
 import { bindingRecoveryDirectory } from "../src/compiler/consumer-review-binding.js";
 import { CONSUMER_REVIEW_CORRECTION, deriveConsumerReviewContract } from "../src/compiler/consumer-review-contract.js";
 import { canonicalEventSchema } from "../src/world/model.js";
+import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
 import * as upstreamSession from "../src/compiler/identity-upstream-session.js";
 import { prerequisiteStop } from "../src/compiler/role-source-prerequisites.js";
 import { verifyIdentitySessionEvidence } from "../src/compiler/identity-session-integrity.js";
@@ -215,6 +216,29 @@ it("does not substitute a missing or superseded consumer with its frozen origina
   expect(() => revalidation.currentConsumerPayload({ ref: "entity-resolution/old", reason: "typed-consumer", payload }, current)).toThrow(/retained predecessor/);
   expect(() => revalidation.currentConsumerPayload({ ref: "event/missing", reason: "typed-consumer", payload }, current)).toThrow(/no fallback/);
   expect(() => revalidation.currentConsumerPayload({ ref: "source-review/old", reason: "source-review-coverage", payload }, current)).toThrow(/original owning audit/);
+});
+
+it("resolves each discourse consumer through its original active owner and source", () => {
+  const anchor = textAnchorForByteRange("src", Buffer.from("Dream"), 0, 5);
+  const segment = { version: 1, sourceId: "src", id: "dream", kind: "dream", confidence: 1, anchors: [anchor] };
+  const observation = { ...segment, annotationType: "discourse-segment",
+    derivation: { worker: "test", runId: "run", ontologyVersion: "observation-v1" } };
+  const revised = { ...observation, interpretation: "Viewpoint remains unresolved." };
+  const structural = { ...segment, proposedBy: "human", evidenceAssertionIds: [] };
+  const consumer = { ref: "discourse/dream", reason: "typed-consumer", payload: observation };
+  const current = { source: { id: "src" }, payloads: new Map<string, unknown>([["discourse-segment:dream", revised]]),
+    activeRevisions: new Map([["discourse-segment:dream", h(revised)]]) };
+  expect(revalidation.currentConsumerPayload(consumer, current)).toBe(revised);
+  current.activeRevisions.set("discourse-segment:dream", h(observation));
+  expect(() => revalidation.currentConsumerPayload(consumer, current)).toThrow(/active discourse-segment/);
+  current.activeRevisions.set("discourse-segment:dream", h(revised));
+  expect(() => revalidation.currentConsumerPayload(consumer, { ...current, source: { id: "other" } })).toThrow(/active discourse-segment/);
+  const structureConsumer = { ...consumer, payload: structural };
+  expect(() => revalidation.currentConsumerPayload(structureConsumer, current)).toThrow(/active structural-discourse/);
+  current.payloads.set("structural-discourse:dream", structural);
+  current.activeRevisions.set("structural-discourse:dream", h(structural));
+  expect(revalidation.currentConsumerPayload(structureConsumer, current)).toBe(structural);
+  expect(() => revalidation.currentConsumerPayload(consumer, current)).toThrow(/changed-owner/);
 });
 
 it.each([CONSUMER_REVIEW_CORRECTION, CONSUMER_EVIDENCE_COVERAGE])("reserves one predecessor allowance across policies after %s, including unrecorded failures", async policy => {

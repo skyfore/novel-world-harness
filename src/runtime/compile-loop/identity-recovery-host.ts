@@ -102,7 +102,7 @@ export async function withIdentityRecoveryHost<T>(root: string, prepared: Prepar
     let reviewer: string | undefined;
     await command("review", "codex", dedicatedSessionArgs({ workspace: root, sourceId: spec.sourceId, model: spec.engineerModel, effort: "max" },
       null, Date.now(), schemaFile, reviewFile, true),
-    `Independently review the current identity recovery implementation and tests. Read AGENTS.md and docs/agent-tool-recovery.md. Do not edit files or dispatch models/workers/other agents. Check lossless complete evidence, original budgets and deadline, mandatory host gates, sealed raw sessions before registration, and real-chain regressions. No semantic novel judgments. Return the strict verdict. Source fingerprint: ${sourceHash}. Original incident: ${spec.incidentFile}.`, line => {
+    `Independently review the current identity recovery implementation and tests. Read the relevant source implementation and regression tests. Do not edit files or dispatch models/workers/other agents. Check lossless complete evidence, original budgets and deadline, mandatory host gates, sealed raw sessions before registration, and real-chain regressions. No semantic novel judgments. Return the strict verdict. Source fingerprint: ${sourceHash}. Original incident: ${spec.incidentFile}.`, line => {
       let event; try { event = JSON.parse(line); } catch { return; }
       if (event.type === "thread.started") { const id = z.string().uuid().parse(event.thread_id); if (reviewer && reviewer !== id) throw prerequisiteStop("Reviewer identity changed"); reviewer = id; }
     });

@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 
 const HARNESS_INSTRUCTIONS = `# Novel World Harness workspace
@@ -42,13 +41,14 @@ async function createIfMissing(destination: string, content: string): Promise<vo
 export async function initCommand(target = process.cwd()): Promise<void> {
   const root = path.resolve(target);
   await fs.mkdir(root, { recursive: true });
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const source = path.resolve(here, "../../config.example.yaml");
-  const template = YAML.parse(await fs.readFile(source, "utf8")) as {
-    project: { name: string };
-  };
-  template.project.name = path.basename(root) || "novel-world";
-  const config = YAML.stringify(template);
+  const config = YAML.stringify({
+    version: 1,
+    project: {
+      name: path.basename(root) || "novel-world",
+      language: "zh-CN",
+      instructions: ["NWH.md"],
+    },
+  });
   await createIfMissing(path.join(root, "novel-harness.yaml"), config);
   await createIfMissing(path.join(root, "NWH.md"), HARNESS_INSTRUCTIONS);
 }

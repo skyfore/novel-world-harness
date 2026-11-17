@@ -28,7 +28,7 @@ export function changes(before: Record<string, string>, after: Record<string, st
   return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(file => before[file] !== after[file]).sort();
 }
 export function assertPatchScope(files: string[], before: Record<string, string>, after: Record<string, string>) {
-  const invalid = files.filter(file => !(file.startsWith("src/") || file.startsWith("test/") || file === "docs/agent-tool-recovery.md")
+  const invalid = files.filter(file => !(file.startsWith("src/") || file.startsWith("test/"))
     || protectedPaths.some(p => p.endsWith("/") ? file.startsWith(p) : file === p)
     || before[file]?.startsWith("symlink:") || after[file]?.startsWith("symlink:"));
   if (invalid.length) throw new Error(`COMPILE_LOOP_PATCH_SCOPE: ${invalid.join(", ")}; preserve the diff for host review; do not retry or revert user work.`);
@@ -36,7 +36,7 @@ export function assertPatchScope(files: string[], before: Record<string, string>
 export function baselineContents(root: string, files: Record<string, string>) {
   const result: Record<string, string> = {}; let bytes = 0;
   for (const [file, hash] of Object.entries(files)) {
-    if (hash.startsWith("symlink:") || !(file.startsWith("src/") || file.startsWith("test/") || file === "docs/agent-tool-recovery.md")) continue;
+    if (hash.startsWith("symlink:") || !(file.startsWith("src/") || file.startsWith("test/"))) continue;
     const content = readFileSync(path.join(root, file)); bytes += content.length;
     if (bytes > 32_000_000) throw new Error("COMPILE_LOOP_BASELINE_TOO_LARGE: retain state and narrow the repair scope before continuing.");
     result[file] = content.toString("base64");

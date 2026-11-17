@@ -5,13 +5,9 @@ playwright-report/
 test-results/
 .env
 .env.*
-!.env.example
 .novel-harness/
-# Local compilation records and one-off recovery scripts are not repository inputs.
 /run-records/
-# Local-only compilation supervisors, recovery tooling, and their tests.
 /local-loop/
-# Keep only documented root-level novel fixtures; add exceptions with tests.
 /fixtures/corpus/*.txt
 !/fixtures/corpus/smoke-world.txt
 !/fixtures/corpus/三国演义.txt

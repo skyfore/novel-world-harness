@@ -88,10 +88,12 @@ export async function runIdentityConsumerQueue(options: {
     const request = options.providerResumption ? consumerProviderResumptionSchema.parse(options.providerResumption) : undefined;
     if (request) await retainPiArtifact(path.join(directory, `continuation-${request.scopeHash}.json`), request);
     let dispatched = 0;
+    let inspectingRef: string | null = null;
     let target: Awaited<ReturnType<typeof currentConsumerRepair>> | undefined;
     try {
       await save();
       for (const ref of refs) {
+        inspectingRef = ref;
         const fresh = await dependencies.inspect(root, sourceId, { taskId, ref });
         if (!("selected" in fresh) || fresh.intentHash !== plan.intentHash || fresh.inventoryHash !== plan.inventoryHash || fresh.selected.ref !== ref)
           throw stop("Current consumer discovery changed its frozen queue scope");
@@ -129,9 +131,13 @@ export async function runIdentityConsumerQueue(options: {
         item.status = ["unaffected", "revalidated"].includes(result.status) ? "recorded" : "blocked"; item.result = result.status;
         state.currentRef = null; await save();
       }
+      inspectingRef = null;
       if (state.status === "running") state.status = "reviewed";
       await save();
       return { directory, state, progress: consumerQueueProgress(plan, state.items) };
-    } catch (error) { state.status = "stopped"; state.failure = String(error); await save(); throw error; }
+    } catch (error) {
+      state.status = "stopped"; state.currentRef ??= inspectingRef;
+      state.failure = String(error); await save(); throw error;
+    }
   });
 }

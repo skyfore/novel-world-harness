@@ -65,6 +65,7 @@ it("keeps blocked consumers and the undispatched tail through resume, continues 
     await expect(runIdentityConsumerQueue(args, deps)).rejects.toThrow(/orphaned/);
     const stopped = await inspectConsumerQueue(root, "src", f.intent.taskId);
     expect(stopped.state?.status).toBe("stopped");
+    expect(stopped.state?.currentRef).toBe(refs[2]);
     expect(stopped.progress).toMatchObject({ recorded: 0, blocked: 2, waiting: 1 });
   } finally { vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }); }
 });

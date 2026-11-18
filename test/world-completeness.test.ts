@@ -27,12 +27,13 @@ function bundle(): PreparedNovelBundle {
         { id: "nono", kind: "character", canonicalName: "诺诺", aliases: [], evidence: [] },
         { id: "hall", kind: "location", canonicalName: "走廊", aliases: [], evidence: [] },
       ],
-      events: [{ id: "e1", title: "走", participants: ["lu"], preconditions: [], causalParents: [], confidence: 1, evidence: [],
+      events: [{ id: "e1", title: "走", participants: ["lu"], preconditions: [], causalParents: [], confidence: 1, evidence: [], storyTime: { kind: "ordinal", label: "1" },
         observedOutcome: { version: 1, operations: [{ op: "set", entityId: "lu", field: "character.location", value: "hall" }] } }],
       eventParticipations: [{ id: "p1", eventId: "e1", entityId: "lu", role: "agent", presence: "physical", confidence: 1, evidence: [] }],
       sceneOccurrences: [{ ontologyVersion: "scene-occurrence-v1", id: "s1", discourseSegmentIds: ["ds1"], eventIds: ["e1"], locationId: "hall", viewpointActorIds: [], presentActorIds: ["lu"],
         entryConditions: [], exitConditions: [], evidence: [span(unitAnchors[0]!.startByte, unitAnchors[1]!.endByte)] }],
       spatialRelations: [], semanticEffects: [], eventExecutions: [], acquisitions: [], goals: [],
+      propositions: [], eventRelations: [], normTemplates: [], processTemplates: [], possibilities: [], rules: [], actionSchemas: [],
       models: [{ actorId: "lu", traits: { brave: 0.5 }, decisionBiases: {}, evidence: [] }],
       initialWorld: { delta: { version: 1, operations: [] }, participantPresence: [{ entityId: "lu", mode: "physical" }] },
     },
@@ -91,5 +92,104 @@ describe("world-model completeness", () => {
     expect(byId.get("knowledge.acquisition-paths")).toMatchObject({ total: 0, ratio: null, status: "unknown" });
     expect(report.summary.unknown).toBeGreaterThanOrEqual(3);
     expect(formatCompletenessTable(report).split("\n")[0]).toContain("unknown");
+  });
+});
+
+describe("world-model completeness v2 layers", () => {
+  const policy = { ...DEFAULT_COMPLETENESS_POLICY, speakingLineThreshold: 1, loreTermThreshold: 2, rosterPairScenes: 2 };
+  const v2Text = "\t第二天，“走吧。”明非说。他想起“言灵”。\n\t“好。”诺诺说，“言灵是真的。”\n";
+  const v2Source = Buffer.from(v2Text, "utf8");
+  const at = (needle: string) => {
+    const startByte = Buffer.byteLength(v2Text.slice(0, v2Text.indexOf(needle)), "utf8");
+    return { version: 1, sourceId: "src", startByte, endByte: startByte + Buffer.byteLength(needle, "utf8"), startLine: 1, endLine: 1, exactHash: "0".repeat(64) };
+  };
+  const [line1, line2] = v2Text.split(/(?<=\n)/u);
+  function v2Bundle(extra: { relation?: boolean; concept?: boolean; precondition?: boolean } = {}): PreparedNovelBundle {
+    const base = bundle() as unknown as { canonical: Record<string, unknown>; compilerSnapshot: Record<string, unknown> };
+    const units = [line1!, line2!].map((line, index) => ({ version: 1, id: `v${index}`, sourceId: "src", kind: "sentence", anchor: at(line), ordinal: index, proposedBy: "deterministic", confidence: 1, evidenceAssertionIds: [] }));
+    const scene = (id: string, line: string) => ({ ontologyVersion: "scene-occurrence-v1", id, discourseSegmentIds: [], eventIds: ["e1"], locationUnknown: { reason: "unstated" }, viewpointActorIds: [], presentActorIds: ["lu", "nono"],
+      entryConditions: [], exitConditions: [], evidence: [span(at(line).startByte, at(line).endByte)] });
+    return {
+      ...base,
+      canonical: {
+        ...base.canonical,
+        entities: [
+          { id: "lu", kind: "character", canonicalName: "路明非", aliases: [], evidence: [] },
+          { id: "nono", kind: "character", canonicalName: "诺诺", aliases: [], evidence: [] },
+          { id: "man", kind: "character", canonicalName: "男人", aliases: [], evidence: [] },
+          ...(extra.concept ? [{ id: "yanling", kind: "concept", canonicalName: "言灵", aliases: [], evidence: [] }] : []),
+        ],
+        events: [{ id: "e1", title: "走", participants: ["lu"], preconditions: extra.precondition ? [{ kind: "exists", entityId: "lu" }] : [], causalParents: [], confidence: 1,
+          evidence: [], storyTime: { kind: "ordinal", label: "1" }, observedOutcome: { version: 1, operations: [{ op: "set", entityId: "lu", field: "character.mood", value: "calm" }] } }],
+        sceneOccurrences: [scene("s1", line1!), scene("s2", line2!)],
+        propositions: extra.relation ? [{ id: "p-rel", subjectEntityId: "lu", relationId: "friend-of", object: { kind: "entity", entityId: "nono" }, polarity: "positive" }] : [],
+      },
+      compilerSnapshot: {
+        ...base.compilerSnapshot,
+        structure: { units, baseUnitIds: units.map((unit) => unit.id) },
+        annotations: [
+          { version: 1, id: "m1", sourceId: "src", derivation, annotationType: "entity-mention", anchor: at("明非"), surface: "明非", form: "proper", kindCandidates: ["character"], confidence: 1 },
+          { version: 1, id: "m2", sourceId: "src", derivation, annotationType: "entity-mention", anchor: at("诺诺"), surface: "诺诺", form: "proper", kindCandidates: ["character"], confidence: 1 },
+          { version: 1, id: "em1", sourceId: "src", derivation, annotationType: "event-mention", triggerAnchor: at("走"), trigger: "走", extentAnchors: [at(line1!)],
+            eventTypeCandidates: ["movement"], participantMentionIds: ["m1"], salience: "major", confidence: 1 },
+        ],
+        entityResolutions: [
+          { id: "r1", mentionId: "m1", status: "resolved", entityId: "lu", aliasType: "nickname" },
+          { id: "r2", mentionId: "m2", status: "resolved", entityId: "nono" },
+        ],
+        eventResolutions: [{ id: "er1", eventMentionIds: ["em1"], status: "new-event", canonicalEventId: "e1", supersedesResolutionIds: [] }],
+        accounting: { records: [] },
+      },
+    } as unknown as PreparedNovelBundle;
+  }
+  const measuresOf = (report: ReturnType<typeof measureWorldCompleteness>) => new Map(report.measures.map((item) => [item.id, item]));
+
+  it("measures aliases, generic names, roster relations, time anchors, conditions, autonomy and lore", () => {
+    const report = measureWorldCompleteness(v2Bundle(), v2Source, { policy });
+    const byId = measuresOf(report);
+    expect(byId.get("identity.aliases-attached")).toMatchObject({ numerator: 1, total: 2, status: "gap" });
+    expect(report.queues.unattachedAliases).toEqual([{ entityId: "lu", surface: "明非", mentions: 1 }]);
+    expect(byId.get("identity.generic-names")).toMatchObject({ numerator: 1, status: "gap" });
+    expect(report.roster).toMatchObject({ reviewed: false });
+    // Provisional roster: the denominator exists but cannot pass without review.
+    expect(byId.get("relations.roster-pairs")).toMatchObject({ numerator: 0, total: 1, status: "unknown" });
+    expect(report.queues.rosterPairs).toEqual([{ subject: "pair:lu|nono", scenes: 2 }]);
+    expect(byId.get("time.anchored-events")).toMatchObject({ numerator: 0, total: 1, status: "gap" });
+    expect(report.queues.unanchoredEvents).toEqual(["e1"]);
+    expect(byId.get("causality.conditioned-key-events")).toMatchObject({ numerator: 0, total: 1, status: "unknown" });
+    expect(byId.get("possibility.autonomous-templates")).toMatchObject({ numerator: 0, status: "gap" });
+    expect(byId.get("lore.terms-grounded")).toMatchObject({ numerator: 0, total: 1, status: "gap" });
+    expect(report.queues.ungroundedTerms.map((term) => term.surface)).toEqual(["言灵"]);
+    expect(byId.get("cost.per-source-kb")).toMatchObject({ status: "info" });
+  });
+
+  it("accepts artifacts or explicit reviewed dispositions, and a reviewed roster makes roster measures decidable", () => {
+    const roster = { reviewed: true, actorIds: ["lu", "nono"] };
+    const withArtifacts = measuresOf(measureWorldCompleteness(v2Bundle({ relation: true, concept: true, precondition: true }), v2Source, { policy, roster }));
+    expect(withArtifacts.get("relations.roster-pairs")).toMatchObject({ numerator: 1, total: 1, status: "satisfied" });
+    expect(withArtifacts.get("causality.conditioned-key-events")).toMatchObject({ numerator: 1, status: "satisfied" });
+    expect(withArtifacts.get("lore.terms-grounded")).toMatchObject({ numerator: 1, status: "satisfied" });
+    expect(withArtifacts.get("characters.roster-reviewed")).toMatchObject({ status: "satisfied" });
+    const dispositions = [
+      { measureId: "relations.roster-pairs", subject: "pair:lu|nono", verdict: "not-stated" as const, rationale: "No relation is stated." },
+      { measureId: "causality.conditioned-key-events", subject: "event:e1", verdict: "unconditioned" as const, rationale: "Nothing gates it." },
+      { measureId: "lore.terms-grounded", subject: "term:言灵", verdict: "narration-only" as const, rationale: "Mentioned only." },
+    ];
+    const withDispositions = measuresOf(measureWorldCompleteness(v2Bundle(), v2Source, { policy, roster, dispositions }));
+    expect(withDispositions.get("relations.roster-pairs")!.status).toBe("satisfied");
+    expect(withDispositions.get("causality.conditioned-key-events")!.status).toBe("satisfied");
+    expect(withDispositions.get("lore.terms-grounded")!.status).toBe("satisfied");
+  });
+
+  it("limits source denominators and artifacts to a scope with the same implementation", () => {
+    const scope = { startByte: at(line2!).startByte, endByte: at(line2!).endByte };
+    const report = measureWorldCompleteness(v2Bundle(), v2Source, { policy, scope });
+    const byId = measuresOf(report);
+    expect(report.scope).toEqual(scope);
+    expect(byId.get("observation.speech-annotated")).toMatchObject({ total: 2 });
+    expect(byId.get("observation.names-annotated")!.total).toBeLessThanOrEqual(1);
+    expect(byId.get("time.anchored-events")).toMatchObject({ total: 0, status: "unknown" });
+    expect(byId.get("events.typed-agent")).toMatchObject({ total: 0 });
+    expect(byId.get("lore.terms-grounded")).toMatchObject({ total: 1 });
   });
 });

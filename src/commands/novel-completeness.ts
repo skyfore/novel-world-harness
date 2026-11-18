@@ -1,7 +1,8 @@
 import path from "node:path";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { buildAdmissionManifest } from "../compiler/cut-admission.js";
-import { measureWorldCompleteness, type WorldCompletenessReport } from "../compiler/world-completeness.js";
+import { measureWorldCompleteness, type ByteRange, type WorldCompletenessReport } from "../compiler/world-completeness.js";
+import { summarizeCompileUsage } from "../compiler/compile-usage.js";
 import { loadNovelCutsBundle } from "./novel-cuts.js";
 
 export type NovelCompletenessOptions = {
@@ -12,7 +13,17 @@ export type NovelCompletenessOptions = {
   admission?: boolean;
   /** Print the measure table instead of the full JSON report. */
   brief?: boolean;
+  /** Limit every measure to one byte range (`start-end`), as a stage gate or slice acceptance does. */
+  range?: string;
+  /** Skip the trace-derived usage summary. */
+  usage?: boolean;
 };
+
+export function parseByteRange(value: string): ByteRange {
+  const match = /^(\d+)-(\d+)$/u.exec(value.trim());
+  if (!match || Number(match[2]) <= Number(match[1])) throw new Error(`Invalid byte range '${value}': use <start>-<end> with end > start.`);
+  return { startByte: Number(match[1]), endByte: Number(match[2]) };
+}
 
 export type NovelCompletenessReport = WorldCompletenessReport & {
   bundle: { origin: "candidate" | "revision"; bundleHash?: string; baselineIssues: number };
@@ -26,8 +37,9 @@ export async function inspectNovelCompleteness(options: NovelCompletenessOptions
   const admission = !loaded.bundle.admission && options.admission
     ? await buildAdmissionManifest(loaded.bundle, { inputIssues: loaded.baselineIssues, probe: true })
     : null;
+  const usage = options.usage === false ? null : await summarizeCompileUsage(root, loaded.source.id);
   return {
-    ...measureWorldCompleteness(loaded.bundle, source, { admission }),
+    ...measureWorldCompleteness(loaded.bundle, source, { admission, usage, ...(options.range ? { scope: parseByteRange(options.range) } : {}) }),
     bundle: { origin: loaded.origin, ...(loaded.bundleHash ? { bundleHash: loaded.bundleHash } : {}), baselineIssues: loaded.baselineIssues.length },
   };
 }
@@ -39,7 +51,8 @@ export function formatCompletenessTable(report: WorldCompletenessReport): string
   const widths = rows[0]!.map((_, column) => Math.max(...rows.map((row) => row[column]!.length)));
   const lines = rows.map((row) => row.map((cell, column) => cell.padEnd(widths[column]!)).join("  ").trimEnd());
   const { satisfied, gap, unknown } = report.summary;
-  return [`${report.sourceId}  ${report.version}  ${report.policy}  satisfied ${satisfied}  gap ${gap}  unknown ${unknown}`, ...lines].join("\n");
+  const scope = report.scope ? `  bytes ${report.scope.startByte}-${report.scope.endByte}` : "";
+  return [`${report.sourceId}  ${report.version}  ${report.policy}${scope}  satisfied ${satisfied}  gap ${gap}  unknown ${unknown}  roster ${report.roster.reviewed ? "reviewed" : "provisional"} (${report.roster.actorIds.length})`, ...lines].join("\n");
 }
 
 export async function novelCompletenessCommand(options: NovelCompletenessOptions): Promise<void> {

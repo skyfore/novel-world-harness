@@ -12,9 +12,10 @@ import { spatialEndpoints } from "../world/spatial-ontology.js";
  * (structure units, direct-speech spans, established-name occurrences), so a
  * model that extracts less cannot shrink them.
  */
-export const WORLD_COMPLETENESS_VERSION = "world-completeness-v1" as const;
+export const WORLD_COMPLETENESS_VERSION = "world-completeness-v2" as const;
 
-export type CompletenessLayer = "source" | "observation" | "identity" | "events" | "scenes" | "characters" | "space" | "knowledge" | "agency";
+export type CompletenessLayer = "source" | "observation" | "identity" | "relations" | "events" | "time" | "scenes" | "characters" | "space" | "knowledge" | "agency"
+  | "causality" | "possibility" | "lore" | "cost";
 /** `source`: counted in the text; `roster`: independent role review; `internal`: derived from compiled artifacts (consistency only). */
 export type DenominatorKind = "source" | "roster" | "internal";
 export type MeasureStatus = "satisfied" | "gap" | "unknown" | "info";
@@ -38,9 +39,15 @@ export type CompletenessMeasure = {
  * for every novel. Targets apply to coverage of things the text itself states.
  */
 export const DEFAULT_COMPLETENESS_POLICY = {
-  version: "completeness-policy-v1",
+  version: "completeness-policy-v2",
   /** A character with at least this many attributed lines is a speaking character (a source-derived role denominator). */
   speakingLineThreshold: 6,
+  /** A setting term (quoted term or census lore entry) needs grounding once it occurs this often. */
+  loreTermThreshold: 10,
+  /** Roster pairs co-present in at least this many scenes need a relation record or an explicit "not stated". */
+  rosterPairScenes: 2,
+  /** Provisional roster: speaking characters plus this many most frequent event agents. */
+  rosterTopAgents: 8,
   targets: {
     accounted: 1,
     hiddenUnits: 0,
@@ -52,6 +59,7 @@ export const DEFAULT_COMPLETENESS_POLICY = {
     scenesWithEvents: 1,
     effectfulEvents: 0.9,
     typedAgent: 0.9,
+    speechInBeats: 0.9,
     narrativeInScenes: 0.95,
     sceneLocation: 1,
     speakerPresence: 1,
@@ -60,17 +68,63 @@ export const DEFAULT_COMPLETENESS_POLICY = {
     openingPositions: 1,
     acquisitions: 1,
     enterable: 1,
+    aliasesAttached: 1,
+    genericNames: 0,
+    rosterPairs: 1,
+    anchoredEvents: 0.9,
+    conditionedKeyEvents: 1,
+    /** An absolute floor: at least this many autonomous possibility templates. */
+    autonomousTemplates: 1,
+    termsGrounded: 1,
   },
 } as const;
 export type CompletenessPolicy = typeof DEFAULT_COMPLETENESS_POLICY;
 
 export type ByteRange = { startByte: number; endByte: number };
+
+/**
+ * An explicit reviewed conclusion that stands in for an artifact: "the source
+ * does not state a relation", "this key event is unconditioned", "this term is
+ * narration only", "location unknown". It is legal only as the result of a
+ * review, so it carries a rationale; an absent artifact is never read as one.
+ */
+export type ReviewDisposition = {
+  measureId: string;
+  /** Subject key: `pair:<a>|<b>` (sorted), `event:<id>`, `term:<surface>`, `location:<id>`, `actor:<id>`. */
+  subject: string;
+  verdict: "not-stated" | "unconditioned" | "narration-only" | "unknown";
+  rationale: string;
+};
+
+/** Provisional or reviewed major-role set (design 5.7). */
+export type RosterSummary = { reviewed: boolean; actorIds: string[]; missing?: string[] };
+
+/** Model usage attributed to the compile of this source (all stages). */
+export type CompileUsage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; nominalUsd: number; runs: number };
+
+/** Surfaces a novel uses as setting vocabulary; a census entry classified as lore, or a frequently quoted term. */
+export type LoreTerm = { surface: string; occurrences: number; origin: "census" | "quoted-term" };
+
+export const pairSubject = (left: string, right: string) => `pair:${[left, right].sort().join("|")}`;
+
+/** Pronouns and bare common nouns are not names; an unnamed person needs a qualified derived label. */
+const GENERIC_NAMES = new Set([
+  "他", "她", "它", "我", "你", "您", "他们", "她们", "它们", "我们", "你们", "咱们", "自己", "此人", "那人", "这人", "某人", "有人", "众人", "大家", "对方",
+  "男人", "女人", "男孩", "女孩", "男子", "女子", "老人", "老头", "老者", "孩子", "少年", "少女", "青年", "姑娘", "小姐", "先生", "女士", "夫人",
+  "叔叔", "阿姨", "婶婶", "舅舅", "爷爷", "奶奶", "爸爸", "妈妈", "父亲", "母亲", "哥哥", "姐姐", "弟弟", "妹妹",
+  "老师", "教授", "医生", "司机", "警察", "士兵", "学生", "同学", "服务员", "列车员", "保安", "陌生人", "路人", "客人", "主人",
+]);
+export function isGenericName(name: string): boolean {
+  return GENERIC_NAMES.has(name.trim());
+}
 export type HiddenUnitRange = ByteRange & { units: number; speech: number; names: number; statuses: string[] };
 
 export type WorldCompletenessReport = {
   version: typeof WORLD_COMPLETENESS_VERSION;
   policy: CompletenessPolicy["version"];
   sourceId: string;
+  /** Present when the report is limited to one source range (a stage gate or a slice). */
+  scope?: ByteRange;
   measures: CompletenessMeasure[];
   summary: { satisfied: number; gap: number; unknown: number; info: number };
   /** Source-derived character denominator, most attributed lines first. */
@@ -85,7 +139,14 @@ export type WorldCompletenessReport = {
     locationsOffGraph: string[];
     nameCollisions: Array<{ surface: string; entityIds: string[] }>;
     eventGaps: ByteRange[];
+    unattachedAliases: Array<{ entityId: string; surface: string; mentions: number }>;
+    genericNames: Array<{ entityId: string; name: string }>;
+    rosterPairs: Array<{ subject: string; scenes: number }>;
+    unanchoredEvents: string[];
+    unconditionedKeyEvents: string[];
+    ungroundedTerms: LoreTerm[];
   };
+  roster: RosterSummary;
 };
 
 const QUEUE_LIMIT = 50;
@@ -124,8 +185,12 @@ class RangeUnion {
 type Anchor = { startByte: number; endByte: number };
 type Annotation = PreparedNovelBundle["compilerSnapshot"]["annotations"][number];
 
-function measure(input: Omit<CompletenessMeasure, "ratio" | "status"> & { status?: MeasureStatus; lowerIsBetter?: boolean }): CompletenessMeasure {
-  const { lowerIsBetter, ...rest } = input;
+function measure(input: Omit<CompletenessMeasure, "ratio" | "status"> & { status?: MeasureStatus; lowerIsBetter?: boolean; atLeast?: boolean }): CompletenessMeasure {
+  const { lowerIsBetter, atLeast, ...rest } = input;
+  if (atLeast) {
+    const status = input.status ?? (input.target === undefined ? "info" : input.numerator >= input.target ? "satisfied" : "gap");
+    return { ...rest, ratio: null, status };
+  }
   if (lowerIsBetter) {
     const status = input.status ?? (input.target === undefined ? "info" : input.numerator <= input.target ? "satisfied" : "gap");
     return { ...rest, ratio: null, status };
@@ -166,18 +231,43 @@ function mergeAdjacent<T extends ByteRange>(items: readonly T[], combine: (left:
   return merged;
 }
 
-export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Uint8Array, options: {
+export type WorldCompletenessOptions = {
   policy?: CompletenessPolicy;
   inventory?: LexicalInventory;
   /** Admission computed for this bundle when it carries none frozen. */
   admission?: AdmissionManifest | null;
-} = {}): WorldCompletenessReport {
+  /**
+   * Limit every measure to one source range: source denominators count only
+   * spans inside it; scenes and events count when their extent overlaps it.
+   * Stage gates and slice acceptance use this with the same implementation.
+   */
+  scope?: ByteRange;
+  /** Explicit reviewed conclusions (not stated / unconditioned / narration only). */
+  dispositions?: readonly ReviewDisposition[];
+  roster?: RosterSummary;
+  /** Census lore entries; quoted terms from the text are always included. */
+  loreTerms?: readonly LoreTerm[];
+  usage?: CompileUsage | null;
+};
+
+export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Uint8Array, options: WorldCompletenessOptions = {}): WorldCompletenessReport {
   const policy = options.policy ?? DEFAULT_COMPLETENESS_POLICY;
   const targets = policy.targets;
   const { canonical, compilerSnapshot: snapshot } = bundle;
   const sourceId = bundle.source.id;
-  const annotations = snapshot.annotations;
-  const inventory = options.inventory ?? buildLexicalInventory({ source, entities: canonical.entities, annotations, entityResolutions: snapshot.entityResolutions });
+  const scope = options.scope;
+  const inScope = (range: ByteRange) => !scope || (range.endByte > scope.startByte && range.startByte < scope.endByte);
+  const annotations = snapshot.annotations.filter((item) => anchorsOf(item).some(inScope));
+  const fullInventory = options.inventory ?? buildLexicalInventory({ source, entities: canonical.entities, annotations: snapshot.annotations, entityResolutions: snapshot.entityResolutions });
+  const inventory: LexicalInventory = scope ? {
+    ...fullInventory,
+    speech: fullInventory.speech.filter(inScope),
+    occurrences: fullInventory.occurrences.filter(inScope),
+    cues: fullInventory.cues.filter((cue) => inScope({ startByte: cue.speechStartByte, endByte: cue.speechEndByte })),
+    times: fullInventory.times.filter(inScope),
+  } : fullInventory;
+  const dispositions = new Map((options.dispositions ?? []).map((item) => [`${item.measureId}\u0000${item.subject}`, item]));
+  const disposed = (measureId: string, subject: string) => dispositions.get(`${measureId}\u0000${subject}`);
   const names = new Map(canonical.entities.map((entity) => [entity.id, entity.canonicalName]));
   const characters = new Set(canonical.entities.filter((entity) => entity.kind === "character").map((entity) => entity.id));
   const measures: CompletenessMeasure[] = [];
@@ -197,6 +287,15 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
     if (supersededEvent.has(item.id) || !item.canonicalEventId) continue;
     for (const mentionId of item.eventMentionIds) mentionEvent.set(mentionId, item.canonicalEventId);
   }
+  // Event extents: resolved event-mention extents, else the event's own evidence spans.
+  const mentionExtents = new Map(snapshot.annotations.flatMap((item) => item.annotationType === "event-mention" ? [[item.id, item.extentAnchors] as const] : []));
+  const eventExtents = new Map<string, ByteRange[]>();
+  for (const [mentionId, eventId] of mentionEvent) eventExtents.set(eventId, [...(eventExtents.get(eventId) ?? []), ...(mentionExtents.get(mentionId) ?? [])]);
+  for (const event of canonical.events) {
+    if (eventExtents.get(event.id)?.length) continue;
+    eventExtents.set(event.id, event.evidence.flatMap(({ span }) => span.sourceId === sourceId && span.startByte !== undefined && span.endByte !== undefined ? [{ startByte: span.startByte, endByte: span.endByte }] : []));
+  }
+  const events = scope ? canonical.events.filter((event) => (eventExtents.get(event.id) ?? []).some(inScope)) : canonical.events;
   const canonicalEventIds = new Set(canonical.events.map((event) => event.id));
 
   const quotations = annotations.filter((item) => item.annotationType === "quotation");
@@ -212,7 +311,7 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
 
   // L0 source accounting.
   const records = new Map((snapshot.accounting?.records ?? []).map((record) => [record.unitId, record]));
-  const units = baseStructuralUnits(snapshot.structure).filter((unit) => unit.kind !== "non-scene");
+  const units = baseStructuralUnits(snapshot.structure).filter((unit) => unit.kind !== "non-scene" && inScope(unit.anchor));
   const speech = inventory.speech.filter((span) => span.kind === "speech");
   const speechByStart = [...speech].sort((a, b) => a.startByte - b.startByte);
   const occurrences = inventory.occurrences;
@@ -278,41 +377,44 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
     numerator: entityMentions.filter((item) => resolvedMentions.has(item.id)).length, total: entityMentions.length, target: 1 }));
 
   // Events and beats.
-  const scenes = canonical.sceneOccurrences;
+  const allScenes = canonical.sceneOccurrences;
   const effectEvents = new Set([
     ...canonical.semanticEffects.flatMap((item) => "eventId" in item && typeof item.eventId === "string" ? [item.eventId] : []),
     ...canonical.eventExecutions.map((item) => item.canonicalEventId),
   ]);
-  const effectful = canonical.events.filter((event) => event.observedOutcome.operations.length > 0
+  const effectful = events.filter((event) => event.observedOutcome.operations.length > 0
     || (event.observedKnowledge?.operations.length ?? 0) > 0 || effectEvents.has(event.id));
   const agents = new Set(canonical.eventParticipations.filter((item) => item.role === "agent").map((item) => item.eventId));
-  measures.push(measure({ id: "events.scenes-with-events", layer: "events", label: "scenes with at least one canonical event", denominator: "internal",
-    numerator: scenes.filter((scene) => scene.eventIds.length > 0).length, total: scenes.length, target: targets.scenesWithEvents }));
+  const scenesWithEventsAt = measures.length;
   measures.push(measure({ id: "events.effectful", layer: "events", label: "events with a state, knowledge, semantic or execution effect", denominator: "internal",
-    numerator: effectful.length, total: canonical.events.length, target: targets.effectfulEvents }));
+    numerator: effectful.length, total: events.length, target: targets.effectfulEvents }));
   measures.push(measure({ id: "events.typed-agent", layer: "events", label: "events with a typed agent participation", denominator: "internal",
-    numerator: canonical.events.filter((event) => agents.has(event.id)).length, total: canonical.events.length, target: targets.typedAgent }));
+    numerator: events.filter((event) => agents.has(event.id)).length, total: events.length, target: targets.typedAgent }));
   measures.push(measure({ id: "events.speech-in-beats", layer: "events", label: "direct-speech spans inside a canonical event's mention extent", denominator: "source",
-    numerator: speech.filter((span) => eventUnion.overlaps(span.startByte, span.endByte)).length, total: speech.length,
+    numerator: speech.filter((span) => eventUnion.overlaps(span.startByte, span.endByte)).length, total: speech.length, target: targets.speechInBeats,
     note: "Dialogue outside every event extent is talk the world model does not stage as a beat." }));
   const narrativeRanges = new RangeUnion(narrative.map((unit) => unit.anchor));
   const eventGaps: ByteRange[] = [];
-  let cursor = narrativeRanges.ranges[0]?.startByte ?? 0;
-  for (const range of [...eventUnion.ranges, { startByte: source.byteLength, endByte: source.byteLength }]) {
+  let cursor = narrativeRanges.ranges[0]?.startByte ?? scope?.startByte ?? 0;
+  const gapEnd = scope ? Math.min(scope.endByte, source.byteLength) : source.byteLength;
+  for (const range of [...eventUnion.ranges.filter((item) => item.startByte < gapEnd), { startByte: gapEnd, endByte: gapEnd }]) {
     if (range.startByte > cursor) eventGaps.push({ startByte: cursor, endByte: range.startByte });
     cursor = Math.max(cursor, range.endByte);
   }
   eventGaps.sort((a, b) => (b.endByte - b.startByte) - (a.endByte - a.startByte));
   measures.push(measure({ id: "events.largest-gap-bytes", layer: "events", label: "largest source stretch outside every canonical event extent (bytes)", denominator: "source",
-    numerator: eventGaps[0] ? eventGaps[0].endByte - eventGaps[0].startByte : 0, total: source.byteLength, lowerIsBetter: true }));
+    numerator: eventGaps[0] ? eventGaps[0].endByte - eventGaps[0].startByte : 0, total: gapEnd - (scope?.startByte ?? 0), lowerIsBetter: true }));
 
   // Scenes.
   // Discourse anchors mark scene boundaries; the scene's evidence spans are the extent it claims.
-  const sceneRanges = new Map(scenes.map((scene) => [scene.id, new RangeUnion([
+  const sceneRanges = new Map(allScenes.map((scene) => [scene.id, new RangeUnion([
     ...scene.discourseSegmentIds.flatMap((id) => discourse.get(id) ?? []),
     ...scene.evidence.flatMap(({ span }) => span.sourceId === sourceId && span.startByte !== undefined && span.endByte !== undefined
       ? [{ startByte: span.startByte, endByte: span.endByte }] : []),
   ])]));
+  const scenes = scope ? allScenes.filter((scene) => sceneRanges.get(scene.id)!.ranges.some(inScope)) : allScenes;
+  measures.splice(scenesWithEventsAt, 0, measure({ id: "events.scenes-with-events", layer: "events", label: "scenes with at least one canonical event", denominator: "internal",
+    numerator: scenes.filter((scene) => scene.eventIds.length > 0).length, total: scenes.length, target: targets.scenesWithEvents }));
   const allSceneRanges = new RangeUnion([...sceneRanges.values()].flatMap((union) => union.ranges));
   measures.push(measure({ id: "scenes.narrative-covered", layer: "scenes", label: "narrative bytes inside a scene's extent (discourse anchors and scene evidence)", denominator: "source",
     numerator: narrative.reduce((total, unit) => total + allSceneRanges.coveredBytes(unit.anchor.startByte, unit.anchor.endByte), 0), total: narrativeBytes, target: targets.narrativeInScenes }));
@@ -373,16 +475,13 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
   speakingMeasure("characters.speaking-with-disposition", "speaking characters whose model carries a trait or disposition", (item) => item.depth, targets.characterDepth);
   speakingMeasure("characters.speaking-with-goal", "speaking characters with at least one goal", (item) => item.goals > 0, targets.characterDepth);
   speakingMeasure("characters.speaking-in-scenes", "speaking characters recorded present in at least one scene", (item) => item.scenes > 0, targets.characterDepth);
-  const roster = snapshot.roleRoster;
-  measures.push(measure({ id: "characters.roster-reviewed", layer: "characters", label: "independent role-roster reviews", denominator: "roster",
-    numerator: roster?.reviews.length ?? 0, total: roster ? 1 : 0, target: 1, ...(roster && roster.reviews.length === 0 ? { status: "unknown" as const } : {}),
-    note: roster ? `${roster.candidates.length} roster candidates; without a review no major-role denominator exists.` : "No role roster in this bundle." }));
+  const rosterReviewedAt = measures.length;
 
   // Space.
   const graph = new Set(canonical.spatialRelations.flatMap((relation) => spatialEndpoints(relation)));
   const locations = new Set(canonical.entities.filter((entity) => entity.kind === "location").map((entity) => entity.id));
   const used = new Set<string>(scenes.flatMap((scene) => scene.locationId ? [scene.locationId] : []));
-  const locationWrites = [...canonical.initialWorld.delta.operations, ...canonical.events.flatMap((event) => event.observedOutcome.operations)]
+  const locationWrites = [...(scope ? [] : canonical.initialWorld.delta.operations), ...events.flatMap((event) => event.observedOutcome.operations)]
     .filter((operation) => "field" in operation && operation.field === "character.location" && "value" in operation && typeof operation.value === "string");
   for (const operation of locationWrites) if (locations.has((operation as { value: string }).value)) used.add((operation as { value: string }).value);
   measures.push(measure({ id: "space.locations-on-graph", layer: "space", label: "locations used by scenes or character positions that sit in the spatial graph", denominator: "internal",
@@ -395,7 +494,7 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
     numerator: [...openingActors].filter((id) => openingPositioned.has(id)).length, total: openingActors.size, target: targets.openingPositions }));
 
   // Knowledge.
-  const learns = canonical.events.flatMap((event) => (event.observedKnowledge?.operations ?? []).filter((operation) => operation.op === "learn")
+  const learns = events.flatMap((event) => (event.observedKnowledge?.operations ?? []).filter((operation) => operation.op === "learn")
     .map((operation) => ({ eventId: event.id, actorId: operation.actorId, claimId: operation.claimId })));
   const acquired = new Set(canonical.acquisitions.map((item) => `${item.canonicalEventId}:${item.actorId}:${item.claimId}`));
   measures.push(measure({ id: "knowledge.acquisition-paths", layer: "knowledge", label: "knowledge gains with an explicit acquisition path (observed / told / read / inferred)", denominator: "internal",
@@ -414,6 +513,148 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
   measures.push(measure({ id: "agency.effectful-goals", layer: "agency", label: "speaking characters with a goal whose candidate action changes state", denominator: "source",
     numerator: speaking.filter((item) => item.effectfulGoals > 0).length, total: speaking.length, target: targets.characterDepth }));
 
+  // Aliases and generic names (design 3.3, identity layer extension).
+  const entitiesById = new Map(canonical.entities.map((entity) => [entity.id, entity]));
+  const aliasTypeOf = new Map(snapshot.entityResolutions.filter((item) => !supersededEntity.has(item.id)).map((item) => [item.mentionId, item.aliasType]));
+  const unattached = new Map<string, { entityId: string; surface: string; mentions: number }>();
+  let aliasMentions = 0, attachedMentions = 0;
+  for (const mention of entityMentions) {
+    if (mention.form !== "proper" || !mention.surface) continue;
+    const entityId = mentionEntity.get(mention.id);
+    const entity = entityId ? entitiesById.get(entityId) : undefined;
+    if (!entity) continue;
+    const surface = mention.surface.trim();
+    aliasMentions += 1;
+    if (surface === entity.canonicalName.trim() || entity.aliases.some((alias) => alias.trim() === surface)) { attachedMentions += 1; continue; }
+    const key = `${entity.id}\u0000${surface}`;
+    const item = unattached.get(key) ?? { entityId: entity.id, surface, mentions: 0 };
+    item.mentions += 1;
+    unattached.set(key, item);
+  }
+  measures.push(measure({ id: "identity.aliases-attached", layer: "identity", label: "resolved proper-name mentions whose surface is the entity's canonical name or a recorded alias", denominator: "internal",
+    numerator: attachedMentions, total: aliasMentions, target: targets.aliasesAttached,
+    note: `${[...aliasTypeOf.values()].filter(Boolean).length} resolutions carry an alias type; ${canonical.entities.reduce((total, entity) => total + entity.aliases.length, 0)} aliases recorded on entities.` }));
+  const scopedEntityIds = scope ? new Set([...mentionEntity.entries()].filter(([mentionId]) => entityMentions.some((item) => item.id === mentionId)).map(([, entityId]) => entityId)) : null;
+  const generic = canonical.entities.filter((entity) => entity.kind === "character" && isGenericName(entity.canonicalName) && (!scopedEntityIds || scopedEntityIds.has(entity.id)));
+  measures.push(measure({ id: "identity.generic-names", layer: "identity", label: "character entities whose canonical name is a pronoun or a bare common noun", denominator: "internal",
+    numerator: generic.length, total: canonical.entities.filter((entity) => entity.kind === "character").length, target: targets.genericNames, lowerIsBetter: true,
+    note: "An unnamed person keeps a qualified derived label (\"列车上的男人\"); a bare noun merges every such person into one identity." }));
+
+  // Roster: reviewed when supplied, else provisional (speaking characters plus the most frequent agents).
+  const agentCounts = new Map<string, number>();
+  for (const item of canonical.eventParticipations) {
+    if (item.role !== "agent" || !characters.has(item.entityId) || (scope && !events.some((event) => event.id === item.eventId))) continue;
+    agentCounts.set(item.entityId, (agentCounts.get(item.entityId) ?? 0) + 1);
+  }
+  const provisional = [...new Set([...speaking.map((item) => item.actorId),
+    ...[...agentCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, policy.rosterTopAgents).map(([actorId]) => actorId)])];
+  const roster: RosterSummary = options.roster ?? { reviewed: Boolean(snapshot.roleRoster?.reviews.length), actorIds: provisional };
+  const rosterSet = new Set(roster.actorIds);
+  measures.splice(rosterReviewedAt, 0, measure({ id: "characters.roster-reviewed", layer: "characters", label: "role roster independently reviewed", denominator: "roster",
+    numerator: roster.reviewed ? 1 : 0, total: 1, target: 1, ...(roster.reviewed ? {} : { status: "unknown" as const }),
+    note: `${roster.actorIds.length} roster actors${roster.missing?.length ? `, ${roster.missing.length} missing majors named by review` : ""}; without a review the major-role denominator is provisional.` }));
+  const rosterStatus = (computed: number, total: number, target: number): MeasureStatus | undefined =>
+    roster.reviewed ? undefined : total === 0 ? "unknown" : computed / total >= target ? undefined : "unknown";
+
+  // Relations between roster characters who share scenes.
+  const related = new Set<string>();
+  const relationshipEnds = new Map<string, { from?: string; to?: string }>();
+  for (const operation of [...canonical.initialWorld.delta.operations, ...canonical.events.flatMap((event) => event.observedOutcome.operations)]) {
+    if (!("field" in operation) || !("entityId" in operation) || !("value" in operation) || typeof operation.value !== "string") continue;
+    if (operation.field !== "relationship.from" && operation.field !== "relationship.to") continue;
+    const ends = relationshipEnds.get(operation.entityId) ?? {};
+    if (operation.field === "relationship.from") ends.from = operation.value; else ends.to = operation.value;
+    relationshipEnds.set(operation.entityId, ends);
+  }
+  for (const ends of relationshipEnds.values()) if (ends.from && ends.to) related.add(pairSubject(ends.from, ends.to));
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) { for (const item of value) visit(item); return; }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (record.op === "adjust-relationship" && typeof record.fromActorId === "string" && typeof record.toActorId === "string") related.add(pairSubject(record.fromActorId, record.toActorId));
+    for (const item of Object.values(record)) if (item && typeof item === "object") visit(item);
+  };
+  visit([canonical.events, canonical.semanticEffects, canonical.initialWorld]);
+  for (const proposition of canonical.propositions) {
+    if (proposition.object.kind === "entity" && characters.has(proposition.subjectEntityId) && characters.has(proposition.object.entityId)) related.add(pairSubject(proposition.subjectEntityId, proposition.object.entityId));
+  }
+  const pairScenes = new Map<string, number>();
+  for (const scene of scenes) {
+    const present = [...new Set([...scene.presentActorIds, ...scene.viewpointActorIds])].filter((id) => rosterSet.has(id)).sort();
+    for (let left = 0; left < present.length; left += 1) for (let right = left + 1; right < present.length; right += 1) {
+      const subject = pairSubject(present[left]!, present[right]!);
+      pairScenes.set(subject, (pairScenes.get(subject) ?? 0) + 1);
+    }
+  }
+  const pairs = [...pairScenes.entries()].filter(([, count]) => count >= policy.rosterPairScenes);
+  const pairDone = (subject: string) => related.has(subject) || Boolean(disposed("relations.roster-pairs", subject));
+  const pairsDone = pairs.filter(([subject]) => pairDone(subject)).length;
+  const rosterPairStatus = rosterStatus(pairsDone, pairs.length, targets.rosterPairs);
+  measures.push(measure({ id: "relations.roster-pairs", layer: "relations", label: `roster pairs co-present in ≥${policy.rosterPairScenes} scenes with a directed relation record or an explicit "not stated"`, denominator: "roster",
+    numerator: pairsDone, total: pairs.length, target: targets.rosterPairs, ...(rosterPairStatus ? { status: rosterPairStatus } : {}),
+    note: `${related.size} related pairs recorded${roster.reviewed ? "" : "; roster not independently reviewed, so the denominator is provisional"}.` }));
+
+  // Time: events whose mention extent states a time should carry a story time that is not an ordinal label.
+  const timeUnion = new RangeUnion(inventory.times);
+  const timed = events.filter((event) => (eventExtents.get(event.id) ?? []).some((range) => timeUnion.overlaps(range.startByte, range.endByte)));
+  const anchored = (event: typeof events[number]) => ["exact", "range", "relative"].includes(event.storyTime.kind);
+  measures.push(measure({ id: "time.anchored-events", layer: "time", label: "events whose extent contains an explicit time expression and whose story time is exact, a range or relative", denominator: "source",
+    numerator: timed.filter(anchored).length, total: timed.length, target: targets.anchoredEvents,
+    note: `${inventory.times.length} explicit time expressions in scope; ${events.filter(anchored).length} events anchored overall.` }));
+
+  // Causality: key events are roster-agent events with an effect.
+  const effectfulIds = new Set(effectful.map((event) => event.id));
+  const rosterAgentEvents = new Set(canonical.eventParticipations.filter((item) => item.role === "agent" && rosterSet.has(item.entityId)).map((item) => item.eventId));
+  const keyEvents = events.filter((event) => effectfulIds.has(event.id) && rosterAgentEvents.has(event.id));
+  const dependents = new Set(canonical.eventRelations.filter((relation) => ["cause", "enable", "motivate", "prevent"].includes(relation.type)).map((relation) => relation.toEventId));
+  const conditioned = (event: typeof events[number]) => event.preconditions.length > 0 || event.causalParents.length > 0 || dependents.has(event.id)
+    || Boolean(disposed("causality.conditioned-key-events", `event:${event.id}`));
+  const conditionedCount = keyEvents.filter(conditioned).length;
+  const causalityStatus = rosterStatus(conditionedCount, keyEvents.length, targets.conditionedKeyEvents);
+  measures.push(measure({ id: "causality.conditioned-key-events", layer: "causality", label: "key events (roster agent, non-empty effect) with a precondition, a typed causal dependency or a reviewed \"unconditioned\"", denominator: "roster",
+    numerator: conditionedCount, total: keyEvents.length, target: targets.conditionedKeyEvents, ...(causalityStatus ? { status: causalityStatus } : {}) }));
+  const autonomous = canonical.normTemplates.length + canonical.processTemplates.length
+    + canonical.possibilities.filter((item) => JSON.stringify(item).match(/"(?:obligation|pressure|process|deadline|pursuit)"/u)).length;
+  measures.push(measure({ id: "possibility.autonomous-templates", layer: "possibility", label: "possibility templates that stay in force after divergence (norms, processes, obligations, pressures)", denominator: "internal",
+    numerator: autonomous, total: autonomous, target: targets.autonomousTemplates, atLeast: true,
+    note: `${canonical.normTemplates.length} norm templates, ${canonical.processTemplates.length} process templates, ${canonical.possibilities.length} possibility templates.` }));
+
+  // Lore: frequent setting vocabulary needs a landing place.
+  const quotedCounts = new Map<string, number>();
+  const text = Buffer.from(source.buffer, source.byteOffset, source.byteLength).toString("utf8");
+  for (const span of fullInventory.speech) {
+    if (span.kind !== "embedded") continue;
+    const surface = Buffer.from(source.buffer, source.byteOffset + span.startByte, span.endByte - span.startByte).toString("utf8").slice(1, -1).trim();
+    if (Array.from(surface).length >= 2 && Array.from(surface).length <= 12 && /\p{Script=Han}|[A-Za-z]{3,}/u.test(surface)) quotedCounts.set(surface, 0);
+  }
+  // Person names are identity material, not setting vocabulary.
+  const personNames = new Set([...fullInventory.lexicon.entries.map((entry) => entry.surface), ...fullInventory.lexicon.collisions.map((item) => item.surface),
+    ...canonical.entities.filter((entity) => entity.kind === "character").flatMap((entity) => [entity.canonicalName, ...entity.aliases].map((name) => name.trim()))]);
+  for (const surface of personNames) quotedCounts.delete(surface);
+  for (const surface of quotedCounts.keys()) quotedCounts.set(surface, countOccurrences(text, surface));
+  const terms = new Map<string, LoreTerm>();
+  for (const [surface, occurrences] of quotedCounts) if (occurrences >= policy.loreTermThreshold) terms.set(surface, { surface, occurrences, origin: "quoted-term" });
+  for (const item of options.loreTerms ?? []) if (item.occurrences >= policy.loreTermThreshold) terms.set(item.surface, item);
+  const scopedTerms = [...terms.values()].filter((term) => !scope || countOccurrences(text.slice(byteToChar(text, scope.startByte), byteToChar(text, Math.min(scope.endByte, source.byteLength))), term.surface) > 0);
+  const nonCharacterNames = new Set(canonical.entities.filter((entity) => entity.kind !== "character").flatMap((entity) => [entity.canonicalName, ...entity.aliases].map((name) => name.trim())));
+  const mechanismText = JSON.stringify([canonical.rules, canonical.actionSchemas, canonical.normTemplates, canonical.processTemplates]);
+  const grounded = (term: LoreTerm) => nonCharacterNames.has(term.surface) || mechanismText.includes(term.surface) || Boolean(disposed("lore.terms-grounded", `term:${term.surface}`));
+  const ungrounded = scopedTerms.filter((term) => !grounded(term)).sort((a, b) => b.occurrences - a.occurrences || a.surface.localeCompare(b.surface));
+  measures.push(measure({ id: "lore.terms-grounded", layer: "lore", label: `setting terms occurring ≥${policy.loreTermThreshold} times grounded in a concept entity, rule, mechanism, institution or a reviewed "narration only"`, denominator: "source",
+    numerator: scopedTerms.length - ungrounded.length, total: scopedTerms.length, target: targets.termsGrounded,
+    note: `${[...terms.values()].filter((term) => term.origin === "quoted-term").length} frequent quoted terms, ${[...terms.values()].filter((term) => term.origin === "census").length} census lore entries.` }));
+
+  // Cost (information only).
+  const usage = options.usage ?? null;
+  const scopeBytes = scope ? Math.min(scope.endByte, source.byteLength) - scope.startByte : source.byteLength;
+  const accepted = snapshot.annotations.length + snapshot.entityResolutions.length + snapshot.eventResolutions.length + canonical.entities.length + canonical.events.length
+    + canonical.eventParticipations.length + canonical.sceneOccurrences.length + canonical.models.length + canonical.goals.length + canonical.rules.length + canonical.actionSchemas.length;
+  measures.push(measure({ id: "cost.per-source-kb", layer: "cost", label: "nominal model cost per KB of source (USD × 1000)", denominator: "source",
+    numerator: usage ? Math.round(usage.nominalUsd * 1000 * 1024 / Math.max(1, scopeBytes) * 1000) / 1000 : 0, total: scopeBytes, lowerIsBetter: true,
+    ...(usage ? { note: `${usage.runs} runs; ${usage.inputTokens} input, ${usage.outputTokens} output, ${usage.cacheReadTokens} cache-read tokens; $${usage.nominalUsd.toFixed(2)} nominal.` } : { note: "No usage summary supplied." }) }));
+  measures.push(measure({ id: "cost.per-accepted-artifact", layer: "cost", label: "nominal model cost per accepted artifact (USD × 1000)", denominator: "internal",
+    numerator: usage && accepted ? Math.round(usage.nominalUsd * 1000 / accepted * 1000) / 1000 : 0, total: accepted, lowerIsBetter: true }));
+
   const summary = { satisfied: 0, gap: 0, unknown: 0, info: 0 };
   for (const item of measures) summary[item.status] += 1;
   const unannotatedSpeech = mergeAdjacent(speechUnion.ranges, (left, right) => ({ startByte: left.startByte, endByte: right.endByte }), 64);
@@ -421,6 +662,7 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
     version: WORLD_COMPLETENESS_VERSION,
     policy: policy.version,
     sourceId,
+    ...(scope ? { scope } : {}),
     measures,
     summary,
     speakingCharacters: speaking,
@@ -433,6 +675,31 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
       locationsOffGraph: [...used].filter((id) => !graph.has(id)).sort(),
       nameCollisions: inventory.lexicon.collisions,
       eventGaps: eventGaps.slice(0, 10),
+      unattachedAliases: [...unattached.values()].sort((a, b) => b.mentions - a.mentions || a.surface.localeCompare(b.surface)).slice(0, QUEUE_LIMIT),
+      genericNames: generic.map((entity) => ({ entityId: entity.id, name: entity.canonicalName })),
+      rosterPairs: pairs.filter(([subject]) => !pairDone(subject)).map(([subject, count]) => ({ subject, scenes: count })).sort((a, b) => b.scenes - a.scenes || a.subject.localeCompare(b.subject)).slice(0, QUEUE_LIMIT),
+      unanchoredEvents: timed.filter((event) => !anchored(event)).map((event) => event.id).slice(0, QUEUE_LIMIT),
+      unconditionedKeyEvents: keyEvents.filter((event) => !conditioned(event)).map((event) => event.id).slice(0, QUEUE_LIMIT),
+      ungroundedTerms: ungrounded.slice(0, QUEUE_LIMIT),
     },
+    roster,
   };
+}
+
+function countOccurrences(text: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  for (let index = text.indexOf(needle); index >= 0; index = text.indexOf(needle, index + needle.length)) count += 1;
+  return count;
+}
+
+/** UTF-16 index of a UTF-8 byte offset (clamped). */
+function byteToChar(text: string, byte: number): number {
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (bytes >= byte) return index;
+    const code = text.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) { bytes += 4; index += 1; } else bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : 3;
+  }
+  return text.length;
 }

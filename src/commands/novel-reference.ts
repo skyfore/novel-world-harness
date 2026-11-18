@@ -1,6 +1,6 @@
 import path from "node:path";
 import { workspaceArchiveDir } from "../agent/runtime-paths.js";
-import { COMPILER_PIPELINE_VERSION } from "../compiler/batch-progress.js";
+import { PIPELINE_VERSION as COMPILER_PIPELINE_VERSION } from "../compiler/pipeline/compile.js";
 import { COMPILER_PROMPT_VERSION } from "../compiler/prepared-cache.js";
 import { summarizeCompileUsage } from "../compiler/compile-usage.js";
 import { buildReferencePack, compareWithReference, loadReferencePack, verifyReferencePack, writeReferencePack } from "../compiler/reference-pack.js";

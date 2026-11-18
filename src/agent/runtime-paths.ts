@@ -21,32 +21,9 @@ export function workspaceArchiveDir(workspaceRoot: string, runtimeDir = nwhRunti
   return path.join(path.resolve(runtimeDir), "archives", workspaceRuntimeId(workspaceRoot));
 }
 
-export function legacyWorkspaceStateDir(workspaceRoot: string): string {
-  return path.join(path.resolve(workspaceRoot), ".novel-harness");
-}
-
+/** The workspace state directory. A legacy in-workspace `.novel-harness` directory is never migrated (decision D5). */
 export async function ensureWorkspaceState(workspaceRoot: string, runtimeDir = nwhRuntimeDir()): Promise<string> {
-  const target = workspaceStateDir(workspaceRoot, runtimeDir);
-  if (await isDirectory(target)) return target;
-  const legacy = legacyWorkspaceStateDir(workspaceRoot);
-  if (!(await isDirectory(legacy))) return target;
-
-  await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-  const staging = `${target}.${process.pid}.${Date.now()}.migrating`;
-  try {
-    await fs.cp(legacy, staging, { recursive: true, force: false, errorOnExist: true });
-    await fs.chmod(staging, 0o700);
-    try {
-      await fs.rename(staging, target);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST" && (error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error;
-      await fs.rm(staging, { recursive: true, force: true });
-    }
-  } catch (error) {
-    await fs.rm(staging, { recursive: true, force: true });
-    throw error;
-  }
-  return target;
+  return workspaceStateDir(workspaceRoot, runtimeDir);
 }
 
 function workspaceRuntimeId(workspaceRoot: string): string {

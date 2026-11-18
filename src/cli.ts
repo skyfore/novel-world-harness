@@ -268,6 +268,24 @@ async function readStandardInput(): Promise<Buffer> {
   return content;
 }
 
+const maintenance = program.command("maintenance").description("Workspace and runtime maintenance");
+maintenance.command("purge-legacy")
+  .option("--confirm <plan-hash>", "execute exactly the previewed plan (copy planHash from the preview)")
+  .description("Preview (default) or purge legacy data: old world namespaces, old prepared caches, engineering-loop records, pre-cutover traces and leftover temporary workspaces. Never touches sources/ or archives/.")
+  .action(async (options) => {
+    const { executeLegacyPurge, planLegacyPurge } = await import("./application/legacy-purge.js");
+    if (!options.confirm) {
+      const plan = await planLegacyPurge();
+      const human = (bytes: number) => bytes > 1 << 30 ? `${(bytes / (1 << 30)).toFixed(2)} GiB` : bytes > 1 << 20 ? `${(bytes / (1 << 20)).toFixed(1)} MiB` : `${(bytes / 1024).toFixed(1)} KiB`;
+      for (const item of plan.items) console.log(`${item.kind.padEnd(20)} ${human(item.bytes).padStart(10)}  ${item.path}  (${item.detail})`);
+      console.log(`Total ${human(plan.totalBytes)} in ${plan.items.length} item(s). Nothing was deleted.`);
+      console.log(`To purge exactly this plan: nwh maintenance purge-legacy --confirm ${plan.planHash}`);
+      return;
+    }
+    const result = await executeLegacyPurge(options.confirm);
+    console.log(JSON.stringify({ removed: result.removed.map((item) => ({ kind: item.kind, path: item.path })), freedBytes: result.freedBytes }, null, 2));
+  });
+
 program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")
   .description("check pending/canonical scene capabilities without writing world truth; exits 2 for unresolved checks")
   .action(async (options) => reviewScenesCommand(rootFor({}), options.spec));

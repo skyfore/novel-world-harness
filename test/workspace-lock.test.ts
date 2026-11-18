@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { legacyWorkspaceStateDir, workspaceStateDir } from "../src/agent/runtime-paths.js";
+import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { WorkspaceOperationLock, withWorkspaceOperationLock } from "../src/util/workspace-lock.js";
 import { withCompilerSignals } from "../src/util/compiler-signals.js";
@@ -90,23 +90,4 @@ describe("workspace operation lock", () => {
     await expect(fs.stat(lockPath)).resolves.toBeDefined();
   });
 
-  it("migrates legacy state before the first global compiler lock is created", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-workspace-lock-migrate-"));
-    roots.push(root);
-    const legacy = legacyWorkspaceStateDir(root);
-    await fs.mkdir(legacy, { recursive: true });
-    await fs.writeFile(path.join(legacy, "project.json"), JSON.stringify({
-      version: 1,
-      id: "legacy-lock",
-      name: "Legacy Lock",
-      language: "zh-CN",
-      createdAt: new Date(0).toISOString(),
-      updatedAt: new Date(0).toISOString(),
-    }), "utf8");
-
-    const lock = await WorkspaceOperationLock.acquire(root, "compiler");
-    await lock.release();
-
-    await expect((await WorkspaceStore.create(root)).readProject()).resolves.toMatchObject({ id: "legacy-lock" });
-  });
 });

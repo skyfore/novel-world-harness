@@ -1,5 +1,79 @@
 # 迭代 02 进度
 
+## M4 清场（2026-11-19，已完成）
+
+| 工作 | 结果 |
+|---|---|
+| 切换主干 | `compile-novel` 改为 source → census → observation → identity → scenes → world → roster → opening → gaps → closure → archive → 认证轨；`admit` 是单独的阶段；`--through-chapter` / `--through-byte` 前缀编译；`--rebuild` 删除 |
+| 删除退役族与旧批次管线 | 216 个源文件、140 个测试文件，约 8.6 万行（含 `role-*`、`identity-*`、`upstream-*`、要求台账、协调与旧候选修复、记账复核、入场修复、消费者执行、来源表示修复、迁移，以及旧批次管线 `batches`/`proposal-tools`/finish 回执/提案义务/compile/compile-source/prepare/prepare-all/reparse/rebuild/repair-existing/migrate-acquisitions/`requirements` 与 `compiler-obligations` 命令组） |
+| 接入点 | 候选构建只认管线；预编译包格式 5（不再携带台账）；认证、闭包图、校验器、收敛、删除、维护预览去掉退役输入；TUI 的 `/prepare-all`、`/compile-next` 与 Web 准备服务改为后台运行新主干；`review-scenes` 只保留只读 `--spec` |
+| 升版（D5） | 世界存储 v3 → v4，预编译缓存 v3 → v4，管线 60，提示词 60；不再隐式复制工作区内的 `.novel-harness` |
+| `nwh maintenance purge-legacy` | 预览列出每项路径与大小和计划哈希；`--confirm <hash>` 只执行同一计划；从不触碰 `sources/`、`archives/` |
+| 代码规模 | `src` 510 → 320 个文件、12.8 万 → 8.7 万行；`test` 333 → 207 个文件 |
+
+**本机清除预览**（未执行）：8.04 GiB，11 项：龙族工作区 `world/v3`（455 MiB）、`compile-loops`（1.70 GiB）、观测数据 1,158 次运行及其 blob（5.88 GiB）、`prepared-novels/v1–v3`（18 MiB）、5 个遗留临时工作区（共 18 KiB）。
+
+**保留**：外层工程循环 `compile-novel-loop` 只对接到新的阶段名（设计 7.3 仍待你确认是否退役）。
+
+**验证**：`pnpm check` 通过；`pnpm test` 192 个文件、1,064 个用例全部通过。
+
+## M3 新主干（2026-11-19，已完成）
+
+新代码在 `src/compiler/pipeline/`（21 个文件，约 2,900 行）。
+
+| 设计项 | 实现 |
+|---|---|
+| 阶段链与运行器 | `runner.ts`：宿主规划范围；每次尝试是独立的模型会话；模型返回后宿主自己提交并重跑栅栏；同一范围失败两次进入“待宿主复核”，阶段继续；`finish_scope` 把每条未通过的检查返回给模型 |
+| 阶段栅栏 = 度量 | `view.ts` 把当前各存储组装成完整度度量读取的形状；栅栏、状态、缺口循环都调用 `measureWorldCompleteness`（按范围限定） |
+| 普查 | `census.ts`：说话人位置、高频成词 n-gram（含片段与扩展过滤）、地点后缀词、引号词语；时间表达由宿主分类；栅栏：出现 ≥10 次或说话人位置 ≥3 次的候选全部有分类 |
+| 观察 | `observation.ts`：16 KiB 窗口；每段直接引语、每次词表出现都是宿主候选（`host-lexical-v1`），模型接受、改写或带理由驳回；批量工具补提及、引语、事件提及、话语片段；诚实记账：“已表示”由覆盖派生，含候选的单元不能关为背景 |
+| 身份 | `identity.ts`：每个词表条目一次决议（可带单元范围区分同名），宿主展开为逐条消解（`host-lexicon-v1`）并把表面形式挂到实体别名；代词、称谓、冲突、例外逐条消解；规范名不得是代词或普通名词，无名人物用原文里的限定短语 |
+| 场景 | `scenes.ts`：每个话语片段一批；场景记录（地点或带理由的未知、在场者）；节拍 = 正典事件 + 类型化参与 + 效果，或显式“无变化”；提及→事件的轨迹先于事件提交；场景与事件双向链接 |
+| 世界 | `world.ts`：从完整度队列派生工作项（设定术语、离图地点、名册角色对、有台词角色、关键事件、自治模板、知识获取）；每项产物或带理由的处置；全书检索与单元读取工具 |
+| 行动三来源（D2） | 领域模块 `base-action-speak/move/observe/give/take`：走同一提案与校验路径，但只接受与注册定义完全一致的副本，模型看不到 domain-module；新增 `source-statement` 归纳（一次引用即成立，必须有证据）；`source-pattern` 仍需至少两个支持事件 |
+| 证据 | `propose_artifacts` 把 `{unit,text}` 引用绑定为宿主构造的 EvidenceRef 与精确证据断言（整件或按 JSON Pointer） |
+| 轻量名册 | `roster.ts`：候选来自原文统计；一次有界独立评审，看不到已编译的角色模型；漏掉的主要角色保留在分母里；冻结时转成名册本体的一次评审 |
+| 开场 | `opening.ts`：首个场景处的初始世界，走同一提案路径 |
+| 闭合 | `closure.ts`：结构与证据（无待处理提案、标注闭合、无搁置或未完成范围）、完整度（无 gap，unknown 都带理由）、切面准入清单 |
+| 缺口循环 | `gaps.ts`：队列按观察 → 身份 → 场景 → 世界排序；范围内可用任何阶段的工具（D3）；失败两次搁置，其他项继续 |
+| 前缀编译 | `--through-chapter`/`--through-byte` 解析为字节上限并写入管线运行记录，后续阶段与候选构建沿用 |
+| 成本 | 每个范围的回执记录 token 与名义成本；`compile-novel status` 给出合计与每 KB 成本；完整度报告的成本项来自回执 |
+
+**验证**（假模型，均为 `test/pipeline/`）
+
+- 合成夹具（钟楼）从空到闭合通过，完整度 0 个 gap；第二次运行不调用模型。
+- 三篇代表性微型小说用通用启发式代理跑完整条链：潮汐同盟闭合通过；玻璃账簿只因原文没有义务或压力陈述而停在 `possibility.autonomous-templates`；灰庭审判停在叙事覆盖与两处未锚定的时间表达。闭合如实列出未完成项，没有一次假通过。
+- 每个阶段栅栏都有“漏提时拒绝完成”的反例：普查不分类、观察漏一段引语、身份漏一个代词、场景台词不在节拍内、世界不回答、名册不评审、开场无初始世界、缺口循环失败两次搁置。
+- 同名人物用带范围的决议区分，名称冲突为 0；改名、调换独立句、加入引号词语后原文分母不变；v4 命名空间不读旧运行记录。
+- 管线编译的工作区能构建候选包与切面准入清单；迭代 01 的准入与试玩测试改用管线标记后全部通过。
+
+**偏离设计之处**
+
+- 旧批次管线（`batches`、`proposal-tools` 等）在设计里只列为“接入点”，这里整体删除：TUI 与 Web 的准备流程改走新主干后它已无调用方，保留会形成两条并存的编译管线。设计“保留的”`finish-recovery` 与 `reparse` 一并删除：中断恢复由范围回执承担，章节级重编改为释放并重跑范围。
+- 名册本体的评审数从两次改为一次，与设计 5.7 的“一次有界的独立评审”一致。
+
+## M2 参考包、契约扩展、评估底座（2026-11-19，已完成）
+
+| 工作 | 结果 |
+|---|---|
+| 词法清单通用化 | 直引号按段内成对、直开弯闭、跨段未闭合引语续接、“曰：”无引号话语；新增“动词＋冒号”说话人规则（子句须以唯一人名开头）；时间表达扫描；可传入外部词表 |
+| 完整度报告 v2 | `completeness-policy-v2`：新增 `identity.aliases-attached`、`identity.generic-names`、`relations.roster-pairs`、`time.anchored-events`、`causality.conditioned-key-events`、`possibility.autonomous-templates`、`lore.terms-grounded` 与成本两项；显式处置（未述 / 无条件 / 仅叙述 / 无变化）可满足工作项；名册度量在未评审时为 unknown；`--range` 按字节范围度量 |
+| 参考包 | `compile-novel reference export/verify`、`compile-novel compare`；龙族参考包已导出并校验，附录 B 的 17 项条数全部一致；位置 `$NWH_HOME/archives/novel-world-harness-96fd81aa9a7d/legacy-reference/a28585b1cf867f3e3a16-20261118/`（约 450 KB） |
+| gold 切片 | 切片格式（版本 2 语义 gold + 来源与逐条确认）；`compile-novel gold draft/score`，按范围限定候选后用现有 13 层打分器打分；草稿未逐条确认时拒绝打分 |
+| 原文分母 | `compile-novel inventory <file>`：无需工作区即可给出引语、说话人提示、时间表达、高频引号词 |
+
+**龙族旧候选的 v2 度量**（升版前，2026-11-19）：3 项达标、26 项缺口、4 项 unknown、5 项信息；名义成本 301.45 美元（1,158 次运行，约 0.39 美元/KB）。新增层：别名挂接 77.5%，普通名词规范名 5 个，名册角色对 2/15（unknown，未评审），时间锚定 1/5，关键事件条件 8/33，自治模板 5（规范模板），设定术语 6/36。
+
+**《三国演义》片段**（前 120 KB）：直引号直接引语 613 段（未闭合从 151 降到 8）、“曰：”3 段；全书动词提示 1,374 条；普查候选 149 个，其中玄德 127 次、说话人位置 27 次。
+
+## 下一步
+
+M2–M4 不调用模型、不写龙族工作区，已全部完成。剩余三件事都需要你逐次确认：
+
+1. **M5 切片编译**：`nwh compile-novel <龙族> --through-byte 117806`（序幕加第一幕），消耗模型额度；随后 `compile-novel gold draft` 起草 gold 切片并逐条确认、打分。
+2. **清除旧数据**：`nwh maintenance purge-legacy` 预览 8.04 GiB；设计建议在切片验收后执行 `--confirm <hash>`。
+3. **外层工程循环**是否退役（设计 7.3）。
+
 ## 设计修订 v2（2026-11-19）
 
 | 工作 | 结果 |

@@ -2,8 +2,8 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | 修订版 v2（2026-11-19），取代 2026-11-18 的草案；M1 已实现，M2 起按本文执行 |
-| 代码基线 | `f9daea4` 加本分支未提交的 M1 |
+| 状态 | 修订版 v2（2026-11-19）；M1–M4 已实现（见[进度](progress.zh-CN.md)），M5 起需逐次确认模型批次 |
+| 代码基线 | `f9daea4`；M1–M4 在分支 `design/iteration-02-world-model-content` |
 | 验证语料 | 《龙族1》，源 `a28585b1cf867f3e3a16`，798,095 字节 |
 | 输入 | [基线评估](baseline-evaluation.zh-CN.md)、[最终态差距分析](end-state-gap-analysis.zh-CN.md) |
 | 文档性质 | 后续开发的指导方向；里程碑可直接拆成任务执行 |

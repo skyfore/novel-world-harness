@@ -33,6 +33,8 @@ import { canonicalJson, contentHash } from "../world/canonical.js";
 import { buildCanonTimeline, canonTimelineSchema } from "../world/canon-timeline.js";
 import { buildVoiceIndex, voiceIndexSchema } from "../world/voice-references.js";
 import { buildLexicalInventory } from "./lexical-inventory.js";
+import { PipelineStore } from "./pipeline/store.js";
+import { loadPipelineView } from "./pipeline/view.js";
 import { admissionManifestSchema, type AdmissionManifest, type AdmissionTier } from "./cut-admission-schema.js";
 import { assertPlayableRevision, buildAdmissionManifest } from "./cut-admission.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
@@ -869,15 +871,28 @@ export class PreparedNovelCache {
     if (currentSource.pendingTitleProposal) {
       throw new Error(`Cannot cache ${source.id}: novel-title proposal ${currentSource.pendingTitleProposal.proposalId} is still pending.`);
     }
-    const batches = await prepareCompilerBatches(this.workspaceRoot, source);
-    const progress = options.legacyRollbackCheckpoint
-      ?? await new CompilerBatchStore(this.workspaceRoot).read(source.id);
-    const completed = new Set(progress.completedBatchIds);
-    const unfinished = batches.filter((batch) => !completed.has(batch.id));
-    if (unfinished.length) throw new Error(`Cannot cache ${source.id}: ${unfinished.length} compiler batch(es) are unfinished.`);
-    const semanticAudit = await auditCompiler(this.workspaceRoot, { sourceId: source.id });
-    if (semanticAudit.consistency.semanticReady === false && !options.allowSemanticDebtForRollback) {
-      throw new Error(`Cannot cache ${source.id}: novel-scale semantic readiness failed (${semanticAudit.consistency.semanticIssues.join(" ")}).`);
+    // A source compiled by the slim pipeline is finished when no scope is mid-run; its
+    // scopes, not the legacy batch plan, identify the candidate (iteration 02, M3).
+    const pipelineStore = new PipelineStore(this.workspaceRoot, source.id);
+    const pipelineRun = await pipelineStore.run();
+    let candidateBatchIds: string[];
+    if (pipelineRun) {
+      const receipts = await pipelineStore.receipts();
+      const running = receipts.filter((receipt) => receipt.status === "running");
+      if (running.length) throw new Error(`Cannot cache ${source.id}: ${running.length} pipeline scope(s) are unfinished (${running.slice(0, 3).map((receipt) => receipt.id).join(", ")}).`);
+      candidateBatchIds = receipts.map((receipt) => receipt.id).sort();
+    } else {
+      const batches = await prepareCompilerBatches(this.workspaceRoot, source);
+      const progress = options.legacyRollbackCheckpoint
+        ?? await new CompilerBatchStore(this.workspaceRoot).read(source.id);
+      const completed = new Set(progress.completedBatchIds);
+      const unfinished = batches.filter((batch) => !completed.has(batch.id));
+      if (unfinished.length) throw new Error(`Cannot cache ${source.id}: ${unfinished.length} compiler batch(es) are unfinished.`);
+      const semanticAudit = await auditCompiler(this.workspaceRoot, { sourceId: source.id });
+      if (semanticAudit.consistency.semanticReady === false && !options.allowSemanticDebtForRollback) {
+        throw new Error(`Cannot cache ${source.id}: novel-scale semantic readiness failed (${semanticAudit.consistency.semanticIssues.join(" ")}).`);
+      }
+      candidateBatchIds = batches.filter((batch) => batch.purpose !== "boundary-calibration").map((batch) => batch.id).sort();
     }
 
     const canonical = new CanonicalModelStore(this.workspaceRoot);
@@ -972,14 +987,9 @@ export class PreparedNovelCache {
       new EventResolutionStore(this.workspaceRoot).list(source.id),
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
-    const currentAccounting = await projectAccountingForSnapshot(
-      this.workspaceRoot,
-      source,
-      structure,
-      accounting,
-      evidenceBindings,
-      annotations,
-    );
+    const currentAccounting = pipelineRun
+      ? (await loadPipelineView(this.workspaceRoot, source.id)).accounting
+      : await projectAccountingForSnapshot(this.workspaceRoot, source, structure, accounting, evidenceBindings, annotations);
     const upstreamRepairJournal = await new UpstreamRepairLedger(this.workspaceRoot, source.id).history();
     const requirementJournal = await new RequirementLedger(this.workspaceRoot, source.id).history();
     const coreRoleReviewRevision = (await new RequirementLedger(this.workspaceRoot, source.id).roleReviewRevisions()).at(-1);
@@ -1001,10 +1011,7 @@ export class PreparedNovelCache {
       // Their accepted artifacts are already captured below. Structure discovery
       // is deterministic workflow provenance and is retained with its validated
       // plan so a prepared revision reproduces the same author-chapter layout.
-      batchIds: batches
-        .filter((batch) => batch.purpose !== "boundary-calibration")
-        .map((batch) => batch.id)
-        .sort(),
+      batchIds: candidateBatchIds,
       canonical: {
         ...preparedCanonical,
         timeline: buildCanonTimeline({

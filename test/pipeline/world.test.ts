@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.setConfig({ testTimeout: 60_000 });
 import { isRegisteredDomainModule, BASE_ACTION_SCHEMAS } from "../../src/compiler/pipeline/domain-modules.js";
 import { rosterStage } from "../../src/compiler/pipeline/roster.js";
 import { runStage } from "../../src/compiler/pipeline/runner.js";

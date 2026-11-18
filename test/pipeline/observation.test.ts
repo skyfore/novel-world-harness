@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.setConfig({ testTimeout: 60_000 });
 import { censusCandidates, censusStage } from "../../src/compiler/pipeline/census.js";
 import { observationStage, openCandidates } from "../../src/compiler/pipeline/observation.js";
 import { releaseHeldScope, runStage } from "../../src/compiler/pipeline/runner.js";

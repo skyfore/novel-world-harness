@@ -140,6 +140,18 @@ export const scopeReceiptSchema = z.object({
 export type ScopeReceipt = z.infer<typeof scopeReceiptSchema>;
 const receiptsDocumentSchema = z.object({ version: z.literal(PIPELINE_STORE_VERSION), receipts: z.array(scopeReceiptSchema) }).strict();
 
+/** The prefix this source is compiled through (design 5.1 prefix compile). */
+export const pipelineRunSchema = z.object({
+  version: z.literal(PIPELINE_STORE_VERSION),
+  sourceId: idSchema,
+  limit: z.number().int().positive(),
+  throughChapter: z.number().int().positive().optional(),
+  throughByte: z.number().int().positive().optional(),
+  startedAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+}).strict();
+export type PipelineRun = z.infer<typeof pipelineRunSchema>;
+
 export function pipelineRoot(workspaceRoot: string): string {
   return path.join(worldStorageRoot(workspaceRoot), "compiler", "pipeline", `v${PIPELINE_STORE_VERSION}`);
 }
@@ -224,6 +236,9 @@ export class PipelineStore {
     const current = (await this.receipts()).filter((item) => item.id !== receipt.id);
     await this.write("receipts.json", receiptsDocumentSchema, { version: 1, receipts: [...current, scopeReceiptSchema.parse(receipt)] });
   }
+
+  async run(): Promise<PipelineRun | null> { return this.read<PipelineRun | null>("run.json", pipelineRunSchema.nullable(), null); }
+  async writeRun(run: PipelineRun): Promise<void> { await this.write("run.json", pipelineRunSchema, run); }
 
   /** Delete every pipeline document of this source (reset-analysis and purge use this). */
   async remove(): Promise<void> { await fs.rm(this.directory, { recursive: true, force: true }); }

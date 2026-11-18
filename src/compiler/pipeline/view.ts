@@ -11,6 +11,7 @@ import { EventResolutionStore } from "../event-resolution.js";
 import { buildCharacterLexicon, buildLexicalInventory, type CharacterLexicon, type LexicalInventory } from "../lexical-inventory.js";
 import type { PreparedNovelBundle } from "../prepared-cache.js";
 import { SourceStructureStore, baseStructuralUnits, type SourceStructureManifest } from "../structure.js";
+import type { SourceAccountingManifest } from "../source-accounting.js";
 import { measureWorldCompleteness, type ByteRange, type CompileUsage, type LoreTerm, type RosterSummary, type WorldCompletenessOptions, type WorldCompletenessReport } from "../world-completeness.js";
 import { PipelineStore, type CandidateReview, type CensusEntry, type LexiconDecision, type PipelineDisposition, type RosterDocument, type ScopeReceipt, type UnitAccount } from "./store.js";
 
@@ -24,6 +25,7 @@ export const censusKey = (surface: string) => `census:${surface}`;
  * measure this view, so a scope cannot pass a gate the report would fail.
  */
 export type PipelineView = {
+  accounting: SourceAccountingManifest;
   source: SourceDocument;
   bytes: Uint8Array;
   structure: SourceStructureManifest;
@@ -93,14 +95,20 @@ export async function loadPipelineView(workspaceRoot: string, sourceId: string):
   ]);
   const sourceEntities = fromSource(entities, sourceId);
   // Host-derived accounting: annotation coverage represents a unit; otherwise only an explicit model disposition closes it.
-  const covered = annotations.flatMap((item) => item.annotationType === "event-mention" ? item.extentAnchors : item.annotationType === "discourse-segment" ? [] : [item.anchor]);
+  const covered = annotations.flatMap((item) => (item.annotationType === "event-mention" ? item.extentAnchors : item.annotationType === "discourse-segment" ? [] : [item.anchor]).map((anchor) => ({ id: item.id, startByte: anchor.startByte, endByte: anchor.endByte })));
   const sortedCovered = [...covered].sort((a, b) => a.startByte - b.startByte);
   const accountByUnit = new Map(accounts.map((item) => [item.unitId, item]));
   const records = baseStructuralUnits(structure).map((unit) => {
-    const represented = sortedCovered.some((range) => range.startByte < unit.anchor.endByte && range.endByte > unit.anchor.startByte);
+    const covering = [...new Set(sortedCovered.filter((range) => range.startByte < unit.anchor.endByte && range.endByte > unit.anchor.startByte).map((range) => range.id))].sort();
+    const represented = covering.length > 0;
     const account = accountByUnit.get(unit.id);
-    return { version: 1, unitId: unit.id, status: represented ? "represented" : account?.status ?? "unresolved", annotationIds: [], evidenceAssertionIds: [], reviewedBy: represented ? "host" : "model", reviewedAt: new Date(0).toISOString(), batchIds: account ? [account.scopeId] : [] };
+    // Blank and other non-scene structure units carry no narrative: the host accounts for them deterministically.
+    if (!represented && unit.kind === "non-scene") return { version: 1 as const, unitId: unit.id, status: "background-only" as const, annotationIds: [], evidenceAssertionIds: [],
+      reason: "Non-scene structure unit (blank or layout).", reviewedBy: "deterministic" as const, reviewedAt: new Date(0).toISOString(), batchIds: [] };
+    return { version: 1 as const, unitId: unit.id, status: represented ? "represented" as const : account?.status ?? "unresolved" as const, annotationIds: covering, evidenceAssertionIds: [],
+      ...(account && !represented ? { reason: account.rationale } : {}), reviewedBy: represented ? "deterministic" as const : "model" as const, reviewedAt: new Date(0).toISOString(), batchIds: account && !represented ? [account.scopeId] : [] };
   });
+  const accounting: SourceAccountingManifest = { version: 1, sourceId, sourceSha256: source.contentSha256, structureVersion: structure.structureVersion, batchReviews: [], records, updatedAt: new Date(0).toISOString() };
   const bundle = {
     version: 4,
     source: { id: source.id, contentMd5: source.contentMd5 ?? "", contentSha256: source.contentSha256 },
@@ -123,7 +131,7 @@ export async function loadPipelineView(workspaceRoot: string, sourceId: string):
     },
     compilerSnapshot: {
       structure, annotations, entityResolutions, eventResolutions, evidenceBindings: [],
-      accounting: { version: 1, sourceId, records },
+      accounting,
       roleRoster: null,
     },
   } as unknown as PreparedNovelBundle;
@@ -147,7 +155,7 @@ export async function loadPipelineView(workspaceRoot: string, sourceId: string):
     usage: receiptsUsage(receipts),
     handled: { speech: rejected("speech"), names: rejected("name") },
   };
-  return { source, bytes, structure, bundle, inventory, census, decisions, dispositions, reviews, accounts, roster, receipts, options };
+  return { accounting, source, bytes, structure, bundle, inventory, census, decisions, dispositions, reviews, accounts, roster, receipts, options };
 }
 
 export function measureView(view: PipelineView, scope?: ByteRange): WorldCompletenessReport {

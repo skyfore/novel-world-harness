@@ -8,6 +8,7 @@ import { CENSUS_CLASSES, type CensusEntry } from "./store.js";
 import { applyEach, pipelineTool, T } from "./tooling.js";
 import { ScopeText, windowUnits } from "./text.js";
 import { loadPipelineView, type PipelineView } from "./view.js";
+import { sourceReadingTools } from "./world.js";
 
 /**
  * Census (design 5.2): the host proposes the surfaces a novel uses as names
@@ -197,6 +198,7 @@ export const censusStage: StageDefinition = {
   },
   tools(ctx, scope) {
     return [
+      ...sourceReadingTools(ctx).filter((tool) => tool.name === "search_source"),
       pipelineTool({
         name: "classify_census_candidates", label: "Classify census candidates",
         description: "Classify host census candidates by id. Each item: candidate id, class, optional rationale (required for non-entity of a speaker-position surface).",

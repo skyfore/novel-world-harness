@@ -6,7 +6,7 @@ import { PipelineStore, addUsage, emptyUsage, type GateResult, type PipelineRang
 import { pipelineTool } from "./tooling.js";
 import { loadPipelineView, type PipelineView } from "./view.js";
 
-export const PIPELINE_MODEL_STAGES = ["census", "observation", "identity", "scenes", "world", "roster", "gaps"] as const;
+export const PIPELINE_MODEL_STAGES = ["census", "observation", "identity", "scenes", "world", "roster", "opening", "gaps"] as const;
 export type PipelineModelStage = typeof PIPELINE_MODEL_STAGES[number];
 
 /** Scopes failing their gate this many times are held for host review; the stage continues with other scopes. */

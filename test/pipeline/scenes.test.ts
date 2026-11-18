@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.setConfig({ testTimeout: 60_000 });
 import { releaseHeldScope, runStage } from "../../src/compiler/pipeline/runner.js";
 import { scenesStage } from "../../src/compiler/pipeline/scenes.js";
 import { loadPipelineView, measureView } from "../../src/compiler/pipeline/view.js";

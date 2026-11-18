@@ -59,3 +59,31 @@
 5. **`assessSemanticSupport` 性能修复。** 原实现对每条证据断言扫描全部单元并做数组 `includes`，龙族上 131 秒；改为按字节索引和按字段索引，输出逐字节相同，27 毫秒。
 6. **Web 只读冻结清单。** 准备页显示活动版本的准入覆盖率，不在读模型里重跑探针；有可入场条目时允许创建实例。
 7. **门禁集成测试替换记账校验。** `novel-certification-gate` 的部分准入用例在真实工作区和缓存上走发布、激活和开局，记账局部性已有单测，所以在该用例里替换 `validateFrozenAccounting`，测试内注明原因。
+
+## M3 场景入场（代码完成；龙族指标未达标）
+
+| 工作包 | 提交 | 结果 |
+|---|---|---|
+| 3.1 入场包派生 | `feat(world): derive scene entry seeds for any cut x actor` | `deriveSceneEntrySeed`：开场 → 该事件上已编译的检查点 → 确定性派生 |
+| 3.2 接口 | `feat(play): start fresh play at an admitted scene cut` | `GET /api/v1/novels/:id/cuts`；开局请求可选 `cutId`；`nwh play --scene`；`branch.entryCutId` |
+| 3.3 阅读视界与引子段 | `feat(world): bound narrative source prose by a read horizon` | `src/world/read-horizon.ts`；引子段；运行时原文咨询的宿主判定 |
+| 3.4 场景地点契约 | `feat(compiler): add the scene location contract and completion queue` | `locationUnknown`、`SCENE_LOCATION_MISSING`、补全队列 |
+| 3.5 枚举式端到端测试 | `test: enumerate every admitted scene entry end to end` | 10 个场景的合成小说：20 个"切面 × 角色"逐个开局、打 1 个玩家回合、冷重放一致 |
+
+### 龙族实测
+
+| 指标 | 设计目标 | 实测 |
+|---|---|---|
+| enterable"切面 × 角色" | 不少于原型估计 65 的八成（52） | **0**。可重放切面上有 28 个"切面 × 角色"对，其中 22 个入场状态落地（replayable），但没有一个通过全部 7 个确定性探针：21 个缺可执行的行动机制或目标行动（`ENTRY_ACTION_UNPROVEN` 12、`ACTOR_EFFECT_REQUIRES_MECHANISM` 9），6 个缺操作性上下文（场景无地点、角色无地点/计划），1 个找不到自主驱动事件 |
+| 非开场场景开局并完成开场叙事 | 至少 5 个不同场景 | 未运行：需要可入场条目和真实模型叙事 |
+| 有地点的场景 | 从 11 提升，缺失的都有显式标注 | 契约与队列已就绪；27/38 个场景缺契约（4 个在地平线内）。补全需要模型驱动的编译批次，会写入用户的真实工作区，本次未运行 |
+
+**解读。** 按 D1，enterable 要求 7 个确定性探针全部通过。龙族的障碍不在入场派生，而在"行动权"：多数角色在源文中没有被编译出可执行的行动机制或目标行动。这正是设计 9.3 风险"抽取稀疏导致世界'薄'"，M4 的行动探针会把它量化。本次没有放宽探针。
+
+### 补充决定
+
+1. **派生入场以确定性检查点表达。** 派生入口被构造为切面事件上的检查点：重申角色前缀折叠后的操作性状态，场景有地点且角色无地点时补地点，身体在场且生死未表态的角色补 `character.alive = true`，在场取场景的 `presentActorIds`。之后复用已有的整条入场流水线（前缀重放、知识、过程、读者前情），不另写一套。
+2. **身体在场即在世。** 探针要求入场时显式在世。对于在亲历场景中身体在场、而前缀和检查点都没有表态生死的角色，补 `character.alive = true`。这条推断同样应用于场景入场用到的已编译检查点。若前缀已表态死亡，派生入场报 `ENTRY_ACTOR_DEAD`。
+3. **派生入场的知识历史。** 投影期 `replayEntryKnowledge` 原本要在正典事件上找到入场检查点。派生入口没有正典检查点，所以知识历史带 `basis: "derived-scene"`，回放时只从正典前缀重建，不允许它遮蔽已编译的检查点。
+4. **已认证或已准入都可以开局。** 不带 `cutId` 的旧请求仍从角色的首个入口开局；未认证但已准入的版本里，首个入口被准入的角色在角色列表中显示为 ready。
+5. **场景地点补全只做到队列。** 新增编译批次用途要接入阶段门、完成回执和提示词版本，且补全本身要调用模型写入用户工作区。本迭代提供契约、诊断和按地平线排序的补全队列，批次本身留给 M6.3 的修复排队一起做。

@@ -29,6 +29,7 @@ import { validateActionConstraintCatalog, type ActionConstraint } from "./action
 import { validateNormTemplateCatalog, type NormTemplate } from "./norm-ontology.js";
 import { validateProcessTemplateCatalog, type ProcessTemplate } from "./process-ontology.js";
 import { buildCanonTimeline, canonTimelineProjectionIssues, canonTimelineSchema, type CanonTimeline } from "./canon-timeline.js";
+import { buildVoiceIndex, voiceIndexSchema, type VoiceIndex } from "./voice-references.js";
 
 const revisionRefSchema = z.object({ id: z.string().min(1), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const validatePreparedSnapshotScope = (
@@ -73,6 +74,8 @@ export const canonicalSnapshotSchema = z.object({
   timeline: canonTimelineSchema.optional(),
   /** Admission horizon: canonical events at or beyond this timeline index are not playable yet. */
   canonHorizonIndex: z.number().int().min(-1).optional(),
+  /** Character-attributed quotation pointers for voice references. */
+  voiceIndex: voiceIndexSchema.optional(),
 }).strict().superRefine(validatePreparedSnapshotScope);
 export type CanonicalSnapshot = z.infer<typeof canonicalSnapshotSchema>;
 
@@ -103,6 +106,7 @@ export type ScopedWorldArtifacts = {
   possibilities: readonly PossibilityTemplate[];
   timeline?: CanonTimeline;
   canonHorizonIndex?: number;
+  voiceIndex?: VoiceIndex;
 };
 
 export class WorldContextStore {
@@ -169,6 +173,8 @@ export class WorldContextStore {
     if (sourceId) {
       const timeline = await this.currentTimeline(sourceId, artifacts.events, artifacts.eventRelations);
       if (timeline) artifacts.timeline = timeline;
+      const voiceIndex = timeline ? await this.currentVoiceIndex(sourceId, artifacts.entities) : undefined;
+      if (voiceIndex?.entries.length) artifacts.voiceIndex = voiceIndex;
     }
     return this.captureArtifacts(artifacts, sourceId);
   }
@@ -178,6 +184,12 @@ export class WorldContextStore {
    * inputs. Compiler stores load lazily so the world layer keeps no static
    * dependency on them.
    */
+  private async currentVoiceIndex(sourceId: string, entities: ScopedWorldArtifacts["entities"]): Promise<VoiceIndex> {
+    const [{ SourceAnnotationStore }, { EntityResolutionStore }] = await Promise.all([import("../compiler/annotations.js"), import("../compiler/entity-resolution.js")]);
+    const [annotations, entityResolutions] = await Promise.all([new SourceAnnotationStore(this.workspaceRoot).list(sourceId, "quotation"), new EntityResolutionStore(this.workspaceRoot).list(sourceId)]);
+    return buildVoiceIndex({ sourceId, annotations, entityResolutions, entities });
+  }
+
   private async currentTimeline(sourceId: string, events: readonly CanonicalEvent[], relations: readonly EventRelation[]): Promise<CanonTimeline | undefined> {
     if (!events.length) return undefined;
     const [{ SourceAnnotationStore }, { EventResolutionStore }, { SourceStructureStore }] = await Promise.all([
@@ -326,6 +338,7 @@ export class WorldContextStore {
       stateFields: DEFAULT_STATE_FIELDS,
       ...(artifacts.timeline ? { timeline: artifacts.timeline } : {}),
       ...(artifacts.timeline && artifacts.canonHorizonIndex !== undefined ? { canonHorizonIndex: artifacts.canonHorizonIndex } : {}),
+      ...(artifacts.voiceIndex ? { voiceIndex: assertVoiceIndexProjection(artifacts.voiceIndex, artifacts.entities, sourceId) } : {}),
     });
     const snapshotHash = contentHash(snapshot);
     await this.writeSnapshot(snapshotHash, snapshot);
@@ -476,6 +489,7 @@ export class WorldContextStore {
       stateSchema: new StateSchemaRegistry(snapshot.stateFields),
       ...(snapshot.timeline ? { timeline: snapshot.timeline } : {}),
       ...(snapshot.canonHorizonIndex !== undefined ? { canonHorizonIndex: snapshot.canonHorizonIndex } : {}),
+      ...(snapshot.voiceIndex ? { voiceIndex: snapshot.voiceIndex } : {}),
     };
   }
 
@@ -490,6 +504,14 @@ export class WorldContextStore {
       if ((await fs.readFile(filePath, "utf8")) !== serialized) throw new Error(`Canonical snapshot already exists with different content: ${snapshotHash}`);
     }
   }
+}
+
+function assertVoiceIndexProjection(index: VoiceIndex, entities: ScopedWorldArtifacts["entities"], sourceId?: string): VoiceIndex {
+  const characters = new Set(entities.filter((entity) => entity.kind === "character").map((entity) => entity.id));
+  if (sourceId && index.sourceId !== sourceId) throw new Error(`Invalid voice index projection: it belongs to ${index.sourceId}, not ${sourceId}`);
+  const stray = index.entries.find((entry) => !characters.has(entry.actorId));
+  if (stray) throw new Error(`Invalid voice index projection: ${stray.actorId} is not a character of this snapshot`);
+  return index;
 }
 
 function assertTimelineProjection(artifacts: Pick<ScopedWorldArtifacts, "timeline" | "events">, sourceId?: string): void {

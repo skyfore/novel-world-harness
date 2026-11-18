@@ -116,6 +116,7 @@ describe("reactive NPC response lane", () => {
       };
     });
 
+    const voiceReferences = vi.fn(async () => [{ text: "「我只说我看见的。」" }]);
     const result = await respondToNpcInteractions({
       engine,
       branchId: "main",
@@ -123,9 +124,13 @@ describe("reactive NPC response lane", () => {
       playerCandidate: candidate,
       triggerEvent: trigger,
       reasoner,
+      voiceReferences,
     });
 
     expect(reasoner).toHaveBeenCalledOnce();
+    // The NPC's own earlier lines reach the reasoner as voice-only reference.
+    expect(voiceReferences).toHaveBeenCalledWith("npc", expect.any(String));
+    expect(reasoner.mock.calls[0]![0]).toMatchObject({ voiceReferences: [{ text: "「我只说我看见的。」" }] });
     expect(result.failures).toEqual([]);
     expect(result.responses).toEqual([
       expect.objectContaining({ actorId: "npc", responseKind: "speak", emotion: { label: "wary", intensity: 0.55, expression: "His eyes remain on the doorway." } }),

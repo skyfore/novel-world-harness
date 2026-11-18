@@ -1,4 +1,5 @@
 import type { CanonTimeline } from "./canon-timeline.js";
+import type { VoiceIndex } from "./voice-references.js";
 import { committedTextDeliveries } from "./text-delivery.js";
 import { committedSpeechDeliveries } from "./speech-delivery.js";
 import { entryAgencyIssues } from "./entry-agency.js";
@@ -153,6 +154,8 @@ export type WorldModelContext = {
   timeline?: CanonTimeline;
   /** Frozen admission horizon on the timeline (exclusive bound for resolvable events). */
   canonHorizonIndex?: number;
+  /** Frozen character-attributed quotation pointers (voice references). */
+  voiceIndex?: VoiceIndex;
 };
 
 export type ResolvedWorldModelContext = WorldModelContext & { canonicalSnapshotHash: ObjectHash };

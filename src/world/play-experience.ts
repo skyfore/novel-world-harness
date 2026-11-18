@@ -33,6 +33,7 @@ import type {
 } from "./canonical-adaptation.js";
 import type { CanonicalRecoveryTrace, WorldMoveTrace } from "./runtime.js";
 import { DEFAULT_CANON_STEP_POLICY, deriveCanonStatus, type CanonStatus, type CanonStepResult } from "./canon-stepper.js";
+import { branchVoiceReferences } from "./voice-references.js";
 import type { RuntimeContextConsultationObserver, RuntimeContextResolver } from "./runtime-context.js";
 import { RuntimeCompilerRepairHintStore } from "../compiler/runtime-repair-hints.js";
 import { PlayMoveStore } from "./play-move.js";
@@ -542,6 +543,7 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions, move?: P
             playerCandidate: result.candidate,
             triggerEvent: playerEvent,
             reasoner: options.npcResponseReasoner,
+            voiceReferences: (npcId, atCommit) => branchVoiceReferences({ engine, ...(sourceId ? { sourceId } : {}), actorId: npcId, atCommit }),
           });
           finalHead = npcResponses.newHead;
           reactionEvents.push(...npcResponses.responses);

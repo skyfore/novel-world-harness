@@ -31,6 +31,7 @@ import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.
 import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { buildCanonTimeline, canonTimelineSchema } from "../world/canon-timeline.js";
+import { buildVoiceIndex, voiceIndexSchema } from "../world/voice-references.js";
 import { admissionManifestSchema, type AdmissionManifest, type AdmissionTier } from "./cut-admission-schema.js";
 import { assertPlayableRevision, buildAdmissionManifest } from "./cut-admission.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
@@ -157,6 +158,8 @@ const preparedCanonicalSchema = z.object({
   possibilities: z.array(possibilityTemplateSchema),
   /** Host-derived chronology frozen with the revision; absent on bundles prepared before timelines. */
   timeline: canonTimelineSchema.optional(),
+  /** Character-attributed source quotations (pointers) used as NPC voice references. */
+  voiceIndex: voiceIndexSchema.optional(),
 }).strict();
 
 const preparedCompilerSnapshotSchema = z.object({
@@ -1010,6 +1013,7 @@ export class PreparedNovelCache {
           annotations,
           structure,
         }),
+        voiceIndex: buildVoiceIndex({ sourceId: source.id, annotations, entityResolutions, entities: preparedCanonical.entities }),
       },
       compilerSnapshot: {
         ...(upstreamRepairCheckpoint ? { upstreamRepairCheckpoint } : {}),

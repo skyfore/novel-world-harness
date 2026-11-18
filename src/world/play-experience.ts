@@ -32,6 +32,7 @@ import type {
   CanonicalAttachmentResolver,
 } from "./canonical-adaptation.js";
 import type { CanonicalRecoveryTrace, WorldMoveTrace } from "./runtime.js";
+import { DEFAULT_CANON_STEP_POLICY, type CanonStepResult } from "./canon-stepper.js";
 import type { RuntimeContextConsultationObserver, RuntimeContextResolver } from "./runtime-context.js";
 import { RuntimeCompilerRepairHintStore } from "../compiler/runtime-repair-hints.js";
 import { PlayMoveStore } from "./play-move.js";
@@ -109,6 +110,10 @@ export type PlayTurnOutcome = {
   canonicalRecoveryResolution?: CanonicalAttachmentResolution;
   canonicalRecoveryError?: string;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
+  /** Canonical events the stepper resolved this turn (frozen-timeline worlds only). */
+  canonStep?: CanonStepResult;
+  canonStepEvents: Array<{ eventHash: string; title: string; canonicalEventId: string }>;
+  canonStepError?: string;
   runtimeMoveTrace?: WorldMoveTrace;
   reactionEvents: Array<{
     eventHash: string;
@@ -359,7 +364,8 @@ async function replayPlayMove(options: PerformPlayTurnOptions, move: PlayMoveSto
   let cursor: string | undefined = currentHead;
   while (cursor && cursor !== saved.finalHead) cursor = (await engine.objects.getCommit(cursor)).parentCommitId;
   if (!cursor) throw move.recoveryRequired("The original result is no longer in this branch's committed history");
-  const outcome = { ...saved, replayed: true };
+  // Moves saved before the canon stepper carry no stepper events.
+  const outcome: PlayTurnOutcome = { ...saved, canonStepEvents: saved.canonStepEvents ?? [], replayed: true };
   // Repair only the derived session pointer, never replay world effects or
   // roll a newer pointer back to a historical move.
   if (outcome.sessionError && currentHead === outcome.finalHead) {
@@ -502,15 +508,21 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions, move?: P
   let npcResponseError: string | undefined;
   let backgroundError: string | undefined;
   let runtimeMoveTrace: WorldMoveTrace | undefined;
+  let canonStep: CanonStepResult | undefined;
+  let canonStepError: string | undefined;
+  const canonStepEvents: PlayTurnOutcome["canonStepEvents"] = [];
   if (result.accepted) {
     const explicitWait = result.candidate?.intent?.kind === "wait";
     const divergedFromCanonThisTurn = Boolean(result.proposal?.supersedesCanonicalEventIds?.length);
-    // A newly committed contradiction of an eligible canonical event grants
-    // exactly one progression slot. This is the user-authorized trigger for
-    // looking forward; old divergence alone never advances an ordinary turn.
+    // On a frozen timeline the canon stepper advances canon in order; the
+    // background lane only carries non-canonical autonomous developments.
+    const timelineWorld = Boolean((await engine.contextForCommit(result.newHead)).timeline);
+    // Legacy worlds: a newly committed contradiction of an eligible canonical
+    // event grants exactly one progression slot; old divergence alone never
+    // advances an ordinary turn.
     const effectiveAdvanceBackground = explicitWait
       ? 1
-      : Math.max(advanceBackground, divergedFromCanonThisTurn ? 1 : 0);
+      : timelineWorld ? advanceBackground : Math.max(advanceBackground, divergedFromCanonThisTurn ? 1 : 0);
     let directNpcAttempts = 0;
     if (options.npcResponseReasoner && result.candidate && result.eventHash) {
       const interaction = result.candidate.intent?.controlledAct?.interaction;
@@ -633,6 +645,28 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions, move?: P
         canonicalRecoveryError = error instanceof Error ? error.message : String(error);
       }
     }
+    if (timelineWorld) {
+      try {
+        const playerEvent = result.eventHash ? await engine.objects.getEvent(result.eventHash) : undefined;
+        const leftScene = Boolean(playerEvent?.progress?.scene && playerEvent.progress.scene.kind !== "stay");
+        const worldResponseCanon = worldResponseEvents.some((event) => event.possibilityId.startsWith("canon-")) || canonicalRecoveryEvents.length > 0;
+        canonStep = await runtime.stepCanon({
+          branchId: options.branchId, actorId: options.actorId, expectedHead: finalHead,
+          budget: explicitWait || leftScene ? DEFAULT_CANON_STEP_POLICY.waitBudget : DEFAULT_CANON_STEP_POLICY.budget,
+          worldBeatBudget: worldResponseCanon ? 0 : DEFAULT_CANON_STEP_POLICY.worldBeatBudget,
+          patience: DEFAULT_CANON_STEP_POLICY.patience, playerWaited: explicitWait, playerLeftScene: leftScene,
+        });
+        finalHead = canonStep.newHead;
+        const committed = new Set(canonStep.committed);
+        for (const entry of (await engine.projections.project(finalHead)).history) {
+          const canonicalEventId = entry.event.realizesCanonicalEventIds?.find((id) => committed.has(id));
+          if (canonicalEventId && entry.event.possibilityId === `canon-${canonicalEventId}`) canonStepEvents.push({ eventHash: entry.eventHash, title: entry.event.title, canonicalEventId });
+        }
+      } catch (error) {
+        finalHead = await engine.branches.readHead(options.branchId);
+        canonStepError = error instanceof Error ? error.message : String(error);
+      }
+    }
     try {
       const advanced = await runtime.move({
         branchId: options.branchId,
@@ -647,7 +681,7 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions, move?: P
           : Math.max(0, effectiveAdvanceBackground - canonicalRecoveryEvents.length),
         excludedBackgroundPossibilityIds: [...excludedCanonicalPossibilityIds],
         temporalMode: explicitWait ? "current-window" : effectiveAdvanceBackground > 0 ? "advance" : "current-window",
-        ...(explicitWait ? { backgroundKinds: AUTONOMOUS_BACKGROUND_KINDS } : {}),
+        ...(explicitWait || timelineWorld ? { backgroundKinds: AUTONOMOUS_BACKGROUND_KINDS } : {}),
       });
       runtimeMoveTrace = structuredClone(advanced.trace);
       finalHead = advanced.newHead;
@@ -709,6 +743,8 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions, move?: P
       backgroundEvents: structuredClone(backgroundEvents),
       ...(runtimeMoveTrace ? { runtimeMoveTrace: structuredClone(runtimeMoveTrace) } : {}),
       ...(backgroundError ? { backgroundError } : {}),
+      ...(canonStep ? { canonStep: structuredClone(canonStep) } : {}),
+      ...(canonStepError ? { canonStepError } : {}),
       ...(conversationError ? { conversationError } : {}),
       ...(sessionError ? { sessionError } : {}),
     });
@@ -731,6 +767,9 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions, move?: P
     ...(canonicalRecoveryError ? { canonicalRecoveryError } : {}),
     ...(npcResponseError ? { npcResponseError } : {}),
     backgroundEvents,
+    canonStepEvents,
+    ...(canonStep ? { canonStep } : {}),
+    ...(canonStepError ? { canonStepError } : {}),
     ...(runtimeMoveTrace ? { runtimeMoveTrace } : {}),
     reactionEvents,
     ...(backgroundError ? { backgroundError } : {}),

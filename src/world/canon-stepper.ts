@@ -97,7 +97,7 @@ export async function stepCanon(deps: CanonStepDependencies, input: CanonStepInp
       if (entry.index >= horizon) return done("beyond-horizon");
       const event = events.get(entry.eventId);
       const evaluated = byEvent.get(entry.eventId);
-      if (!event || !evaluated || evaluated.status !== "eligible") { skipped.add(entry.eventId); continue; }
+      if (!event || !evaluated || !steppable(evaluated)) { skipped.add(entry.eventId); continue; }
       const beat = classifyCanonBeat(event, input.actorId, canonEventAgents(event, participations, initiatorRoles));
       if (beat === "unattributed") { skipped.add(entry.eventId); continue; }
       if (beat === "player") {
@@ -112,7 +112,8 @@ export async function stepCanon(deps: CanonStepDependencies, input: CanonStepInp
       if (beat === "world") {
         if (worldBeats >= input.worldBeatBudget || !sharesPlayerPlace(event, input.actorId, projection.state.values)) { skipped.add(entry.eventId); continue; }
       }
-      const proposal = possibilityToProposal(evaluated);
+      // The engine re-validates the proposal; the stepper only vouches for order.
+      const proposal = possibilityToProposal({ ...evaluated, status: "eligible" });
       if (!proposal) { skipped.add(entry.eventId); continue; }
       const result = await engine.commitProposal({ ...proposal, proposalId: `canon-step-${entry.eventId}-${head.slice(0, 12)}` });
       if (!result.report.accepted) { skipped.add(entry.eventId); continue; }
@@ -128,6 +129,18 @@ export async function stepCanon(deps: CanonStepDependencies, input: CanonStepInp
       return done(live ? "idle" : horizon < timeline.entries.length ? "beyond-horizon" : "exhausted");
     }
   }
+}
+
+/**
+ * Feasible for the stepper: eligible, or latent only because the root-scene
+ * heuristic did not place it in the active scene. The stepper enforces
+ * timeline order itself, so an unattributed front cannot stall later canon.
+ */
+function steppable(entry: Frontier["evaluated"][number]): boolean {
+  if (entry.status === "eligible") return true;
+  if (entry.status !== "latent") return false;
+  const failed = entry.trace.gates.filter((gate) => gate.outcome === "fail");
+  return failed.length > 0 && failed.every((gate) => gate.gate === "scene");
 }
 
 /** Player-authored commits since the canonical position last moved (or Genesis). */

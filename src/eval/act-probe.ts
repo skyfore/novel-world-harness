@@ -162,7 +162,7 @@ export async function runActProbe(input: RunActProbeInput): Promise<ActProbeRepo
       }));
       head = outcome.finalHead;
       const committed = { player: outcome.result.accepted ? 1 : 0, npc: outcome.reactionEvents.length, "world-response": outcome.worldResponseEvents.length,
-        "canon-step": outcome.canonicalRecoveryEvents.length,
+        "canon-step": outcome.canonicalRecoveryEvents.length + (outcome.canonStepEvents?.length ?? 0),
         actor: outcome.runtimeMoveTrace?.candidates.filter((candidate) => candidate.lane === "actor" && candidate.status === "accepted" && candidate.commitBoundary.moved).length ?? 0,
         background: outcome.backgroundEvents.length };
       turns.push(actProbeTurnSchema.parse({
@@ -171,7 +171,7 @@ export async function runActProbe(input: RunActProbeInput): Promise<ActProbeRepo
         issueCodes: [...new Set(outcome.result.issues.map((issue) => issue.code))].sort(),
         committedByLane: committed, canonPositionBefore: positionBefore, canonPositionAfter: await positionAt(head),
         modelCalls, latencyMs: Date.now() - startedAt,
-        degraded: Object.entries({ worldResponse: outcome.worldResponseError, canonicalRecovery: outcome.canonicalRecoveryError, npc: outcome.npcResponseError, background: outcome.backgroundError })
+        degraded: Object.entries({ worldResponse: outcome.worldResponseError, canonicalRecovery: outcome.canonicalRecoveryError, canonStep: outcome.canonStepError, npc: outcome.npcResponseError, background: outcome.backgroundError })
           .flatMap(([lane, error]) => error ? [`${lane}: ${error}`] : []),
       }));
     } catch (error) {

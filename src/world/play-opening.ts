@@ -1,3 +1,4 @@
+import { deriveCanonStatus, type CanonStatus } from "./canon-stepper.js";
 import type { AgencyDecisionView } from "./agency-profile.js";
 import { observeCommittedEvent } from "./actor-visible.js";
 import { buildLiteraryReferenceIndex, type LiteraryReferenceIndex } from "./literary-reference.js";
@@ -140,6 +141,8 @@ export type PlayOpeningFrame = {
   playContinuity?: PlayerNarrativePlayExcerpt[];
   /** Source-grounded human orientation for a fresh instance; never actor knowledge. */
   readerPrelude?: PlayerReaderNarrativePrelude;
+  /** Presentation-only: where the branch stands relative to canon (frozen-timeline worlds). */
+  canonStatus?: PlayerCanonStatus;
   turnResolution?: PlayerTurnResolution;
   /** One-move, non-authoritative projections from frozen-source consultation. */
   runtimeContext?: PlayerRuntimeContextFrame;
@@ -221,6 +224,8 @@ export type PlayerSceneNarratorFrame = {
   playContinuity?: PlayerNarrativePlayExcerpt[];
   /** Opening-only literary material for the human reader, never actor state or knowledge. */
   readerPrelude?: PlayerReaderNarrativePrelude;
+  /** Presentation-only canon progress; carries no event content. */
+  canonStatus?: PlayerCanonStatus;
   turnResolution?: PlayerTurnResolution;
   runtimeContext?: PlayerRuntimeContextFrame;
 };
@@ -278,6 +283,9 @@ export function resolvePlayScenePurpose(
   if (request === "orientation") return context.selectionChanged ? "orientation" : undefined;
   return request === "opening" || request === "turn" || request === "blocked" || request === "recovery" ? request : undefined;
 }
+
+/** Canon progress without event content: lets narration acknowledge divergence or the end of canon. */
+export type PlayerCanonStatus = { status: CanonStatus["status"]; position: number; total: number };
 
 export async function buildPlayOpeningFrame(
   root: string,
@@ -400,7 +408,12 @@ export async function buildPlayOpeningFrame(
     ...(literaryReferenceIndex ? { literaryReferenceIndex } : {}),
     playContinuity,
     ...(readerPrelude ? { readerPrelude } : {}),
+    ...(context.timeline ? { canonStatus: publicCanonStatus(deriveCanonStatus(context.timeline, history.map((entry) => entry.event), context.canonHorizonIndex)) } : {}),
   };
+}
+
+function publicCanonStatus(status: CanonStatus): PlayerCanonStatus {
+  return { status: status.status, position: status.position, total: status.total };
 }
 
 async function readerNarrativePreludeForBranch(
@@ -565,6 +578,7 @@ export function playerSceneModelFrame(
     // or dialogue from the committed scene instead of echoing system templates.
     ...(frame.turnResolution ? { turnResolution: structuredClone(frame.turnResolution) } : {}),
     ...(frame.runtimeContext ? { runtimeContext: structuredClone(frame.runtimeContext) } : {}),
+    ...(frame.canonStatus ? { canonStatus: structuredClone(frame.canonStatus) } : {}),
   };
 }
 

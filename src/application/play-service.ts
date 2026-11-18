@@ -964,6 +964,7 @@ export class PlayApplicationService {
             ...outcome.reactionEvents.map((event) => event.eventHash),
             ...outcome.worldResponseEvents.map((event) => event.eventHash),
             ...outcome.canonicalRecoveryEvents.map((event) => event.eventHash),
+            ...(outcome.canonStepEvents ?? []).map((event) => event.eventHash),
             ...outcome.backgroundEvents.map((event) => event.eventHash),
           ],
         }, turnTrace, { storyTime: storyTimeAfter });
@@ -1056,6 +1057,8 @@ export class PlayApplicationService {
         worldResponseEvents: outcome.worldResponseEvents,
         reactionEvents: outcome.reactionEvents,
         backgroundEvents: outcome.backgroundEvents,
+        ...(outcome.canonStepEvents?.length ? { canonStepEvents: outcome.canonStepEvents } : {}),
+        ...(outcome.canonStatus ? { canonStatus: outcome.canonStatus } : {}),
       });
       return result;
     } catch (error) {

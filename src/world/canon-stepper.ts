@@ -163,3 +163,28 @@ function sharesPlayerPlace(event: CanonicalEvent, actorId: string, values: Recor
     .map((item) => item.entityId);
   return others.every((id) => values[id]?.["character.location"] === here);
 }
+
+/** Where the branch stands relative to canon; never a silent stall. */
+export type CanonStatus = {
+  status: "following" | "diverged" | "beyond-horizon" | "exhausted";
+  position: number;
+  total: number;
+  horizonIndex: number;
+  diverged: boolean;
+};
+
+/**
+ * exhausted: no unresolved canonical event remains; beyond-horizon: the next
+ * unresolved event lies beyond the admission horizon; diverged: the branch
+ * superseded canon (later prose describes a parallel history); else following.
+ */
+export function deriveCanonStatus(timeline: CanonTimeline, history: Parameters<typeof branchCanonResolution>[0], horizonIndex = timeline.entries.length): CanonStatus {
+  const resolution = branchCanonResolution(history);
+  const settled = expandTimelineAliases(timeline, [...resolution.resolved, ...resolution.superseded]);
+  const position = canonPositionFor(timeline, settled);
+  const horizon = Math.min(horizonIndex, timeline.entries.length);
+  const next = timeline.entries.find((entry) => entry.index >= position && !settled.has(entry.eventId));
+  const diverged = resolution.superseded.size > 0;
+  const status = !next ? "exhausted" : next.index >= horizon ? "beyond-horizon" : diverged ? "diverged" : "following";
+  return { status, position, total: timeline.entries.length, horizonIndex: horizon, diverged };
+}

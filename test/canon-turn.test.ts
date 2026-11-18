@@ -22,6 +22,7 @@ it("advances canon after the player's turn in a frozen-timeline world and replay
   // Hero's unattributed reading is left to the world-response channel and is passed.
   expect(outcome.canonStep).toMatchObject({ committed: ["letter", "later-arrives"], position: 3, stoppedAt: "exhausted" });
   expect(outcome.canonStepEvents.map((event) => event.canonicalEventId)).toEqual(["letter", "later-arrives"]);
+  expect(outcome.canonStatus).toEqual({ status: "exhausted", position: 3, total: 3, horizonIndex: 3, diverged: false });
   const { engine } = await openWorkspaceWorld(workspace.root);
   const cold = await engine.projections.project(outcome.finalHead, { fresh: true, useCheckpoints: false });
   expect(cold.history.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? [])).toEqual(expect.arrayContaining(["letter", "later-arrives"]));

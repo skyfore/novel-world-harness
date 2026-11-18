@@ -32,7 +32,7 @@ import type {
   CanonicalAttachmentResolver,
 } from "./canonical-adaptation.js";
 import type { CanonicalRecoveryTrace, WorldMoveTrace } from "./runtime.js";
-import { DEFAULT_CANON_STEP_POLICY, type CanonStepResult } from "./canon-stepper.js";
+import { DEFAULT_CANON_STEP_POLICY, deriveCanonStatus, type CanonStatus, type CanonStepResult } from "./canon-stepper.js";
 import type { RuntimeContextConsultationObserver, RuntimeContextResolver } from "./runtime-context.js";
 import { RuntimeCompilerRepairHintStore } from "../compiler/runtime-repair-hints.js";
 import { PlayMoveStore } from "./play-move.js";
@@ -114,6 +114,8 @@ export type PlayTurnOutcome = {
   canonStep?: CanonStepResult;
   canonStepEvents: Array<{ eventHash: string; title: string; canonicalEventId: string }>;
   canonStepError?: string;
+  /** Where the branch stands relative to canon after this turn (frozen-timeline worlds only). */
+  canonStatus?: CanonStatus;
   runtimeMoveTrace?: WorldMoveTrace;
   reactionEvents: Array<{
     eventHash: string;
@@ -696,6 +698,10 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions, move?: P
     }
   }
   const finalState = await engine.projector.project(finalHead);
+  const finalContext = await engine.contextForCommit(finalHead);
+  const canonStatus = finalContext.timeline
+    ? deriveCanonStatus(finalContext.timeline, (await engine.projections.project(finalHead)).history.map((entry) => entry.event), finalContext.canonHorizonIndex)
+    : undefined;
   const sessionError = await persistPlaySession(options, finalHead, sourceId);
   const finishedAt = new Date();
   let auditId: string | undefined;
@@ -770,6 +776,7 @@ async function performPlayTurnInternal(options: PerformPlayTurnOptions, move?: P
     canonStepEvents,
     ...(canonStep ? { canonStep } : {}),
     ...(canonStepError ? { canonStepError } : {}),
+    ...(canonStatus ? { canonStatus } : {}),
     ...(runtimeMoveTrace ? { runtimeMoveTrace } : {}),
     reactionEvents,
     ...(backgroundError ? { backgroundError } : {}),

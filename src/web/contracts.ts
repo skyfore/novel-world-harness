@@ -934,6 +934,13 @@ export const playOperationResultSchema = z.object({
   worldResponseEvents: z.array(z.object({ eventHash: z.string(), title: z.string(), possibilityId: z.string() }).strict()),
   reactionEvents: z.array(z.object({ eventHash: z.string(), title: z.string(), actorId: z.string() }).passthrough()),
   backgroundEvents: z.array(z.object({ eventHash: z.string(), title: z.string() }).strict()),
+  /** Canonical events the stepper resolved this turn. */
+  canonStepEvents: z.array(z.object({ eventHash: z.string(), title: z.string(), canonicalEventId: z.string() }).strict()).optional(),
+  /** Where the instance stands relative to canon (frozen-timeline worlds). */
+  canonStatus: z.object({
+    status: z.enum(["following", "diverged", "beyond-horizon", "exhausted"]),
+    position: z.number().int().nonnegative(), total: z.number().int().nonnegative(), horizonIndex: z.number().int().min(-1), diverged: z.boolean(),
+  }).strict().optional(),
 }).strict();
 
 export const sceneNarrationResultSchema = z.object({

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildCanonTimeline } from "../src/world/canon-timeline.js";
-import { classifyCanonBeat } from "../src/world/canon-stepper.js";
+import { classifyCanonBeat, deriveCanonStatus } from "../src/world/canon-stepper.js";
 import { contentHash } from "../src/world/canonical.js";
 import type { ScopedWorldArtifacts } from "../src/world/context.js";
 import type { CanonicalEvent, EventParticipation, EventRelation, StateOperation } from "../src/world/model.js";
@@ -121,5 +121,14 @@ describe("canon stepper", () => {
     const result = await step(diverged, superseding);
     expect(result.committed).toEqual(["e3"]);
     expect(result.committed).not.toContain("e4");
+  });
+
+  it("reports where the branch stands relative to canon", () => {
+    const events = ["a", "b", "c"].map((id): CanonicalEvent => ({ id, title: id, participants: [], storyTime: { kind: "unknown" }, preconditions: [], observedOutcome: { version: 1, operations: [] }, evidence: [], causalParents: [], confidence: 1 }));
+    const timeline = buildCanonTimeline({ sourceId: "s", events, relations: [] });
+    expect(deriveCanonStatus(timeline, [{ realizesCanonicalEventIds: ["a"] }])).toMatchObject({ status: "following", position: 1, total: 3, diverged: false });
+    expect(deriveCanonStatus(timeline, [{ supersedesCanonicalEventIds: ["a"] }])).toMatchObject({ status: "diverged", position: 1, diverged: true });
+    expect(deriveCanonStatus(timeline, [{ realizesCanonicalEventIds: ["a"] }], 1)).toMatchObject({ status: "beyond-horizon", horizonIndex: 1 });
+    expect(deriveCanonStatus(timeline, [{ realizesCanonicalEventIds: ["a", "b", "c"] }])).toMatchObject({ status: "exhausted", position: 3 });
   });
 });

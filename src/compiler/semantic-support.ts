@@ -24,11 +24,12 @@ export function assessSemanticSupport(bundle: PreparedNovelBundle, reviews: read
   const reviewMap = new Map(reviews.map((review) => [review.assertionId, review]));
   if (reviewMap.size !== reviews.length) issues.push({ code: "SUPPORT_REVIEW_DUPLICATED", message: "Independent evidence assertion reviews must be unique" });
   for (const review of reviews) if (!assertions.some((assertion) => assertion.id === review.assertionId && contentHash(assertion) === review.assertionHash)) issues.push({ code: "SUPPORT_REVIEW_STALE", message: `Support review ${review.assertionId} does not match a frozen assertion` });
+  const overlappingUnits = baseUnitOverlapIndex(bundle);
   const assessments = assertions.map((assertion): SupportAssessment => {
     const review = reviewMap.get(assertion.id), scope = mechanismKinds.has(assertion.target.artifactKind) ? "mechanism" : "occurrence";
     const valid = review?.assertionHash === contentHash(assertion) && review.scope === scope;
     return { assertionId: assertion.id, assertionHash: contentHash(assertion), ...assertion.target,
-      sourceUnitIds: bundle.compilerSnapshot.structure.units.filter((unit) => bundle.compilerSnapshot.structure.baseUnitIds.includes(unit.id) && assertion.anchors.some((anchor) => anchor.sourceId === bundle.source.id && anchor.startByte < unit.anchor.endByte && anchor.endByte > unit.anchor.startByte)).map((unit) => unit.id),
+      sourceUnitIds: overlappingUnits(assertion.anchors),
       decision: valid ? review!.decision : "underdetermined", method: valid ? "independent-frozen-review" : "unreviewed-extraction", scope,
       rationale: valid ? review!.rationale : "An extraction assertion and valid source anchor do not independently establish field support or mechanism applicability." };
   });
@@ -44,6 +45,11 @@ export function assessSemanticSupport(bundle: PreparedNovelBundle, reviews: read
     .filter((artifact) => artifact.induction?.kind !== "domain-module")
     .map((artifact) => [`${kind}/${artifact.id}`, artifact] as const)));
   const required = bundle.compilerSnapshot.evidenceBindings.filter((binding) => payloads.has(`${binding.artifactKind}/${binding.artifactId}`));
+  const byField = new Map<string, SupportAssessment[]>();
+  for (const assessment of assessments) {
+    const key = `${assessment.artifactKind}\u0000${assessment.artifactId}\u0000${assessment.jsonPointer}`;
+    byField.set(key, [...(byField.get(key) ?? []), assessment]);
+  }
   for (const artifactKey of payloads.keys()) if (!required.some((binding) => `${binding.artifactKind}/${binding.artifactId}` === artifactKey)) {
     issues.push({ code: "MECHANISM_SUPPORT_MISSING", message: `${artifactKey} has no exact executable-field evidence binding` });
   }
@@ -57,12 +63,39 @@ export function assessSemanticSupport(bundle: PreparedNovelBundle, reviews: read
       issues.push({ code: "MECHANISM_SUPPORT_MISSING", message: `${binding.artifactKind}/${binding.artifactId}${field} has no field support target`, path: field });
     }
     for (const field of fields) {
-      const assessmentsForField = assessments.filter((assessment) => assessment.artifactKind === binding.artifactKind && assessment.artifactId === binding.artifactId && assessment.jsonPointer === field);
+      const assessmentsForField = byField.get(`${binding.artifactKind}\u0000${binding.artifactId}\u0000${field}`) ?? [];
       if (assessmentsForField.some((assessment) => assessment.decision === "contradicts")) issues.push({ code: "MECHANISM_SUPPORT_CONFLICT", message: `Independent counterevidence remains for ${binding.artifactKind}/${binding.artifactId}${field}`, path: field });
       else if (!assessmentsForField.some((assessment) => assessment.decision === "supports" && assessment.scope === "mechanism")) issues.push({ code: "MECHANISM_SUPPORT_UNREVIEWED", message: `Executable field ${binding.artifactKind}/${binding.artifactId}${field} requires independent mechanism review`, path: field });
     }
   }
   return { assessments, issues };
+}
+
+/**
+ * Base source units overlapping a set of anchors, in structure order. Indexed
+ * by start byte with a running maximum end so any unit layout stays exact.
+ */
+function baseUnitOverlapIndex(bundle: PreparedNovelBundle): (anchors: ReadonlyArray<{ sourceId: string; startByte: number; endByte: number }>) => string[] {
+  const structure = bundle.compilerSnapshot.structure;
+  const baseIds = new Set(structure.baseUnitIds);
+  const units = structure.units.map((unit, order) => ({ id: unit.id, start: unit.anchor.startByte, end: unit.anchor.endByte, order }))
+    .filter((unit) => baseIds.has(unit.id))
+    .sort((a, b) => a.start - b.start || a.order - b.order);
+  const maxEnd: number[] = [];
+  units.forEach((unit, index) => { maxEnd[index] = Math.max(unit.end, index ? maxEnd[index - 1]! : -Infinity); });
+  return (anchors) => {
+    const hits = new Map<number, string>();
+    for (const anchor of anchors) {
+      if (anchor.sourceId !== bundle.source.id) continue;
+      let low = 0, high = units.length;
+      while (low < high) { const middle = (low + high) >> 1; if (units[middle]!.start < anchor.endByte) low = middle + 1; else high = middle; }
+      for (let index = low - 1; index >= 0 && maxEnd[index]! > anchor.startByte; index--) {
+        const unit = units[index]!;
+        if (unit.end > anchor.startByte) hits.set(unit.order, unit.id);
+      }
+    }
+    return [...hits].sort(([a], [b]) => a - b).map(([, id]) => id);
+  };
 }
 
 function executableLeaves(payload: unknown, pointer = ""): string[] {

@@ -31,6 +31,7 @@ import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.
 import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { buildCanonTimeline, canonTimelineSchema } from "../world/canon-timeline.js";
+import { admissionManifestSchema } from "./cut-admission-schema.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import {
   InitialWorldStore,
@@ -189,6 +190,8 @@ export const preparedNovelBundleSchema = z.object({
   lineage: preparedRevisionLineageSchema.optional(),
   compilerSnapshot: preparedCompilerSnapshotSchema,
   readiness: novelClosureAssessmentSchema.nullable().default(null),
+  /** Per-cut admission frozen at publication; play may start at an admitted cut without full-novel certification. */
+  admission: admissionManifestSchema.nullable().default(null),
 }).strict();
 
 export type PreparedNovelBundle = z.infer<typeof preparedNovelBundleSchema>;

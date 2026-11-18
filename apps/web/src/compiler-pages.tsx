@@ -341,7 +341,7 @@ export function CompilerWorkbenchPage({
           {snapshot.stage === "review" && <button className="primary-button" disabled={!snapshot.proposalCounts.pending || convergeMutation.isPending} onClick={() => window.confirm(t("Accept every proposal that passes deterministic validation? Blocked proposals will remain pending for review.")) && convergeMutation.mutate()}>{t("Converge all valid")}</button>}
           {snapshot.stage === "create-branch" && <>
             <input className="branch-id-input" aria-label={t("New instance branch ID")} value={branchId} onChange={(event) => setBranchId(event.target.value)} />
-            <button className="primary-button" disabled={!branchId || instanceMutation.isPending || !snapshot.closure?.fullNovelReady} onClick={() => instanceMutation.mutate()}>{t("Create world instance")}</button>
+            <button className="primary-button" disabled={!branchId || instanceMutation.isPending || !(snapshot.closure?.fullNovelReady || snapshot.closure?.admission?.admittedEntries)} onClick={() => instanceMutation.mutate()}>{t("Create world instance")}</button>
           </>}
         </div>
       </section>}
@@ -352,6 +352,8 @@ export function CompilerWorkbenchPage({
         <div>
           <strong>{t(snapshot.closure.fullNovelReady ? "Certified for new play" : "New play certification incomplete")}</strong>
           <p>{t("Major entry probes")}: {snapshot.closure.readyTotal}/{snapshot.closure.majorTotal} · {t("Independent evaluation")}: {t(snapshot.closure.evaluation)}</p>
+          {snapshot.closure.admission && <p>{t("Cut admission")}: {snapshot.closure.admission.admissibleCuts}/{snapshot.closure.admission.cuts} {t("cuts")} · {snapshot.closure.admission.admissibleScenes}/{snapshot.closure.admission.scenes} {t("scenes")} · {t("Admitted entries")}: {snapshot.closure.admission.admittedEntries} ({t(snapshot.closure.admission.minimumTier)}){snapshot.closure.admission.current ? "" : ` · ${t("Admission is from an older revision")}`}</p>}
+          {snapshot.closure.admission?.firstBlocking && <p>{t("First blocked cut")}: {snapshot.closure.admission.firstBlocking.message}</p>}
           {snapshot.closure.issues.map((issue, index) => <p key={`${issue.code}-${index}`}>{issue.message}</p>)}
           <details><summary>{t("All character readiness")}</summary>{snapshot.closure.roles.map((role) => <p key={role.rosterEntryId}><strong>{role.canonicalName}</strong> · {t(role.status)} — {role.issues.map((issue) => issue.message).join("; ")}</p>)}</details>
           {!snapshot.closure.fullNovelReady && <button className="secondary-button" disabled={busy || prepareMutation.isPending} onClick={() => prepareMutation.mutate("all")}>{t("Continue compilation")}</button>}

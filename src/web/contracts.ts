@@ -423,6 +423,13 @@ export const preparationSnapshotSchema = z.object({
     majorTotal: z.number().int().nonnegative(), readyTotal: z.number().int().nonnegative(),
     evaluation: z.enum(["not-run", "blocked", "passed"]), roles: z.array(preparedPlayRoleSchema),
     issues: z.array(z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict()),
+    /** Per-cut admission coverage of the active revision's frozen manifest. */
+    admission: z.object({
+      bundleHash: z.string().regex(/^[a-f0-9]{64}$/), current: z.boolean(), minimumTier: z.string().min(1),
+      horizonIndex: z.number().int().min(-1), cuts: z.number().int().nonnegative(), admissibleCuts: z.number().int().nonnegative(),
+      scenes: z.number().int().nonnegative(), admissibleScenes: z.number().int().nonnegative(), admittedEntries: z.number().int().nonnegative(),
+      firstBlocking: z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict().optional(),
+    }).strict().optional(),
   }).strict().optional(),
   audit: compilerAuditSummarySchema.optional(),
   updatedAt: z.string().datetime({ offset: true }),

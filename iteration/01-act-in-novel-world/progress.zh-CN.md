@@ -31,3 +31,31 @@
 6. **话语坐标缺失时的退路。** 依次用事件提及锚点、证据字节、源结构的行号映射；完全没有字节信息时用证据行号（只在整份数据都没有字节时才会发生，保证同一坐标系）。坐标相同时用编译器的 `discourseOrder` 作并列裁决，它不会覆盖字节位置。
 7. **引擎版本升级推迟到 M5.1。** 旧快照没有时间线，仍按原逻辑投影，结果不变；新快照多了严格 schema 字段，旧引擎读不了，不会静默分叉。所以 1.3 不需要单独升版，和 M5.1 的 schema 3 → 4 一起把引擎升到 0.37.0。
 8. **改造过的测试夹具去掉冻结时间线。** `acquisition`、`process-capacity` 两个测试在构建好的 bundle 上增删事件，时间线随之失效；这些测试关注获取与过程语义，删除 `timeline` 后继续走旧切面，时间线语义由专门测试覆盖。
+
+## M2 切面准入（已完成）
+
+| 工作包 | 提交 | 结果 |
+|---|---|---|
+| 2.1 issue 归属 | `feat(compiler): attribute closure issues to their dependency nodes` | `src/compiler/issue-attribution.ts`；`assessNovelClosure` 汇总处补 `path` |
+| 2.2 准入清单 | `feat(compiler): derive a per-cut admission manifest` | `src/compiler/cut-admission.ts`；`bundle.admission` |
+| 2.3 按"切面 × 角色"探针 | `refactor(compiler): extract per-entry deterministic probes` | `probeEntry`；`major-character-playability` 不变通过 |
+| 2.4 门禁替换 | `feat(play): gate fresh play and activation on per-cut admission` | `assertPlayableRevision`、`assertCutAdmission`；`compile-novel admit [--activate]`；配置 `play.minimumAdmissionTier` |
+| 2.5 清单进诊断与 Web | `feat(cli): report admission tiers in cut diagnostics and preparation` | `compile-novel cuts` 输出等级、首要阻塞和覆盖率；准备页显示切面准入覆盖率 |
+
+### 龙族实测
+
+| 指标 | 设计目标 | 实测 |
+|---|---|---|
+| 无归属 issue | 不超过 14 | 2（均为全书级名册评审：`ROSTER_REVIEW_INCOMPLETE`、`ROSTER_NO_MAJOR_CHARACTERS`）；853 个 issue 中 851 个归属到节点 |
+| replayable 切面 | 第一个阻塞单元之前的 20 个全部通过；通不过的有具体归因 | **10 个**（47 个切面、38 个场景中 7 个），地平线在时间线第 11 位。未达到 20；其余全部有具体归因：首个封锁是 `event-car-stop-00005` 重放时 `SPATIAL_LOCATION_REQUIRED`（人物从未设定的地点移动），之后叠加记账（508 KB 一带）与依赖失效 |
+| enterable"切面 × 角色" | M3 指标 | 0。确定性探针的拒绝分布：入场状态缺显式 `character.alive`（7）、探针回合要求行动机制（5）、找不到自主驱动事件（1）。这是 M3 派生入场要解决的问题 |
+
+### 补充决定
+
+1. **前缀按"正典发生"重放。** 设计说 replayable 复用 `executeSceneEvent`。它原来把有施事者的历史事件当成 `actor` 提案校验，于是 `character.plan` 之类的变化要求可执行的行动机制；而运行时提交正典可能性用的是 `canon-candidate`。准入必须预测"游玩能否到达这个状态"，所以前缀重放用与运行时相同的语义（新增 `canonOccurrences` 选项）。场景执行契约仍用更严的 actor 语义，因为它回答的是"这个场景能否被角色执行"。这一改动把龙族的地平线从第 5 位推进到第 11 位。
+2. **准入输入只取保留的基线问题。** 闭包评估中的场景契约问题（`SCENE_EXECUTION_INVALID`）基于更严的 actor 语义，不作为准入输入；闭包图悬空引用、记账、机制支持在清单内部单独计算。
+3. **地平线按时间线位置计算。** 每个位置 i 表示 `entries[i]` 发生前的世界；位置可重放当且仅当它不早于开场、不超过重放失败点、话语位置之前没有阻塞单元、闭包内没有失效依赖、之前没有约束环。地平线是从开场起连续可重放的最远位置；步进器只能结算 `index < 地平线` 的事件。
+4. **只用冻结清单开局。** `assertCutAdmission` 校验清单的 subjectHash 和 timelineHash 与 bundle 一致；没有冻结时间线的旧 bundle 只能走全书认证。
+5. **`assessSemanticSupport` 性能修复。** 原实现对每条证据断言扫描全部单元并做数组 `includes`，龙族上 131 秒；改为按字节索引和按字段索引，输出逐字节相同，27 毫秒。
+6. **Web 只读冻结清单。** 准备页显示活动版本的准入覆盖率，不在读模型里重跑探针；有可入场条目时允许创建实例。
+7. **门禁集成测试替换记账校验。** `novel-certification-gate` 的部分准入用例在真实工作区和缓存上走发布、激活和开局，记账局部性已有单测，所以在该用例里替换 `validateFrozenAccounting`，测试内注明原因。

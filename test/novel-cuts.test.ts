@@ -37,3 +37,24 @@ describe("compile-novel cuts diagnostics", () => {
     expect(report.timeline.entries.filter((entry) => "cycle" in entry).map((entry) => entry.eventId)).toEqual(["p", "q"]);
   });
 });
+
+describe("compile-novel cuts admission summary", () => {
+  it("reports tiers, the first blocking cause and coverage per cut", async () => {
+    const { summarizeAdmission } = await import("../src/commands/novel-cuts.js");
+    const issue = { code: "CUT_PREFIX_REPLAY_FAILED", message: "Canonical event b fails", path: "event/b" };
+    const manifest = {
+      version: 1 as const, sourceId: "src", subjectHash: "a".repeat(64), timelineHash: "b".repeat(64), baselineIndex: 0, horizonIndex: 1,
+      replay: { limitIndex: 1, failedEventId: "b", failure: "fails" }, globalIssues: [],
+      cuts: [
+        { cutId: "c".repeat(64), beforeEventId: "a", sceneId: "s1", sceneIds: ["s1"], index: 0, discourseByte: 1, tier: "enterable" as const, blocking: [], advisories: [], dependsOn: [], closureHash: "d".repeat(64),
+          actors: [{ actorId: "hero", tier: "enterable" as const, entryBasis: "opening" as const, probes: [], issues: [] }, { actorId: "villain", tier: "replayable" as const, entryBasis: "derived" as const, probes: [], issues: [{ code: "MAJOR_ROLE_ENTRY_BLOCKED", message: "x" }] }] },
+        { cutId: "e".repeat(64), beforeEventId: "c", sceneIds: ["s2", "s3"], index: 2, discourseByte: 3, tier: "blocked" as const, blocking: [issue, { ...issue, code: "CUT_DEPENDENCY_INVALID" }], advisories: [], dependsOn: [], closureHash: "f".repeat(64), actors: [] },
+      ],
+    };
+    const summary = summarizeAdmission(manifest, { origin: "frozen", probed: true, scenes: 4 });
+    expect(summary.coverage).toEqual({ cuts: 2, tiers: { enterable: 1, blocked: 1 }, scenes: 4, scenesAdmissible: 1, admittedEntries: 1, minimumTier: "enterable" });
+    expect(summary.cuts[1]).toMatchObject({ tier: "blocked", firstBlocking: issue, blockingCodes: ["CUT_PREFIX_REPLAY_FAILED", "CUT_DEPENDENCY_INVALID"] });
+    expect(summary.cuts[0]!.actors[1]).toMatchObject({ actorId: "villain", firstIssue: { code: "MAJOR_ROLE_ENTRY_BLOCKED" } });
+    expect(summarizeAdmission(manifest, { origin: "computed", probed: false, scenes: 4, minimumTier: "replayable" }).coverage.admittedEntries).toBe(2);
+  });
+});

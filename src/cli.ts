@@ -151,11 +151,14 @@ novelOptions(compileNovel.command("status").description("Read current source/pha
   .action(async (_options, child) => runCompileNovel(child, undefined, "status"));
 novelOptions(compileNovel.command("plan").description("Discover the complete remaining phase/dependency handoff and exact recovery conditions without writes or model calls"))
   .action(async (_options, child) => runCompileNovel(child, undefined, "plan"));
-novelOptions(compileNovel.command("cuts").description("Read-only cut diagnostics: the host-derived canonical timeline (default: current workspace candidate)"))
+novelOptions(compileNovel.command("cuts").description("Read-only cut diagnostics: canonical timeline, per-cut admission tiers and first blocking causes (default: current workspace candidate)"))
   .option("--revision <hash>", "inspect an exact cached prepared revision instead of the workspace candidate")
+  .option("--no-admission", "print only the timeline")
+  .option("--no-probe", "skip the deterministic entry probes (cut tiers stop at replayable)")
   .action(async (_options, child) => {
     const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
-    await novelCutsCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision });
+    await novelCutsCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision, admission: options.admission, probe: options.probe,
+      configPath: options.config ? path.resolve(options.config) : undefined });
   });
 novelOptions(compileNovel.command("admit").description("Freeze the current candidate with per-cut admission; publishable when certified or when a cut admits an entry at play.minimumAdmissionTier"))
   .option("--activate", "activate the admitted revision for fresh play")

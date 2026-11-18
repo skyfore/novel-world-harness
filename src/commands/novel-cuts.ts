@@ -5,10 +5,27 @@ import { bundleCanonTimeline, timelineBlockedFromIndex, TIMELINE_BLOCKING_CODES 
 import type { ValidationIssue } from "../world/model.js";
 import { resolveNovelSource } from "../world/play-experience.js";
 import { minimumAdmissionTierFor } from "../config/load.js";
-import { tierAtLeast } from "../compiler/cut-admission-schema.js";
+import { DEFAULT_MINIMUM_ADMISSION_TIER, tierAtLeast, type AdmissionManifest, type AdmissionTier } from "../compiler/cut-admission-schema.js";
+import { buildAdmissionManifest } from "../compiler/cut-admission.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
+export type NovelCutAdmissionSummary = {
+  origin: "frozen" | "computed";
+  probed: boolean;
+  baselineIndex: number;
+  horizonIndex: number;
+  replay: AdmissionManifest["replay"];
+  coverage: { cuts: number; tiers: Record<string, number>; scenes: number; scenesAdmissible: number; admittedEntries: number; minimumTier: AdmissionTier };
+  globalIssues: ValidationIssue[];
+  cuts: Array<{
+    cutId: string; index: number; beforeEventId: string; sceneIds: string[]; tier: AdmissionTier;
+    firstBlocking?: ValidationIssue; blockingCodes: string[];
+    actors: Array<{ actorId: string; tier: AdmissionTier; entryBasis: string; firstIssue?: ValidationIssue }>;
+  }>;
+};
+
 export type NovelCutsReport = {
+  admission?: NovelCutAdmissionSummary;
   sourceId: string;
   bundle: { origin: "candidate" | "revision"; bundleHash?: string; frozenTimeline: boolean; baselineIssues: ValidationIssue[] };
   timeline: {
@@ -78,12 +95,33 @@ export function summarizeNovelCuts(bundle: PreparedNovelBundle, origin: NovelCut
   };
 }
 
+/** Per-cut tiers, first blocking cause and coverage, from a frozen or freshly computed manifest. */
+export function summarizeAdmission(manifest: AdmissionManifest, options: { origin: NovelCutAdmissionSummary["origin"]; probed: boolean; scenes: number; minimumTier?: AdmissionTier }): NovelCutAdmissionSummary {
+  const minimumTier = options.minimumTier ?? DEFAULT_MINIMUM_ADMISSION_TIER;
+  const tiers: Record<string, number> = {};
+  for (const cut of manifest.cuts) tiers[cut.tier] = (tiers[cut.tier] ?? 0) + 1;
+  const admissibleScenes = new Set(manifest.cuts.filter((cut) => cut.tier !== "blocked").flatMap((cut) => cut.sceneIds));
+  return {
+    origin: options.origin, probed: options.probed, baselineIndex: manifest.baselineIndex, horizonIndex: manifest.horizonIndex, replay: manifest.replay,
+    coverage: {
+      cuts: manifest.cuts.length, tiers, scenes: options.scenes, scenesAdmissible: admissibleScenes.size, minimumTier,
+      admittedEntries: manifest.cuts.reduce((count, cut) => count + (cut.tier === "blocked" ? 0 : cut.actors.filter((actor) => tierAtLeast(actor.tier, minimumTier)).length), 0),
+    },
+    globalIssues: manifest.globalIssues,
+    cuts: manifest.cuts.map((cut) => ({
+      cutId: cut.cutId, index: cut.index, beforeEventId: cut.beforeEventId, sceneIds: cut.sceneIds, tier: cut.tier,
+      ...(cut.blocking[0] ? { firstBlocking: cut.blocking[0] } : {}), blockingCodes: [...new Set(cut.blocking.map((issue) => issue.code))],
+      actors: cut.actors.map((actor) => ({ actorId: actor.actorId, tier: actor.tier, entryBasis: actor.entryBasis, ...(actor.issues[0] ? { firstIssue: actor.issues[0] } : {}) })),
+    })),
+  };
+}
+
 /** One cycle issue is emitted per member; distinct member sets identify cycles. */
 function countCycles(issues: readonly ValidationIssue[]): number {
   return new Set(issues.filter((issue) => TIMELINE_BLOCKING_CODES.has(issue.code)).map((issue) => issue.message)).size;
 }
 
-export type NovelCutsOptions = { root: string; sourceId?: string; revision?: string };
+export type NovelCutsOptions = { root: string; sourceId?: string; revision?: string; admission?: boolean; probe?: boolean; configPath?: string };
 
 /** Load the workspace candidate (or an exact cached revision) without writes, migrations or model calls. */
 export async function loadNovelCutsBundle(options: NovelCutsOptions): Promise<{ source: SourceDocument; bundle: PreparedNovelBundle; origin: NovelCutsReport["bundle"]["origin"]; bundleHash?: string; baselineIssues: ValidationIssue[] }> {
@@ -106,7 +144,15 @@ export async function loadNovelCutsBundle(options: NovelCutsOptions): Promise<{ 
 
 export async function inspectNovelCuts(options: NovelCutsOptions): Promise<NovelCutsReport> {
   const loaded = await loadNovelCutsBundle(options);
-  return summarizeNovelCuts(loaded.bundle, loaded.origin, { ...(loaded.bundleHash ? { bundleHash: loaded.bundleHash } : {}), baselineIssues: loaded.baselineIssues });
+  const report = summarizeNovelCuts(loaded.bundle, loaded.origin, { ...(loaded.bundleHash ? { bundleHash: loaded.bundleHash } : {}), baselineIssues: loaded.baselineIssues });
+  if (options.admission === false) return report;
+  const minimumTier = await minimumAdmissionTierFor(path.resolve(options.root), options.configPath);
+  const scenes = loaded.bundle.canonical.sceneOccurrences.length;
+  const frozen = loaded.bundle.admission;
+  const admission = frozen
+    ? summarizeAdmission(frozen, { origin: "frozen", probed: true, scenes, minimumTier })
+    : summarizeAdmission(await buildAdmissionManifest(loaded.bundle, { inputIssues: loaded.baselineIssues, probe: options.probe !== false }), { origin: "computed", probed: options.probe !== false, scenes, minimumTier });
+  return { ...report, admission };
 }
 
 export async function novelCutsCommand(options: NovelCutsOptions): Promise<void> {

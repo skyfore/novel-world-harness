@@ -1,6 +1,4 @@
-import { sameIds } from "./role-review-verification.js";
 import crypto from "node:crypto";
-import { boundedRoleReviewEvidenceSchema } from "./role-review-work.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -22,7 +20,6 @@ export type RoleCandidate = z.infer<typeof roleCandidateSchema>;
 
 export const roleRosterReviewSchema = z.object({
   version: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
-  workEvidence: boundedRoleReviewEvidenceSchema.optional(),
   runId: idSchema,
   reviewRevisionId: idSchema.optional(),
   subjectHash: hashSchema,
@@ -88,24 +85,6 @@ export function validateRosterReview(roster: RoleRoster, review: RoleRosterRevie
   if (review.reviewRevisionId !== roster.reviewRevisionId) fail("ROSTER_REVIEW_REVISION_STALE", "Review belongs to another host review revision. Preserve its receipt and stop model retries; do not replay it into the new review.");
   if (review.subjectHash !== roster.subjectHash) fail("ROSTER_STALE_REVIEW", "Roster review refers to stale source or identity inputs");
   if (roster.extractionRunIds.includes(review.runId) || roster.reviews.some((x) => x.runId === review.runId)) fail("ROSTER_INDEPENDENT_REVIEW_REQUIRED", "Review must use a separate run from extraction and the other review");
-  if ((review.version === 3 || review.version === 4) !== Boolean(review.workEvidence) || (review.version === 4 && review.workEvidence?.version !== 2) || (review.version === 3 && review.workEvidence?.version !== 1)) fail("ROSTER_WORK_EVIDENCE_REQUIRED", "Version 4 requires v2 verification; version 3 remains legacy v1 evidence and cannot claim the new contract");
-  if (review.workEvidence) {
-    const proof = review.workEvidence, plan = proof.plan;
-    if (plan.sourceId !== roster.sourceId || plan.sourceHash !== roster.sourceSha256 || plan.subjectHash !== roster.subjectHash
-      || plan.reviewRevisionId !== roster.reviewRevisionId || plan.batchId !== review.runId
-      || proof.entriesHash !== contentHash([...review.entries].sort((a,b) => a.candidateId.localeCompare(b.candidateId)))
-      || contentHash(proof.auditWork.flatMap(work => work.missingMajorCharacters)) !== contentHash(review.missingMajorCharacters)) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Bounded work proof differs from this source/review/entry set");
-    if (proof.version === 2) {
-      const audits = proof.claimAudits ?? [];
-      if (!boundedRoleReviewEvidenceSchema.safeParse(proof).success || !sameIds(audits.map(a => a.candidateId), review.entries.map(e => e.candidateId))
-        || audits.some(a => a.claimRevision !== contentHash(review.entries.find(e => e.candidateId === a.candidateId) ?? null))) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Missing, stale or unresolved claim verification");
-      const refs = [...audits.flatMap(a => [...a.basisUnitIds, ...a.counterevidence.searchedUnitIds, ...a.checks.flatMap(c => c.basisUnitIds)]), ...proof.auditWork.flatMap(a => [...(a.questionDispositions ?? []).flatMap(q => q.basisUnitIds), ...(a.discoveryDispositions ?? []).flatMap(d => d.basisUnitIds)])];
-      if (refs.some(id => !roster.unitIds.includes(id)) || proof.auditWork.some(a => a.discoveryDispositions?.some(d => d.candidateIds.some(id => !review.entries.some(e => e.candidateId === id))
-        || (d.disposition === "mapped") !== (d.candidateIds.length > 0)))) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Verification references escape the frozen source/denominator");
-    }
-    const allowed = new Set(roster.unitIds);
-    if (proof.sourceWork.some(work => work.findings.some(f => f.unitIds.some(id => !allowed.has(id))))) fail("ROSTER_WORK_EVIDENCE_MISMATCH", "Bounded source finding has foreign evidence");
-  }
   const expected = new Set(roster.candidates.map((x) => x.id));
   const actual = new Set(review.entries.map((x) => x.candidateId));
   const missing = roster.candidates.filter(candidate => !actual.has(candidate.id)).map(candidate => candidate.id);
@@ -180,7 +159,8 @@ export function validateRoleDevelopmentExpectations(roster: RoleRoster): Validat
 
 export function validateRoleRoster(roster: RoleRoster): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (roster.reviews.length !== 2) issues.push({ code: "ROSTER_REVIEW_INCOMPLETE", message: "Two independent full-source role reviews are required" });
+  // One bounded independent review (iteration 02, design 5.7).
+  if (roster.reviews.length < 1) issues.push({ code: "ROSTER_REVIEW_INCOMPLETE", message: "An independent role review is required" });
   const accumulated: RoleRoster = { ...roster, reviews: [] };
   for (const review of roster.reviews) {
     issues.push(...validateRosterReview(accumulated, review)); accumulated.reviews.push(review);

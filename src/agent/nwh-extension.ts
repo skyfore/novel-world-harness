@@ -3,45 +3,16 @@ import { withPlayModelBudget } from "../runtime/play-model-budget.js";
 import { currentRuntimeHooks, hookError } from "../runtime/hooks.js";
 import { withCommandHooks } from "./pi-hooks.js";
 import { INITIAL_WORLD_INPUT_GUIDANCE } from "../compiler/initial-world-preflight.js";
-import { certifyPreparedNovel } from "../commands/compile-novel.js";
-import { CompilerFinishReceipts, finishHostError } from "../compiler/finish-receipts.js";
-import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
-import { recoverCompilerFinish } from "../compiler/finish-recovery.js";
+import { compileNovelCommand } from "../commands/compile-novel.js";
+import { ingestWorkspaceSource } from "../commands/ingest.js";
+import { FULL_COMPILATION_PHASES, NovelCompilationRunStore, type NovelCompilationPhase } from "../workflow/novel-compilation.js";
 import path from "node:path";
 import { getMarkdownTheme, type AgentSessionEvent, type ExtensionAPI, type ExtensionContext, type ExtensionFactory, type TransientAssistantStream } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
 import { Key, Markdown, Text, matchesKey } from "@earendil-works/pi-tui";
 import { expandFileMentions } from "./file-mentions.js";
 import { createNwhWelcomeHeader, hasPlayerConversation, isFreshConversation, NWH_WORKING_FRAMES } from "./nwh-welcome.js";
-import {
-  BOUNDARY_CALIBRATION_TOOL_NAMES,
-  COMPILER_TOOL_NAMES,
-  ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
-  EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
-  compilerToolAllowedInSemanticStage,
-  createCompilerProposalToolset,
-  type CompilerSemanticStage,
-  type CompilerProposalToolset,
-} from "../compiler/proposal-tools.js";
-import {
-  compilerBatchFailure,
-  compilerBatchOutcomeFromMessages,
-  isRecoverableCompilerBatchInterruption,
-} from "../compiler/batch-outcome.js";
-import {
-  markSourceLoopBatchComplete,
-  parseStandaloneSourcePath,
-  prepareNextSourceLoopTurn,
-  prepareSourceLoopFromContent,
-  prepareSourceLoopFromInput,
-  type SourceLoopTurn,
-} from "../compiler/source-loop.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import { COMPILER_SYSTEM_PROMPT, compilerModeInstructions, SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS } from "../compiler/pi-compiler.js";
-import { SOURCE_EVIDENCE_TOOL_NAMES } from "../compiler/source-evidence-retrieval.js";
-import { prepareCompilerBatches, prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld } from "../compiler/batches.js";
-import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
-import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
 import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prepare.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
@@ -82,13 +53,6 @@ import { formatCharacters, formatInstances, formatNovels, formatProgress } from 
 import { createTuiUserQuestion } from "../util/tui-user-question.js";
 import type { UserQuestionCustomInput } from "../util/ask-user-question.js";
 import { auditCompiler } from "../compiler/audit.js";
-import {
-  buildWorldReconciliationPrompt,
-  MAX_RECONCILIATION_ITERATIONS,
-  semanticRepairIsIsolated,
-  semanticRepairRequiresReparse,
-} from "../compiler/reconcile-world.js";
-import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
 import { WorkspaceOperationLock, withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
 import { createWorldBranch } from "../world/instance.js";
@@ -125,50 +89,6 @@ import { promptJson } from "../util/prompt-data.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
-const COMPILER_TOOL_NAME_SET = new Set(COMPILER_TOOL_NAMES);
-
-export function compilerToolNamesForScope(
-  availableNames: readonly string[],
-  scope: "source" | "opening" | "reconciliation",
-  sourcePurpose: "structure-discovery" | "source-review" | "boundary-calibration" = "source-review",
-  semanticStage?: CompilerSemanticStage,
-): string[] {
-  const known = new Set(COMPILER_TOOL_NAMES);
-  return [...new Set(availableNames)]
-    .filter((name) => known.has(name))
-    .filter((name) => !SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(name))
-    .filter((name) => !semanticStage || compilerToolAllowedInSemanticStage(name, semanticStage))
-    .filter((name) => scope === "source" && sourcePurpose === "structure-discovery"
-      ? name === "configure_chapter_split" || name === "finish_compiler_batch"
-      : name !== "configure_chapter_split")
-    .filter((name) => scope === "reconciliation" || scope === "opening"
-      || !SOURCE_EVIDENCE_TOOL_NAMES.includes(name as typeof SOURCE_EVIDENCE_TOOL_NAMES[number]))
-    .filter((name) => scope === "source" || !BOUNDARY_CALIBRATION_TOOL_NAMES.includes(name as typeof BOUNDARY_CALIBRATION_TOOL_NAMES[number]))
-    .filter((name) => scope === "source" || !ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES.includes(name as typeof ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES[number]))
-    .filter((name) => scope === "source" || !EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES.includes(name as typeof EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES[number]))
-    .filter((name) => name !== "propose_novel_title"
-      || (scope === "source" && sourcePurpose === "source-review"))
-    .filter((name) => {
-      if (scope !== "source") return true;
-      return sourcePurpose === "boundary-calibration"
-        ? name !== "peek_adjacent_evidence" && name !== "defer_boundary_artifact"
-        : name !== "replace_boundary_proposal";
-    })
-    .filter((name) => scope !== "source" || !["propose_initial_world", "preview_initial_world"].includes(name))
-    .filter((name) => scope !== "opening" || [
-      "find_compiler_artifacts",
-      "read_compiler_artifact",
-      "find_source_evidence",
-      "read_source_evidence",
-      "propose_entity",
-      "propose_claim",
-      "propose_initial_world",
-      "preview_initial_world",
-      "withdraw_compiler_proposal",
-      "finish_compiler_batch",
-    ].includes(name));
-}
-
 export type NwhExtensionOptions = {
   workspace: LocalFileWorkspace;
   saveSession: boolean;
@@ -188,7 +108,6 @@ export type NwhExtensionOptions = {
   activeWorldScene?: PlaySceneRequest;
   restoreSavedWorldOnStartup?: boolean;
   playerOpeningNarrator?: PlayerOpeningNarrator;
-  runReparse?: typeof reparseCommand;
 };
 
 const COMMAND_HELP = `NWH commands:
@@ -208,10 +127,8 @@ const COMMAND_HELP = `NWH commands:
   /files [path filter]       list safe workspace files
   /search <text>             search local files for fixed text
   /read <path> [start:end]   read a bounded line range
-  /prepare-content <text>    archive and compile pasted novel text
-  /compile-next              process the next evidence batch for the active novel
+  /compile-next [source]     run the next unfinished compile phase
   /prepare-all [source]      finish compilation and create a playable world
-  /reparse [--source id] (--chapters 2,37 | --all) rebuild selected novel evidence
   /tasks                    show or foreground the current long-running task
   /audit [--source id]       audit novel evidence and canonical consistency
   /prepared-cache [list|activate] inspect or activate prepared revisions
@@ -231,28 +148,6 @@ TUI shortcuts:
   ↑/↓ prompt history · ← backgrounds the focused NWH task panel · /tasks restores it
   Ctrl+C stops the current response/task; press it again within 2s to exit
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
-
-const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
-const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence, whole-source evidence retrieval, and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Treat the human player as an unread reader: in addition to concise readerSetup, populate readerContext with the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, the actual holder and direction of each relevant attitude or social pressure, completed pre-checkpoint beats, and the immediate unresolved situation. These are presentation facts, not actor knowledge. Add an actorObservation for every physically present opening character using only what that actor directly perceives. readerSetup, every readerContext summary/gloss, and every actorObservation summary requires an exact explicit or strong-inference field-level evidence selector; weak inference is insufficient. Use find_source_evidence/read_source_evidence only to recover missing identity, causation, stance, or other preexisting context from later discourse; classify it as later-discourse-preexisting and never import an outcome or development after the checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Establish an actionable lived state only for characters bodily present at the opening, with final source-supported operational context under the shared entry contract; retain qualitative bodily facts at their original precision with exact operation evidence. Context grounding still requires independent action and autonomous-driver proofs; a catalog-wide alive list is not a scene. Later characters receive separate source-backed entry checkpoints on their first embodied canonical events. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.` + "\n\n" + INITIAL_WORLD_INPUT_GUIDANCE;
-
-type TuiPrepareAllState = {
-  sourceId: string;
-  branchId: string;
-  branchIdExplicit: boolean;
-  preferNewBranch: boolean;
-  branchTitleKey: string | null;
-  compileAllApproved: boolean;
-  initialWorldRequestRunning: boolean;
-  initialWorldAttempted: boolean;
-  initialWorldBatchId?: string;
-  reconciliationRequestRunning: boolean;
-  reconciliationAttempts: number;
-  reconciliationBatchId?: string;
-  preparedCacheVerified: boolean;
-  recoveryRetryCounts: Map<string, number>;
-};
-
-const MAX_PREPARE_ALL_RECOVERY_RETRIES = 1;
 
 function generatedNovelLabel(source: SourceDocument): string {
   return source.titleInference?.title ?? `Novel ${source.id.slice(0, 8)}`;
@@ -289,37 +184,6 @@ export function splitCommandArguments(value: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(value)) !== null) tokens.push(match[1] ?? match[2] ?? match[3] ?? "");
   return tokens;
-}
-
-export type TuiReparseArguments = {
-  source?: string;
-  chapters?: string;
-  all: boolean;
-  model?: string;
-};
-
-export function parseTuiReparseArguments(value: string): TuiReparseArguments {
-  const tokens = splitCommandArguments(value);
-  const parsed: TuiReparseArguments = { all: false };
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index]!;
-    if (token === "--all") {
-      parsed.all = true;
-      continue;
-    }
-    if (token === "--source" || token === "--chapters" || token === "--model") {
-      const next = tokens[index + 1];
-      if (!next || next.startsWith("--")) throw new Error(`${token} requires a value.`);
-      index += 1;
-      if (token === "--source") parsed.source = next;
-      else if (token === "--chapters") parsed.chapters = next;
-      else parsed.model = next;
-      continue;
-    }
-    throw new Error(`Unknown /reparse argument '${token}'. Use --source, --chapters, --all, or --model.`);
-  }
-  if (parsed.all && parsed.chapters) throw new Error("Choose only one reparse scope: --all or --chapters <selection>.");
-  return parsed;
 }
 
 function modelLabel(model: { provider: string; id: string } | undefined): string {
@@ -454,16 +318,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ? new Text("", 0, 0)
         : new Markdown(content, 1, 0, getMarkdownTheme());
     });
-    let compilerToolsRegistered = mode === "compiler";
-    let compilerToolScope: "source" | "opening" | "reconciliation" | undefined;
     let activeSourceId: string | undefined;
-    let pendingTurn: SourceLoopTurn | undefined;
-    let pendingTurnInitiatedByUserInput = false;
-    let pendingRunMessages: unknown[] = [];
-    let registeredCompilerToolset: CompilerProposalToolset | undefined;
-    let prepareAllState: TuiPrepareAllState | undefined;
     let compilerOperationLock: WorkspaceOperationLock | undefined;
-    let compilerCircuitBroken = false;
     let playerMode = false;
     let selectedPlay: SelectedPlayExperience | undefined;
     let activePlayerScene: {
@@ -479,10 +335,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let activeTask: NwhTask | undefined;
     const taskHistory: NwhTask[] = [];
     let taskForeground = false;
-    let prepareAllHostActivity: { update(message: string): void; close(): void } | undefined;
     const hostActivities = new Map<string, symbol>();
     const preparedCache = new PreparedNovelCache(workspace.root, options.preparedCacheRoot);
-    const runReparse = options.runReparse ?? reparseCommand;
     const acquireCompilerOperationLock = async (): Promise<WorkspaceOperationLock> => {
       if (compilerOperationLock) throw new Error("A compiler operation lock is already held by this TUI session.");
       compilerOperationLock = await WorkspaceOperationLock.acquire(workspace.root, "compiler");
@@ -562,10 +416,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ctx.ui.notify(`Cannot ${action} while the current model response is streaming. Press Esc to interrupt it, or wait for it to finish.`, "warning");
         return false;
       }
-      if (pendingTurn || prepareAllState) {
-        ctx.ui.notify(`Cannot ${action} while novel preparation is active. Its model output remains in the foreground.`, "warning");
-        return false;
-      }
       if (activePlayerTurn) {
         ctx.ui.notify(`Cannot ${action} while a player action is being resolved. Press Esc to cancel it before commitment, or wait for the committed result.`, "warning");
         return false;
@@ -615,52 +465,29 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
     };
 
-    const startReparseTask = async (
-      ctx: ExtensionContext,
-      request: {
-        sourceId: string;
-        sourceTitle: string;
-        selectedChapters: readonly number[];
-        all: boolean;
-        chapters?: string;
-        model?: string;
-      },
-    ): Promise<NwhTask> => {
-      const chapterLabel = request.selectedChapters.join(",");
-      const task = new NwhTask(
-        `reparse-${request.sourceId}`,
-        `Reparse ${request.sourceTitle} · chapters ${chapterLabel}`,
-        "Preparing compiler request",
-      );
+    /**
+     * Compile through the slim pipeline as a background task (iteration 02).
+     * Every scope is an isolated model job with its own trace; the
+     * interactive session only shows progress. `phase` runs one phase.
+     */
+    const startCompileTask = async (ctx: ExtensionContext, request: { sourceId: string; sourceTitle: string; phase?: NovelCompilationPhase; branchId?: string }): Promise<NwhTask> => {
+      const task = new NwhTask(`compile-${request.sourceId}`, `${request.phase ? `Compile ${request.phase}` : "Compile"} ${request.sourceTitle}`, "Preparing the compile pipeline");
       activeTask = task;
       taskHistory.push(task);
       const unsubscribe = task.subscribe(() => syncTaskChrome(ctx, task));
       task.start(async (signal) => {
-        const selectedModel = request.model ?? (ctx.model ? modelLabel(ctx.model) : undefined);
-        const result = await runReparse({
-          root: workspace.root,
-          configPath: path.join(workspace.root, "novel-harness.yaml"),
-          sourceId: request.sourceId,
-          ...(request.all ? { all: true } : { chapters: request.chapters }),
-          ...(selectedModel ? { model: selectedModel } : {}),
-          cacheRoot: options.preparedCacheRoot,
-          signal,
-          onProgress: (message) => task.log(message),
-          onStatus: (message) => task.update(message),
-          onModelEvent: (event) => task.appendAgentEvent(event),
-        });
-        task.log(`Active revision: ${result.activeBundleHash}`);
+        const selectedModel = ctx.model ? modelLabel(ctx.model) : undefined;
+        const run = await compileNovelCommand({ root: workspace.root, configPath: path.join(workspace.root, "novel-harness.yaml"), sourceId: request.sourceId,
+          ...(selectedModel ? { model: selectedModel } : {}), ...(request.phase ? { phase: request.phase } : {}), ...(request.branchId ? { branchId: request.branchId } : {}),
+          cacheRoot: options.preparedCacheRoot, signal, onProgress: (message) => { task.log(message); task.update(message); } });
+        if (run?.branchId) task.log(`Playable branch: ${run.branchId}`);
       });
       void task.completion.then(() => {
         unsubscribe();
         syncTaskChrome(ctx, task);
-        if (task.snapshot.status === "completed") {
-          ctx.ui.notify(`Reparse complete for chapter(s) ${request.selectedChapters.join(", ")}.`, "info");
-        } else if (task.snapshot.status === "cancelled") {
-          ctx.ui.notify("Reparse cancelled safely; the prior prepared revision remains active.", "info");
-        } else {
-          ctx.ui.notify(`Reparse stopped: ${task.snapshot.error ?? "unknown error"}`, "error");
-        }
+        if (task.snapshot.status === "completed") ctx.ui.notify(`${task.snapshot.title} finished.`, "info");
+        else if (task.snapshot.status === "cancelled") ctx.ui.notify("Compilation cancelled safely; completed scopes stay committed and the run resumes where it stopped.", "info");
+        else ctx.ui.notify(`Compilation stopped: ${task.snapshot.error ?? "unknown error"}. Inspect /status or nwh compile-novel status.`, "error");
       });
       syncTaskChrome(ctx, task);
       await foregroundTask(ctx, task);
@@ -1460,68 +1287,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
     };
 
-    const resetCompilerBatch = async (segmentIds: readonly string[], compilerBatchId: string, sourceId: string) => {
-      new CompilerProposalObligations(workspace.root, sourceId, compilerBatchId).assertModelRecoveryAllowed();
-      if (await new CompilerFinishReceipts(workspace.root, sourceId, compilerBatchId).read()) throw finishHostError("resume the saved finish through the host before an interactive model turn");
-      await registeredCompilerToolset?.beginBatch(segmentIds, compilerBatchId, sourceId);
-      await options.resetCompilerProposalTools?.(segmentIds, compilerBatchId, sourceId);
-      compilerCircuitBroken = false;
-      pendingRunMessages = [];
-    };
-
-    const beginTurn = async (turn: SourceLoopTurn, initiatedByUserInput = false) => {
-      await resetCompilerBatch(turn.batch.segmentIds, turn.batch.id, turn.source.id);
-      pendingTurn = turn;
-      pendingTurnInitiatedByUserInput = initiatedByUserInput;
-      setContextSessionName(`${generatedNovelLabel(turn.source)} · world compilation`);
-    };
-
-    const activateCompilerTools = (
-      ctx: ExtensionContext,
-      scope: "source" | "opening" | "reconciliation" = "source",
-      sourcePurpose: "structure-discovery" | "source-review" | "boundary-calibration" = "source-review",
-      semanticStage?: CompilerSemanticStage,
-    ) => {
-      if (!compilerToolsRegistered) {
-        const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
-        registeredCompilerToolset = createCompilerProposalToolset(workspace.root, generatedBy);
-        for (const tool of registeredCompilerToolset.tools) {
-          if (!SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name)) {
-            pi.registerTool(withNwhToolRecovery(tool, () => ({ activeToolNames: pi.getActiveTools() })));
-          }
-        }
-        compilerToolsRegistered = true;
-      }
-      const knownCompilerNames = new Set(COMPILER_TOOL_NAMES);
-      const availableCompilerTools = registeredCompilerToolset?.tools ?? pi.getAllTools()
-        .filter((tool) => knownCompilerNames.has(tool.name));
-      const compilerNames = compilerToolNamesForScope(availableCompilerTools.map((tool) => tool.name), scope, sourcePurpose, semanticStage);
-      pi.setActiveTools([...new Set(compilerNames)]);
-      compilerToolScope = scope;
-      if (ctx.mode === "tui") ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · world compiler loop"));
-    };
-
-    const restoreAssistantTools = (ctx?: ExtensionContext) => {
-      if (!compilerToolScope) return;
-      pi.setActiveTools(assistantToolNames);
-      compilerToolScope = undefined;
-      if (ctx?.mode === "tui") {
-        ctx.ui.setStatus(
-          "nwh-mode",
-          ctx.ui.theme.fg("dim", mode === "compiler" ? "NWH · compiler proposals" : "NWH · read-only assistant"),
-        );
-      }
-    };
-
-    const compilerPromptForTurn = (turn: SourceLoopTurn, retryAttempt = 0) => [
-      turn.batch.purpose === "structure-discovery"
-        ? `Begin preliminary chapter-structure discovery ${turn.completedBatches + 1}/${turn.totalBatches} for immutable source ${turn.source.id}. The upload filename is intentionally withheld because it is not novel metadata. Infer only a safe declarative split rule from the supplied structural sample.`
-        : `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for immutable source ${turn.source.id}. The upload filename is intentionally withheld because it is not novel metadata. Analyze the supplied evidence now and record typed pending proposals.`,
-      ...(retryAttempt > 0 ? [
-        `This is batch-recovery attempt ${retryAttempt}/${MAX_PREPARE_ALL_RECOVERY_RETRIES}. Use neutral, concise literary-analysis language; do not reproduce or embellish narrative passages in prose. Prefer typed tool calls and short clinical summaries. Recover active current-batch proposals instead of duplicating them. If the active list is empty because the prior attempt abandoned or withdrew its proposals, re-review every supplied evidence segment with fresh unique envelope proposal_id values while preserving intended stable annotation_id/payload identities. Preserve unrelated valid drafts, repair only diagnosed defects, and finish with outcome=complete whenever any valid proposal remains; never use no-artifacts merely to escape proposal or finish errors.`,
-      ] : []),
-    ].join("\n\n");
-
     const choose = async <T extends string>(
       ctx: ExtensionContext,
       title: string,
@@ -1567,277 +1332,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       });
     };
 
-    const stopPrepareAll = async (ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "warning") => {
-      restoreAssistantTools(ctx);
-      prepareAllState = undefined;
-      pendingTurn = undefined;
-      pendingTurnInitiatedByUserInput = false;
-      pendingRunMessages = [];
-      compilerCircuitBroken = false;
-      prepareAllHostActivity?.close();
-      prepareAllHostActivity = undefined;
-      ctx.ui.setStatus("nwh-prepare-all", undefined);
-      ctx.ui.setWidget("nwh-prepare-all", undefined, { placement: "belowEditor" });
-      await releaseCompilerOperationLock();
-      ctx.ui.notify(message, level);
-    };
-
-    const sendHiddenPreparationTurn = async (
-      ctx: ExtensionContext,
-      content: string,
-      customType: string,
-      expectedSegmentIds: readonly string[],
-    ): Promise<boolean> => {
-      const missingSegmentIds = expectedSegmentIds.filter((segmentId) =>
-        !content.includes(`<source-segment id="${segmentId}">`));
-      if (missingSegmentIds.length) {
-        pendingTurn = undefined;
-        pendingTurnInitiatedByUserInput = false;
-        pendingRunMessages = [];
-        compilerCircuitBroken = false;
-        await stopPrepareAll(
-          ctx,
-          `Full preparation stopped before the model turn because compiler evidence was missing for: ${missingSegmentIds.join(", ")}.`,
-          "error",
-        );
-        return false;
-      }
-      pi.sendMessage({ customType, content, display: false }, { triggerTurn: true });
-      return true;
-    };
-
-    const advancePrepareAll = async (ctx: ExtensionContext): Promise<void> => {
-      const state = prepareAllState;
-      if (!state) return;
-      try {
-      prepareAllHostActivity?.update("Checking deterministic preparation state");
-      for (const receipt of await CompilerFinishReceipts.list(workspace.root, state.sourceId)) {
-        if (receipt.state === "prepared") await recoverCompilerFinish(workspace.root, state.sourceId, receipt.identity.batchId);
-      }
-      let inspection = await inspectPreparation(workspace.root, {
-        sourceId: state.sourceId,
-        branchId: state.branchId,
-      });
-      const branchTitleKey = inspection.source?.titleInference?.title ?? null;
-      if (!state.branchIdExplicit && inspection.source
-        && (state.preferNewBranch || state.branchTitleKey !== branchTitleKey)) {
-        const resolvedBranchId = await resolvePreparationBranchId(
-          workspace.root,
-          inspection.source,
-          undefined,
-          { preferNew: state.preferNewBranch },
-        );
-        state.preferNewBranch = false;
-        state.branchTitleKey = branchTitleKey;
-        if (resolvedBranchId !== state.branchId) {
-          state.branchId = resolvedBranchId;
-          inspection = await inspectPreparation(workspace.root, {
-            sourceId: state.sourceId,
-            branchId: state.branchId,
-          });
-        }
-      }
-      if (inspection.stage === "compile") {
-        prepareAllHostActivity?.update(`Preparing evidence batch ${inspection.completedBatches + 1}/${inspection.totalBatches}`);
-        if (!state.compileAllApproved) {
-          const decision = await choose(ctx, "Complete novel compilation?", [
-            { value: "continue", label: "Compile all", description: `Run all ${inspection.totalBatches - inspection.completedBatches} remaining evidence batches.`, recommended: true },
-            { value: "pause", label: "Pause", description: "Keep current progress and return to the TUI." },
-          ]);
-          if (decision !== "continue") {
-            await stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
-            return;
-          }
-          state.compileAllApproved = true;
-        }
-        const preparation = await prepareNextSourceLoopTurn(workspace.root, state.sourceId);
-        if (preparation?.status === "complete") {
-          await advancePrepareAll(ctx);
-          return;
-        }
-        if (!preparation) {
-          await stopPrepareAll(ctx, "Could not resolve the next compiler batch.", "error");
-          return;
-        }
-        activeSourceId = preparation.source.id;
-        activateCompilerTools(ctx, "source", preparation.batch.purpose, preparation.batch.semanticStage);
-        await beginTurn(preparation);
-        const retryAttempt = state.recoveryRetryCounts.get(preparation.batch.id) ?? 0;
-        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Preparing · batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`));
-        ctx.ui.notify(
-          retryAttempt > 0
-            ? `Full preparation: retrying compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} after a recoverable interruption.`
-            : `Full preparation: starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches}.`,
-          "info",
-        );
-        await sendHiddenPreparationTurn(
-          ctx,
-          `${compilerPromptForTurn(preparation, retryAttempt)}\n\n${preparation.prompt}`,
-          "nwh-prepare-all-batch",
-          preparation.batch.segmentIds,
-        );
-        return;
-      }
-      if (inspection.stage === "review") {
-        prepareAllHostActivity?.update(`Reviewing ${inspection.pending.length} pending proposal(s)`);
-        const decision = await choose(ctx, "Accept validated proposals?", [
-          { value: "accept", label: "Converge safely", description: `Commit valid proposals and preserve uncommittable drafts in rejected history (${inspection.pending.length} pending).`, recommended: true },
-          { value: "review", label: "Review first", description: "Stop before accepting anything; use proposal CLI commands." },
-        ]);
-        if (decision !== "accept") {
-          await stopPrepareAll(ctx, `Full preparation paused for proposal review. Next: ${inspection.next}`, "info");
-          return;
-        }
-        let lastReported = 0;
-        prepareAllHostActivity?.update("Converging validated proposals");
-        const result = await convergeWorldProposals(workspace.root, state.sourceId, {
-          onProgress: (progress) => {
-            if (progress.phase === "complete" || progress.processed === progress.total || progress.processed - lastReported >= 10) {
-              ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Converging · ${progress.phase} ${progress.processed}/${progress.total}`));
-              prepareAllHostActivity?.update(`Converging ${progress.phase} ${progress.processed}/${progress.total}`);
-              lastReported = progress.processed;
-            }
-          },
-        });
-        const blocked = result.canonical.blocked.length + result.possibilities.blocked.length;
-        const quarantined = await quarantineUncommittableProposals(workspace.root, result);
-        if (quarantined.length) {
-          ctx.ui.notify(
-            `Rejected ${blocked} validation-blocked and ${result.staging.length} staging-only proposal(s) to immutable history; continuing with validated artifacts.`,
-            "warning",
-          );
-        }
-        ctx.ui.notify(`Accepted ${result.canonical.accepted.length + result.possibilities.accepted.length} validated proposal(s).`, "info");
-        await advancePrepareAll(ctx);
-        return;
-      }
-      if (inspection.stage === "needs-initial-world") {
-        prepareAllHostActivity?.update("Preparing the opening world state");
-        if (state.initialWorldAttempted) {
-          try {
-            await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
-          } catch (error) {
-            await stopPrepareAll(
-              ctx,
-              error instanceof Error ? error.message : String(error),
-              "error",
-            );
-            return;
-          }
-        }
-        const decision = await choose(ctx, "Generate opening world?", [
-          { value: "generate", label: "Generate proposal", description: "Ask the current compiler session for an evidence-backed opening state.", recommended: true },
-          { value: "pause", label: "Pause", description: "Leave the opening world unresolved for manual work." },
-        ]);
-        if (decision !== "generate") {
-          await stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
-          return;
-        }
-        activateCompilerTools(ctx, "opening");
-        const openingBatch = await prepareOpeningWorldCompilerBatch(workspace.root, inspection.source!);
-        await resetCompilerBatch(openingBatch.segmentIds, openingBatch.id, inspection.source!.id);
-        state.initialWorldRequestRunning = true;
-        state.initialWorldAttempted = true;
-        state.initialWorldBatchId = openingBatch.id;
-        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing · opening world"));
-        await sendHiddenPreparationTurn(
-          ctx,
-          `${INITIAL_WORLD_PROMPT}\n\n${openingBatch.prompt}`,
-          "nwh-prepare-all-initial-world",
-          openingBatch.segmentIds,
-        );
-        return;
-      }
-      if (inspection.stage === "create-branch") {
-        prepareAllHostActivity?.update("Evaluating and certifying the prepared revision");
-        const certified = await certifyPreparedNovel({ root: workspace.root, sourceId: state.sourceId,
-          cacheRoot: options.preparedCacheRoot, ...(ctx.model ? { model: modelLabel(ctx.model) } : {}),
-          onProgress: message => prepareAllHostActivity?.update(message) });
-        state.preparedCacheVerified = true;
-        ctx.ui.notify(`Certified and activated prepared revision ${certified.bundleHash}.`, "info");
-        const decision = await choose(ctx, "Create playable branch?", [
-          { value: "create", label: "Create branch", description: `Commit genesis for branch '${state.branchId}'.`, recommended: true },
-          { value: "pause", label: "Pause", description: "Keep canonical preparation complete without creating a branch." },
-        ]);
-        if (decision !== "create") {
-          await stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
-          return;
-        }
-        await createWorldBranch(workspace.root, state.branchId, undefined, state.sourceId, options.preparedCacheRoot);
-        await advancePrepareAll(ctx);
-        return;
-      }
-      if (inspection.stage === "repair" && inspection.audit && semanticRepairRequiresReparse(inspection.audit)) {
-        await stopPrepareAll(
-          ctx,
-          `Full preparation found systemic semantic debt that exceeds the bounded reconciliation capacity. Run /reparse --source ${state.sourceId} --all; ordinary /prepare-all will not retry the same incomplete migration.`,
-          "error",
-        );
-        return;
-      }
-      if (inspection.stage === "repair" && inspection.audit && semanticRepairIsIsolated(inspection.audit) && state.reconciliationAttempts < MAX_RECONCILIATION_ITERATIONS) {
-        if (state.reconciliationAttempts === 0) {
-          const decision = await choose(ctx, "Reconcile world semantics?", [
-            { value: "repair", label: "Reconcile world", description: "Repair evidence-backed timeline, effects, and character phases through typed proposals.", recommended: true },
-            { value: "pause", label: "Pause", description: "Keep the semantic audit findings for manual repair." },
-          ]);
-          if (decision !== "repair") {
-            await stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
-            return;
-          }
-        }
-        const iteration = state.reconciliationAttempts + 1;
-        const batchId = `reconcile-${state.sourceId}-v2-${iteration}`;
-        activateCompilerTools(ctx, "reconciliation");
-        await resetCompilerBatch([], batchId, state.sourceId);
-        state.reconciliationAttempts = iteration;
-        state.reconciliationRequestRunning = true;
-        state.reconciliationBatchId = batchId;
-        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Reconciling world · ${iteration}/${MAX_RECONCILIATION_ITERATIONS}`));
-        await sendHiddenPreparationTurn(
-          ctx,
-          await buildWorldReconciliationPrompt(workspace.root, state.sourceId, inspection.audit, iteration),
-          "nwh-prepare-all-reconciliation",
-          [],
-        );
-        return;
-      }
-      if (inspection.stage === "ready") {
-        prepareAllHostActivity?.update("Verifying the playable revision");
-        if (!state.preparedCacheVerified) {
-          const certified = await certifyPreparedNovel({ root: workspace.root, sourceId: state.sourceId,
-            cacheRoot: options.preparedCacheRoot, ...(ctx.model ? { model: modelLabel(ctx.model) } : {}),
-            onProgress: message => prepareAllHostActivity?.update(message) });
-          ctx.ui.notify(`Certified and activated prepared revision ${certified.bundleHash}.`, "info");
-        }
-        await stopPrepareAll(ctx, `Preparation complete. Run /play to choose a character on '${state.branchId}'.`, "info");
-        return;
-      }
-      const diagnosis = inspection.repairReasons?.length
-        ? ` ${inspection.repairReasons.join(" ")}`
-        : "";
-      await stopPrepareAll(
-        ctx,
-        `Full preparation stopped at '${inspection.stage}'.${diagnosis} Next: ${inspection.next}`,
-        inspection.stage === "repair" ? "error" : "warning",
-      );
-      } catch (error) {
-        if (prepareAllState === state) {
-          await stopPrepareAll(
-            ctx,
-            `Full preparation stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}. Progress already checkpointed remains resumable with /prepare-all.`,
-            "error",
-          );
-        }
-      }
-    };
-
     pi.on("session_shutdown", async () => {
       shuttingDown = true;
       stopTerminalInput?.();
       stopTerminalInput = undefined;
-      prepareAllHostActivity?.close();
-      prepareAllHostActivity = undefined;
       await releaseCompilerOperationLock();
       if (startupRestorePromise) await startupRestorePromise;
       const pendingPlayerTurn = activePlayerTurn;
@@ -1853,76 +1351,22 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       await options.onSessionShutdown?.();
     });
 
-    pi.on("tool_call", (event) => {
+    pi.on("tool_call", () => {
       if (playerMode) {
         return {
           block: true,
-          reason: "Player narration is limited to the committed actor frame; tools are unavailable in player mode. Do not retry the tool call; continue from the supplied committed frame.",
+          reason: "Player narration is limited to the committed actor frame; tools are unavailable in player mode. Do not retry the tool call; continue from the supplied frame.",
         };
       }
-      if (compilerCircuitBroken) {
-        return {
-          block: true,
-          reason: "The compiler circuit breaker opened; this batch turn is stopping without a checkpoint. Do not retry any tool in this turn; resume through a fresh host-started compiler turn.",
-          terminate: true,
-        };
-      }
-      const compilerTurnActive = Boolean(
-        pendingTurn
-        || prepareAllState?.initialWorldRequestRunning
-        || prepareAllState?.reconciliationRequestRunning,
-      );
-      if (pendingTurn && event.toolName === "propose_initial_world") {
-        return {
-          block: true,
-          reason: "Ordinary source-review batches cannot propose the initial world; NWH runs a dedicated opening-world pass after source compilation. Do not retry this tool in the current batch; finish the source review with the tools currently active.",
-        };
-      }
-      if (COMPILER_TOOL_NAME_SET.has(event.toolName)) {
-        if (mode === "assistant" && !compilerTurnActive) {
-          return {
-            block: true,
-            reason: "Compiler proposal tools are unavailable outside an explicit compiler turn. Do not retry the call here; start an explicit compile/source-preparation turn first.",
-          };
-        }
-        try {
-          if (!pi.getActiveTools().includes(event.toolName)) {
-            return {
-              block: true,
-              reason: `Compiler tool ${event.toolName} is outside the active compiler scope. Do not probe it again; use one of the tools explicitly active for this compiler phase.`,
-            };
-          }
-        } catch {
-          // The real Pi runtime exposes active tools. Synthetic embeddings may
-          // omit the registry and still enforce their own configured toolset.
-        }
-      }
-      if (!pendingTurn || !LOCAL_EVIDENCE_TOOL_NAMES.has(event.toolName)) return;
-      return {
-        block: true,
-        reason: "This compiler batch may use only the evidence slice supplied by the host; workspace file tools are disabled until the batch settles. Do not retry the file tool; use the current <source-segment> blocks and in-scope compiler retrieval tools.",
-      };
-    });
-
-    pi.on("tool_result", (event) => {
-      const details = event.details && typeof event.details === "object" && !Array.isArray(event.details)
-        ? event.details as Record<string, unknown>
-        : undefined;
-      if (details?.compilerBatchBlocked === true) {
-        compilerCircuitBroken = true;
-        return { isError: true };
-      }
+      return undefined;
     });
 
     pi.on("input", async (event, ctx) => {
       if (event.source === "extension") return { action: "continue" };
       if (shuttingDown) return { action: "handled" };
       if (startupRestorePromise) await startupRestorePromise;
-      if (pendingTurn || prepareAllState) {
-        ctx.ui.notify("Novel preparation is already running. Wait for it to finish before sending another message.", "warning");
-        return { action: "handled" };
-      }
-      const sourceCandidate = parseStandaloneSourcePath(event.text);
+      const trimmed = event.text.trim().replace(/^['"]|['"]$/gu, "");
+      const sourceCandidate = !/\s/u.test(trimmed) ? trimmed : undefined;
       const sourceLike = Boolean(sourceCandidate && /\.(?:txt|text|novel|md|markdown)$/iu.test(sourceCandidate));
       if (
         taskRunning()
@@ -1961,39 +1405,17 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return { action: "handled" };
       }
 
-      const sourceActivity = sourceLike ? beginHostActivity(ctx, "source-ingest", "Reading and indexing the novel source") : undefined;
-      let inputCompilerLock: WorkspaceOperationLock | undefined;
-      let keepInputCompilerLock = false;
-      try {
-        if (sourceLike) inputCompilerLock = await acquireCompilerOperationLock();
-        const preparation = await prepareSourceLoopFromInput(workspace.root, event.text, { cacheRoot: options.preparedCacheRoot });
-        if (preparation) {
-          activeSourceId = preparation.source.id;
-          if (preparation.status === "complete") {
-            ctx.ui.notify(
-              preparation.preparedCache?.status === "restored"
-                ? `Restored active prepared revision ${preparation.preparedCache.bundleHash} for ${preparation.source.title}; run /prepare-all to create an independent branch.`
-                : `${preparation.source.title} has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`,
-              "info",
-            );
-            return { action: "handled" };
-          }
-          sourceActivity?.update("Preparing the foreground compiler turn");
-          activateCompilerTools(ctx, "source", preparation.batch.purpose, preparation.batch.semanticStage);
-          await beginTurn(preparation, true);
-          keepInputCompilerLock = true;
-          ctx.ui.notify(
-            `Novel indexed: ${preparation.source.sourcePath} · starting batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`,
-            "info",
-          );
-          return { action: "continue" };
-        }
-      } catch (error) {
-        ctx.ui.notify(`Cannot start novel compiler: ${error instanceof Error ? error.message : String(error)}`, "error");
+      if (sourceLike) {
+        // A dropped novel path is ingested; compilation runs as an explicit /prepare-all task.
+        const activity = beginHostActivity(ctx, "source-ingest", "Reading and indexing the novel source");
+        try {
+          const ingested = await withWorkspaceOperationLock(workspace.root, "compiler", () => ingestWorkspaceSource(workspace.root, path.resolve(workspace.root, sourceCandidate!)));
+          activeSourceId = ingested.document.id;
+          ctx.ui.notify(`Novel indexed: ${ingested.document.sourcePath} (${ingested.document.id}). Run /prepare-all to compile it.`, "info");
+        } catch (error) {
+          ctx.ui.notify(`Cannot index novel: ${error instanceof Error ? error.message : String(error)}`, "error");
+        } finally { activity.close(); }
         return { action: "handled" };
-      } finally {
-        if (inputCompilerLock && !keepInputCompilerLock) await releaseCompilerOperationLock(inputCompilerLock);
-        sourceActivity?.close();
       }
 
       try {
@@ -2015,179 +1437,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     });
 
     pi.on("before_agent_start", async (event) => {
-      const compilerActive = Boolean(
-        pendingTurn
-        || prepareAllState?.initialWorldRequestRunning
-        || prepareAllState?.reconciliationRequestRunning,
-      );
-      // Automatic compiler turns have a host-selected evidence boundary.
-      // Generic @file expansion would bypass both the selected segment and the
-      // source-scoped exact-retrieval tools, so it is allowed only outside
-      // such a turn (including explicit standalone manual compiler sessions).
-      const expanded = compilerActive ? event.prompt : await expandFileMentions(event.prompt, workspace);
-      const context: string[] = [];
-      if (pendingTurn) context.push(pendingTurn.prompt);
-      if (expanded !== event.prompt) context.push(expanded.slice(event.prompt.length).trim());
-      let activeCompilerTools: Array<{ name: string; guidelines: readonly string[] }> = [];
-      if (compilerActive) {
-        try {
-          const activeNames = new Set(pi.getActiveTools());
-          activeCompilerTools = pi.getAllTools()
-            .filter((tool) => activeNames.has(tool.name))
-            .map((tool) => ({ name: tool.name, guidelines: tool.promptGuidelines ?? [] }));
-        } catch {
-          activeCompilerTools = (registeredCompilerToolset?.tools ?? [])
-            .filter((tool) => !SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name))
-            .map((tool) => ({ name: tool.name, guidelines: tool.promptGuidelines ?? [] }));
-        }
-      }
-      const compilerTurnContract = compilerActive
-        ? `<nwh-compiler-turn-contract>\n${promptJson({
-            mode: "compiler",
-            semanticStage: pendingTurn?.batch.semanticStage ?? "integrated",
-            evidence: pendingTurn?.batch.purpose === "structure-discovery"
-              ? "supplied non-citable bounded source-structure sample"
-              : pendingTurn
-                ? "supplied bounded source segment"
-                : "supplied host reconciliation/opening payload",
-            projectInstructions: "disabled",
-            ordinaryConversation: "excluded",
-            tools: activeCompilerTools,
-            persistence: "typed writes are pending proposals only; successful finish is required for checkpointing",
-          })}\n</nwh-compiler-turn-contract>`
-        : undefined;
-      if (!context.length && !compilerTurnContract) return;
-      return {
-        ...(context.length
-          ? {
-              message: {
-                customType: pendingTurn ? "nwh-compiler-batch" : "nwh-file-context",
-                content: context.join("\n\n"),
-                display: false,
-                ...(pendingTurnInitiatedByUserInput ? { details: { excludePreviousUser: true } } : {}),
-              },
-            }
-          : {}),
-        ...(compilerTurnContract
-          ? {
-              systemPrompt: `${COMPILER_SYSTEM_PROMPT}\n\n${compilerModeInstructions(false)}\n\n${compilerTurnContract}`,
-            }
-          : {}),
-      };
+      const expanded = await expandFileMentions(event.prompt, workspace);
+      if (expanded === event.prompt) return;
+      return { message: { customType: "nwh-file-context", content: expanded.slice(event.prompt.length).trim(), display: false } };
     });
 
-    registerNwhContextProjection(pi, () => Boolean(pendingTurn || prepareAllState?.initialWorldRequestRunning || prepareAllState?.reconciliationRequestRunning));
-
-    pi.on("agent_end", (event) => {
-      if (!pendingTurn && !prepareAllState?.initialWorldRequestRunning && !prepareAllState?.reconciliationRequestRunning) return;
-      // agent_end is per low-level run. Keep every run until agent_settled so
-      // provider retries, compaction retries, and queued continuations cannot
-      // erase an earlier unresolved proposal failure or finish handshake.
-      pendingRunMessages.push(...event.messages);
-    });
-
-    pi.on("agent_settled", async (_event, ctx) => {
-      compilerCircuitBroken = false;
-      const completedTurn = pendingTurn;
-      const openingRequest = !completedTurn && prepareAllState?.initialWorldRequestRunning;
-      const reconciliationRequest = !completedTurn && prepareAllState?.reconciliationRequestRunning;
-      if (!completedTurn && !openingRequest && !reconciliationRequest) return;
-      restoreAssistantTools(ctx);
-      const outcome = compilerBatchOutcomeFromMessages(pendingRunMessages);
-      pendingRunMessages = [];
-      if (!completedTurn) {
-        if (openingRequest) prepareAllState!.initialWorldRequestRunning = false;
-        if (reconciliationRequest) prepareAllState!.reconciliationRequestRunning = false;
-        const failure = compilerBatchFailure(outcome);
-        if (failure) {
-          if (openingRequest) {
-            await stopPrepareAll(ctx, `Opening-state compiler did not complete (${failure}). Preserve the original session, drafts and budgets; inspect the same source/batch and resolve this failure before continuing. No automatic retry or synthesized opening.`, "error");
-            return;
-          }
-          const specialBatchId = reconciliationRequest
-            ? prepareAllState!.reconciliationBatchId
-            : prepareAllState!.initialWorldBatchId;
-          if (specialBatchId && (outcome.hostReviewReason
-            || new CompilerProposalObligations(workspace.root, prepareAllState!.sourceId, specialBatchId).requiringHostReview().length
-            || await new CompilerFinishReceipts(workspace.root, prepareAllState!.sourceId, specialBatchId).read())) {
-            await stopPrepareAll(ctx, `Compiler scope requires host recovery (${failure}). Preserve the saved intent, failure journal and drafts; resume the same source/batch through the host compiler.`, "error");
-            return;
-          }
-          const rejected = specialBatchId
-            ? await rejectPendingCompilerBatchProposals(workspace.root, specialBatchId)
-            : [];
-          ctx.ui.notify(`${reconciliationRequest ? "World reconciliation" : "Opening-state compiler"} did not complete (${failure}); incomplete drafts will not enter canonical truth.`, "warning");
-          if (rejected.length) ctx.ui.notify(`Rejected ${rejected.length} partial proposal(s).`, "warning");
-          if (reconciliationRequest) {
-            await stopPrepareAll(
-              ctx,
-              `Full preparation stopped after reconciliation failed (${failure}). The same deterministic repair pass will not be repeated automatically; retry only after correcting the reported cause or run /reparse --source ${prepareAllState!.sourceId} --all.`,
-              "error",
-            );
-            return;
-          }
-        }
-        await advancePrepareAll(ctx);
-        return;
-      }
-      const failure = compilerBatchFailure(outcome);
-      if (failure) {
-        const preparation = prepareAllState;
-        if (preparation && isRecoverableCompilerBatchInterruption(outcome)) {
-          const retries = preparation.recoveryRetryCounts.get(completedTurn.batch.id) ?? 0;
-          if (retries < MAX_PREPARE_ALL_RECOVERY_RETRIES) {
-            preparation.recoveryRetryCounts.set(completedTurn.batch.id, retries + 1);
-            pendingTurn = undefined;
-            pendingTurnInitiatedByUserInput = false;
-            ctx.ui.notify(
-              `Compiler batch ${completedTurn.batch.ordinal + 1} had a recoverable interruption (${failure}); retrying automatically ${retries + 1}/${MAX_PREPARE_ALL_RECOVERY_RETRIES}.`,
-              "warning",
-            );
-            await advancePrepareAll(ctx);
-            return;
-          }
-        }
-        pendingTurn = undefined;
-        pendingTurnInitiatedByUserInput = false;
-        const wasPreparingAll = Boolean(preparation);
-        ctx.ui.notify(
-          `Compiler batch ${completedTurn.batch.ordinal + 1} was not checkpointed (${failure}); /compile-next retries the same evidence.`,
-          "warning",
-        );
-        if (wasPreparingAll) {
-          await stopPrepareAll(ctx, `Full preparation stopped because the compiler batch did not complete (${failure}). Retry /prepare-all to resume.`);
-        } else {
-          await releaseCompilerOperationLock();
-        }
-        return;
-      }
-      pendingTurn = undefined;
-      pendingTurnInitiatedByUserInput = false;
-      try {
-        await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id, { requireFinishReceipt: true });
-      } catch (error) {
-        const message = `Compiler batch was not checkpointed: ${error instanceof Error ? error.message : String(error)}`;
-        if (prepareAllState) await stopPrepareAll(ctx, message, "error");
-        else { ctx.ui.notify(message, "error"); await releaseCompilerOperationLock(); }
-        return;
-      }
-      const refreshedSource = await (await WorkspaceStore.create(workspace.root)).getSource(completedTurn.source.id);
-      if (refreshedSource?.titleInference) {
-        setContextSessionName(
-          `${generatedNovelLabel(refreshedSource)} · ${prepareAllState ? "full preparation" : "world compilation"}`,
-        );
-      }
-      ctx.ui.notify(
-        completedTurn.batch.purpose === "structure-discovery"
-          ? `Chapter split plan checkpointed for ${completedTurn.source.title}; evidence batches will be regenerated on the next compiler turn.`
-          : completedTurn.remainingAfterBatch > 0
-          ? `Compiler batch ${completedTurn.completedBatches + 1}/${completedTurn.totalBatches} checkpointed · ${completedTurn.remainingAfterBatch} remaining · /compile-next to continue`
-          : `All ${completedTurn.totalBatches} compiler batches for ${completedTurn.source.title} are checkpointed.`,
-        "info",
-      );
-      if (prepareAllState) await advancePrepareAll(ctx);
-      else await releaseCompilerOperationLock();
-    });
+    registerNwhContextProjection(pi, () => false);
 
     pi.on("session_start", (event, ctx) => {
       if (ctx.mode !== "tui") return;
@@ -2684,7 +1939,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }
         playerMode = false;
         selectedPlay = undefined;
-        const modeLabel = compilerToolScope && mode === "assistant" ? "world compiler loop" : "read-only assistant";
+        const modeLabel = "read-only assistant";
         ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
         ctx.ui.setWorkingMessage("Consulting local evidence...");
         ctx.ui.notify("Left player mode. The selected instance and character remain saved; use /world-resume to return.", "info");
@@ -2725,362 +1980,41 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       },
     });
 
-    pi.registerCommand("prepare-content", {
-      description: "Archive pasted novel text and start its compiler loop",
+    /** Resolve the source for a compile command: an explicit id, the active one, or a choice. */
+    const resolveCompileSource = async (ctx: ExtensionContext, requested?: string): Promise<SourceDocument | undefined> => {
+      const sources = await (await WorkspaceStore.create(workspace.root)).listSources();
+      if (!sources.length) {
+        ctx.ui.notify("No novel source is registered. Drop a novel file path into the TUI first.", "warning");
+        return undefined;
+      }
+      const id = requested || activeSourceId || (sources.length === 1 ? sources[0]!.id : await chooseNovelSourceId(ctx, undefined, "Compile which novel?"));
+      const source = sources.find((candidate) => candidate.id === id);
+      if (!source) ctx.ui.notify(`Unknown novel source ${id ?? ""}.`, "warning");
+      else activeSourceId = source.id;
+      return source;
+    };
+
+    pi.registerCommand("prepare-all", {
+      description: "Compile the novel through the slim pipeline, evaluate, certify and create a playable branch (resumes where it stopped)",
       handler: async (args, ctx) => {
-        if (!guardForegroundIdle(ctx, "prepare pasted content")) return;
-        if (!args.trim()) throw new Error("Usage: /prepare-content <novel text>");
-        const content = args;
-        const activity = beginHostActivity(ctx, "compiler-preflight", "Archiving and indexing pasted novel content");
-        let compilerLock: WorkspaceOperationLock | undefined;
-        let keepCompilerLock = false;
-        try {
-          compilerLock = await acquireCompilerOperationLock();
-          const preparation = await prepareSourceLoopFromContent(workspace.root, content, {
-            title: "pasted-novel.txt",
-            cacheRoot: options.preparedCacheRoot,
-          });
-          activeSourceId = preparation.source.id;
-          if (preparation.status === "complete") {
-            ctx.ui.notify(
-              preparation.preparedCache?.status === "restored"
-                ? `Restored active prepared revision ${preparation.preparedCache.bundleHash} for pasted content; run /prepare-all to create an independent branch.`
-                : `Pasted content has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`,
-              "info",
-            );
-            return;
-          }
-          activity.update("Preparing the foreground compiler turn");
-          activateCompilerTools(ctx, "source", preparation.batch.purpose, preparation.batch.semanticStage);
-          await beginTurn(preparation);
-          keepCompilerLock = true;
-          ctx.ui.notify(`Archived pasted content as ${preparation.source.id} · starting batch 1/${preparation.totalBatches}.`, "info");
-          pi.sendMessage({
-            customType: "nwh-compiler-batch",
-            content: `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
-            display: false,
-          }, { triggerTurn: true });
-        } finally {
-          if (compilerLock && !keepCompilerLock) await releaseCompilerOperationLock(compilerLock);
-          activity.close();
-        }
+        if (!guardForegroundIdle(ctx, "prepare the complete novel world")) return;
+        const [requestedSourceId, requestedBranchId] = splitCommandArguments(args);
+        const source = await resolveCompileSource(ctx, requestedSourceId);
+        if (!source) return;
+        await startCompileTask(ctx, { sourceId: source.id, sourceTitle: generatedNovelLabel(source), ...(requestedBranchId ? { branchId: requestedBranchId } : {}) });
       },
     });
 
     pi.registerCommand("compile-next", {
-      description: "Process the next evidence batch for the active novel",
-      handler: async (_args, ctx) => {
-        if (!guardForegroundIdle(ctx, "compile the next evidence batch")) return;
-        const activity = beginHostActivity(ctx, "compiler-preflight", "Loading the next evidence batch");
-        let compilerLock: WorkspaceOperationLock | undefined;
-        let keepCompilerLock = false;
-        try {
-          compilerLock = await acquireCompilerOperationLock();
-          const preparation = await prepareNextSourceLoopTurn(workspace.root, activeSourceId);
-          if (!preparation) {
-            ctx.ui.notify("No novel source is registered. Paste or drag a novel file path into the TUI first.", "warning");
-            return;
-          }
-          activeSourceId = preparation.source.id;
-          if (preparation.status === "complete") {
-            ctx.ui.notify(`${preparation.source.title} has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`, "info");
-            return;
-          }
-          activity.update("Preparing the foreground compiler turn");
-          activateCompilerTools(ctx, "source", preparation.batch.purpose, preparation.batch.semanticStage);
-          await beginTurn(preparation);
-          keepCompilerLock = true;
-          ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
-          // Host-generated compiler context must never be represented as a user
-          // message: doing so replaces the visible slash-command transcript.
-          pi.sendMessage({
-            customType: "nwh-compiler-batch",
-            content: `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
-            display: false,
-          }, { triggerTurn: true });
-        } finally {
-          if (compilerLock && !keepCompilerLock) await releaseCompilerOperationLock(compilerLock);
-          activity.close();
-        }
-      },
-    });
-
-    pi.registerCommand("prepare-all", {
-      description: "Complete compilation, accept validated proposals and create a playable branch",
+      description: "Run the next unfinished compile phase for the active novel",
       handler: async (args, ctx) => {
-        if (!guardForegroundIdle(ctx, "prepare the complete novel world")) return;
-        const activity = beginHostActivity(ctx, "prepare-all", "Inspecting novel readiness");
-        let handedOff = false;
-        let preparationLock: WorkspaceOperationLock | undefined;
-        try {
-        const [requestedSourceId, requestedBranchId] = splitCommandArguments(args);
-        let branchId = requestedBranchId || "main";
-        let preferNewBranch = false;
-        let inspection = await inspectPreparation(workspace.root, {
-          sourceId: requestedSourceId || activeSourceId,
-          branchId,
-        });
-        let sourceId = inspection.source?.id;
-        if (inspection.stage === "needs-source") {
-          ctx.ui.notify("No novel source is registered. Paste or drag a novel path into the TUI first, then run /prepare-all.", "warning");
-          return;
-        }
-        if (inspection.stage === "choose-source") {
-          const choices = inspection.sources.map((source, index) => ({
-            value: source.id,
-            label: source.title,
-            description: `${source.sourcePath} (${source.id})`,
-            recommended: index === 0,
-          }));
-          const store = await WorkspaceStore.create(workspace.root);
-          sourceId = await choose(ctx, "Choose a novel source", choices, {
-            label: "Enter a source",
-            description: "Type a registered source id, title, or path.",
-            prompt: "Source id, title, or path",
-            placeholder: choices[0]?.value,
-            invalidMessage: "No unique registered novel matches that value.",
-            resolve: async (value) => {
-              try {
-                return (await resolveNovelSource(store, value)).id;
-              } catch {
-                return undefined;
-              }
-            },
-          });
-          if (!sourceId) {
-            ctx.ui.notify("Full preparation cancelled.", "info");
-            return;
-          }
-          inspection = await inspectPreparation(workspace.root, { sourceId, branchId });
-        }
-        if (!sourceId) {
-          ctx.ui.notify(`Cannot start full preparation at '${inspection.stage}'.`, "error");
-          return;
-        }
-        if (!requestedBranchId) {
-          const resolvedBranchId = await resolvePreparationBranchId(workspace.root, inspection.source!, undefined);
-          if (resolvedBranchId !== branchId) {
-            branchId = resolvedBranchId;
-            inspection = await inspectPreparation(workspace.root, { sourceId, branchId });
-            ctx.ui.notify(`The default 'main' instance belongs to another novel revision; using independent branch '${branchId}'.`, "info");
-          }
-        }
-        activeSourceId = sourceId;
-        const source = inspection.source ?? await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);
-        if (source) setContextSessionName(`${generatedNovelLabel(source)} · full preparation`);
-        const sourceChanged = inspection.audit?.sources.changedSinceIngest.includes(sourceId) ?? false;
-        // A changed source cannot be identified as the immutable cached input.
-        // Preserve that audit diagnosis instead of replacing it with a hash
-        // mismatch. Every unchanged source, including one already at repair,
-        // must still pass the semantic-pipeline compatibility preflight.
-        if (source && !sourceChanged) {
-          activity.update("Checking the prepared revision cache");
-          const cached = await preparedCache.lookup(source);
-          if (cached.requiresReparse) {
-            const decision = await choose(ctx, "Upgrade prepared world semantics?", [
-              {
-                value: "reparse",
-                label: "Reparse all",
-                description: "Preserve the old immutable revision and rebuild every source batch with the current world model.",
-                recommended: true,
-              },
-              {
-                value: "pause",
-                label: "Pause",
-                description: `Keep revision ${cached.bundleHash ?? "legacy"} active and run /reparse later.`,
-              },
-            ]);
-            if (decision !== "reparse") {
-              ctx.ui.notify(`Full preparation paused. Next: /reparse --source ${sourceId} --all`, "info");
-              return;
-            }
-            const batches = await prepareCompilerBatches(workspace.root, source);
-            const selectedChapters = [...new Set(
-              batches.filter((batch) => batch.purpose !== "structure-discovery").map((batch) => batch.chapterOrdinal),
-            )].sort((left, right) => left - right);
-            activity.update("Running rollback-safe semantic pipeline upgrade");
-            ctx.ui.notify(
-              `Prepared revision ${cached.bundleHash ?? "legacy"} is incompatible with the current semantic pipeline; starting a rollback-safe whole-novel reparse.`,
-              "warning",
-            );
-            const task = await startReparseTask(ctx, {
-              sourceId,
-              sourceTitle: source.title,
-              selectedChapters,
-              all: true,
-            });
-            await task.completion;
-            if (task.snapshot.status !== "completed") return;
-            if (!requestedBranchId) {
-              preferNewBranch = true;
-              const reparsedSource = await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);
-              if (!reparsedSource) throw new Error(`Unknown source '${sourceId}' after reparse.`);
-              branchId = await resolvePreparationBranchId(workspace.root, reparsedSource, undefined, { preferNew: true });
-              ctx.ui.notify(`Existing branches remain pinned to their prior revision; the upgraded world will use new branch '${branchId}'.`, "info");
-            }
-            inspection = await inspectPreparation(workspace.root, { sourceId, branchId });
-          }
-        }
-        preparationLock = await acquireCompilerOperationLock();
-        if (source && !sourceChanged) {
-          activity.update("Checking whether the active prepared revision can be restored");
-          const restored = await preparedCache.restore(source);
-          if (restored.status === "restored") {
-            ctx.ui.notify(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; source compilation is skipped.`, "info");
-          } else if (restored.status === "workspace-not-empty" && restored.reason) {
-            ctx.ui.notify(`Prepared cache was not restored: ${restored.reason}`, "warning");
-          }
-        }
-        prepareAllState = {
-          sourceId,
-          branchId,
-          branchIdExplicit: Boolean(requestedBranchId),
-          preferNewBranch,
-          branchTitleKey: inspection.source?.titleInference?.title ?? null,
-          compileAllApproved: false,
-          initialWorldRequestRunning: false,
-          initialWorldAttempted: false,
-          reconciliationRequestRunning: false,
-          reconciliationAttempts: 0,
-          preparedCacheVerified: false,
-          recoveryRetryCounts: new Map(),
-        };
-        prepareAllHostActivity = activity;
-        handedOff = true;
-        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing world"));
-        await advancePrepareAll(ctx);
-        } finally {
-          if (!handedOff && preparationLock) await releaseCompilerOperationLock(preparationLock);
-          if (!handedOff) activity.close();
-        }
-      },
-    });
-
-    pi.registerCommand("reparse", {
-      description: "Rebuild selected chapters or an entire novel into a new prepared revision",
-      handler: async (args, ctx) => {
-        const runningTask = taskRunning() ? activeTask : undefined;
-        if (runningTask) {
-          ctx.ui.notify(`${runningTask.snapshot.title} is already running; bringing it to the foreground.`, "info");
-          await foregroundTask(ctx, runningTask);
-          return;
-        }
-        if (!guardForegroundIdle(ctx, "start a reparse")) return;
-        const parsed = parseTuiReparseArguments(args);
-        const preflight = beginHostActivity(ctx, "reparse-preflight", "Loading novel chapters and compiler batches");
-        let sourceId: string | undefined;
-        let source: Awaited<ReturnType<WorkspaceStore["getSource"]>>;
-        let batches: Awaited<ReturnType<typeof prepareCompilerBatches>>;
-        try {
-          sourceId = await chooseNovelSourceId(ctx, parsed.source, "Choose a novel to reparse");
-          if (!sourceId) {
-            ctx.ui.notify("Reparse cancelled.", "info");
-            return;
-          }
-          const store = await WorkspaceStore.create(workspace.root);
-          source = await store.getSource(sourceId);
-          if (!source) throw new Error(`Unknown source '${sourceId}'.`);
-          batches = await prepareCompilerBatches(workspace.root, source);
-        } finally {
-          preflight.close();
-        }
-        if (!sourceId) {
-          ctx.ui.notify("Reparse cancelled.", "info");
-          return;
-        }
-        if (!source) throw new Error(`Unknown source '${sourceId}'.`);
-        if (!batches.length) throw new Error(`Source ${source.id} has no compiler batches.`);
-        const chapterMap = new Map<number, { title?: string; batches: number }>();
-        for (const batch of batches.filter((candidate) => candidate.purpose !== "structure-discovery")) {
-          const current = chapterMap.get(batch.chapterOrdinal);
-          chapterMap.set(batch.chapterOrdinal, {
-            ...(batch.chapterTitle ? { title: batch.chapterTitle } : current?.title ? { title: current.title } : {}),
-            batches: (current?.batches ?? 0) + 1,
-          });
-        }
-        const availableChapters = [...chapterMap.keys()].sort((left, right) => left - right);
-        let all = parsed.all;
-        let chapters = parsed.chapters;
-        if (!all && !chapters) {
-          const scope = await choose(ctx, "Choose reparse scope", [
-            {
-              value: "chapters",
-              label: "Selected chapters",
-              description: "Rebuild one chapter or enter a comma-separated range.",
-              recommended: true,
-            },
-            {
-              value: "all",
-              label: "Entire novel",
-              description: `Rebuild all ${batches.length} compiler batches while retaining the prior revision.`,
-            },
-          ]);
-          if (!scope) {
-            ctx.ui.notify("Reparse cancelled.", "info");
-            return;
-          }
-          all = scope === "all";
-        }
-        if (!all) {
-          if (!chapters) {
-            chapters = await choose(ctx, "Choose chapters to reparse", availableChapters.map((ordinal) => {
-              const chapter = chapterMap.get(ordinal)!;
-              return {
-                value: String(ordinal),
-                label: chapter.title ? `${ordinal}. ${chapter.title}` : `Detected chapter ${ordinal}`,
-                description: `${chapter.batches} compiler batch(es)`,
-              };
-            }), {
-              label: "Enter chapter range",
-              description: "Use comma-separated ordinals or ranges, for example 2,37 or 3-5.",
-              prompt: "Detected chapter ordinals",
-              placeholder: availableChapters.length > 1 ? `${availableChapters[0]},${availableChapters.at(-1)}` : String(availableChapters[0]),
-              invalidMessage: `Use available chapter ordinals: ${availableChapters.join(", ")}`,
-              resolve: (value) => {
-                try {
-                  return parseOrdinalSelection(value, availableChapters, "chapters").join(",");
-                } catch {
-                  return undefined;
-                }
-              },
-            });
-            if (!chapters) {
-              ctx.ui.notify("Reparse cancelled.", "info");
-              return;
-            }
-          }
-          chapters = parseOrdinalSelection(chapters, availableChapters, "--chapters").join(",");
-        }
-        const selectedChapters = all ? availableChapters : parseOrdinalSelection(chapters!, availableChapters, "--chapters");
-        const selectedBatchCount = batches.filter((batch) => selectedChapters.includes(batch.chapterOrdinal)).length;
-        const confirmation = await choose(ctx, "Start novel reparse?", [
-          {
-            value: "start",
-            label: "Start reparse",
-            description: `Rebuild ${selectedBatchCount} batch(es) for ${source.title}; prior revision and branch snapshots are retained.`,
-            recommended: true,
-          },
-          {
-            value: "cancel",
-            label: "Cancel",
-            description: "Keep the current prepared revision unchanged.",
-          },
-        ]);
-        if (confirmation !== "start") {
-          ctx.ui.notify("Reparse cancelled.", "info");
-          return;
-        }
-        activeSourceId = sourceId;
-        setContextSessionName(`${generatedNovelLabel(source)} · reparse chapters ${selectedChapters.join(",")}`);
-        ctx.ui.notify(`Starting reparse for ${source.title}: chapter(s) ${selectedChapters.join(", ")}.`, "info");
-        await startReparseTask(ctx, {
-          sourceId,
-          sourceTitle: source.title,
-          selectedChapters,
-          all,
-          ...(chapters ? { chapters } : {}),
-          ...(parsed.model ? { model: parsed.model } : {}),
-        });
+        if (!guardForegroundIdle(ctx, "compile the next phase")) return;
+        const source = await resolveCompileSource(ctx, splitCommandArguments(args)[0]);
+        if (!source) return;
+        const run = await new NovelCompilationRunStore(workspace.root).read(source.id);
+        const latest = new Map((run?.history ?? []).map((receipt) => [receipt.phase, receipt.status] as const));
+        const phase = FULL_COMPILATION_PHASES.find((candidate) => latest.get(candidate) !== "completed") ?? "branch";
+        await startCompileTask(ctx, { sourceId: source.id, sourceTitle: generatedNovelLabel(source), phase });
       },
     });
 
@@ -3209,7 +2143,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ctx.ui.notify([
           `workspace: ${workspace.root}`,
           `state: ${workspaceStateDir(workspace.root)}`,
-          `mode: ${playerMode ? "player" : compilerToolScope && mode === "assistant" ? "world-compiler-loop" : mode}`,
+          `mode: ${playerMode ? "player" : mode}`,
           `active source: ${activeSourceId ?? "none"}`,
           `registered novels: ${catalog.novels.length}`,
           `playable instances: ${catalog.instances.length}`,

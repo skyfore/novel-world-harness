@@ -9,7 +9,7 @@ import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/
 import { BranchStore } from "../world/store.js";
 import { spatialRelationEvidence } from "../world/spatial-ontology.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
-import { CompilerBatchStore } from "../compiler/batches.js";
+import { PipelineStore } from "../compiler/pipeline/store.js";
 import { BoundaryCalibrationStore } from "../compiler/boundary-calibration.js";
 import { ChapterSplitPlanStore } from "../compiler/chapter-split.js";
 import { SegmentStore } from "../compiler/segments.js";
@@ -267,8 +267,9 @@ export class MaintenanceApplicationService {
     }
     const chapterPlan = await new ChapterSplitPlanStore(this.root).read(sourceId);
     if (chapterPlan) compilerObservationIds.push(`chapter-split:${sourceId}`);
-    const batchProgress = await new CompilerBatchStore(this.root).readPersisted(sourceId);
-    if (batchProgress) compilerObservationIds.push(...batchProgress.completedBatchIds.map((id) => `batch:${id}`), `batch-checkpoint:${sourceId}`);
+    const pipeline = new PipelineStore(this.root, sourceId);
+    compilerObservationIds.push(...(await pipeline.receipts()).map((receipt) => `scope:${receipt.id}`));
+    if (await pipeline.run()) compilerObservationIds.push(`pipeline-run:${sourceId}`);
     compilerObservationIds.push(...(await new BoundaryCalibrationStore(this.root).list(sourceId)).map((item) => `boundary:${item.id}`));
 
     const preparedRevisionIds = (await new PreparedNovelCache(this.root, this.options.cacheRoot).listRevisions(source)).map((item) => item.bundleHash).sort();

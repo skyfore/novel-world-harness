@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { vi } from "vitest";
 import * as certification from "../../src/compiler/certification.js";
-import { CompilerBatchStore, prepareCompilerBatches } from "../../src/compiler/batches.js";
+import { markPipelineCompiled } from "./pipeline-compiled.js";
 import { PreparedNovelCache } from "../../src/compiler/prepared-cache.js";
 import { ActorModelStore } from "../../src/world/actors.js";
 import { CanonicalModelStore } from "../../src/world/canonical-model.js";
@@ -46,8 +46,7 @@ export async function createAdmittedWorkspace(prefix = "nwh-admitted-") {
       { op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.location", value: "hall" }, { op: "set", entityId: "hero", field: "character.plan", value: "Carry a letter" },
       { op: "set", entityId: "courier", field: "character.alive", value: true }, { op: "set", entityId: "courier", field: "character.location", value: "hall" }] },
     projectionSeed: { version: 1, semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] }, activeRuleIds: [], elapsedDays: 0 } });
-  const batches = await prepareCompilerBatches(root, fixture.source);
-  await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+  await markPipelineCompiled(root, fixture.source);
   const cacheRoot = path.join(root, "prepared-cache"), cache = new PreparedNovelCache(root, cacheRoot);
   const accounting = vi.spyOn(certification, "validateFrozenAccounting").mockReturnValue([]);
   try {

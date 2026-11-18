@@ -55,7 +55,7 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
     directory = activeCompileLoopDirectory(root, request.sourceId);
     if (options.newRunFromStateHash !== undefined) {
       const key = options.newRunFromStateHash;
-      if (!request.rebuild || !/^[a-f0-9]{64}$/.test(key) || options.legacyState || options.hostPatchHash || options.resumeStateHash) throw new Error("COMPILE_LOOP_NEW_RUN_SCOPE: use --rebuild with --loop-new-run copied from a completed supervision.stateHash; do not combine new work with stop recovery.");
+      if (!/^[a-f0-9]{64}$/.test(key) || options.legacyState || options.hostPatchHash || options.resumeStateHash) throw new Error("COMPILE_LOOP_NEW_RUN_SCOPE: use --loop-new-run copied from a completed supervision.stateHash; do not combine new work with stop recovery.");
       const next = path.join(base, "generations", key);
       if (directory !== next) {
         const previousFile = path.join(directory, "state.json");
@@ -80,8 +80,8 @@ export async function runCompileLoop(options: CompileLoopOptions): Promise<Compi
     if (existsSync(stateFile)) {
       state = loopStateSchema.parse(read(stateFile));
       if (state.root !== root || state.sourceId !== request.sourceId || state.sourceHash !== options.sourceHash) throw new Error("COMPILE_LOOP_SCOPE_CHANGED: inspect the original source and workspace bindings; do not rewrite the retained state or retry under another source.");
-      if (state.policyHash !== digest(policy)) throw new Error(state.phase === "DONE" && request.rebuild
-        ? "COMPILE_LOOP_NEW_RUN_REQUIRED: a new rebuild must bind the completed supervision.stateHash with --loop-new-run; the original delivery and policy remain unchanged."
+      if (state.policyHash !== digest(policy)) throw new Error(state.phase === "DONE"
+        ? "COMPILE_LOOP_NEW_RUN_REQUIRED: a new generation must bind the completed supervision.stateHash with --loop-new-run; the original delivery and policy remain unchanged."
         : "COMPILE_LOOP_POLICY_CHANGED: inspect the saved policy and original source before revising it; no reset or unchanged retry.");
       if (state.childPid || !["READY", "BREAK", "DONE"].includes(state.phase)) throw new Error("COMPILE_LOOP_IN_FLIGHT: inspect the original child on its owning host; never redispatch uncertain work.");
       if (!existsSync(requestFile) || !existsSync(path.join(directory, "policy.json"))

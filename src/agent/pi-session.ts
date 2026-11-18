@@ -1,4 +1,3 @@
-import { COMPILER_TOOL_NAMES } from "../compiler/proposal-tools.js";
 import { createNwhRequestPolicy } from "./pi-request-policy.js";
 import { currentPlayModelBudget } from "../runtime/play-model-budget.js";
 import { installModelRequestBudget, type ModelRequestBudget } from "./model-request-budget.js";
@@ -817,7 +816,7 @@ export class PiAgentSession {
         redact: text => redactHostWorkspacePath(text, this.options.workspace.root),
         includeNwhExtension: this.options.includeNwhExtension !== false,
         allowedToolNames: new Set([...configuredTools.map(tool => tool.name),
-          ...(this.options.includeNwhExtension === false ? [] : ["rename_session", ...COMPILER_TOOL_NAMES])]),
+          ...(this.options.includeNwhExtension === false ? [] : ["rename_session"])]),
       });
       const services = await createAgentSessionServices({
         cwd,

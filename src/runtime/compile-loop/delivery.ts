@@ -13,7 +13,7 @@ export type WorkerResult = z.infer<typeof workerResultSchema>;
 
 export type NovelDelivery = { runId: string; candidateBundleHash?: string; branchId?: string; completed: boolean };
 export async function verifyNovelDelivery(root: string, sourceId: string, delivery: NovelDelivery) {
-  const { NovelCompilationRunStore, NOVEL_COMPILATION_PHASES } = await import("../../workflow/novel-compilation.js");
+  const { NovelCompilationRunStore, FULL_COMPILATION_PHASES: NOVEL_COMPILATION_PHASES } = await import("../../workflow/novel-compilation.js");
   const { WorkspaceStore } = await import("../../storage/workspace-store.js");
   const { PreparedNovelCache } = await import("../../compiler/prepared-cache.js");
   const { assertPreparedReadiness, preparedSubjectHash } = await import("../../compiler/certification.js");

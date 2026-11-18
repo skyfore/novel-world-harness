@@ -16,7 +16,7 @@ export type SupervisedCompileOptions = CompileNovelOptions & {
 
 /** Public CLI default; phase commands and the explicit diagnostic opt-out retain their single invocation semantics. */
 export async function compileNovelWithLoop(options: SupervisedCompileOptions) {
-  if (options.loopNewRun && (options.phase || options.loop === false || !options.rebuild)) throw new Error("--loop-new-run requires the full supervised --rebuild command and the previous completed supervision.stateHash.");
+  if (options.loopNewRun && (options.phase || options.loop === false)) throw new Error("--loop-new-run requires the full supervised command and the previous completed supervision.stateHash.");
   if (options.phase || options.loop === false) return compileNovelCommand(options);
   const root = path.resolve(options.root);
   let source: SourceDocument;
@@ -39,10 +39,9 @@ export async function compileNovelWithLoop(options: SupervisedCompileOptions) {
   const explicit: WorkerRequest = { root, sourceId: source.id, model: options.model,
     configPath: retained && !retained.request.configPath && configPath === path.join(root, "novel-harness.yaml") ? undefined : configPath,
     branchId: options.branchId,
-    rebuild: options.rebuild || retained?.request.rebuild, cacheRoot: options.cacheRoot,
+    cacheRoot: options.cacheRoot, throughChapter: options.throughChapter ?? retained?.request.throughChapter, throughByte: options.throughByte ?? retained?.request.throughByte,
     evaluationPlanFile: options.evaluationPlanFile ? path.resolve(root, options.evaluationPlanFile) : undefined,
-    evaluationPlanHash: options.evaluationPlanHash, upstreamRepairPlan: options.upstreamRepairPlan,
-    upstreamRepairFinishFile: options.upstreamRepairFinishFile ? path.resolve(root, options.upstreamRepairFinishFile) : undefined };
+    evaluationPlanHash: options.evaluationPlanHash };
   const request = { ...retained?.request, ...Object.fromEntries(Object.entries(explicit).filter(([, value]) => value !== undefined)) } as WorkerRequest;
   const state = await runCompileLoop({ request, sourceHash: source.contentSha256,
     engineerModel: options.engineerModel ?? retained?.engineerModel ?? "gpt-5.6-sol", signal: options.signal ?? new AbortController().signal,

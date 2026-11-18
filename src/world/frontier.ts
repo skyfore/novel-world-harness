@@ -416,7 +416,9 @@ export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: str
     || possibility.proposedProcesses?.operations.length
     || possibility.proposedNorms?.operations.length
     || possibility.timeAdvance
-    || possibility.kind === "due-process",
+    || possibility.kind === "due-process"
+    // A canonical occurrence is material in itself (occurrence channel).
+    || (possibility.kind === "canon-analogue" && Boolean(possibility.canonicalEventId)),
   );
   if (entry.status !== "eligible" || !hasEffect || possibility.canonicalScaffold) return null;
   const causalRelations = entry.trace.causalLinks.flatMap((item): BranchEventRelationProposal[] => {

@@ -1233,6 +1233,8 @@ export const progressChannelSchema = z.enum([
   "thread",
   "time-pressure",
   "consequence",
+  /** A canonical event happened in this branch: branch truth even without typed effects. */
+  "occurrence",
 ]);
 export type ProgressChannel = z.infer<typeof progressChannelSchema>;
 
@@ -1308,9 +1310,14 @@ export const progressCertificateSchema = z.object({
   messageCount: z.number().int().positive().max(32).optional(),
   timeAdvanced: z.boolean(),
   sceneTransition: sceneTransitionSchema.optional(),
+  /** Present (true) only when this commit realizes a not-yet-realized canonical event. */
+  canonicalOccurrence: z.literal(true).optional(),
   channels: z.array(progressChannelSchema),
 }).strict().superRefine((certificate, ctx) => {
   const uniqueChannels = new Set(certificate.channels);
+  if (Boolean(certificate.canonicalOccurrence) !== uniqueChannels.has("occurrence")) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "occurrence channel must exactly match canonicalOccurrence" });
+  }
   if (uniqueChannels.size !== certificate.channels.length) {
     ctx.addIssue({ code: "custom", path: ["channels"], message: "Progress certificate channels must be unique" });
   }
@@ -2013,5 +2020,5 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
-export const WORLD_SCHEMA_VERSION = 3;
-export const WORLD_ENGINE_VERSION = "0.36.0";
+export const WORLD_SCHEMA_VERSION = 4;
+export const WORLD_ENGINE_VERSION = "0.37.0";

@@ -33,7 +33,19 @@ export type ProgressCertificateInput = {
   messageCount?: number;
   timeAdvanced: boolean;
   sceneTransition?: SceneTransition;
+  /** The commit realizes a not-yet-realized canonical event (occurrence materiality). */
+  canonicalOccurrence?: boolean;
 };
+
+/**
+ * A committed canonical occurrence: the event realizes exactly the canonical
+ * event of its canon-* possibility and is not an adaptation. The engine admits
+ * each canonical event's realization once, so this is always a first occurrence.
+ */
+export function isCanonicalOccurrence(event: Pick<CommittedEvent, "possibilityId" | "realizesCanonicalEventIds" | "canonicalAdaptation">): boolean {
+  const id = event.possibilityId?.startsWith("canon-") ? event.possibilityId.slice("canon-".length) : undefined;
+  return Boolean(id && !event.canonicalAdaptation && event.realizesCanonicalEventIds?.includes(id));
+}
 
 /** Build the only material-progress claim that may cross the commit boundary. */
 export function deriveProgressCertificate(input: ProgressCertificateInput): ProgressCertificate {
@@ -57,6 +69,7 @@ export function deriveProgressCertificate(input: ProgressCertificateInput): Prog
   if (input.messageCount) channels.add("text");
   if (input.timeAdvanced) channels.add("time");
   if (input.sceneTransition) channels.add("scene");
+  if (input.canonicalOccurrence) channels.add("occurrence");
 
   const effectiveStateOperations = stateIndexes.map((index) => input.loaded.stateDelta?.operations[index]).filter(isDefined);
   const effectiveSemanticOperations = semanticIndexes.map((index) => input.loaded.semanticDelta?.operations[index]).filter(isDefined);
@@ -96,6 +109,7 @@ export function deriveProgressCertificate(input: ProgressCertificateInput): Prog
     ...(input.messageCount ? { messageCount: input.messageCount } : {}),
     timeAdvanced: input.timeAdvanced,
     ...(input.sceneTransition ? { sceneTransition: structuredClone(input.sceneTransition) } : {}),
+    ...(input.canonicalOccurrence ? { canonicalOccurrence: true as const } : {}),
     channels: [...channels],
   });
 }
@@ -109,7 +123,8 @@ export function hasMaterialProgress(certificate: ProgressCertificate): boolean {
     || certificate.utteranceCount > 0
     || (certificate.messageCount ?? 0) > 0
     || certificate.timeAdvanced
-    || Boolean(certificate.sceneTransition);
+    || Boolean(certificate.sceneTransition)
+    || certificate.canonicalOccurrence === true;
 }
 
 /** Validate certificate pointers and derived channels against immutable event effects. */
@@ -131,6 +146,7 @@ export function validateCommittedProgress(
     messageCount: event.writtenMessages?.length ?? 0,
     timeAdvanced,
     ...(event.progress?.scene ? { sceneTransition: event.progress.scene } : {}),
+    canonicalOccurrence: isCanonicalOccurrence(event),
   });
   assertPointerSet(certificate.stateOperations, event.effects.stateDeltaHash, loaded.stateDelta, "state");
   assertPointerSet(certificate.knowledgeOperations, event.effects.knowledgeDeltaHash, loaded.knowledgeDelta, "knowledge");

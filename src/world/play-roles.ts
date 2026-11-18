@@ -1,5 +1,6 @@
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
-import { assertPreparedReadiness, preparedSubjectHash, type NovelClosureAssessment } from "../compiler/certification.js";
+import { preparedSubjectHash, type NovelClosureAssessment } from "../compiler/certification.js";
+import { admittedEntries, assertPlayableRevision, DEFAULT_MINIMUM_ADMISSION_TIER, type AdmissionTier } from "../compiler/cut-admission.js";
 import { buildRoleRoster, majorRoleCandidates } from "../compiler/role-roster.js";
 import { contentHash } from "./canonical.js";
 import { deriveCharacterEntryOptions, deriveCharacterEntrySeed } from "./entry-context.js";
@@ -35,16 +36,36 @@ export function describePreparedRoles(bundle: PreparedNovelBundle, assessment: N
   });
 }
 
-export function certifiedEntryOptions(bundle: PreparedNovelBundle) {
-  assertPreparedReadiness(bundle);
-  const ready = new Set(describePreparedRoles(bundle).filter((role) => role.status === "ready").map((role) => role.actorId));
-  return deriveCharacterEntryOptions(bundle).filter((entry) => ready.has(entry.actorId));
+/**
+ * Entries a fresh playthrough may start from: every ready role of a fully
+ * certified revision, otherwise each role whose grounded entry cut is
+ * admitted at the minimum tier.
+ */
+export function certifiedEntryOptions(bundle: PreparedNovelBundle, minimumTier: AdmissionTier = DEFAULT_MINIMUM_ADMISSION_TIER) {
+  if (assertPlayableRevision(bundle, minimumTier) === "certified") {
+    const ready = new Set(describePreparedRoles(bundle).filter((role) => role.status === "ready").map((role) => role.actorId));
+    return deriveCharacterEntryOptions(bundle).filter((entry) => ready.has(entry.actorId));
+  }
+  const admitted = admittedCharacterEntries(bundle, minimumTier);
+  return deriveCharacterEntryOptions(bundle).filter((entry) => admitted.has(entry.actorId));
 }
 
 /** Checked immediately before Genesis as well as at role selection. */
-export function requireCertifiedEntry(bundle: PreparedNovelBundle, actorId: string, expectedEntryCutHash?: string) {
-  if (!certifiedEntryOptions(bundle).some((entry) => entry.actorId === actorId)) throw new Error(`MAJOR_ROLE_NOT_CERTIFIED: ${actorId} has no certified entry in this revision`);
+export function requireCertifiedEntry(bundle: PreparedNovelBundle, actorId: string, expectedEntryCutHash?: string, minimumTier: AdmissionTier = DEFAULT_MINIMUM_ADMISSION_TIER) {
+  if (!certifiedEntryOptions(bundle, minimumTier).some((entry) => entry.actorId === actorId)) throw new Error(`MAJOR_ROLE_NOT_CERTIFIED: ${actorId} has no certified or admitted entry in this revision`);
   const seed = deriveCharacterEntrySeed(bundle, actorId);
+  const admitted = admittedCharacterEntries(bundle, minimumTier).get(actorId);
+  if (admitted && admitted.entryCutHash !== seed.cut.hash) throw new Error("ENTRY_CUT_STALE: the admitted entry was probed at a different cut. Re-admit the revision before starting play.");
   if (expectedEntryCutHash && seed.cut.hash !== expectedEntryCutHash) throw new Error("ENTRY_CUT_STALE: the selected historical cut changed. Refresh the role list and copy entryCutHash before retrying once.");
   return seed;
+}
+
+/** Admitted opening/checkpoint entries per actor (derived scene entries are started by cut). */
+function admittedCharacterEntries(bundle: PreparedNovelBundle, minimumTier: AdmissionTier): Map<string, { cutId: string; entryCutHash?: string }> {
+  const entries = new Map<string, { cutId: string; entryCutHash?: string }>();
+  for (const { cut, actor } of admittedEntries(bundle, minimumTier)) {
+    if (actor.entryBasis === "derived" || entries.has(actor.actorId)) continue;
+    entries.set(actor.actorId, { cutId: cut.cutId, ...(actor.entryCutHash ? { entryCutHash: actor.entryCutHash } : {}) });
+  }
+  return entries;
 }

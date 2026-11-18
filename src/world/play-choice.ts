@@ -15,6 +15,7 @@ import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prep
 import { createWorldBranch } from "./instance.js";
 import { BranchStore } from "./store.js";
 import { certifiedEntryOptions, requireCertifiedEntry } from "./play-roles.js";
+import { minimumAdmissionTierFor } from "../config/load.js";
 import {
   deriveCharacterEntryOptions,
   deriveCharacterEntrySeed,
@@ -123,20 +124,21 @@ export async function choosePlayExperience(
   if (sourceId && (mode === "create" || (!instanceCatalog.instances.length && (options.createIfMissing ?? true)))) {
     const source = catalog.novels.find((novel) => novel.id === sourceId);
     if (!source) throw new Error(`Unknown novel source '${sourceId}'.`);
-    const prepared = await new PreparedNovelCache(root, options.preparedCacheRoot).loadFreshActive(source);
+    const minimumAdmissionTier = await minimumAdmissionTierFor(root);
+    const prepared = await new PreparedNovelCache(root, options.preparedCacheRoot).loadFreshActive(source, { minimumAdmissionTier });
     if (!prepared) throw new Error(`Novel '${source.title}' has no active prepared revision with character entry checkpoints.`);
     if (options.expectedPreparedRevisionHash && prepared.bundleHash !== options.expectedPreparedRevisionHash) {
       throw new Error(
         `Active prepared revision changed from ${options.expectedPreparedRevisionHash} to ${prepared.bundleHash}; refresh the frozen base before creating an instance.`,
       );
     }
-    const entryOptions = certifiedEntryOptions(prepared.bundle);
+    const entryOptions = certifiedEntryOptions(prepared.bundle, minimumAdmissionTier);
     if (!entryOptions.length) {
       throw new Error(`Novel '${source.title}' has no grounded embodied character entry with complete prior reader context. Recompile its opening and canonical scenes before play.`);
     }
     createdActorId = await chooseCharacterEntry(entryOptions, options.character, source.title, ask);
     if (!createdActorId) return undefined;
-    const selectedSeed = requireCertifiedEntry(prepared.bundle, createdActorId, options.expectedEntryCutHash);
+    const selectedSeed = requireCertifiedEntry(prepared.bundle, createdActorId, options.expectedEntryCutHash, minimumAdmissionTier);
     createdReaderContext = selectedSeed.readerContext;
     const created = await createSourcePlayInstance(root, catalog, sourceId, {
       ...(mode === "create" ? { alwaysCreate: true } : {}),

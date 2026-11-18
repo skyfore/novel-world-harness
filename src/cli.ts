@@ -26,7 +26,7 @@ import { migrateLegacyAcquisitions } from "./compiler/acquisition-migration.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
 import { compileNovelCommand } from "./commands/compile-novel.js";
-import { novelCutsCommand } from "./commands/novel-cuts.js";
+import { novelAdmitCommand, novelCutsCommand } from "./commands/novel-cuts.js";
 import { compileNovelWithLoop } from "./commands/compile-novel-loop.js";
 import { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
 import { WorkspaceOperationLock } from "./util/workspace-lock.js";
@@ -156,6 +156,12 @@ novelOptions(compileNovel.command("cuts").description("Read-only cut diagnostics
   .action(async (_options, child) => {
     const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
     await novelCutsCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision });
+  });
+novelOptions(compileNovel.command("admit").description("Freeze the current candidate with per-cut admission; publishable when certified or when a cut admits an entry at play.minimumAdmissionTier"))
+  .option("--activate", "activate the admitted revision for fresh play")
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await novelAdmitCommand({ root: rootFor(options), sourceId: options.source, configPath: options.config ? path.resolve(options.config) : undefined, activate: Boolean(options.activate) });
   });
 
 const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and run bounded host-reviewed corrections");

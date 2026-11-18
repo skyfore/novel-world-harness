@@ -3,6 +3,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 import YAML from "yaml";
 import { configSchema, type HarnessConfig } from "./schema.js";
+import { DEFAULT_MINIMUM_ADMISSION_TIER, type AdmissionTier } from "../compiler/cut-admission-schema.js";
 
 const ENV_PATTERN = /\$\{([A-Z_][A-Z0-9_]*)\}/g;
 
@@ -21,6 +22,12 @@ export async function loadOptionalConfig(configPath: string): Promise<HarnessCon
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+/** The configured minimum admission tier for fresh play (default: enterable). */
+export async function minimumAdmissionTierFor(root: string, configPath?: string): Promise<AdmissionTier> {
+  const config = await loadOptionalConfig(configPath ?? path.join(root, "novel-harness.yaml"));
+  return config?.play?.minimumAdmissionTier ?? DEFAULT_MINIMUM_ADMISSION_TIER;
 }
 
 export function resolveConfigPath(value?: string): string {

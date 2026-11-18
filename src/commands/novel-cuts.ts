@@ -4,6 +4,9 @@ import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.
 import { bundleCanonTimeline, timelineBlockedFromIndex, TIMELINE_BLOCKING_CODES } from "../world/canon-timeline.js";
 import type { ValidationIssue } from "../world/model.js";
 import { resolveNovelSource } from "../world/play-experience.js";
+import { minimumAdmissionTierFor } from "../config/load.js";
+import { tierAtLeast } from "../compiler/cut-admission-schema.js";
+import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
 export type NovelCutsReport = {
   sourceId: string;
@@ -108,4 +111,35 @@ export async function inspectNovelCuts(options: NovelCutsOptions): Promise<Novel
 
 export async function novelCutsCommand(options: NovelCutsOptions): Promise<void> {
   console.log(JSON.stringify(await inspectNovelCuts(options), null, 2));
+}
+
+export type NovelAdmitOptions = { root: string; sourceId?: string; configPath?: string; activate?: boolean; cacheRoot?: string };
+
+/**
+ * Freeze the current candidate with its closure assessment and per-cut
+ * admission manifest, and optionally activate it. Publishes only when the
+ * revision is fully certified or admits at least one entry at the configured
+ * minimum tier.
+ */
+export async function novelAdmitCommand(options: NovelAdmitOptions): Promise<void> {
+  const root = path.resolve(options.root);
+  const minimumAdmissionTier = await minimumAdmissionTierFor(root, options.configPath);
+  const summary = await withWorkspaceOperationLock(root, "compiler", async () => {
+    const workspace = await WorkspaceStore.openReadOnly(root);
+    const sources = await workspace.listSources();
+    const source = options.sourceId ? await resolveNovelSource(workspace, options.sourceId) : sources.length === 1 ? sources[0]! : undefined;
+    if (!source) throw new Error(`Select one novel with --source. Registered sources: ${sources.map((item) => item.id).join(", ") || "none"}.`);
+    const cache = new PreparedNovelCache(root, options.cacheRoot);
+    const admitted = await cache.admitCandidate(source, { minimumAdmissionTier });
+    if (options.activate) await cache.activate(source, admitted.bundleHash!, { minimumAdmissionTier });
+    const tiers: Record<string, number> = {};
+    for (const cut of admitted.admission.cuts) tiers[cut.tier] = (tiers[cut.tier] ?? 0) + 1;
+    return {
+      sourceId: source.id, bundleHash: admitted.bundleHash, activated: Boolean(options.activate), minimumAdmissionTier,
+      horizonIndex: admitted.admission.horizonIndex, cutTiers: tiers,
+      admitted: admitted.admission.cuts.flatMap((cut) => cut.actors.filter((actor) => tierAtLeast(actor.tier, minimumAdmissionTier))
+        .map((actor) => ({ cutId: cut.cutId, sceneId: cut.sceneId, beforeEventId: cut.beforeEventId, actorId: actor.actorId, tier: actor.tier }))),
+    };
+  });
+  console.log(JSON.stringify(summary, null, 2));
 }

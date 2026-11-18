@@ -3,10 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "../world/canonical.js";
-import { bundleCanonTimeline, openingTimelineIndex, timelineBlockedFromIndex, timelineGroupStart, timelineIndex, TIMELINE_ADVISORY_CODES, type CanonTimeline } from "../world/canon-timeline.js";
+import { bundleCanonTimeline, cutIdFor, openingTimelineIndex, timelineBlockedFromIndex, timelineGroupStart, timelineIndex, TIMELINE_ADVISORY_CODES, type CanonTimeline } from "../world/canon-timeline.js";
 import { WorldContextStore } from "../world/context.js";
 import { WorldEngine } from "../world/engine.js";
-import { deriveCharacterEntryOptions, deriveCharacterEntrySeed, type CharacterEntrySeed } from "../world/entry-context.js";
+import { deriveCharacterEntryOptions, deriveSceneEntrySeed, type CharacterEntrySeed } from "../world/entry-context.js";
 import type { ValidationIssue } from "../world/model.js";
 import { WorldRuntime } from "../world/runtime.js";
 import { CanonReplayError, executeSceneEvent } from "../world/source-history.js";
@@ -20,8 +20,8 @@ import { assessSemanticSupport } from "./semantic-support.js";
 export * from "./cut-admission-schema.js";
 import { admissionManifestSchema, cutAdmissionSchema, DEFAULT_MINIMUM_ADMISSION_TIER, tierAtLeast, type ActorAdmission, type AdmissionManifest, type AdmissionTier, type CutAdmission } from "./cut-admission-schema.js";
 
-/** A playable entry candidate at one cut. M3 adds derived scene entries for every present actor. */
-export type CutEntryCandidate = { actorId: string; entryBasis: ActorAdmission["entryBasis"]; seed: () => CharacterEntrySeed };
+/** A playable entry candidate at one cut; the seed may report the basis it actually used. */
+export type CutEntryCandidate = { actorId: string; entryBasis: ActorAdmission["entryBasis"]; seed: () => CharacterEntrySeed & { entryBasis?: ActorAdmission["entryBasis"] } };
 export type CutDescriptor = Pick<CutAdmission, "cutId" | "beforeEventId" | "sceneIds" | "index">;
 
 export type AdmissionOptions = {
@@ -29,14 +29,11 @@ export type AdmissionOptions = {
   inputIssues?: readonly ValidationIssue[];
   /** Run the seven deterministic probes per cut x actor (default true). */
   probe?: boolean;
-  /** Entry candidates per cut; defaults to each actor's grounded opening or checkpoint entry. */
+  /** Entry candidates per cut; defaults to opening actors, checkpoint actors and present scene actors. */
   entryCandidates?: (bundle: PreparedNovelBundle, cut: CutDescriptor) => CutEntryCandidate[];
 };
 
-/** Deterministic cut identity within one frozen timeline. */
-export function cutIdFor(beforeEventId: string, timelineHash: string): string {
-  return contentHash({ beforeEventId, timelineHash });
-}
+export { cutIdFor } from "../world/canon-timeline.js";
 
 /** Analyse a bundle under its frozen timeline (a derived one only for legacy candidates). */
 export function withFrozenTimeline(bundle: PreparedNovelBundle): PreparedNovelBundle {
@@ -149,7 +146,7 @@ export async function buildAdmissionManifest(input: PreparedNovelBundle, options
     if (start !== undefined) addCut(start);
   }
 
-  const candidates = options.entryCandidates ?? defaultEntryCandidates(baseline);
+  const candidates = options.entryCandidates ?? sceneEntryCandidates(baseline);
   const probing = options.probe !== false ? await ProbeWorld.open(bundle, subjectHash) : undefined;
   const cuts: CutAdmission[] = [];
   try {
@@ -168,7 +165,12 @@ export async function buildAdmissionManifest(input: PreparedNovelBundle, options
         actors.push(actor);
         if (blocking.length) { actor.issues.push({ code: "CUT_NOT_REPLAYABLE", message: "The cut itself is not replayable" }); continue; }
         let seed: CharacterEntrySeed;
-        try { seed = candidate.seed(); actor.entryCutHash = seed.cut.hash; }
+        try {
+          const derived = candidate.seed();
+          seed = derived;
+          actor.entryCutHash = seed.cut.hash;
+          if (derived.entryBasis) actor.entryBasis = derived.entryBasis;
+        }
         catch (error) { actor.issues.push({ code: "ENTRY_CONTEXT_MISSING", message: error instanceof Error ? error.message : String(error) }); continue; }
         if (!probing) { actor.tier = "replayable"; continue; }
         const result = await probing.probe(seed, candidate.actorId, `cut-${cut.index}-${candidate.actorId}`);
@@ -199,13 +201,26 @@ export async function buildAdmissionManifest(input: PreparedNovelBundle, options
   });
 }
 
-/** Each actor's grounded opening or first checkpoint entry, placed at its cut. */
-function defaultEntryCandidates(baseline: number): NonNullable<AdmissionOptions["entryCandidates"]> {
-  let options: ReturnType<typeof deriveCharacterEntryOptions> | undefined;
-  return (bundle, cut) => (options ??= deriveCharacterEntryOptions(bundle)).flatMap((option): CutEntryCandidate[] => {
-    const here = option.entry.kind === "opening" ? cut.index === baseline : option.entry.canonicalEventId !== undefined && cut.beforeEventId === option.entry.canonicalEventId;
-    return here ? [{ actorId: option.actorId, entryBasis: option.entry.kind === "opening" ? "opening" : "checkpoint", seed: () => deriveCharacterEntrySeed(bundle, option.actorId) }] : [];
-  });
+/**
+ * Every character who can plausibly enter at a cut: opening actors at the
+ * opening position, actors with a compiled checkpoint on the cut's event, and
+ * actors present in a scene that starts there. deriveSceneEntrySeed decides.
+ */
+function sceneEntryCandidates(baseline: number): NonNullable<AdmissionOptions["entryCandidates"]> {
+  let openingActors: Set<string> | undefined;
+  return (bundle, cut) => {
+    openingActors ??= new Set(deriveCharacterEntryOptions(bundle).filter((option) => option.entry.kind === "opening").map((option) => option.actorId));
+    const characters = new Set(bundle.canonical.entities.filter((entity) => entity.kind === "character").map((entity) => entity.id));
+    const event = bundle.canonical.events.find((item) => item.id === cut.beforeEventId);
+    const checkpointActors = new Set((event?.characterEntryCheckpoints ?? []).map((checkpoint) => checkpoint.actorId));
+    const present = bundle.canonical.sceneOccurrences.filter((scene) => cut.sceneIds.includes(scene.id)).flatMap((scene) => scene.presentActorIds);
+    const actors = new Set([...(cut.index === baseline ? openingActors : []), ...checkpointActors, ...present].filter((id) => characters.has(id)));
+    return [...actors].sort().map((actorId): CutEntryCandidate => ({
+      actorId,
+      entryBasis: cut.index === baseline && openingActors!.has(actorId) ? "opening" : checkpointActors.has(actorId) ? "checkpoint" : "derived",
+      seed: () => deriveSceneEntrySeed(bundle, cut.cutId, actorId),
+    }));
+  };
 }
 
 /** Freshness of a frozen manifest against the bundle it claims to describe. */

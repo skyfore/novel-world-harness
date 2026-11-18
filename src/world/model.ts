@@ -1152,6 +1152,8 @@ export type CanonicalAdaptation = z.infer<typeof canonicalAdaptationSchema>;
 export const entryKnowledgeHistorySchema = z.object({
   version: z.literal(1), actorId: idSchema, beforeCanonicalEventId: idSchema,
   cutHash: z.string().regex(/^[a-f0-9]{64}$/),
+  /** A derived scene entry has no compiled checkpoint; its experience is exactly the canonical prefix. */
+  basis: z.literal("derived-scene").optional(),
 }).strict();
 export type EntryKnowledgeHistory = z.infer<typeof entryKnowledgeHistorySchema>;
 export const entryProjectionSeedSchema = z.object({

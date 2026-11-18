@@ -15,8 +15,12 @@ export function replayEntryKnowledge(input: EntryKnowledgeHistory, context: Worl
   if (opening.projectionSeed?.knowledgeHistory) return stop("Recursive opening knowledge history is not supported");
   const target = context.events?.get(history.beforeCanonicalEventId);
   if (!target || context.entities.get(history.actorId)?.kind !== "character") return stop("Entry occurrence or character is outside the frozen scope");
-  const checkpoint = target.characterEntryCheckpoints?.find(item => item.actorId === history.actorId);
-  if (!checkpoint) return stop("Entry character has no grounded checkpoint");
+  const derived = history.basis === "derived-scene";
+  const compiled = target.characterEntryCheckpoints?.find(item => item.actorId === history.actorId);
+  if (!compiled && !derived) return stop("Entry character has no grounded checkpoint");
+  if (compiled && derived) return stop("A derived scene entry cannot shadow a compiled checkpoint");
+  // A derived scene entry is bodily present and carries no knowledge of its own.
+  const checkpoint = compiled ?? { actorId: history.actorId, participantPresence: [{ entityId: history.actorId, mode: "physical" as const }], knowledge: undefined, projectionSeed: undefined };
   const bundle = { source: { id: context.sourceId }, canonical: {
     initialWorld: opening, entities: [...context.entities.values()], events: [...(context.events?.values() ?? [])], rules: [...context.rules.values()],
     claims: [...(context.claims?.values() ?? [])], propositions: [...(context.propositions?.values() ?? [])], attributions: [...(context.attributions?.values() ?? [])],

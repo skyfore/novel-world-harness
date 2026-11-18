@@ -1,6 +1,6 @@
 import { entryKnowledgeSupplement } from "./entry-knowledge.js";
 import { remoteEntryOccurrenceIssues } from "./entry-agency.js";
-import { assessEntryState } from "./entry-contract.js";
+import { assessEntryState, entryContextFields } from "./entry-contract.js";
 import { applyProcessDelta, emptyProcessState } from "./process-effects.js";
 import { applyStateDelta, emptyWorldState, StateSchemaRegistry, DEFAULT_STATE_FIELDS, evaluatePredicateTruth, advanceTemporalState } from "./state.js";
 import { resolveActionInvocation } from "./action-ontology.js";
@@ -9,12 +9,13 @@ import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateInca
 import { materializeProcessProposal } from "./process-ontology.js";
 import { validateSemanticEffect } from "./semantic-effect.js";
 import { deriveEntryCut, type EntryCut } from "./entry-cut.js";
-import { canonTimelineProjectionIssues, openingTimelineIndex, timelineGroupStart, timelineIndex, type CanonTimeline } from "./canon-timeline.js";
+import { canonTimelineProjectionIssues, cutIdFor, openingTimelineIndex, timelineGroupStart, timelineIndex, type CanonTimeline } from "./canon-timeline.js";
 import { timeAdvanceInDays } from "./time.js";
 import { applyEventExecutions, validateEventExecutions } from "./event-execution.js";
 import type { EntryProjectionSeed } from "./model.js";
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 import type {
+  StateValue,
   CanonicalEvent,
   CharacterEntryCheckpoint,
   ActorEventObservation,
@@ -173,13 +174,29 @@ export function deriveCharacterEntrySeed(
       `Character '${actorId}' has no grounded playable entry with complete prior reader context. A name, mention, letter signature, remote reference, or incomplete recap is not enough to establish a lived scene.`,
     );
   }
+  const targetEvent = option.entry.canonicalEventId
+    ? bundle.canonical.events.find((event) => event.id === option.entry.canonicalEventId)
+    : undefined;
+  return seedForEntry(bundle, actorId, option, targetEvent ? entryCheckpointFor(targetEvent, actorId, bundle) : undefined);
+}
+
+/**
+ * The entry seed for one actor at one entry point: an opening, a compiled
+ * checkpoint, or a derived checkpoint. Shared by first-entry and scene entry.
+ */
+function seedForEntry(
+  bundle: PreparedNovelBundle,
+  actorId: string,
+  option: Pick<CharacterEntryOption, "entry">,
+  entryCheckpoint: CharacterEntryCheckpoint | undefined,
+  derived = false,
+): CharacterEntrySeed {
   const { ordered: orderedEvents, opening: baselineIndex, timeline } = entryChronology(bundle);
   const priorEvents = orderedEvents.slice(0, option.entry.discourseOrder);
   const cutChronology = timeline ? { timeline, baselineIndex } : {};
   const targetEvent = option.entry.canonicalEventId
     ? orderedEvents.find((event) => event.id === option.entry.canonicalEventId)
     : undefined;
-  const entryCheckpoint = targetEvent ? entryCheckpointFor(targetEvent, actorId, bundle) : undefined;
   let projectionSeed = entryCheckpoint?.projectionSeed ?? (option.entry.kind === "opening" ? bundle.canonical.initialWorld.projectionSeed : undefined);
   const openingSeed = bundle.canonical.initialWorld.projectionSeed;
   if (option.entry.kind !== "opening" && !entryCheckpoint?.projectionSeed && openingSeed
@@ -273,7 +290,7 @@ export function deriveCharacterEntrySeed(
       }
     }
     projectionSeed = { version: 1,
-      ...(targetEvent && forwardEvents.some(event => event.observedKnowledge?.operations.length) ? { knowledgeHistory: { version: 1 as const, actorId, beforeCanonicalEventId: targetEvent.id, cutHash: cut.hash } } : {}), semantics: { version: 1, operations: [] }, processes, norms: { version: 1, operations: [] },
+      ...(targetEvent && forwardEvents.some(event => event.observedKnowledge?.operations.length) ? { knowledgeHistory: { version: 1 as const, actorId, beforeCanonicalEventId: targetEvent.id, cutHash: cut.hash, ...(derived ? { basis: "derived-scene" as const } : {}) } } : {}), semantics: { version: 1, operations: [] }, processes, norms: { version: 1, operations: [] },
       activeRuleIds: [...activeRuleIds].sort(), elapsedDays };
   }
   const evidence = uniqueEvidence([
@@ -312,6 +329,118 @@ export function deriveCharacterEntrySeed(
         }),
     readerContext: readerContextForEntry(option.entry, priorEvents, bundle.canonical.entities),
   };
+}
+
+export type SceneEntryBasis = "opening" | "checkpoint" | "derived";
+export type SceneEntrySeed = CharacterEntrySeed & { cutId: string; entryBasis: SceneEntryBasis; sceneIds: string[] };
+
+/**
+ * Entry at any admitted cut x actor, tried in order: the frozen opening, a
+ * compiled checkpoint on the cut's event, then a deterministic derivation.
+ * A derived entry re-asserts the actor's prefix-folded operational state, adds
+ * the scene location when none is known and explicit life for a physically
+ * present actor, and is grounded under the same entry contract. It never
+ * applies the cut event's own outcome or future knowledge.
+ */
+export function deriveSceneEntrySeed(input: PreparedNovelBundle, cutId: string, actorId: string): SceneEntrySeed {
+  const bundle = withExecutionEntries(input);
+  const timeline = bundle.canonical.timeline;
+  if (!timeline) throw new Error("ENTRY_TIMELINE_REQUIRED: scene entry needs the revision's frozen canonical timeline");
+  const { ordered, opening } = entryChronology(bundle);
+  const index = timelineIndex(timeline);
+  const entry = timeline.entries.find((candidate) => cutIdFor(candidate.eventId, timeline.hash) === cutId);
+  if (!entry) throw new Error(`ENTRY_CUT_UNKNOWN: ${cutId} is not a cut of this revision's timeline`);
+  const position = timelineGroupStart(timeline, entry.eventId, index)!;
+  const target = ordered[position]!;
+  const actor = bundle.canonical.entities.find((entity) => entity.id === actorId);
+  if (actor?.kind !== "character") throw new Error(`ENTRY_ACTOR_UNKNOWN: ${actorId} is not a character of this revision`);
+  const scenes = bundle.canonical.sceneOccurrences.filter((scene) => {
+    const starts = ordered.filter((event) => scene.eventIds.includes(event.id) || event.sceneOccurrenceIds?.includes(scene.id))
+      .map((event) => timelineGroupStart(timeline, event.id, index)!);
+    return starts.length > 0 && Math.min(...starts) === position;
+  });
+  const sceneIds = scenes.map((scene) => scene.id).sort();
+  const priorComplete = ordered.slice(0, position).every((event) => event.readerSummary?.trim());
+  if (!priorComplete) throw new Error("ENTRY_READER_CONTEXT_INCOMPLETE: every event before the cut needs a reader recap");
+  const done = (entryBasis: SceneEntryBasis, seed: CharacterEntrySeed): SceneEntrySeed => ({ ...seed, cutId, entryBasis, sceneIds });
+
+  if (position === opening && initialWorldRepresentsActor(bundle, actorId)) {
+    const option = deriveCharacterEntryOptions(bundle).find((candidate) => candidate.actorId === actorId && candidate.entry.kind === "opening");
+    if (option) return done("opening", seedForEntry(bundle, actorId, option, undefined));
+  }
+  const entryPoint = (title: string, readerSetup: string, evidence: EvidenceRef[]): Pick<CharacterEntryOption, "entry"> => ({ entry: {
+    actorId, kind: "canonical-scene", title, discourseOrder: position, storyTime: structuredClone(target.storyTime),
+    canonicalEventId: target.id, readerSetup, evidence,
+  } });
+  const compiled = eventOffersEntry(target, actorId, bundle) ? entryCheckpointFor(target, actorId, bundle) : undefined;
+  if (compiled) {
+    const checkpoint = withExplicitLife(compiled, actorId, prefixActorValues(bundle, timeline, opening, target, actorId));
+    return done("checkpoint", seedForEntry(bundle, actorId, entryPoint(`${actor.canonicalName} 的亲历场景`, compiled.readerSetup, structuredClone(target.evidence)), checkpoint));
+  }
+
+  const scene = scenes.find((candidate) => candidate.presentActorIds.includes(actorId));
+  if (!scene) throw new Error(`ENTRY_CONTEXT_MISSING: ${actorId} is not present in a scene that starts at this cut`);
+  const checkpoint = derivedSceneCheckpoint(bundle, timeline, opening, target, scene, actor);
+  return done("derived", seedForEntry(bundle, actorId, entryPoint(`${actor.canonicalName} 的场景入场`, checkpoint.readerSetup, structuredClone(scene.evidence)), checkpoint, true));
+}
+
+/** The actor's own state after the opening and the replayed canonical prefix of a cut. */
+function prefixActorValues(bundle: PreparedNovelBundle, timeline: CanonTimeline, opening: number, target: CanonicalEvent, actorId: string): Record<string, StateValue> {
+  const cut = deriveEntryCut({ events: bundle.canonical.events, relations: bundle.canonical.eventRelations ?? [], beforeEventId: target.id, timeline, baselineIndex: opening,
+    baselineEventId: bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId, storyTime: target.storyTime });
+  if (cut.issues.length) throw new Error(cut.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
+  const events = new Map(bundle.canonical.events.map((event) => [event.id, event]));
+  const operations = [
+    ...bundle.canonical.initialWorld.delta.operations,
+    ...cut.replayEventIds.flatMap((id) => events.get(id)!.observedOutcome.operations),
+  ].filter((operation) => "entityId" in operation && operation.entityId === actorId);
+  try {
+    return applyStateDelta(emptyWorldState("scene-entry"), { version: 1, operations }, new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+      new Map(bundle.canonical.entities.map((entity) => [entity.id, entity])), new Map()).values[actorId] ?? {};
+  } catch { return {}; }
+}
+
+/** A bodily present actor whose life is never stated is alive at its own lived scene. */
+function withExplicitLife(checkpoint: CharacterEntryCheckpoint, actorId: string, prefix: Record<string, StateValue>): CharacterEntryCheckpoint {
+  const physical = checkpoint.participantPresence.some((item) => item.entityId === actorId && item.mode === "physical");
+  const stated = prefix["character.alive"] !== undefined || checkpoint.delta.operations.some((operation) => "entityId" in operation && operation.entityId === actorId && "field" in operation && operation.field === "character.alive");
+  if (!physical || stated) return checkpoint;
+  return { ...checkpoint, delta: { ...checkpoint.delta, operations: [...checkpoint.delta.operations, { op: "set", entityId: actorId, field: "character.alive", value: true }] } };
+}
+
+function derivedSceneCheckpoint(
+  bundle: PreparedNovelBundle,
+  timeline: CanonTimeline,
+  opening: number,
+  target: CanonicalEvent,
+  scene: PreparedNovelBundle["canonical"]["sceneOccurrences"][number],
+  actor: Entity,
+): CharacterEntryCheckpoint {
+  const registry = new StateSchemaRegistry(DEFAULT_STATE_FIELDS);
+  const entities = new Map(bundle.canonical.entities.map((entity) => [entity.id, entity]));
+  const values = prefixActorValues(bundle, timeline, opening, target, actor.id);
+  if (values["character.alive"] === false) throw new Error(`ENTRY_ACTOR_DEAD: ${actor.id} is dead before this cut`);
+  const operations: StateDelta["operations"] = [];
+  for (const field of entryContextFields(values, registry)) operations.push({ op: "set", entityId: actor.id, field, value: structuredClone(values[field]!) });
+  const location = typeof values["character.location"] === "string" ? values["character.location"] : scene.locationId;
+  if (values["character.location"] === undefined && scene.locationId && entities.get(scene.locationId)) {
+    operations.push({ op: "set", entityId: actor.id, field: "character.location", value: scene.locationId });
+  }
+  if (values["character.alive"] === undefined) operations.push({ op: "set", entityId: actor.id, field: "character.alive", value: true });
+  const placeName = typeof location === "string" ? entities.get(location)?.canonicalName ?? location : undefined;
+  const checkpoint: CharacterEntryCheckpoint = {
+    actorId: actor.id,
+    readerSetup: placeName ? `${actor.canonicalName}此刻在${placeName}，下面的场景即将展开。` : `${actor.canonicalName}身处下面即将展开的场景之中。`,
+    actorObservation: placeName ? `你此刻在${placeName}。` : "你正身处这一场景之中。",
+    participantPresence: scene.presentActorIds.filter((id) => entities.get(id)?.kind === "character").map((id) => ({ entityId: id, mode: "physical" as const })),
+    delta: { version: 1, operations },
+  };
+  const assessed = assessEntryState(actor.id, checkpoint, {
+    sourceId: bundle.source.id, entities, processTemplates: new Map((bundle.canonical.processTemplates ?? []).map((item) => [item.id, item])),
+    actionSchemas: new Map((bundle.canonical.actionSchemas ?? []).map((item) => [item.id, item])), acquisitions: new Map((bundle.canonical.acquisitions ?? []).map((item) => [item.id, item])),
+  });
+  if (assessed.state !== "grounded") throw new Error(`ENTRY_CONTEXT_MISSING: ${assessed.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
+  return checkpoint;
 }
 
 function withExecutionEntries(bundle: PreparedNovelBundle): PreparedNovelBundle {

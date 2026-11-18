@@ -356,6 +356,11 @@ export function canonTimelineProjectionIssues(timeline: CanonTimeline, events: r
   return issues;
 }
 
+/** Deterministic cut identity: the world just before an event, within one frozen timeline. */
+export function cutIdFor(beforeEventId: string, timelineHash: string): string {
+  return contentHash({ beforeEventId, timelineHash });
+}
+
 /** Event ID -> timeline index. Hypothetical and unknown events are absent. */
 export function timelineIndex(timeline: Pick<CanonTimeline, "entries">): Map<string, number> {
   return new Map(timeline.entries.map((entry) => [entry.eventId, entry.index]));

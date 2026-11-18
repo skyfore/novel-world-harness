@@ -28,6 +28,8 @@ import { rebuildCommand } from "./commands/rebuild.js";
 import { compileNovelCommand } from "./commands/compile-novel.js";
 import { novelAdmitCommand, novelCutsCommand } from "./commands/novel-cuts.js";
 import { novelCompletenessCommand } from "./commands/novel-completeness.js";
+import { novelReferenceCompareCommand, novelReferenceExportCommand, novelReferenceVerifyCommand } from "./commands/novel-reference.js";
+import { novelGoldDraftCommand, novelGoldScoreCommand } from "./commands/novel-gold.js";
 import { novelProbeCommand } from "./commands/novel-probe.js";
 import { compileNovelWithLoop } from "./commands/compile-novel-loop.js";
 import { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
@@ -166,9 +168,51 @@ novelOptions(compileNovel.command("completeness").description("Read-only world-m
   .option("--revision <hash>", "measure an exact cached prepared revision instead of the workspace candidate")
   .option("--admission", "compute per-cut admission with entry probes when the bundle carries none (measures agency; slower)")
   .option("--brief", "print the measure table instead of the full JSON report")
+  .option("--range <start-end>", "limit every measure to one source byte range (stage gate / slice view)")
+  .option("--no-usage", "skip the trace-derived cost summary")
   .action(async (_options, child) => {
     const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
-    await novelCompletenessCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision, admission: Boolean(options.admission), brief: Boolean(options.brief) });
+    await novelCompletenessCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision, admission: Boolean(options.admission), brief: Boolean(options.brief),
+      ...(options.range ? { range: options.range } : {}), usage: options.usage !== false });
+  });
+const reference = compileNovel.command("reference").description("Legacy reference packs: read-only JSON exports of an old compile for comparison and gold drafting; never imported into a new compile");
+novelOptions(reference.command("export").description("Export the current candidate (or --revision) to $NWH_HOME/archives/<workspace>/legacy-reference/<source>-<date>/ and verify it"))
+  .option("--revision <hash>", "export an exact cached prepared revision instead of the workspace candidate")
+  .option("--out <dir>", "write the pack to this new directory instead of the default archive path")
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await novelReferenceExportCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision, out: options.out });
+  });
+reference.command("verify").argument("<dir>", "reference pack directory").option("--expect <counts>", "comma-separated key=count artifact counts to check, e.g. entities=135,events=79")
+  .description("Recompute file hashes and record counts against the pack manifest")
+  .action(async (directory, options) => novelReferenceVerifyCommand({ directory, expect: options.expect }));
+novelOptions(compileNovel.command("compare").description("Review list: legacy reference entities (by name) and events (by mention overlap) the current candidate does not reproduce; not a gate"))
+  .requiredOption("--reference <dir>", "reference pack directory")
+  .option("--revision <hash>", "compare an exact cached prepared revision instead of the workspace candidate")
+  .option("--range <start-end>", "limit to the source byte range the new compile covers")
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await novelReferenceCompareCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision, reference: options.reference, range: options.range });
+  });
+compileNovel.command("inventory").argument("<file>", "UTF-8 source text (no workspace or compile needed)")
+  .option("--range <start-end>", "limit to one byte range")
+  .option("--threshold <n>", "quoted-term occurrence threshold", (value) => Number.parseInt(value, 10))
+  .description("Source-only denominators: direct speech by quotation convention, speaker cues, time expressions and frequent quoted terms")
+  .action(async (file, options) => {
+    const [{ summarizeSourceInventory }, { parseByteRange }, fs] = await Promise.all([import("./compiler/lexical-inventory.js"), import("./commands/novel-completeness.js"), import("node:fs/promises")]);
+    console.log(JSON.stringify(summarizeSourceInventory(await fs.readFile(path.resolve(file)), { ...(options.range ? { range: parseByteRange(options.range) } : {}), ...(options.threshold ? { termThreshold: options.threshold } : {}) }), null, 2));
+  });
+const gold = compileNovel.command("gold").description("Gold slices: hand-checked semantic gold over one source range, scored by the 13-layer compiler scorer");
+gold.command("draft").requiredOption("--reference <dir>", "legacy reference pack").requiredOption("--range <start-end>", "slice byte range")
+  .requiredOption("--name <name>", "slice name").requiredOption("--out <file>", "new JSON file to write")
+  .description("Draft a gold slice from a legacy reference pack; every record must then be confirmed against the source")
+  .action(async (options) => novelGoldDraftCommand(options));
+novelOptions(gold.command("score").argument("<file>", "gold slice JSON").description("Precision and recall of the current candidate on a gold slice (read-only)"))
+  .option("--revision <hash>", "score an exact cached prepared revision instead of the workspace candidate")
+  .option("--allow-draft", "score a slice that still has unconfirmed drafted records (provisional)")
+  .action(async (file, _options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await novelGoldScoreCommand({ root: rootFor(options), file, sourceId: options.source, revision: options.revision, allowDraft: Boolean(options.allowDraft) });
   });
 novelOptions(compileNovel.command("probe").description("Act probe: scripted player turns on every admitted cut x actor of the active revision (fake reasoners by default; --live uses the configured model)"))
   .option("--cut <id>", "probe one admitted cut")

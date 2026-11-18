@@ -123,3 +123,14 @@ describe("lexical inventory v2 conventions", () => {
     ]);
   });
 });
+
+describe("lexical inventory mixed conventions", () => {
+  it("closes a straight opener with a curly mark and continues a quotation the next paragraph does not re-open", () => {
+    const source = bytes('\t嵩曰："叔言汝中风，今已愈乎？”\n\t说誓曰："念刘备、关羽、张飞，\n\t皇天后土，实鉴此心！"誓毕。\n');
+    expect(scanSpeechSpans(source).map((span) => [slice(source, span.startByte, span.endByte), span.closed])).toEqual([
+      ['"叔言汝中风，今已愈乎？”', true],
+      ['"念刘备、关羽、张飞，', false],
+      ['皇天后土，实鉴此心！"', true],
+    ]);
+  });
+});

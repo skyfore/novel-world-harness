@@ -124,10 +124,36 @@ function paragraphs(text: string): Paragraph[] {
 
 type CharSpeech = { start: number; end: number; paragraph: Paragraph; kind: SpeechSpan["kind"]; closed: boolean; delimiter: SpeechDelimiter };
 
+/** Closers each opener accepts: a straight opener may be closed by a curly mark (mixed-convention texts). */
+const CLOSERS = new Map([["“", ["”"]], ["「", ["」"]], ["『", ["』"]], ['"', ['"', "”"]]]);
+
+function findCloser(text: string, opener: string, from: number, limit: number): number {
+  let best = -1;
+  for (const closer of CLOSERS.get(opener) ?? []) {
+    const at = text.indexOf(closer, from);
+    if (at >= 0 && at < limit && (best < 0 || at < best)) best = at;
+  }
+  return best;
+}
+
 function scanCharSpeech(text: string): CharSpeech[] {
   const spans: CharSpeech[] = [];
+  let pending: CharSpeech | undefined;
   for (const paragraph of paragraphs(text)) {
     let index = paragraph.contentStart;
+    // A quotation left open by the previous paragraph continues here when this
+    // paragraph does not re-open it: its text runs to the first closing mark.
+    const carried = pending;
+    pending = undefined;
+    if (carried && !QUOTE_PAIRS.has(text[index]!)) {
+      const opener = text[carried.start]!;
+      const closeAt = findCloser(text, opener, index, paragraph.end);
+      const firstOpener = [...QUOTE_PAIRS.keys()].map((mark) => text.indexOf(mark, index)).filter((at) => at >= 0 && at < paragraph.end).sort((a, b) => a - b)[0] ?? -1;
+      if (closeAt >= 0 && (firstOpener < 0 || closeAt <= firstOpener)) {
+        if (text.slice(index, closeAt).trim()) spans.push({ start: index, end: closeAt + 1, paragraph, kind: "speech", closed: true, delimiter: carried.delimiter });
+        index = closeAt + 1;
+      }
+    }
     while (index < paragraph.end) {
       const mark = text[index]!;
       // Classical unquoted discourse: 后人有诗赞曰：英雄露颖在今朝…
@@ -153,17 +179,20 @@ function scanCharSpeech(text: string): CharSpeech[] {
         index += 1;
         continue;
       }
-      const closer = QUOTE_PAIRS.get(mark);
-      if (!closer) { index += 1; continue; }
-      const closeAt = text.indexOf(closer, index + 1);
-      const closed = closeAt >= 0 && closeAt < paragraph.end;
+      if (!QUOTE_PAIRS.has(mark)) { index += 1; continue; }
+      const closeAt = findCloser(text, mark, index + 1, paragraph.end);
+      const closed = closeAt >= 0;
       const end = closed ? closeAt + 1 : paragraph.end;
       const content = text.slice(index + 1, closed ? closeAt : paragraph.end);
       const before = index > paragraph.contentStart ? text[index - 1]! : "";
       const after = end < paragraph.end ? text[end]! : "";
       const embedded = closed && !SPEECH_PUNCTUATION.test(content)
         && ((before !== "" && IDEOGRAPH.test(before)) || EMBEDDING_PARTICLES.has(after));
-      if (content.trim()) spans.push({ start: index, end, paragraph, kind: embedded ? "embedded" : "speech", closed, delimiter: DELIMITER_OF.get(mark)! });
+      if (content.trim()) {
+        const span: CharSpeech = { start: index, end, paragraph, kind: embedded ? "embedded" : "speech", closed, delimiter: DELIMITER_OF.get(mark)! };
+        spans.push(span);
+        if (!closed) pending = span;
+      }
       index = end;
     }
   }
@@ -423,4 +452,51 @@ export function scanTimeExpressions(source: Uint8Array): TimeExpression[] {
 
 export function sha256Hex(bytes: Uint8Array): string {
   return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+
+export type SourceInventorySummary = {
+  version: typeof LEXICAL_INVENTORY_VERSION;
+  bytes: number;
+  range?: { startByte: number; endByte: number };
+  speech: { total: number; byDelimiter: Partial<Record<SpeechDelimiter, number>>; unclosed: number };
+  embedded: number;
+  cues: { total: number; byRule: Partial<Record<SpeakerCueRule, number>> };
+  times: { total: number; byKind: Partial<Record<TimeExpressionKind, number>>; top: Array<{ surface: string; count: number }> };
+  /** Quoted terms occurring at least `threshold` times in the whole text: setting-vocabulary candidates for the census. */
+  quotedTerms: Array<{ surface: string; occurrences: number }>;
+};
+
+/** Source-only denominators for any text, with no compile: the deterministic layer of the content contract. */
+export function summarizeSourceInventory(source: Uint8Array, options: { range?: { startByte: number; endByte: number }; lexicon?: CharacterLexicon; termThreshold?: number } = {}): SourceInventorySummary {
+  const inventory = buildLexicalInventory({ source, lexicon: options.lexicon ?? { entries: [], collisions: [] } });
+  const inRange = (item: { startByte: number; endByte: number }) => !options.range || (item.startByte >= options.range.startByte && item.endByte <= options.range.endByte);
+  const speech = inventory.speech.filter(inRange);
+  const count = <K extends string>(keys: K[]) => keys.reduce<Partial<Record<K, number>>>((acc, key) => ({ ...acc, [key]: (acc[key] ?? 0) + 1 }), {});
+  const times = inventory.times.filter(inRange);
+  const timeCounts = new Map<string, number>();
+  for (const item of times) timeCounts.set(item.surface, (timeCounts.get(item.surface) ?? 0) + 1);
+  const text = Buffer.from(source.buffer, source.byteOffset, source.byteLength).toString("utf8");
+  const quoted = new Set<string>();
+  for (const span of speech) {
+    if (span.kind !== "embedded") continue;
+    const surface = Buffer.from(source.buffer, source.byteOffset + span.startByte, span.endByte - span.startByte).toString("utf8").slice(1, -1).trim();
+    if (Array.from(surface).length >= 2 && Array.from(surface).length <= 12 && /\p{Script=Han}|[A-Za-z]{3,}/u.test(surface)) quoted.add(surface);
+  }
+  const threshold = options.termThreshold ?? 10;
+  const quotedTerms = [...quoted].map((surface) => {
+    let occurrences = 0;
+    for (let index = text.indexOf(surface); index >= 0; index = text.indexOf(surface, index + surface.length)) occurrences += 1;
+    return { surface, occurrences };
+  }).filter((item) => item.occurrences >= threshold).sort((a, b) => b.occurrences - a.occurrences || a.surface.localeCompare(b.surface));
+  const cues = inventory.cues.filter((cue) => inRange({ startByte: cue.speechStartByte, endByte: cue.speechEndByte }));
+  return {
+    version: LEXICAL_INVENTORY_VERSION,
+    bytes: options.range ? options.range.endByte - options.range.startByte : source.byteLength,
+    ...(options.range ? { range: options.range } : {}),
+    speech: { total: speech.filter((span) => span.kind === "speech").length, byDelimiter: count(speech.filter((span) => span.kind === "speech").map((span) => span.delimiter)), unclosed: speech.filter((span) => !span.closed).length },
+    embedded: speech.filter((span) => span.kind === "embedded").length,
+    cues: { total: cues.length, byRule: count(cues.map((cue) => cue.rule)) },
+    times: { total: times.length, byKind: count(times.map((item) => item.kind)), top: [...timeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 20).map(([surface, n]) => ({ surface, count: n })) },
+    quotedTerms: quotedTerms.slice(0, 50),
+  };
 }

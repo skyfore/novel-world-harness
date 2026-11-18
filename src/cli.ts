@@ -27,6 +27,7 @@ import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
 import { compileNovelCommand } from "./commands/compile-novel.js";
 import { novelAdmitCommand, novelCutsCommand } from "./commands/novel-cuts.js";
+import { novelProbeCommand } from "./commands/novel-probe.js";
 import { compileNovelWithLoop } from "./commands/compile-novel-loop.js";
 import { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
 import { WorkspaceOperationLock } from "./util/workspace-lock.js";
@@ -159,6 +160,15 @@ novelOptions(compileNovel.command("cuts").description("Read-only cut diagnostics
     const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
     await novelCutsCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision, admission: options.admission, probe: options.probe,
       configPath: options.config ? path.resolve(options.config) : undefined });
+  });
+novelOptions(compileNovel.command("probe").description("Act probe: scripted player turns on every admitted cut x actor of the active revision (fake reasoners by default; --live uses the configured model)"))
+  .option("--cut <id>", "probe one admitted cut")
+  .option("--live", "use the configured Pi model instead of deterministic fake reasoners")
+  .option("--turns <n>", "turns per intent class (1-3)", (value) => Number.parseInt(value, 10))
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await withCompilerSignals(signal => novelProbeCommand({ root: rootFor(options), sourceId: options.source, cutId: options.cut, live: Boolean(options.live), turns: options.turns,
+      configPath: options.config ? path.resolve(options.config) : undefined, model: options.model, signal }));
   });
 novelOptions(compileNovel.command("admit").description("Freeze the current candidate with per-cut admission; publishable when certified or when a cut admits an entry at play.minimumAdmissionTier"))
   .option("--activate", "activate the admitted revision for fresh play")

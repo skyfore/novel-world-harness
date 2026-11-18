@@ -36,3 +36,18 @@ it("runs all six intent classes through the production turn pipeline and reports
   const file = await new ActProbeStore(workspace.root).write(workspace.source.id, [report], summary);
   expect(JSON.parse(await fs.readFile(file, "utf8"))).toMatchObject({ version: 1, sourceId: workspace.source.id, reports: [{ runId: report.runId }] });
 }, 120_000);
+
+it("probes every admitted cut x actor in isolated scratch workspaces and saves the report", async () => {
+  const workspace = await createAdmittedWorkspace("nwh-novel-probe-"); roots.push(workspace.root);
+  const { runNovelProbe } = await import("../src/commands/novel-probe.js");
+  const { BranchStore } = await import("../src/world/store.js");
+  const result = await runNovelProbe({ root: workspace.root, sourceId: workspace.source.id, cacheRoot: workspace.cacheRoot });
+  const admittedCount = workspace.admitted.admission.cuts.reduce((count, cut) => count + cut.actors.filter((actor) => ["enterable", "reviewed", "certified"].includes(actor.tier)).length, 0);
+  expect(result.summary).toMatchObject({ mode: "fake", admittedEntries: admittedCount, entries: admittedCount, failures: [], replayEquivalent: true, knowledgeViolations: 0 });
+  expect(result.summary.turns).toBe(admittedCount * 6);
+  expect(result.reports.map((report) => report.actorId).sort()).toEqual(workspace.admitted.admission.cuts.flatMap((cut) => cut.actors.filter((actor) => actor.tier !== "blocked" && actor.tier !== "replayable").map((actor) => actor.actorId)).sort());
+  expect(await new BranchStore(workspace.root).listIds()).toEqual([]);
+  expect(JSON.parse(await fs.readFile(result.reportPath, "utf8")).summary.entries).toBe(admittedCount);
+  const one = await runNovelProbe({ root: workspace.root, sourceId: workspace.source.id, cacheRoot: workspace.cacheRoot, cutId: result.reports[0]!.cutId });
+  expect(one.reports.every((report) => report.cutId === result.reports[0]!.cutId)).toBe(true);
+}, 180_000);

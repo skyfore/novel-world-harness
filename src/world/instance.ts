@@ -77,6 +77,8 @@ export async function createWorldBranch(
     models: prepared.bundle.canonical.models,
     possibilities: prepared.bundle.canonical.possibilities,
     ...(prepared.bundle.canonical.timeline ? { timeline: prepared.bundle.canonical.timeline } : {}),
+    ...(prepared.bundle.canonical.timeline && prepared.bundle.admission?.timelineHash === prepared.bundle.canonical.timeline.hash
+      ? { canonHorizonIndex: prepared.bundle.admission.horizonIndex } : {}),
   } : undefined;
   const { engine } = await openWorkspaceWorld(root, undefined, {
     ...(effectiveSourceId ? { sourceId: effectiveSourceId } : {}),

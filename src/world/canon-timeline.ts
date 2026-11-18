@@ -361,6 +361,33 @@ export function cutIdFor(beforeEventId: string, timelineHash: string): string {
   return contentHash({ beforeEventId, timelineHash });
 }
 
+/** Default number of forward canonical events materialized as possibilities. */
+export const CANON_POSSIBILITY_WINDOW = 64;
+
+/** Resolved IDs expanded to whole coreference groups: one occurrence settles all its aliases. */
+export function expandTimelineAliases(timeline: Pick<CanonTimeline, "entries">, ids: Iterable<string>): Set<string> {
+  const roots = new Set<string>();
+  const byId = new Map(timeline.entries.map((entry) => [entry.eventId, entry]));
+  for (const id of ids) roots.add(byId.get(id)?.aliasOf ?? id);
+  const expanded = new Set(ids);
+  for (const entry of timeline.entries) if (roots.has(entry.aliasOf ?? entry.eventId)) expanded.add(entry.eventId);
+  return expanded;
+}
+
+/**
+ * The branch's canonical position: one past the furthest resolved (realized,
+ * adapted or superseded) event on the timeline, never below the floor.
+ */
+export function canonPositionFor(timeline: Pick<CanonTimeline, "entries">, settled: Iterable<string>, floor = 0): number {
+  const index = timelineIndex(timeline);
+  let position = floor;
+  for (const id of expandTimelineAliases(timeline, settled)) {
+    const at = index.get(id);
+    if (at !== undefined) position = Math.max(position, at + 1);
+  }
+  return position;
+}
+
 /** Event ID -> timeline index. Hypothetical and unknown events are absent. */
 export function timelineIndex(timeline: Pick<CanonTimeline, "entries">): Map<string, number> {
   return new Map(timeline.entries.map((entry) => [entry.eventId, entry.index]));

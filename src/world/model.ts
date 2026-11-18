@@ -1908,6 +1908,8 @@ export const possibilityBaseSchema = z
     sourceActorId: idSchema.optional(),
     sourceGoalId: idSchema.optional(),
     canonicalEventId: idSchema.optional(),
+    /** Host timeline index of the canonical event; replaces story-time comparison for ordered canon. */
+    canonicalOrder: z.number().int().nonnegative().optional(),
     /** Source-support diagnostic only; never a pressure or ranking input. */
     sourceConfidence: z.number().min(0).max(1).optional(),
     /** Legacy declaration retained for artifact compatibility; host scheduler derives pressure independently. */

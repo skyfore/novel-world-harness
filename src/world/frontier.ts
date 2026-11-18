@@ -105,6 +105,8 @@ type FrontierEvaluationOptions = {
   canonAffinity?: number;
   temporalMode?: FrontierTemporalMode;
   temporalAnchor?: StoryTime;
+  /** Branch canonical position on the host timeline; ordered canon below it has been passed. */
+  canonPosition?: number;
   activeEntityIds?: ReadonlySet<string>;
   rootEvidenceSupported?: boolean;
   cooldownPenalty?: number;
@@ -126,13 +128,17 @@ export function evaluatePossibility(
   const supportive = causalTrace.filter((item) => item.operationality === "necessary" || item.operationality === "contributory");
   const fulfilledSupport = supportive.filter((item) => item.resolution === "fulfilled");
   const causalSupport = supportive.length ? fulfilledSupport.length / supportive.length : 0;
-  const temporal = assessTemporalCompatibility(
-    options.temporalAnchor ?? state.logicalTime.storyTime,
-    possibility.candidateWindow,
-    options.temporalMode ?? "current-window",
-    fulfilledSupport.length > 0,
-    !possibility.canonicalEventId && possibility.kind !== "canon-analogue",
-  );
+  // Timeline-ordered canon is placed by its host index, never by model story-time scalars.
+  const ordered = possibility.canonicalOrder !== undefined && options.canonPosition !== undefined;
+  const temporal = ordered
+    ? { allowed: true, reason: "canonical order is at or after the branch's canonical position" }
+    : assessTemporalCompatibility(
+      options.temporalAnchor ?? state.logicalTime.storyTime,
+      possibility.candidateWindow,
+      options.temporalMode ?? "current-window",
+      fulfilledSupport.length > 0,
+      !possibility.canonicalEventId && possibility.kind !== "canon-analogue",
+    );
   const rootSceneSupported = !possibility.canonicalEventId
     || links.some((link) => link.operationality === "necessary" || link.operationality === "contributory")
     || possibility.preconditions.length > 0
@@ -181,6 +187,10 @@ export function evaluatePossibility(
     status = "superseded";
     reasons.push("replaced by another committed development");
     gates.push({ gate: "realization", outcome: "fail", detail: "candidate was explicitly superseded" });
+  } else if (ordered && possibility.canonicalOrder! < options.canonPosition!) {
+    status = "expired";
+    reasons.push(`passed: the branch's canonical position ${options.canonPosition} is beyond timeline index ${possibility.canonicalOrder}`);
+    gates.push({ gate: "time", outcome: "fail", detail: reasons.at(-1)! });
   } else if (supersededNecessary.length) {
     status = "invalidated";
     reasons.push(`required cause was superseded: ${supersededNecessary.map((item) => item.sourceEventId).join(", ")}`);
@@ -265,10 +275,17 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
   novelty?: ReadonlyMap<string, number>;
   temporalMode?: FrontierTemporalMode;
   temporalAnchor?: StoryTime;
+  canonPosition?: number;
   activeEntityIds?: ReadonlySet<string>;
   activeEvidence?: readonly EvidenceRef[];
 } = {}): Frontier {
   const rootEvidenceSupport = canonicalRootEvidenceSupport(templates, options.activeEvidence);
+  // On a frozen timeline the front of unresolved canon is "in scene"; other ordered
+  // canon falls back to active-participant support rather than evidence lines.
+  const settledIds = new Set([...(options.realizedIds ?? []), ...(options.adaptedIds ?? []), ...(options.supersededIds ?? [])]);
+  const frontOrder = options.canonPosition === undefined ? undefined : Math.min(...templates
+    .filter((template) => template.canonicalOrder !== undefined && template.canonicalOrder >= options.canonPosition! && !settledIds.has(template.id))
+    .map((template) => template.canonicalOrder!));
   const evaluated = templates.map((template) => {
     const possibility: Possibility = { ...template, branchId, evaluatedAtCommit: commitId };
     return evaluatePossibility(state, possibility, {
@@ -283,8 +300,11 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
       novelty: options.novelty?.get(possibility.id),
       temporalMode: options.temporalMode,
       temporalAnchor: options.temporalAnchor,
+      ...(options.canonPosition === undefined ? {} : { canonPosition: options.canonPosition }),
       activeEntityIds: options.activeEntityIds,
-      rootEvidenceSupported: rootEvidenceSupport.get(possibility.id),
+      rootEvidenceSupported: possibility.canonicalOrder !== undefined && frontOrder !== undefined
+        ? possibility.canonicalOrder === frontOrder ? true : undefined
+        : rootEvidenceSupport.get(possibility.id),
     });
   });
   propagateInvalidatedDescendants(evaluated);

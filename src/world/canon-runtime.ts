@@ -8,6 +8,7 @@ export function canonicalEventToPossibility(
   branchId: string,
   commitId: CommitId,
   relations: readonly EventRelation[] = [],
+  canonicalOrder?: number,
 ): Possibility {
   const causalLinks = relations
     .filter((relation) => relation.toEventId === event.id && relation.status !== "contested")
@@ -35,6 +36,7 @@ export function canonicalEventToPossibility(
     causalLinks,
     causalParents: event.causalParents,
     canonicalEventId: event.id,
+    ...(canonicalOrder === undefined ? {} : { canonicalOrder }),
     pressure: UNSPECIFIED_WORLD_PRESSURE,
     sourceConfidence: event.confidence,
     relevance: 1,

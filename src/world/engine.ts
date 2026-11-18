@@ -151,6 +151,8 @@ export type WorldModelContext = {
   possibilityTemplates?: readonly PossibilityTemplate[];
   /** Host-derived canonical chronology frozen with the snapshot. Absent on legacy snapshots. */
   timeline?: CanonTimeline;
+  /** Frozen admission horizon on the timeline (exclusive bound for resolvable events). */
+  canonHorizonIndex?: number;
 };
 
 export type ResolvedWorldModelContext = WorldModelContext & { canonicalSnapshotHash: ObjectHash };

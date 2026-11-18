@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
-import { timelineIndex, type CanonTimeline } from "../world/canon-timeline.js";
+import { canonPositionFor, type CanonTimeline } from "../world/canon-timeline.js";
 import type { WorldEngine } from "../world/engine.js";
 import { KnowledgeProjector } from "../world/knowledge.js";
 import { worldStorageRoot } from "../world/paths.js";
@@ -97,14 +97,8 @@ function fakeCandidate(step: ActProbeStep, input: PlayerActionTranslationInput) 
 
 /** Canonical position: one past the furthest realized/adapted/superseded event; the entry cut otherwise. */
 export function canonPosition(timeline: Pick<CanonTimeline, "entries">, events: Parameters<typeof branchCanonResolution>[0], floor = 0): number {
-  const index = timelineIndex(timeline);
   const resolution = branchCanonResolution(events);
-  let position = floor;
-  for (const id of [...resolution.resolved, ...resolution.superseded]) {
-    const at = index.get(id);
-    if (at !== undefined) position = Math.max(position, at + 1);
-  }
-  return position;
+  return canonPositionFor(timeline, [...resolution.resolved, ...resolution.superseded], floor);
 }
 
 /** Claims this actor could only learn from canonical events the branch has not resolved. */

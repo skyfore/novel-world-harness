@@ -71,6 +71,8 @@ export const canonicalSnapshotSchema = z.object({
   stateFields: z.array(stateFieldSpecSchema),
   /** Frozen host chronology; snapshots captured before timelines keep legacy story-time cuts. */
   timeline: canonTimelineSchema.optional(),
+  /** Admission horizon: canonical events at or beyond this timeline index are not playable yet. */
+  canonHorizonIndex: z.number().int().min(-1).optional(),
 }).strict().superRefine(validatePreparedSnapshotScope);
 export type CanonicalSnapshot = z.infer<typeof canonicalSnapshotSchema>;
 
@@ -100,6 +102,7 @@ export type ScopedWorldArtifacts = {
   models: readonly CharacterModel[];
   possibilities: readonly PossibilityTemplate[];
   timeline?: CanonTimeline;
+  canonHorizonIndex?: number;
 };
 
 export class WorldContextStore {
@@ -322,6 +325,7 @@ export class WorldContextStore {
       possibilities: await possibilityRefs(artifacts.possibilities),
       stateFields: DEFAULT_STATE_FIELDS,
       ...(artifacts.timeline ? { timeline: artifacts.timeline } : {}),
+      ...(artifacts.timeline && artifacts.canonHorizonIndex !== undefined ? { canonHorizonIndex: artifacts.canonHorizonIndex } : {}),
     });
     const snapshotHash = contentHash(snapshot);
     await this.writeSnapshot(snapshotHash, snapshot);
@@ -471,6 +475,7 @@ export class WorldContextStore {
       possibilityTemplates: possibilities,
       stateSchema: new StateSchemaRegistry(snapshot.stateFields),
       ...(snapshot.timeline ? { timeline: snapshot.timeline } : {}),
+      ...(snapshot.canonHorizonIndex !== undefined ? { canonHorizonIndex: snapshot.canonHorizonIndex } : {}),
     };
   }
 

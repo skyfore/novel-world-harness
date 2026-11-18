@@ -27,7 +27,7 @@ export function validateAgencyProfile(entity: Entity, catalog: Catalog): Validat
       fail("AGENCY_PROCESS_MISSING", "Discover the process-template in the same source with find_compiler_artifacts; copy results[].readArguments.ref into read_compiler_artifact.ref, then payload.id into processTemplateId. One corrected retry only; stop if absent, never guess or retry unchanged.", `${path}.processTemplateId`);
       continue;
     }
-    if (template.induction.kind === "source-pattern" && (!template.evidence.length || template.evidence.some(ref => !sources.has(ref.span.sourceId)))) fail("AGENCY_SOURCE_MISMATCH", "Channel process evidence belongs to another source.", path);
+    if (template.induction.kind !== "domain-module" && (!template.evidence.length || template.evidence.some(ref => !sources.has(ref.span.sourceId)))) fail("AGENCY_SOURCE_MISMATCH", "Channel process evidence belongs to another source.", path);
     const actor = template.ownerRoles.find(role => role.id === channel.actorRoleId);
     const peer = template.ownerRoles.find(role => role.id === channel.peerRoleId);
     const carrier = template.ownerRoles.find(role => role.id === channel.carrierRoleId);
@@ -41,7 +41,7 @@ export function validateAgencyProfile(entity: Entity, catalog: Catalog): Validat
       const action = catalog.actionSchemas?.get(channel.actionSchemaId);
       if (!action) fail("AGENCY_ACTION_MISSING", "Discover the same-source action-schema with find_compiler_artifacts, copy results[].readArguments.ref into read_compiler_artifact.ref and payload.id into actionSchemaId. One corrected retry only; stop without inventing a physical-control mechanism.", `${path}.actionSchemaId`);
       else if (action.initiatorRoleId !== channel.actorRoleId || [channel.actorRoleId, channel.peerRoleId, channel.carrierRoleId].some(id => !action.roles.some(role => role.id === id))) fail("AGENCY_ACTION_ROLE_MISMATCH", "Physical control must use the same actor, peer and carrier role IDs in its action mechanism.", `${path}.actionSchemaId`);
-      else if (action.induction.kind === "source-pattern" && (!action.evidence.length || action.evidence.some(ref => !sources.has(ref.span.sourceId)))) fail("AGENCY_SOURCE_MISMATCH", "Physical-control mechanism evidence belongs to another source.", `${path}.actionSchemaId`);
+      else if (action.induction.kind !== "domain-module" && (!action.evidence.length || action.evidence.some(ref => !sources.has(ref.span.sourceId)))) fail("AGENCY_SOURCE_MISMATCH", "Physical-control mechanism evidence belongs to another source.", `${path}.actionSchemaId`);
     }
   }
   return errors;

@@ -1,6 +1,8 @@
 import { Type } from "typebox";
 import { z } from "zod";
-import type { CompilerProposalKind } from "../proposals.js";
+import crypto from "node:crypto";
+import { compilerProposalArtifactId, type CompilerProposalKind } from "../proposals.js";
+import { evidenceAssertionSchema, type EvidenceAssertion } from "../../world/model.js";
 import { convergeCanonical, submitCanonical } from "./canon.js";
 import type { ScopePlan, StageContext } from "./runner.js";
 import { DISPOSITION_VERDICTS, type PipelineDisposition } from "./store.js";
@@ -36,9 +38,35 @@ export function bindEvidence(payload: unknown, text: ScopeText, citations: reado
   return bound;
 }
 
-const artifactInput = z.object({
-  items: z.array(z.object({ kind: z.enum(PIPELINE_ARTIFACT_KINDS), payload: z.record(z.string(), z.unknown()), evidence: z.array(citation).max(16).default([]) }).strict()).min(1).max(60),
+const supportSchema = z.object({
+  path: z.string().refine((value) => /^(?:\/(?:[^~/]|~[01])*)*$/u.test(value), "path must be a JSON Pointer into the payload ('' for the whole artifact)"),
+  citations: z.array(citation).min(1).max(8),
+  relation: z.enum(["supports", "contradicts", "contextualizes"]).default("supports"),
+  strength: z.enum(["explicit", "strong-inference", "weak-inference"]).default("explicit"),
+  interpretation: z.string().trim().min(1).max(1_000).optional(),
 }).strict();
+const artifactInput = z.object({
+  items: z.array(z.object({ kind: z.enum(PIPELINE_ARTIFACT_KINDS), payload: z.record(z.string(), z.unknown()), evidence: z.array(citation).max(16).default([]), support: z.array(supportSchema).max(32).default([]) }).strict()).min(1).max(60),
+}).strict();
+
+/**
+ * Exact evidence assertions for one proposal: each support entry binds cited
+ * anchors to a payload path. With citations but no support, the whole
+ * artifact is supported explicitly by them.
+ */
+export function buildAssertions(ctx: StageContext, scopeId: string, text: ScopeText, kind: string, payload: unknown, citations: readonly Citation[], support: readonly z.infer<typeof supportSchema>[]): EvidenceAssertion[] {
+  const artifactId = compilerProposalArtifactId(kind as CompilerProposalKind, payload, "pending");
+  const entries = support.length ? support : citations.length ? [{ path: "", citations: [...citations], relation: "supports" as const, strength: "explicit" as const }] : [];
+  return entries.map((entry) => {
+    const anchors = entry.citations.map((item) => text.anchor("unit" in item ? text.span(item) : text.extent(item)));
+    return evidenceAssertionSchema.parse({
+      version: 1, id: `ea-${crypto.createHash("sha256").update(`${kind}\u0000${artifactId}\u0000${entry.path}\u0000${JSON.stringify(anchors.map((anchor) => [anchor.startByte, anchor.endByte]))}`).digest("hex").slice(0, 20)}`,
+      target: { artifactKind: kind, artifactId, jsonPointer: entry.path }, anchors, relation: entry.relation, strength: entry.strength,
+      ...(entry.interpretation ? { interpretation: entry.interpretation } : entry.strength !== "explicit" ? { interpretation: "Inferred from the cited text." } : {}),
+      derivation: { runId: ctx.runId, worker: `pipeline-${kind}`, compilerBatchId: scopeId, ...(ctx.generatedBy.provider ? { provider: ctx.generatedBy.provider } : {}), ...(ctx.generatedBy.model ? { model: ctx.generatedBy.model } : {}), ontologyVersion: "evidence-v1" },
+    });
+  });
+}
 const dispositionInput = z.object({
   items: z.array(z.object({ measure: z.string().min(1), subject: z.string().min(1).max(300), verdict: z.enum(DISPOSITION_VERDICTS), rationale: z.string().trim().min(1).max(1_000) }).strict()).min(1).max(200),
 }).strict();
@@ -64,12 +92,16 @@ export function artifactTools(ctx: StageContext, scope: ScopePlan, range = scope
   return [
     pipelineTool({
       name: "propose_artifacts", label: "Propose canonical artifacts",
-      description: `Propose canonical artifacts of kinds ${PIPELINE_ARTIFACT_KINDS.join(", ")}. Give the full payload as the ontology defines it, without evidence spans: put {"$evidence":[{unit,text}|{from,to}]} wherever the payload needs EvidenceRefs, or list citations in evidence for the top-level field. The host validates and commits; failures come back per item.`,
-      parameters: Type.Object({ items: Type.Array(Type.Object({ kind: Type.String(), payload: Type.Record(Type.String(), Type.Unknown()), evidence: Type.Optional(Type.Array(Type.Union([T.span(), T.extent()]))) }, { additionalProperties: false })) }, { additionalProperties: false }),
+      description: `Propose canonical artifacts of kinds ${PIPELINE_ARTIFACT_KINDS.join(", ")}. Give the full payload as the ontology defines it, without evidence spans: put {"$evidence":[{unit,text}|{from,to}]} wherever the payload needs EvidenceRefs, or list citations in evidence for the top-level field. Exact support: citations also become evidence assertions on the whole artifact; give support [{path:"/clauses/0", citations, strength, interpretation}] to bind specific fields. The host validates and commits; failures come back per item.`,
+      parameters: Type.Object({ items: Type.Array(Type.Object({ kind: Type.String(), payload: Type.Record(Type.String(), Type.Unknown()), evidence: Type.Optional(Type.Array(Type.Union([T.span(), T.extent()]))),
+        support: Type.Optional(Type.Array(Type.Object({ path: Type.String(), citations: Type.Array(Type.Union([T.span(), T.extent()])), relation: Type.Optional(Type.String()), strength: Type.Optional(Type.String()), interpretation: Type.Optional(Type.String()) }, { additionalProperties: false }))) }, { additionalProperties: false })) }, { additionalProperties: false }),
       input: artifactInput,
       async execute(input) {
         const scopeText = await text();
-        const result = await applyEach(input.items, async (item) => submitCanonical(ctx, scope.id, item.kind, bindEvidence(item.payload, scopeText, item.evidence)));
+        const result = await applyEach(input.items, async (item) => {
+          const payload = bindEvidence(item.payload, scopeText, item.evidence);
+          return submitCanonical(ctx, scope.id, item.kind, payload, `pipeline-${item.kind}`, buildAssertions(ctx, scope.id, scopeText, item.kind, payload, item.evidence, item.support));
+        });
         const issues = result.applied.length ? await convergeCanonical(ctx) : [];
         return { proposed: result.applied.length, failed: result.failed, convergenceIssues: issues };
       },

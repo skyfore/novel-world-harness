@@ -77,6 +77,7 @@ import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
 import { hasExecutablePossibilityEffect, isMetaKnowledgePredicate } from "./semantics.js";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
+import { isRegisteredDomainModule } from "./pipeline/domain-modules.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import {
   evidenceAssertionSourceIds,
@@ -161,13 +162,28 @@ const compilerAttributionSchema = attributionSchema.safeExtend({ evidence: evide
 const compilerEventParticipationSchema = eventParticipationSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerEventRelationSchema = eventRelationSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerEventFrameSchema = eventFrameSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
-const compilerSourcePatternInductionSchema = (minimumSupportingEvents: number) => z.object({
-  kind: z.literal("source-pattern"),
-  supportingEventIds: z.array(idSchema).min(minimumSupportingEvents).max(64),
-}).strict();
+/**
+ * Model-proposed mechanisms are source-induced: a pattern over supporting
+ * events, or (decision D2) one explicit statement in the text, which must be
+ * cited. Domain modules are host-installed, never model-proposed.
+ */
+const compilerSourcePatternInductionSchema = (minimumSupportingEvents: number) => z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("source-pattern"), supportingEventIds: z.array(idSchema).min(minimumSupportingEvents).max(64) }).strict(),
+  z.object({ kind: z.literal("source-statement"), statement: z.string().trim().min(1).max(500) }).strict(),
+]);
 const compilerActionSchema = actionSchemaSchema.safeExtend({
   induction: compilerSourcePatternInductionSchema(2),
 });
+
+/**
+ * The payload schema a proposal is validated with. Models only ever see the
+ * source-induced compiler schemas; a host domain module travels the same
+ * validation and commit path, but only as an exact registered copy.
+ */
+export function proposalPayloadSchema(kind: CompilerProposalKind, payload: unknown): z.ZodTypeAny {
+  if (kind === "action-schema" && isRegisteredDomainModule(payload)) return actionSchemaSchema;
+  return compilerProposalSchemas[kind];
+}
 const compilerActionConstraintSchema = actionConstraintSchema.safeExtend({
   induction: compilerSourcePatternInductionSchema(1),
 });
@@ -274,7 +290,7 @@ export class CompilerProposalService {
   readonly store: ProposalStore;
   constructor(private readonly workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
   async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; evidenceAssertions?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; beforeWrite?: (payload: unknown, evidenceAssertions: readonly EvidenceAssertion[]) => Promise<void> }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
-    const schema = compilerProposalSchemas[kind];
+    const schema = proposalPayloadSchema(kind, input.payload);
     const payload = schema.parse(input.payload);
     if (input.generatedBy.compilerBatchId) {
       const canonical = new CanonicalModelStore(this.workspaceRoot);
@@ -557,7 +573,7 @@ export async function validateCompilerProposalClosure(
     if (activePendingIds && !activePendingIds.has(summary.id)) continue;
     if (!isCompilerProposalKind(summary.kind)) continue;
     const envelope = await proposals.readEnvelope("pending", summary.id);
-    const payload = compilerProposalSchemas[summary.kind].parse(envelope.payload);
+    const payload = proposalPayloadSchema(summary.kind, envelope.payload).parse(envelope.payload);
     staged.set(summary.id, {
       kind: summary.kind,
       payload,

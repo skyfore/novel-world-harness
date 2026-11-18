@@ -199,7 +199,7 @@ export async function loadCompilerArtifactRecords(
   addCanonical(await canon.listUtteranceExpressions(), "utterance-expression", value => ({ id: value.id, label: `${value.modality}: ${value.speakerId}` }));
   addCanonical(eventFrames, "event-frame", (value) => ({ id: value.id, label: value.name }));
   addCanonical(eventExecutions, "event-execution", (value) => ({ id: value.id, label: `${value.canonicalEventId}: ${value.actorId}` }));
-  addCanonical(actionSchemas.filter((value) => value.induction.kind === "source-pattern"), "action-schema", (value) => ({ id: value.id, label: value.name }));
+  addCanonical(actionSchemas.filter((value) => value.induction.kind !== "domain-module"), "action-schema", (value) => ({ id: value.id, label: value.name }));
   for (const action of actionSchemas.filter((value) => value.induction.kind === "domain-module")) {
     records.push(canonicalRecord("action-schema", action.id, action.name, structuredClone(action), []));
   }
@@ -208,7 +208,7 @@ export async function loadCompilerArtifactRecords(
     ["norm-template", normTemplates],
     ["process-template", processTemplates],
   ] as const) {
-    addCanonical(values.filter((value) => value.induction.kind === "source-pattern"), kind, (value) => ({ id: value.id, label: value.name }));
+    addCanonical(values.filter((value) => value.induction.kind !== "domain-module"), kind, (value) => ({ id: value.id, label: value.name }));
     for (const value of values.filter((candidate) => candidate.induction.kind === "domain-module")) {
       records.push(canonicalRecord(kind, value.id, value.name, structuredClone(value), []));
     }

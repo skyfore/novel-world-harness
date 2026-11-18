@@ -293,10 +293,10 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     bundle.canonical.acquisitions ?? [],
     bundle.canonical.utteranceExpressions ?? [],
     bundle.canonical.eventExecutions,
-    bundle.canonical.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
-    bundle.canonical.actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
-    bundle.canonical.normTemplates.filter((template) => template.induction.kind === "source-pattern"),
-    bundle.canonical.processTemplates.filter((template) => template.induction.kind === "source-pattern"),
+    bundle.canonical.actionSchemas.filter((schema) => schema.induction.kind !== "domain-module"),
+    bundle.canonical.actionConstraints.filter((constraint) => constraint.induction.kind !== "domain-module"),
+    bundle.canonical.normTemplates.filter((template) => template.induction.kind !== "domain-module"),
+    bundle.canonical.processTemplates.filter((template) => template.induction.kind !== "domain-module"),
     bundle.canonical.rules,
     bundle.canonical.goals,
     bundle.canonical.models,
@@ -932,13 +932,13 @@ export class PreparedNovelCache {
       utteranceExpressions: fromSource(await canonical.listUtteranceExpressions()),
       eventExecutions: fromSource(eventExecutions),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module")
-        .concat(fromSource(actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"))),
+        .concat(fromSource(actionSchemas.filter((schema) => schema.induction.kind !== "domain-module"))),
       actionConstraints: actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module")
-        .concat(fromSource(actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"))),
+        .concat(fromSource(actionConstraints.filter((constraint) => constraint.induction.kind !== "domain-module"))),
       normTemplates: normTemplates.filter((template) => template.induction.kind === "domain-module")
-        .concat(fromSource(normTemplates.filter((template) => template.induction.kind === "source-pattern"))),
+        .concat(fromSource(normTemplates.filter((template) => template.induction.kind !== "domain-module"))),
       processTemplates: processTemplates.filter((template) => template.induction.kind === "domain-module")
-        .concat(fromSource(processTemplates.filter((template) => template.induction.kind === "source-pattern"))),
+        .concat(fromSource(processTemplates.filter((template) => template.induction.kind !== "domain-module"))),
       rules: fromSource(rules),
       initialWorld,
       goals: fromSource(goals),

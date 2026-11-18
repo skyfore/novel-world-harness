@@ -82,6 +82,7 @@ export const actionConstraintSchema = z.object({
   induction: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("source-pattern"), supportingEventIds: z.array(idSchema).min(1).max(64) }).strict(),
     z.object({ kind: z.literal("domain-module"), moduleId: idSchema, moduleVersion: z.string().trim().min(1).max(120) }).strict(),
+    z.object({ kind: z.literal("source-statement"), statement: z.string().trim().min(1).max(500) }).strict(),
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
@@ -96,7 +97,7 @@ export const actionConstraintSchema = z.object({
   if (value.overridesConstraintIds.includes(value.id)) {
     ctx.addIssue({ code: "custom", path: ["overridesConstraintIds"], message: "An action constraint cannot override itself" });
   }
-  if (value.induction.kind === "source-pattern" && !value.evidence.length) {
+  if (value.induction.kind !== "domain-module" && !value.evidence.length) {
     ctx.addIssue({ code: "custom", path: ["evidence"], message: "A source-induced action constraint requires source evidence" });
   }
   if (value.induction.kind === "domain-module" && value.evidence.length) {

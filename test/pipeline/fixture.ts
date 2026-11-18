@@ -149,3 +149,34 @@ export function scenesScript(options: { conversations?: () => boolean } = {}) {
     await call("finish_scope", {});
   };
 }
+
+export async function scenedWorkspace(text = BELL_TOWER) {
+  const workspace = await identifiedWorkspace(text);
+  const { scenesStage } = await import("../../src/compiler/pipeline/scenes.js");
+  const scened = await runStage(scenesStage, stageContext(workspace.root, workspace.source.id, scenesScript()));
+  if (scened.held.length) throw new Error(`scenes held: ${scened.held.join(", ")}`);
+  return workspace;
+}
+
+/** World script: a stated route for each location, a reviewed unconditioned key event, and one source-statement norm. */
+export function worldScript() {
+  return async (input: StageAgentInput, call: ScriptedCall) => {
+    const items = [...input.prompt.matchAll(/^((?:location|key-event|autonomy|pair|actor|lore|knowledge):[^:\s]+):/gmu)].map((match) => match[1]!);
+    const found = await must(call, "search_source", { query: "走向北门" });
+    const walk = found.units[0];
+    for (const item of items) {
+      if (item.startsWith("location:")) {
+        await must(call, "propose_artifacts", { items: [{ kind: "spatial-relation", payload: { ontologyVersion: "spatial-v1", id: "route-bell-tower-north-gate", kind: "route", basis: "explicit", visibility: "public",
+          status: "supported", confidence: 0.8, fromLocationId: "loc-bell-tower", toLocationId: "loc-north-gate", direction: "two-way", modes: ["foot"] }, evidence: [{ unit: walk.unit, text: "走向北门" }] }] });
+      } else if (item.startsWith("key-event:")) {
+        await must(call, "record_dispositions", { items: [{ measure: "causality.conditioned-key-events", subject: item.replace("key-event:", "event:"), verdict: "unconditioned", rationale: "Nothing in the text gates the walk." }] });
+      } else if (item.startsWith("autonomy:")) {
+        const hurry = (await must(call, "search_source", { query: "快走" })).units[0];
+        await must(call, "propose_artifacts", { items: [{ kind: "norm-template", payload: { ontologyVersion: "norm-template-v1", id: "norm-leave-before-seventh-bell", name: "Leave before the seventh bell", modality: "obligation",
+          actionPattern: { kind: "schema", schemaId: "base-action-move" }, appliesWhen: [], exceptions: [], reparations: [], priority: 1, defeasible: true, overridesTemplateIds: [], status: "supported", visibility: "public", knownByClaimIds: [],
+          induction: { kind: "source-statement", statement: "林岐催促：快走！" } }, evidence: [{ unit: hurry.unit, text: "“快走！”" }] }] });
+      }
+    }
+    await call("finish_scope", {});
+  };
+}

@@ -78,6 +78,7 @@ export const processTemplateSchema = z.object({
   induction: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("source-pattern"), supportingEventIds: z.array(idSchema).min(1).max(64) }).strict(),
     z.object({ kind: z.literal("domain-module"), moduleId: idSchema, moduleVersion: z.string().trim().min(1).max(120) }).strict(),
+    z.object({ kind: z.literal("source-statement"), statement: z.string().trim().min(1).max(500) }).strict(),
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
@@ -123,7 +124,7 @@ export const processTemplateSchema = z.object({
     for (const key of ["fromPhaseId", "toPhaseId"] as const) if (control[key] && !phases.has(control[key]!)) ctx.addIssue({ code: "custom", path: ["actorControls", index, key], message: "Unknown process control phase" });
     if (control.outcomeId && !value.outcomeIds.includes(control.outcomeId)) ctx.addIssue({ code: "custom", path: ["actorControls", index, "outcomeId"], message: "Unknown process control outcome" });
   });
-  if (value.induction.kind === "source-pattern" && !value.evidence.length) ctx.addIssue({ code: "custom", path: ["evidence"], message: "A source process template requires evidence" });
+  if (value.induction.kind !== "domain-module" && !value.evidence.length) ctx.addIssue({ code: "custom", path: ["evidence"], message: "A source process template requires evidence" });
   if (value.induction.kind === "domain-module" && value.evidence.length) ctx.addIssue({ code: "custom", path: ["evidence"], message: "Domain processes use module provenance, not novel EvidenceRefs" });
 });
 export type ProcessTemplate = z.infer<typeof processTemplateSchema>;

@@ -78,7 +78,8 @@ export const DEFAULT_COMPLETENESS_POLICY = {
     termsGrounded: 1,
   },
 } as const;
-export type CompletenessPolicy = typeof DEFAULT_COMPLETENESS_POLICY;
+type Widen<T> = { [K in keyof T]: T[K] extends number ? number : T[K] extends string ? string : Widen<T[K]> };
+export type CompletenessPolicy = Widen<typeof DEFAULT_COMPLETENESS_POLICY>;
 
 export type ByteRange = { startByte: number; endByte: number };
 
@@ -145,6 +146,7 @@ export type WorldCompletenessReport = {
     unanchoredEvents: string[];
     unconditionedKeyEvents: string[];
     ungroundedTerms: LoreTerm[];
+    unacquiredKnowledge: Array<{ eventId: string; actorId: string; claimId: string }>;
   };
   roster: RosterSummary;
 };
@@ -686,6 +688,7 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
       unanchoredEvents: timed.filter((event) => !anchored(event)).map((event) => event.id).slice(0, QUEUE_LIMIT),
       unconditionedKeyEvents: keyEvents.filter((event) => !conditioned(event)).map((event) => event.id).slice(0, QUEUE_LIMIT),
       ungroundedTerms: ungrounded.slice(0, QUEUE_LIMIT),
+      unacquiredKnowledge: learns.filter((item) => !acquired.has(`${item.eventId}:${item.actorId}:${item.claimId}`)).slice(0, QUEUE_LIMIT),
     },
     roster,
   };

@@ -48,3 +48,22 @@ export async function applyEach<I, R>(items: readonly I[], apply: (item: I, inde
   }
   return { applied, failed };
 }
+
+/**
+ * Stage a proposal under a content-derived ID. An identical proposal that is
+ * already accepted is reused; one sitting in rejected history (e.g. after a
+ * quarantine on an earlier attempt) is re-staged under a fresh ID.
+ */
+export async function stageOnce(stage: (id: string) => Promise<void>, id: string): Promise<string> {
+  try {
+    await stage(id);
+    return id;
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    if (/already exists in accepted history/u.test(error.message)) return id;
+    if (!/already exists in rejected history/u.test(error.message)) throw error;
+    const fresh = `${id.slice(0, 40)}-r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    await stage(fresh);
+    return fresh;
+  }
+}

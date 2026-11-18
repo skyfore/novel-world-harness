@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { censusCandidates, censusStage } from "../../src/compiler/pipeline/census.js";
 import { observationStage, openCandidates } from "../../src/compiler/pipeline/observation.js";
-import { runStage } from "../../src/compiler/pipeline/runner.js";
+import { releaseHeldScope, runStage } from "../../src/compiler/pipeline/runner.js";
 import { loadPipelineView, measureView } from "../../src/compiler/pipeline/view.js";
-import { must, pipelineWorkspace, stageContext } from "./fixture.js";
+import { must, observationScript, pipelineWorkspace, stageContext, unitsOf } from "./fixture.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { while (cleanups.length) await cleanups.pop()!(); });
@@ -40,25 +40,13 @@ describe("pipeline census and observation", () => {
     cleanups.push(workspace.cleanup);
     const { summary } = await runCensus(workspace.root, workspace.source.id);
     expect(summary.completed).toHaveLength(1);
-
     let skip = true;
     const ctx = stageContext(workspace.root, workspace.source.id, async (input, call) => {
-      const open = await must(call, "list_open_candidates", {});
-      const items = open.candidates.filter((item: { id: string; kind: string }) => !(skip && item.id === open.candidates.find((other: { kind: string }) => other.kind === "speech").id))
-        .map((item: { id: string; kind: string; cue?: string }) => item.kind === "speech" ? { id: item.id, verdict: "accept", speaker: item.cue ? "cue" : undefined } : { id: item.id, verdict: "accept" });
-      await must(call, "review_observation_candidates", { items });
-      const lines = [...input.prompt.matchAll(/^\[(u\d+)\] (.*)$/gmu)].map((match) => ({ unit: match[1]!, text: match[2]! }));
-      const heading = lines.find((line) => line.text.startsWith("第一章"))!;
-      await must(call, "account_units", { items: [{ unit: heading.unit, status: "paratext", rationale: "Chapter heading." }] });
+      const lines = unitsOf(input.prompt);
       // A unit holding an unrejected candidate cannot be closed as background.
       const speechUnit = lines.find((line) => line.text.startsWith("“第七声钟"))!;
       expect((await call("account_units", { items: [{ unit: speechUnit.unit, status: "background-only", rationale: "Try to hide it." }] })).details).toMatchObject({ accounted: [], failed: [{ index: 0 }] });
-      const walk = lines.find((line) => line.text.startsWith("他们"))!;
-      const pronoun = await must(call, "propose_entity_mentions", { items: [{ span: { unit: walk.unit, text: "他们" }, form: "pronoun", kinds: ["character"], interpretation: "林岐 and 墨砚." }] });
-      await must(call, "propose_event_mentions", { items: [{ trigger: { unit: walk.unit, text: "走向" }, extent: { from: walk.unit, to: walk.unit }, types: ["movement"], salience: "major", participants: pronoun.created }] });
-      const narrative = lines.filter((line) => line !== heading);
-      await must(call, "propose_discourse_segments", { items: [{ extent: { from: narrative[0]!.unit, to: narrative.at(-1)!.unit }, kind: "scene" }] });
-      await call("finish_scope", {});
+      await observationScript({ skipFirstSpeech: () => skip })(input, call);
     });
     const first = await runStage(observationStage, ctx, { maxAttempts: 1 });
     expect(first.held).toHaveLength(1);
@@ -67,7 +55,6 @@ describe("pipeline census and observation", () => {
     expect(receipt.gate!.checks.filter((check) => !check.passed).map((check) => check.id)).toEqual(["observation.candidates-reviewed", "observation.speech-annotated", "source.blocking-units"]);
 
     // Release and redo with the full review: the same gate now passes.
-    const { releaseHeldScope } = await import("../../src/compiler/pipeline/runner.js");
     await releaseHeldScope(ctx.store, receipt.id);
     skip = false;
     const second = await runStage(observationStage, ctx);

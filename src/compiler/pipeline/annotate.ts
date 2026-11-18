@@ -5,6 +5,7 @@ import type { ByteRange } from "../world-completeness.js";
 import type { StageContext } from "./runner.js";
 import type { CensusClass } from "./store.js";
 import type { ScopeText } from "./text.js";
+import { stageOnce } from "./tooling.js";
 
 export const HOST_LEXICAL_WORKER = "host-lexical-v1";
 export const PIPELINE_OBSERVATION_WORKER = "pipeline-observation";
@@ -35,14 +36,11 @@ export class AnnotationWriter {
 
   async commit(annotation: SourceAnnotation): Promise<SourceAnnotation> {
     const payload = sourceAnnotationSchema.parse(annotation);
-    const id = `pp-${crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 24)}`;
     const existing = await this.store.read(this.ctx.sourceId, payload.id).catch(() => null);
     if (existing && JSON.stringify(existing) === JSON.stringify(payload)) return payload;
-    await this.store.stage(this.ctx.sourceId, { version: 1, id, annotationType: payload.annotationType, payload,
+    const id = await stageOnce((proposalId) => this.store.stage(this.ctx.sourceId, { version: 1, id: proposalId, annotationType: payload.annotationType, payload,
       generatedBy: { worker: payload.derivation.worker, compilerBatchId: this.scopeId, ...(payload.derivation.provider ? { provider: payload.derivation.provider } : {}), ...(payload.derivation.model ? { model: payload.derivation.model } : {}) },
-      createdAt: new Date().toISOString() }).catch((error: Error) => {
-      if (!/already exists in accepted history/u.test(error.message)) throw error;
-    });
+      createdAt: new Date().toISOString() }), `pp-${crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 24)}`);
     await this.store.commitProposals(this.ctx.sourceId, [id]);
     return payload;
   }

@@ -3,13 +3,18 @@ import crypto from "node:crypto";
 /**
  * Host-deterministic lexical inventory (iteration 02, M1).
  *
- * Three things a novel's text states on its face, found without a model:
- * direct-speech spans, occurrences of established character names, and
- * conservative speaker cues ("…”路明非说" / "路明非点头，“…"). They serve as
- * independent completeness denominators and as presentation-only fallback
- * voice material. They never become canonical facts or branch state.
+ * Things a novel's text states on its face, found without a model:
+ * direct-speech spans, occurrences of lexicon names, conservative speaker
+ * cues ("…”路明非说" / "路明非点头，“…" / "玄德曰：\"…\"") and explicit time
+ * expressions. They serve as independent completeness denominators, as host
+ * observation candidates and as presentation-only fallback voice material.
+ * They never become canonical facts or branch state.
+ *
+ * Quotation conventions (v2): curly “…”, corner 「…」『…』, straight "…"
+ * (paired left to right inside a paragraph) and the classical unquoted
+ * "曰：…" which runs to the end of its paragraph.
  */
-export const LEXICAL_INVENTORY_VERSION = "lexical-v1" as const;
+export const LEXICAL_INVENTORY_VERSION = "lexical-v2" as const;
 
 export type SpeechSpan = {
   /** Byte span including the quotation marks. */
@@ -19,7 +24,10 @@ export type SpeechSpan = {
   kind: "speech" | "embedded";
   /** False when the paragraph ends before the closing mark (multi-paragraph quotation convention). */
   closed: boolean;
+  /** Which quotation convention delimited the span; `colon` is unquoted "曰：…" discourse. */
+  delimiter: SpeechDelimiter;
 };
+export type SpeechDelimiter = "curly" | "corner" | "straight" | "colon";
 
 export type LexiconEntry = { surface: string; entityId: string };
 export type CharacterLexicon = {
@@ -30,7 +38,7 @@ export type CharacterLexicon = {
 
 export type NameOccurrence = { startByte: number; endByte: number; entityId: string };
 
-export type SpeakerCueRule = "post-cue" | "pre-cue" | "continuation";
+export type SpeakerCueRule = "post-cue" | "verb-cue" | "pre-cue" | "continuation";
 export type SpeakerCue = {
   speechStartByte: number;
   speechEndByte: number;
@@ -40,19 +48,28 @@ export type SpeakerCue = {
   rule: SpeakerCueRule;
 };
 
+export type TimeExpressionKind = "date" | "clock" | "relative" | "period";
+export type TimeExpression = { startByte: number; endByte: number; kind: TimeExpressionKind; surface: string };
+
 export type LexicalInventory = {
   version: typeof LEXICAL_INVENTORY_VERSION;
   speech: SpeechSpan[];
   occurrences: NameOccurrence[];
   cues: SpeakerCue[];
   lexicon: CharacterLexicon;
+  times: TimeExpression[];
 };
 
 type LexiconEntity = { id: string; kind: string; canonicalName: string; aliases: readonly string[] };
 type LexiconAnnotation = { annotationType: string; id: string; surface?: string; form?: string };
 type LexiconResolution = { id: string; mentionId: string; status: string; entityId?: string; supersedesResolutionId?: string };
 
-const QUOTE_PAIRS = new Map([["“", "”"], ["「", "」"], ["『", "』"]]);
+const QUOTE_PAIRS = new Map([["“", "”"], ["「", "」"], ["『", "』"], ['"', '"']]);
+const DELIMITER_OF = new Map<string, SpeechDelimiter>([["“", "curly"], ["「", "corner"], ["『", "corner"], ['"', "straight"]]);
+const QUOTE_MARKS = /[“”「」『』"']/u;
+/** Speech verbs that introduce discourse with a colon: 玄德曰：/ 路明非说：/ 张飞大叫：. */
+const SPEECH_VERBS = new Set(["曰", "道", "说", "问", "答", "叫", "喊", "喝", "骂", "笑", "叹", "云", "言", "吼", "嚷", "呼"]);
+const COLONS = new Set(["：", ":"]);
 const SPEECH_PUNCTUATION = /[。！？!?…，,；;～~—：:]/u;
 const SENTENCE_END = /[。！？!?]/u;
 const CLAUSE_JOIN = new Set(["，", ",", "：", ":"]);
@@ -84,6 +101,11 @@ function byteOffsets(text: string): Int32Array {
   return offsets;
 }
 
+function skipSpaces(text: string, index: number, limit: number): number {
+  while (index < limit && SPACE.test(text[index]!)) index += 1;
+  return index;
+}
+
 type Paragraph = { start: number; contentStart: number; end: number };
 
 function paragraphs(text: string): Paragraph[] {
@@ -100,14 +122,38 @@ function paragraphs(text: string): Paragraph[] {
   return result;
 }
 
-type CharSpeech = { start: number; end: number; paragraph: Paragraph; kind: SpeechSpan["kind"]; closed: boolean };
+type CharSpeech = { start: number; end: number; paragraph: Paragraph; kind: SpeechSpan["kind"]; closed: boolean; delimiter: SpeechDelimiter };
 
 function scanCharSpeech(text: string): CharSpeech[] {
   const spans: CharSpeech[] = [];
   for (const paragraph of paragraphs(text)) {
     let index = paragraph.contentStart;
     while (index < paragraph.end) {
-      const closer = QUOTE_PAIRS.get(text[index]!);
+      const mark = text[index]!;
+      // Classical unquoted discourse: 后人有诗赞曰：英雄露颖在今朝…
+      if (mark === "曰" && COLONS.has(text[index + 1] ?? "")) {
+        const start = skipSpaces(text, index + 2, paragraph.end);
+        const next = text[start] ?? "";
+        if (start < paragraph.end && !QUOTE_PAIRS.has(next) && next !== "'") {
+          let end = start;
+          while (end < paragraph.end && !QUOTE_MARKS.test(text[end]!)) end += 1;
+          if (text.slice(start, end).trim()) spans.push({ start, end, paragraph, kind: "speech", closed: true, delimiter: "colon" });
+          index = end;
+          continue;
+        }
+        if (next === "'") {
+          // 曰：'持此还祖龙。' — a straight single quote opened by a speech verb.
+          const closeAt = text.indexOf("'", start + 1);
+          const closed = closeAt >= 0 && closeAt < paragraph.end;
+          const end = closed ? closeAt + 1 : paragraph.end;
+          if (text.slice(start + 1, closed ? closeAt : paragraph.end).trim()) spans.push({ start, end, paragraph, kind: "speech", closed, delimiter: "straight" });
+          index = end;
+          continue;
+        }
+        index += 1;
+        continue;
+      }
+      const closer = QUOTE_PAIRS.get(mark);
       if (!closer) { index += 1; continue; }
       const closeAt = text.indexOf(closer, index + 1);
       const closed = closeAt >= 0 && closeAt < paragraph.end;
@@ -117,7 +163,7 @@ function scanCharSpeech(text: string): CharSpeech[] {
       const after = end < paragraph.end ? text[end]! : "";
       const embedded = closed && !SPEECH_PUNCTUATION.test(content)
         && ((before !== "" && IDEOGRAPH.test(before)) || EMBEDDING_PARTICLES.has(after));
-      if (content.trim()) spans.push({ start: index, end, paragraph, kind: embedded ? "embedded" : "speech", closed });
+      if (content.trim()) spans.push({ start: index, end, paragraph, kind: embedded ? "embedded" : "speech", closed, delimiter: DELIMITER_OF.get(mark)! });
       index = end;
     }
   }
@@ -128,7 +174,7 @@ function scanCharSpeech(text: string): CharSpeech[] {
 export function scanSpeechSpans(source: Uint8Array): SpeechSpan[] {
   const text = Buffer.from(source.buffer, source.byteOffset, source.byteLength).toString("utf8");
   const offsets = byteOffsets(text);
-  return scanCharSpeech(text).map((span) => ({ startByte: offsets[span.start]!, endByte: offsets[span.end]!, kind: span.kind, closed: span.closed }));
+  return scanCharSpeech(text).map((span) => ({ startByte: offsets[span.start]!, endByte: offsets[span.end]!, kind: span.kind, closed: span.closed, delimiter: span.delimiter }));
 }
 
 /**
@@ -207,11 +253,6 @@ export function scanNameOccurrences(source: Uint8Array, lexicon: CharacterLexico
   return scanCharOccurrences(text, lexicon).map((item) => ({ startByte: offsets[item.start]!, endByte: offsets[item.end]!, entityId: item.entityId }));
 }
 
-function skipSpaces(text: string, index: number, limit: number): number {
-  while (index < limit && SPACE.test(text[index]!)) index += 1;
-  return index;
-}
-
 function attributeCharSpeech(text: string, speech: readonly CharSpeech[], occurrences: readonly CharOccurrence[]) {
   const occurrenceAt = new Map(occurrences.map((item) => [item.start, item]));
   const firstOccurrenceFrom = (from: number, to: number) => occurrences.find((item) => item.start >= from && item.end <= to);
@@ -229,6 +270,27 @@ function attributeCharSpeech(text: string, speech: readonly CharSpeech[], occurr
     if (prior && prior.paragraph === span.paragraph) previousSpeech.set(span, prior);
     prior = span;
   }
+  /**
+   * 张飞大怒曰：“…” / 路明非说：“…”: a speech verb and colon directly before the
+   * quotation, whose clause (since the last sentence end or quotation mark)
+   * opens with exactly one character's name. "后人有诗赞玄德曰" does not open with
+   * the name, and "玄德谓张飞曰" names two characters, so both abstain.
+   */
+  const verbCue = (span: CharSpeech) => {
+    let colonAt = span.start - 1;
+    while (colonAt >= span.paragraph.contentStart && SPACE.test(text[colonAt]!)) colonAt -= 1;
+    if (colonAt <= span.paragraph.contentStart || !COLONS.has(text[colonAt]!) || !SPEECH_VERBS.has(text[colonAt - 1]!)) return undefined;
+    const verbAt = colonAt - 1;
+    let clauseStart = verbAt;
+    while (clauseStart > span.paragraph.contentStart && !SENTENCE_END.test(text[clauseStart - 1]!) && !QUOTE_MARKS.test(text[clauseStart - 1]!)) clauseStart -= 1;
+    clauseStart = skipSpaces(text, clauseStart, verbAt);
+    if (Array.from(text.slice(clauseStart, verbAt)).length > PRE_CUE_MAX_CHARACTERS) return undefined;
+    const inClause = occurrences.filter((item) => item.start >= clauseStart && item.end <= verbAt);
+    const subject = inClause[0];
+    if (!subject || subject.start !== clauseStart || NON_SUBJECT_FOLLOWERS.has(text[subject.end] ?? "")) return undefined;
+    if (inClause.some((item) => item.entityId !== subject.entityId)) return undefined;
+    return subject;
+  };
   const attributed = new Map<CharSpeech, CharOccurrence>();
   for (const span of speech) {
     if (span.kind !== "speech") continue;
@@ -236,6 +298,12 @@ function attributeCharSpeech(text: string, speech: readonly CharSpeech[], occurr
     if (post) {
       cues.push({ speech: span, occurrence: post, rule: "post-cue" });
       attributed.set(span, post);
+      continue;
+    }
+    const verb = verbCue(span);
+    if (verb) {
+      cues.push({ speech: span, occurrence: verb, rule: "verb-cue" });
+      attributed.set(span, verb);
       continue;
     }
     let joinAt = span.start - 1;
@@ -246,7 +314,7 @@ function attributeCharSpeech(text: string, speech: readonly CharSpeech[], occurr
       // “A”路明非说，“B”: B continues A's speaker when only a cue clause sits between them.
       const between = text.slice(previous.end, span.start);
       const speaker = attributed.get(previous);
-      if (speaker && speaker.start >= previous.end && !SENTENCE_END.test(between) && !/[“”「」『』]/u.test(between)) {
+      if (speaker && speaker.start >= previous.end && !SENTENCE_END.test(between) && !QUOTE_MARKS.test(between)) {
         cues.push({ speech: span, occurrence: speaker, rule: "continuation" });
         attributed.set(span, speaker);
       }
@@ -265,22 +333,28 @@ function attributeCharSpeech(text: string, speech: readonly CharSpeech[], occurr
   return cues;
 }
 
-/** The full inventory for one immutable source. */
+/**
+ * The full inventory for one immutable source. The lexicon is either derived
+ * from compiled entities (attested proper-name mentions, M1) or supplied by
+ * the caller, e.g. from the census store (v2), in which case `entityId` is the
+ * lexicon key the caller chose.
+ */
 export function buildLexicalInventory(input: {
   source: Uint8Array;
-  entities: readonly LexiconEntity[];
+  entities?: readonly LexiconEntity[];
   annotations?: readonly LexiconAnnotation[];
   entityResolutions?: readonly LexiconResolution[];
+  lexicon?: CharacterLexicon;
 }): LexicalInventory {
   const text = Buffer.from(input.source.buffer, input.source.byteOffset, input.source.byteLength).toString("utf8");
   const offsets = byteOffsets(text);
-  const lexicon = buildCharacterLexicon(input);
+  const lexicon = input.lexicon ?? buildCharacterLexicon({ ...input, entities: input.entities ?? [] });
   const charSpeech = scanCharSpeech(text);
   const charOccurrences = scanCharOccurrences(text, lexicon);
   const cues = attributeCharSpeech(text, charSpeech, charOccurrences);
   return {
     version: LEXICAL_INVENTORY_VERSION,
-    speech: charSpeech.map((span) => ({ startByte: offsets[span.start]!, endByte: offsets[span.end]!, kind: span.kind, closed: span.closed })),
+    speech: charSpeech.map((span) => ({ startByte: offsets[span.start]!, endByte: offsets[span.end]!, kind: span.kind, closed: span.closed, delimiter: span.delimiter })),
     occurrences: charOccurrences.map((item) => ({ startByte: offsets[item.start]!, endByte: offsets[item.end]!, entityId: item.entityId })),
     cues: cues.map(({ speech, occurrence, rule }) => ({
       speechStartByte: offsets[speech.start]!,
@@ -291,7 +365,60 @@ export function buildLexicalInventory(input: {
       rule,
     })),
     lexicon,
+    times: scanCharTimes(text).map((item) => ({ startByte: offsets[item.start]!, endByte: offsets[item.end]!, kind: item.kind, surface: item.surface })),
   };
+}
+
+const CN_NUMBER = "〇零一二三四五六七八九十百千两廿卅0-9０-９";
+/**
+ * Explicit time expressions, most specific kind first. Conservative: a match
+ * must carry a calendar/clock unit or a fixed deictic phrase, so "周围" or
+ * "后来" never count. Overlaps resolve leftmost-longest.
+ */
+const TIME_PATTERNS: Array<{ kind: TimeExpressionKind; pattern: RegExp }> = [
+  { kind: "date", pattern: new RegExp(`(?:[${CN_NUMBER}]+|元)年(?:[${CN_NUMBER}正闰]+月)?(?:(?:初|廿)?[${CN_NUMBER}]+[日号]|望日|朔日|晦日)?(?![轻纪级头代])`, "gu") },
+  { kind: "date", pattern: new RegExp(`[${CN_NUMBER}正闰]+月(?:(?:初|廿)?[${CN_NUMBER}]+[日号]|望日?|朔日?|晦日?)?`, "gu") },
+  { kind: "clock", pattern: new RegExp(`[0-9０-９]{1,2}[:：][0-9０-９]{2}|[0-9０-９]{1,2}点(?:钟|半|[0-9０-９]+分)?|[${CN_NUMBER}]+点(?:钟|半|[${CN_NUMBER}]+分)|[子丑寅卯辰巳午未申酉戌亥]时(?:[一二三四初正]刻)?|[一二三四五]更(?:天|时分?)?(?![加多是好大新换改衣])`, "gu") },
+  { kind: "relative", pattern: new RegExp(`[${CN_NUMBER}几数半]+(?:天|日|年|个月|个星期|星期|周|小时|个小时|钟头|分钟|秒钟?|刻钟)(?:之后|以后|之前|以前|后|前|过去了|过后)`, "gu") },
+  { kind: "relative", pattern: /(?:第[二三四五六七八九十0-9]+|次|翌|当|前|昨|今|明|后|那|这|同|是|其)(?:天|日|晚|夜|年|早|晨)(?:晚上|夜里|早上|清早)?(?![空使才生下性然真地赋气轻纪级头代色际意命子数神堂王])/gu },
+  { kind: "period", pattern: /(?:星期|礼拜)[一二三四五六日天]|周[一二三四五六日](?![\p{Script=Han}])|清晨|早上|早晨|上午|中午|正午|下午|傍晚|黄昏|晚上|深夜|半夜|午夜|凌晨|拂晓|黎明|入夜|夜里|白天/gu },
+];
+
+/** A calendar match must name a month, a full year numeral or an era's first year; "三年" alone is a duration. */
+function calendarLike(surface: string): boolean {
+  if (surface.includes("月")) {
+    const month = surface.slice(surface.indexOf("年") + 1, surface.indexOf("月"));
+    return /^(?:[正闰]|[一二三四五六七八九十]{1,3}|[0-9０-９]{1,2})$/u.test(month) || surface.includes("年");
+  }
+  const year = surface.slice(0, surface.indexOf("年"));
+  return year === "元" || Array.from(year).length >= 3;
+}
+
+function scanCharTimes(text: string): Array<{ start: number; end: number; kind: TimeExpressionKind; surface: string }> {
+  const found: Array<{ start: number; end: number; kind: TimeExpressionKind; surface: string; rank: number }> = [];
+  TIME_PATTERNS.forEach(({ kind, pattern }, rank) => {
+    for (const match of text.matchAll(pattern)) {
+      if (!match[0] || match.index === undefined) continue;
+      if (kind === "date" && !calendarLike(match[0])) continue;
+      found.push({ start: match.index, end: match.index + match[0].length, kind, surface: match[0], rank });
+    }
+  });
+  found.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start) || a.rank - b.rank);
+  const result: Array<{ start: number; end: number; kind: TimeExpressionKind; surface: string }> = [];
+  let cursor = -1;
+  for (const item of found) {
+    if (item.start < cursor) continue;
+    result.push({ start: item.start, end: item.end, kind: item.kind, surface: item.surface });
+    cursor = item.end;
+  }
+  return result;
+}
+
+/** Explicit time expressions with exact byte offsets. */
+export function scanTimeExpressions(source: Uint8Array): TimeExpression[] {
+  const text = Buffer.from(source.buffer, source.byteOffset, source.byteLength).toString("utf8");
+  const offsets = byteOffsets(text);
+  return scanCharTimes(text).map((item) => ({ startByte: offsets[item.start]!, endByte: offsets[item.end]!, kind: item.kind, surface: item.surface }));
 }
 
 export function sha256Hex(bytes: Uint8Array): string {

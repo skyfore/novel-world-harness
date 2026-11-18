@@ -4,6 +4,7 @@ import {
   buildLexicalInventory,
   scanNameOccurrences,
   scanSpeechSpans,
+  scanTimeExpressions,
 } from "../src/compiler/lexical-inventory.js";
 
 const entities = [
@@ -80,5 +81,45 @@ describe("lexical inventory", () => {
     expect(slice(source, span!.startByte, span!.endByte)).toBe("“好。”");
     const inventory = buildLexicalInventory({ source, entities, annotations, entityResolutions });
     expect(slice(source, inventory.cues[0]!.cueStartByte, inventory.cues[0]!.cueEndByte)).toBe("路明非");
+  });
+});
+
+describe("lexical inventory v2 conventions", () => {
+  const classical = { entries: ["玄德", "张飞", "关公"].map((surface) => ({ surface, entityId: surface })), collisions: [] };
+
+  it("pairs straight quotes inside a paragraph and reads unquoted 曰：discourse", () => {
+    const source = bytes('\t玄德曰："此天佑我也！"号为"十常侍"。\n\t后人有诗赞曰：英雄露颖在今朝，一试矛兮一试刀。\n\t始皇与从者曰：\'持此还祖龙。\'言讫不见。\n\t"第一段，\n');
+    expect(scanSpeechSpans(source).map((span) => [slice(source, span.startByte, span.endByte), span.kind, span.delimiter, span.closed])).toEqual([
+      ['"此天佑我也！"', "speech", "straight", true],
+      ['"十常侍"', "embedded", "straight", true],
+      ["英雄露颖在今朝，一试矛兮一试刀。", "speech", "colon", true],
+      ["'持此还祖龙。'", "speech", "straight", true],
+      ['"第一段，', "speech", "straight", false],
+    ]);
+  });
+
+  it("attributes verb cues only when the clause opens with exactly one name", () => {
+    const text = [
+      '\t玄德曰："我本汉室宗亲。"',
+      '\t张飞听了，大怒曰："吾当斩之！"',
+      '\t玄德谓张飞曰："不可。"',
+      "\t后人有诗赞玄德曰：运筹决算有神功。",
+      "\t关公说：“走吧。”",
+    ].join("\n");
+    const source = bytes(text);
+    const inventory = buildLexicalInventory({ source, lexicon: classical });
+    expect(inventory.cues.map((cue) => [slice(source, cue.speechStartByte, cue.speechEndByte), cue.entityId, cue.rule])).toEqual([
+      ['"我本汉室宗亲。"', "玄德", "verb-cue"],
+      ['"吾当斩之！"', "张飞", "verb-cue"],
+      ["“走吧。”", "关公", "verb-cue"],
+    ]);
+  });
+
+  it("finds explicit time expressions without matching ordinary words", () => {
+    const source = bytes("建宁二年四月望日，帝御温德殿。次日三更时分，他来了。第二天晚上九点十五分，三天后又是星期五。周围那年轻人一点也不怕，读了三年书。1992年02月14日。");
+    expect(scanTimeExpressions(source).map((item) => [item.surface, item.kind])).toEqual([
+      ["二年四月望日", "date"], ["次日", "relative"], ["三更时分", "clock"], ["第二天晚上", "relative"], ["九点十五分", "clock"],
+      ["三天后", "relative"], ["星期五", "period"], ["1992年02月14日", "date"],
+    ]);
   });
 });

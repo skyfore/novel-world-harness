@@ -10,7 +10,7 @@
 设计 4.2 的完成标准是"龙族真实模型跑出第一份基线报告"。本次没有做到，原因有两个，都可以独立核实：
 
 - **龙族没有任何可入场的"切面 × 角色"。** 行动探针只在已准入的入口上开局（门禁是 `assertCutAdmission`）。龙族当前 0 个条目达到 `enterable`（见下文第 2 节），所以 `compile-novel probe` 不会有可跑的入口。
-- **本机没有模型配置。** 工作区没有 `novel-harness.yaml`、`.env` 或模型 API 密钥，`--live` 无法运行。
+- **（更正）本机有可用模型。** 早先判断"本机没有模型配置"是错的：工作区虽然没有 `novel-harness.yaml`、`.env` 或 API 密钥环境变量，但 harness 读取本地 Pi 代理目录 `~/.pi/agent/auth.json`，其中保存的 Codex OAuth 登录就是默认模型（`openai-codex` / `gpt-6.1-sol`），`nwh doctor` 可确认。`--live` 可以运行；没有跑出龙族基线的真正原因是第一条（没有可入场条目）。
 
 另外，要在龙族上跑探针，必须先 `compile-novel admit --activate`：它会向用户的预编译缓存发布新版本，并把它物化到真实工作区。这是不可轻易撤销的写操作，本次没有自行执行。
 
@@ -65,7 +65,7 @@
 # 只读诊断：时间线、准入等级、首要阻塞、场景地点队列
 nwh compile-novel cuts --source a28585b1cf867f3e3a16
 
-# 有已准入并激活的版本之后：假模型基线 / 真实模型基线
+# 有已准入并激活的版本之后：假模型基线 / 真实模型基线（默认使用 ~/.pi/agent 中的 Codex OAuth 登录）
 nwh compile-novel probe --source a28585b1cf867f3e3a16
 nwh compile-novel probe --source a28585b1cf867f3e3a16 --live --turns 3
 ```

@@ -16,6 +16,11 @@ export function workspaceStateDir(workspaceRoot: string, runtimeDir = nwhRuntime
   return path.join(path.resolve(runtimeDir), "workspaces", "v1", workspaceRuntimeId(workspaceRoot));
 }
 
+/** Durable archives (legacy reference packs). Never purged by maintenance. */
+export function workspaceArchiveDir(workspaceRoot: string, runtimeDir = nwhRuntimeDir()): string {
+  return path.join(path.resolve(runtimeDir), "archives", workspaceRuntimeId(workspaceRoot));
+}
+
 export function legacyWorkspaceStateDir(workspaceRoot: string): string {
   return path.join(path.resolve(workspaceRoot), ".novel-harness");
 }

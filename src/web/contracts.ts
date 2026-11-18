@@ -768,11 +768,40 @@ export const sourcePlayRoleListSchema = z.object({
   roles: z.array(sourcePlayRoleSchema),
 }).strict();
 
+export const sourceCutListSchema = z.object({
+  sourceId: z.string().min(1),
+  sourceTitle: z.string().min(1),
+  preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/),
+  minimumTier: z.string().min(1),
+  horizonIndex: z.number().int().min(-1),
+  cuts: z.array(z.object({
+    cutId: z.string().regex(/^[a-f0-9]{64}$/),
+    beforeEventId: z.string().min(1),
+    beforeEventTitle: z.string().min(1),
+    sceneId: z.string().min(1).optional(),
+    sceneIds: z.array(z.string().min(1)),
+    index: z.number().int().nonnegative(),
+    tier: z.string().min(1),
+    blocking: z.array(z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict()),
+    actors: z.array(z.object({
+      actorId: z.string().min(1),
+      canonicalName: z.string().min(1),
+      tier: z.string().min(1),
+      entryBasis: z.enum(["opening", "checkpoint", "derived"]),
+      admitted: z.boolean(),
+      entryCutHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+      issues: z.array(z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict()),
+    }).strict()),
+  }).strict()),
+}).strict();
+
 export const startFreshPlayRequestSchema = z.object({
   sourceId: z.string().min(1),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/),
   actorId: z.string().min(1),
   entryCutHash: z.string().regex(/^[a-f0-9]{64}$/),
+  /** Optional admitted cut; omitted requests start at the character's first entry as before. */
+  cutId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   title: z.string().trim().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(200),
 }).strict();
@@ -1016,6 +1045,7 @@ export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSc
 export type SourcePlayRole = z.infer<typeof sourcePlayRoleSchema>;
 export type SourcePlayRoleList = z.infer<typeof sourcePlayRoleListSchema>;
 export type StartFreshPlayRequest = z.infer<typeof startFreshPlayRequestSchema>;
+export type SourceCutList = z.infer<typeof sourceCutListSchema>;
 export type StartFreshPlayResult = z.infer<typeof startFreshPlayResultSchema>;
 export type PlayableCharacter = z.infer<typeof playableCharacterSchema>;
 export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;

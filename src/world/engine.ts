@@ -506,6 +506,8 @@ export class WorldEngine {
     initialTime: Omit<LogicalTime, "step"> = {},
     genesisOptions: {
       entryActorId?: EntityId;
+      /** Admitted cut this fresh instance starts from (recorded on the branch). */
+      entryCutId?: string;
       projectionSeed?: EntryProjectionSeed;
       realizesCanonicalEventIds?: readonly string[];
       participantPresence?: readonly ParticipantPresence[];
@@ -731,7 +733,7 @@ export class WorldEngine {
       ...(branchSourceId ? { sourceId: branchSourceId } : {}),
       ...(branchPreparedRevisionHash ? { preparedRevisionHash: branchPreparedRevisionHash } : {}),
       ...(genesisOptions.entryActorId && branchSourceId && branchPreparedRevisionHash
-        ? { entryActorId: genesisOptions.entryActorId }
+        ? { entryActorId: genesisOptions.entryActorId, ...(genesisOptions.entryCutId ? { entryCutId: genesisOptions.entryCutId } : {}) }
         : {}),
       createdAt: new Date().toISOString(),
       headCommitId: commitHash,

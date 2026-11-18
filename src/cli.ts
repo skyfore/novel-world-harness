@@ -51,7 +51,7 @@ import {
   worldSnapshotCommand,
   worldValidateCommand,
 } from "./commands/world.js";
-import { choosePlayExperience } from "./world/play-choice.js";
+import { resolveSceneEntryCut, choosePlayExperience } from "./world/play-choice.js";
 import { playSceneRequestForEntry } from "./world/play-opening.js";
 import { askUserQuestion } from "./util/ask-user-question.js";
 import { parseWebPort, webCommand } from "./commands/web.js";
@@ -1004,6 +1004,7 @@ program
   .option("--branch <id>", "playable instance to enter")
   .option("--character <id-or-name>", "character to inhabit")
   .option("--novel <id-or-title>", "registered novel source to enter")
+  .option("--scene <scene-id-or-cut-id>", "start a fresh instance at an admitted scene cut (requires --character)")
   .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
@@ -1014,8 +1015,15 @@ program
   .description("open the local-first terminal session")
   .action(async (options) => {
     const globalOptions = program.opts();
-    const explicitlySelectedWorld = Boolean(options.branch || options.character || options.novel);
-    if (explicitlySelectedWorld) {
+    const explicitlySelectedWorld = Boolean(options.branch || options.character || options.novel || options.scene);
+    if (options.scene) {
+      if (!options.character) throw new Error("--scene requires --character: choose who enters at that scene.");
+      const { sourceId, cutId } = await resolveSceneEntryCut(rootFor(options), { scene: options.scene, ...(options.novel ? { source: options.novel } : {}) });
+      await choosePlayExperience(rootFor(options), {
+        source: sourceId, character: options.character, entryCutId: cutId,
+        preferActiveSource: false, preferSavedCharacter: false, instanceMode: "create",
+      }, askUserQuestion);
+    } else if (explicitlySelectedWorld) {
       await choosePlayExperience(rootFor(options), {
         ...(options.branch ? { branchId: options.branch } : {}),
         ...(options.character ? { character: options.character } : {}),

@@ -1824,6 +1824,8 @@ export const branchSchema = z.object({
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   /** Character whose grounded checkpoint seeded a fresh source-based instance. */
   entryActorId: idSchema.optional(),
+  /** Admitted cut (the world just before one canonical event) this instance started from. */
+  entryCutId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   createdAt: z.string().datetime({ offset: true }).optional(),
   parentBranchId: idSchema.optional(),
   forkCommitId: idSchema.optional(),
@@ -1842,6 +1844,9 @@ export const branchSchema = z.object({
       path: ["entryActorId"],
       message: "An entry actor belongs only to a fresh source-based instance with a frozen prepared revision",
     });
+  }
+  if (value.entryCutId && !value.entryActorId) {
+    ctx.addIssue({ code: "custom", path: ["entryCutId"], message: "An entry cut requires the entry actor that started there" });
   }
 });
 export type Branch = z.infer<typeof branchSchema>;

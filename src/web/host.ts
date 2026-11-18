@@ -355,6 +355,10 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     const { sourceId } = sourceParamSchema.parse(request.params);
     return play.listSourceRoles(sourceId);
   });
+  app.get(`/api/${WEB_API_VERSION}/novels/:sourceId/cuts`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    return play.listSourceCuts(sourceId);
+  });
   app.post(`/api/${WEB_API_VERSION}/play-instances`, async (request, reply) => {
     const result = await play.startFreshPlay(startFreshPlayRequestSchema.parse(request.body));
     return reply.code(result.reused ? 200 : 201).send(result);

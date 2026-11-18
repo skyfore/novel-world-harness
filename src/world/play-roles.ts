@@ -1,9 +1,9 @@
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 import { preparedSubjectHash, type NovelClosureAssessment } from "../compiler/certification.js";
-import { admittedEntries, assertPlayableRevision, DEFAULT_MINIMUM_ADMISSION_TIER, type AdmissionTier } from "../compiler/cut-admission.js";
+import { admittedEntries, assertCutAdmission, assertPlayableRevision, DEFAULT_MINIMUM_ADMISSION_TIER, type AdmissionTier } from "../compiler/cut-admission.js";
 import { buildRoleRoster, majorRoleCandidates } from "../compiler/role-roster.js";
 import { contentHash } from "./canonical.js";
-import { deriveCharacterEntryOptions, deriveCharacterEntrySeed } from "./entry-context.js";
+import { deriveCharacterEntryOptions, deriveCharacterEntrySeed, deriveSceneEntrySeed } from "./entry-context.js";
 import { preparedPlayRoleSchema, type PreparedPlayRole } from "./play-role-schema.js";
 import { ENTRY_ACTION_WITNESS_VERSION, ENTRY_CONTRACT_VERSION } from "./entry-contract.js";
 
@@ -17,8 +17,16 @@ export function describePreparedRoles(bundle: PreparedNovelBundle, assessment: N
   const entries = deriveCharacterEntryOptions(bundle);
   const current = assessment?.subjectSnapshotHash === preparedSubjectHash(bundle) && assessment.playability?.rosterHash === contentHash(roster)
     && assessment.playability.contractVersion === ENTRY_CONTRACT_VERSION;
+  const admitted = assessment?.fullNovelReady ? new Map<string, { cutId: string; entryCutHash?: string }>() : admittedCharacterEntries(bundle, DEFAULT_MINIMUM_ADMISSION_TIER);
   return candidates.map((candidate) => {
     const entry = entries.find((option) => option.actorId === candidate.entityId);
+    const admittedEntry = candidate.entityId ? admitted.get(candidate.entityId) : undefined;
+    if (entry && admittedEntry?.entryCutHash) {
+      // A cut-admitted first entry is playable without full-novel certification (D1).
+      return preparedPlayRoleSchema.parse({ id: candidate.entityId, rosterEntryId: candidate.id, actorId: candidate.entityId, canonicalName: candidate.name,
+        aliases: bundle.canonical.entities.find((entity) => entity.id === candidate.entityId)?.aliases ?? [], major: majorIds.has(candidate.id),
+        status: "ready", entryKind: entry.entry.kind, entryTitle: entry.entry.title, entryCutHash: admittedEntry.entryCutHash, issues: [] });
+    }
     const probe = current ? assessment.playability?.roles.find((role) => role.candidateId === candidate.id) : undefined;
     const issues = [...(probe?.issues ?? [])];
     if (!current) issues.push({ code: "ROLE_EVALUATION_NOT_CURRENT", message: "This role has not been evaluated against the current frozen inputs" });
@@ -68,4 +76,17 @@ function admittedCharacterEntries(bundle: PreparedNovelBundle, minimumTier: Admi
     entries.set(actor.actorId, { cutId: cut.cutId, ...(actor.entryCutHash ? { entryCutHash: actor.entryCutHash } : {}) });
   }
   return entries;
+}
+
+/**
+ * Checked immediately before Genesis for a start at an explicit cut: the cut
+ * and actor must be admitted at the minimum tier, and the entry derived now
+ * must be the exact entry the deterministic probes evaluated.
+ */
+export function requireAdmittedSceneEntry(bundle: PreparedNovelBundle, cutId: string, actorId: string, expectedEntryCutHash?: string, minimumTier: AdmissionTier = DEFAULT_MINIMUM_ADMISSION_TIER) {
+  const { actor } = assertCutAdmission(bundle, cutId, actorId, minimumTier);
+  const seed = deriveSceneEntrySeed(bundle, cutId, actorId);
+  if (actor.entryCutHash !== seed.cut.hash) throw new Error("ENTRY_CUT_STALE: the admitted entry was probed at a different cut. Re-admit the revision before starting play.");
+  if (expectedEntryCutHash && seed.cut.hash !== expectedEntryCutHash) throw new Error("ENTRY_CUT_STALE: the selected scene entry changed. Refresh the cut list and copy entryCutHash before retrying once.");
+  return seed;
 }

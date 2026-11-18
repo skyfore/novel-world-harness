@@ -185,9 +185,17 @@ export class WorldContextStore {
    * dependency on them.
    */
   private async currentVoiceIndex(sourceId: string, entities: ScopedWorldArtifacts["entities"]): Promise<VoiceIndex> {
-    const [{ SourceAnnotationStore }, { EntityResolutionStore }] = await Promise.all([import("../compiler/annotations.js"), import("../compiler/entity-resolution.js")]);
-    const [annotations, entityResolutions] = await Promise.all([new SourceAnnotationStore(this.workspaceRoot).list(sourceId, "quotation"), new EntityResolutionStore(this.workspaceRoot).list(sourceId)]);
-    return buildVoiceIndex({ sourceId, annotations, entityResolutions, entities });
+    const [{ SourceAnnotationStore }, { EntityResolutionStore }, { buildLexicalInventory }, { WorkspaceStore }, { readSourceMaterial }] = await Promise.all([
+      import("../compiler/annotations.js"), import("../compiler/entity-resolution.js"), import("../compiler/lexical-inventory.js"),
+      import("../storage/workspace-store.js"), import("../storage/source-material-store.js"),
+    ]);
+    const [annotations, entityResolutions, source] = await Promise.all([
+      new SourceAnnotationStore(this.workspaceRoot).list(sourceId), new EntityResolutionStore(this.workspaceRoot).list(sourceId),
+      WorkspaceStore.create(this.workspaceRoot).then((store) => store.getSource(sourceId)),
+    ]);
+    const bytes = source ? await readSourceMaterial(this.workspaceRoot, source) : undefined;
+    const lexical = bytes ? { cues: buildLexicalInventory({ source: bytes, entities, annotations, entityResolutions }).cues, source: bytes } : undefined;
+    return buildVoiceIndex({ sourceId, annotations, entityResolutions, entities, ...(lexical ? { lexical } : {}) });
   }
 
   private async currentTimeline(sourceId: string, events: readonly CanonicalEvent[], relations: readonly EventRelation[]): Promise<CanonTimeline | undefined> {

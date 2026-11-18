@@ -44,4 +44,22 @@ describe("NPC voice references", () => {
     const tampered = { ...index, entries: index.entries.map((entry) => entry.quotationId === "q8" ? { ...entry, exactHash: "0".repeat(64) } : entry) };
     expect(selectVoiceReferences({ index: tampered, actorId: "mira", source, horizon: { horizonByte, frozenByDivergence: false, excludedRanges: [] }, limit: 1 }).map((reference) => reference.text)).toEqual([lines[7]]);
   });
+
+  it("adds host-cued lines only where no quotation annotation exists, and ranks them behind annotated lines", () => {
+    const cue = (line: string, entityId: string) => ({ speechStartByte: anchorOf(line).startByte, speechEndByte: anchorOf(line).endByte, entityId });
+    const index = buildVoiceIndex({
+      sourceId: "src", entities,
+      annotations: [quotation("q1", lines[1]!, "m-mira"), quotation("q2", lines[2]!)],
+      entityResolutions: [resolution("r1", "m-mira", "mira")],
+      lexical: { source, cues: [cue(lines[0]!, "mira"), cue(lines[2]!, "mira"), cue(lines[3]!, "radio"), cue(lines[5]!, "mira"), cue(lines[7]!, "mira")] },
+    });
+    // Line 2 has an (unattributed) annotation, so the model decision wins; the radio is not a character.
+    expect(index.entries.map((entry) => [entry.quotationId, entry.basis ?? "annotation"])).toEqual([
+      [`lexq-${anchorOf(lines[0]!).startByte}`, "lexical-cue"], ["q1", "annotation"],
+      [`lexq-${anchorOf(lines[5]!).startByte}`, "lexical-cue"], [`lexq-${anchorOf(lines[7]!).startByte}`, "lexical-cue"],
+    ]);
+    const horizon = { horizonByte: source.byteLength, frozenByDivergence: false, excludedRanges: [] };
+    expect(selectVoiceReferences({ index, actorId: "mira", source, horizon, limit: 2 }).map((reference) => reference.text)).toEqual([lines[1], lines[7]]);
+    expect(selectVoiceReferences({ index, actorId: "mira", source, horizon }).map((reference) => reference.text)).toEqual([lines[0], lines[1], lines[5], lines[7]]);
+  });
 });

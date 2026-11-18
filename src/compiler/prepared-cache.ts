@@ -32,6 +32,7 @@ import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../w
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { buildCanonTimeline, canonTimelineSchema } from "../world/canon-timeline.js";
 import { buildVoiceIndex, voiceIndexSchema } from "../world/voice-references.js";
+import { buildLexicalInventory } from "./lexical-inventory.js";
 import { admissionManifestSchema, type AdmissionManifest, type AdmissionTier } from "./cut-admission-schema.js";
 import { assertPlayableRevision, buildAdmissionManifest } from "./cut-admission.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
@@ -948,6 +949,7 @@ export class PreparedNovelCache {
     if (!structure || structure.sourceSha256 !== source.contentSha256) {
       throw new Error(`Cannot cache ${source.id}: source structure is missing or stale.`);
     }
+    const sourceBytes = await readSourceMaterial(this.workspaceRoot, source);
     const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
     const evidenceBindings: EvidenceAssertionBindingSnapshot[] = [];
     for (const artifact of preparedArtifactDescriptors(preparedCanonical)) {
@@ -1013,7 +1015,10 @@ export class PreparedNovelCache {
           annotations,
           structure,
         }),
-        voiceIndex: buildVoiceIndex({ sourceId: source.id, annotations, entityResolutions, entities: preparedCanonical.entities }),
+        voiceIndex: buildVoiceIndex({
+          sourceId: source.id, annotations, entityResolutions, entities: preparedCanonical.entities,
+          lexical: { cues: buildLexicalInventory({ source: sourceBytes, entities: preparedCanonical.entities, annotations, entityResolutions }).cues, source: sourceBytes },
+        }),
       },
       compilerSnapshot: {
         ...(upstreamRepairCheckpoint ? { upstreamRepairCheckpoint } : {}),

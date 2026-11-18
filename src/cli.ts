@@ -27,6 +27,7 @@ import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
 import { compileNovelCommand } from "./commands/compile-novel.js";
 import { novelAdmitCommand, novelCutsCommand } from "./commands/novel-cuts.js";
+import { novelCompletenessCommand } from "./commands/novel-completeness.js";
 import { novelProbeCommand } from "./commands/novel-probe.js";
 import { compileNovelWithLoop } from "./commands/compile-novel-loop.js";
 import { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
@@ -160,6 +161,14 @@ novelOptions(compileNovel.command("cuts").description("Read-only cut diagnostics
     const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
     await novelCutsCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision, admission: options.admission, probe: options.probe,
       configPath: options.config ? path.resolve(options.config) : undefined });
+  });
+novelOptions(compileNovel.command("completeness").description("Read-only world-model completeness against the end-state content contract: per-layer coverage with source-derived denominators and repair queues (default: current workspace candidate)"))
+  .option("--revision <hash>", "measure an exact cached prepared revision instead of the workspace candidate")
+  .option("--admission", "compute per-cut admission with entry probes when the bundle carries none (measures agency; slower)")
+  .option("--brief", "print the measure table instead of the full JSON report")
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await novelCompletenessCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision, admission: Boolean(options.admission), brief: Boolean(options.brief) });
   });
 novelOptions(compileNovel.command("probe").description("Act probe: scripted player turns on every admitted cut x actor of the active revision (fake reasoners by default; --live uses the configured model)"))
   .option("--cut <id>", "probe one admitted cut")

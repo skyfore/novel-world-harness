@@ -18,6 +18,8 @@ export const sceneOccurrenceSchema = z.object({
   discourseSegmentIds: z.array(idSchema).min(1).max(128),
   eventIds: z.array(idSchema).max(256),
   locationId: idSchema.optional(),
+  /** An explicit, reasoned "the source does not say where": never a guessed place. */
+  locationUnknown: z.object({ reason: z.string().trim().min(1).max(500) }).strict().optional(),
   storyInterval: z.object({
     start: storyTimeSchema,
     end: storyTimeSchema.optional(),
@@ -28,6 +30,9 @@ export const sceneOccurrenceSchema = z.object({
   exitConditions: z.array(predicateSchema).max(64),
   evidence: z.array(evidenceRefSchema).min(1),
 }).strict().superRefine((value, ctx) => {
+  if (value.locationId && value.locationUnknown) {
+    ctx.addIssue({ code: "custom", path: ["locationUnknown"], message: "A scene cannot both name a location and declare it unknown" });
+  }
   for (const field of ["discourseSegmentIds", "eventIds", "viewpointActorIds", "presentActorIds"] as const) {
     if (new Set(value[field]).size !== value[field].length) {
       ctx.addIssue({ code: "custom", path: [field], message: `${field} must contain unique IDs` });
@@ -114,4 +119,17 @@ function predicateEntityIds(predicate: Predicate): string[] {
 
 function issue(code: string, message: string, path?: string): ValidationIssue {
   return path ? { code, message, path } : { code, message };
+}
+
+/**
+ * Scene grounding contract: every scene names its location or explicitly
+ * records why the source leaves it unknown. A missing location only blocks
+ * entries that would need the scene's place to ground an actor.
+ */
+export function sceneLocationIssues(scenes: readonly SceneOccurrence[]): ValidationIssue[] {
+  return scenes.filter((scene) => !scene.locationId && !scene.locationUnknown).map((scene) => ({
+    code: "SCENE_LOCATION_MISSING",
+    message: `Scene ${scene.id} neither names a location nor records why its location is unknown; derived entries cannot ground actors by place here.`,
+    path: `scene/${scene.id}`,
+  }));
 }

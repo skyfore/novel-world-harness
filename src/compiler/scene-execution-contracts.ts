@@ -10,7 +10,7 @@ import { predicateSchema, type CanonicalEvent, type ValidationIssue } from "../w
 import { applyStateDelta, DEFAULT_STATE_FIELDS, emptyWorldState, StateSchemaRegistry, evaluatePredicateTruth } from "../world/state.js";
 import { findSpatialRoute, resolveActiveSpatialRelations } from "../world/spatial-ontology.js";
 import { timeAdvanceInDays } from "../world/time.js";
-import { validateSceneOccurrenceCatalog } from "../world/scene-occurrence.js";
+import { sceneLocationIssues, validateSceneOccurrenceCatalog } from "../world/scene-occurrence.js";
 import { buildPreparedClosure } from "./closure.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { majorRoleCandidates, type RoleRoster } from "./role-roster.js";
@@ -28,7 +28,7 @@ export function buildSceneExecutionContracts(bundle: PreparedNovelBundle, roster
   const canonical = bundle.canonical, graph = buildPreparedClosure(bundle);
   const entities = new Map(canonical.entities.map((entity) => [entity.id, entity])), events = new Map(canonical.events.map((event) => [event.id, event]));
   const schemas = new Map(canonical.actionSchemas.map((schema) => [schema.id, schema]));
-  const issues = validateSceneOccurrenceCatalog({ entities, events, scenes: canonical.sceneOccurrences });
+  const issues = [...validateSceneOccurrenceCatalog({ entities, events, scenes: canonical.sceneOccurrences }), ...sceneLocationIssues(canonical.sceneOccurrences)];
   const major = new Set(roster ? majorRoleCandidates(roster).flatMap((role) => role.entityId ? [role.entityId] : []) : []);
   issues.push(...validateEventExecutions(canonical.eventExecutions ?? [], { events, entities, actionSchemas: schemas, processTemplates: new Map(canonical.processTemplates.map(template => [template.id, template])), participations: canonical.eventParticipations }));
   const actual = applyEventExecutions(canonical.events, canonical.eventExecutions ?? []).filter((event) => event.narrativeContext?.mode !== "hypothetical");

@@ -10,6 +10,7 @@ import { deriveCharacterEntryOptions, deriveSceneEntrySeed, type CharacterEntryS
 import type { ValidationIssue } from "../world/model.js";
 import { WorldRuntime } from "../world/runtime.js";
 import { CanonReplayError, executeSceneEvent } from "../world/source-history.js";
+import { sceneLocationIssues } from "../world/scene-occurrence.js";
 import { assertPreparedReadiness, preparedSubjectHash, validateFrozenAccounting } from "./certification.js";
 import { buildPreparedClosure, type ClosureGraph } from "./closure.js";
 import { issueAttributionCatalog, partitionIssueAttribution } from "./issue-attribution.js";
@@ -157,7 +158,10 @@ export async function buildAdmissionManifest(input: PreparedNovelBundle, options
       const nodes = new Set([...prefixNodes[cut.index]!, ...closure.reachable(sceneNodes)]);
       for (const issue of inputSplit.attributed) if (sceneNodes.includes(issue.node)) blocking.push({ code: "CUT_DEPENDENCY_INVALID", message: `${issue.code}: ${issue.message}`, path: issue.node });
       const completed = timeline.entries.slice(0, cut.index).map((entry) => entry.eventId);
-      const advisories = timeline.issues.filter((issue) => TIMELINE_ADVISORY_CODES.has(issue.code) && completed.some((id) => issue.path === `event/${id}`));
+      const advisories = [
+        ...timeline.issues.filter((issue) => TIMELINE_ADVISORY_CODES.has(issue.code) && completed.some((id) => issue.path === `event/${id}`)),
+        ...sceneLocationIssues(bundle.canonical.sceneOccurrences.filter((scene) => cut.sceneIds.includes(scene.id))),
+      ];
       const unreviewed = support.filter((issue) => nodes.has(issue.node));
       const actors: ActorAdmission[] = [];
       for (const candidate of candidates(bundle, cut)) {
@@ -331,4 +335,18 @@ class ProbeWorld {
     await fs.rm(workspaceStateDir(this.scratch), { recursive: true, force: true });
     await fs.rm(this.scratch, { recursive: true, force: true });
   }
+}
+
+/**
+ * Scenes still lacking a location contract, queued for a narrow completion
+ * pass in horizon order: scenes whose cut lies within the horizon first, then
+ * by cut position. The evidence scope is limited to the scene's own discourse.
+ */
+export function sceneLocationCompletionQueue(bundle: PreparedNovelBundle, manifest: { cuts: ReadonlyArray<{ index: number; sceneIds: readonly string[] }>; horizonIndex: number }) {
+  const position = new Map(manifest.cuts.flatMap((cut) => cut.sceneIds.map((sceneId) => [sceneId, cut.index] as const)));
+  return bundle.canonical.sceneOccurrences
+    .filter((scene) => !scene.locationId && !scene.locationUnknown)
+    .map((scene) => ({ sceneId: scene.id, cutIndex: position.get(scene.id), withinHorizon: (position.get(scene.id) ?? Number.MAX_SAFE_INTEGER) <= manifest.horizonIndex,
+      discourseSegmentIds: [...scene.discourseSegmentIds], evidence: structuredClone(scene.evidence), presentActorIds: [...scene.presentActorIds] }))
+    .sort((a, b) => Number(b.withinHorizon) - Number(a.withinHorizon) || (a.cutIndex ?? Number.MAX_SAFE_INTEGER) - (b.cutIndex ?? Number.MAX_SAFE_INTEGER) || a.sceneId.localeCompare(b.sceneId));
 }

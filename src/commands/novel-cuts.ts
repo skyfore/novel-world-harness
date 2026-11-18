@@ -6,7 +6,7 @@ import type { ValidationIssue } from "../world/model.js";
 import { resolveNovelSource } from "../world/play-experience.js";
 import { minimumAdmissionTierFor } from "../config/load.js";
 import { DEFAULT_MINIMUM_ADMISSION_TIER, tierAtLeast, type AdmissionManifest, type AdmissionTier } from "../compiler/cut-admission-schema.js";
-import { buildAdmissionManifest } from "../compiler/cut-admission.js";
+import { buildAdmissionManifest, sceneLocationCompletionQueue } from "../compiler/cut-admission.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
 export type NovelCutAdmissionSummary = {
@@ -26,6 +26,8 @@ export type NovelCutAdmissionSummary = {
 
 export type NovelCutsReport = {
   admission?: NovelCutAdmissionSummary;
+  /** Scene location contract coverage and the horizon-ordered completion queue. */
+  sceneLocations?: { scenes: number; withLocation: number; explicitlyUnknown: number; missing: number; queue: ReturnType<typeof sceneLocationCompletionQueue> };
   sourceId: string;
   bundle: { origin: "candidate" | "revision"; bundleHash?: string; frozenTimeline: boolean; baselineIssues: ValidationIssue[] };
   timeline: {
@@ -152,7 +154,12 @@ export async function inspectNovelCuts(options: NovelCutsOptions): Promise<Novel
   const admission = frozen
     ? summarizeAdmission(frozen, { origin: "frozen", probed: true, scenes, minimumTier })
     : summarizeAdmission(await buildAdmissionManifest(loaded.bundle, { inputIssues: loaded.baselineIssues, probe: options.probe !== false }), { origin: "computed", probed: options.probe !== false, scenes, minimumTier });
-  return { ...report, admission };
+  const scenesList = loaded.bundle.canonical.sceneOccurrences;
+  const queue = sceneLocationCompletionQueue(loaded.bundle, admission);
+  return { ...report, admission, sceneLocations: {
+    scenes: scenesList.length, withLocation: scenesList.filter((scene) => scene.locationId).length,
+    explicitlyUnknown: scenesList.filter((scene) => scene.locationUnknown).length, missing: queue.length, queue,
+  } };
 }
 
 export async function novelCutsCommand(options: NovelCutsOptions): Promise<void> {

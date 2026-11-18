@@ -39,12 +39,16 @@ it("executes scene preconditions at distinct historical cuts and proves entry an
     sceneOccurrenceIds: [`s${n}`], evidence, causalParents: [], confidence: 1 }));
   const input = { source: { id: "book" }, canonical: { entities: [{ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence }],
     events, actionSchemas: [action], sceneOccurrences: events.map((event, i) => ({ ontologyVersion: "scene-occurrence-v1", id: `s${i + 1}`, discourseSegmentIds: ["discourse"], eventIds: [event.id], viewpointActorIds: ["hero"], presentActorIds: ["hero"],
+      locationUnknown: { reason: "The passage never says where the purchases happen." },
       entryConditions: [{ op: "fact-equals", entityId: "hero", field: "character.wealth", value: 3 - i }], exitConditions: [{ op: "fact-equals", entityId: "hero", field: "character.wealth", value: 2 - i }], evidence })),
     initialWorld: { delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.wealth", value: 3 }] }, checkpoint: { beforeCanonicalEventId: "e1", storyTime: events[0]!.storyTime } },
     propositions: [], attributions: [], claims: [], eventParticipations: [], eventRelations: [], spatialRelations: [], eventFrames: [], eventExecutions: [], actionConstraints: [], normTemplates: [], processTemplates: [], rules: [], goals: [], models: [], possibilities: [] },
     compilerSnapshot: { roleRoster: null, structure: { units: [], baseUnitIds: [], discourseSegments: [{ id: "discourse" }] }, annotations: [], entityResolutions: [], eventResolutions: [], evidenceBindings: [] } } as unknown as PreparedNovelBundle;
   const result = buildSceneExecutionContracts(input);
   expect(result.issues).toEqual([]);
+  const unplaced = structuredClone(input);
+  delete unplaced.canonical.sceneOccurrences[0]!.locationUnknown;
+  expect(buildSceneExecutionContracts(unplaced).issues).toEqual([expect.objectContaining({ code: "SCENE_LOCATION_MISSING", path: "scene/s1" })]);
   expect(result.contracts[0]!.entryCutIds).not.toEqual(result.contracts[1]!.entryCutIds);
   input.canonical.initialWorld.delta.operations[0] = { op: "set", entityId: "hero", field: "character.wealth", value: 0 };
   expect(buildSceneExecutionContracts(input).issues).toContainEqual(expect.objectContaining({ code: "SCENE_EXECUTION_INVALID", message: expect.stringContaining("ACTION_SCHEMA_PRECONDITION_FAILED") }));

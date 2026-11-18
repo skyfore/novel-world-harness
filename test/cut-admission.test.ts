@@ -110,3 +110,17 @@ describe("cut admission manifest", () => {
     expect(accountingBlockers(timeline, [{ startByte: 5_000, issue }])).toEqual([expect.objectContaining({ from: 3 })]);
   });
 });
+
+describe("scene location contract", () => {
+  it("queues scenes without a location contract in horizon order and reports them as cut advisories", async () => {
+    const { sceneLocationCompletionQueue } = await import("../src/compiler/cut-admission.js");
+    const bundle = fixture(true);
+    bundle.canonical.sceneOccurrences[1]!.locationUnknown = { reason: "The source never says where the letter is read." };
+    const manifest = await buildAdmissionManifest(bundle, { probe: false });
+    expect(manifest.cuts[0]!.advisories).toContainEqual(expect.objectContaining({ code: "SCENE_LOCATION_MISSING", path: "scene/scene-1" }));
+    expect(manifest.cuts[1]!.advisories.map((issue) => issue.code)).not.toContain("SCENE_LOCATION_MISSING");
+    const queue = sceneLocationCompletionQueue(bundle, manifest);
+    expect(queue.map((item) => [item.sceneId, item.withinHorizon])).toEqual([["scene-1", true], ["scene-3", false]]);
+    expect(queue[0]!.discourseSegmentIds).toEqual(["segment-1"]);
+  });
+});

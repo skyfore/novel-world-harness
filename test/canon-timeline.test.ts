@@ -137,7 +137,9 @@ describe("canonical timeline", () => {
     expect(codes(timeline)).toEqual(["TIMELINE_ANCHOR_MISSING@event/coarse"]);
     const withLines = buildCanonTimeline({ sourceId: "src", events: events.slice(2, 3), relations: [], structure });
     expect(withLines.entries[0]!.discourseByte).toBe(0);
-    const bare = buildCanonTimeline({ sourceId: "src", events: events.slice(3), relations: [] });
+    const linesOnly = buildCanonTimeline({ sourceId: "src", events: [{ ...event("ten"), evidence: [{ span: { sourceId: "src", startLine: 10, endLine: 10, quoteHash: "t" }, strength: "explicit" }] }, event("one")], relations: [] });
+    expect(linesOnly.entries.map((entry) => [entry.eventId, entry.discourseByte])).toEqual([["one", 1], ["ten", 10]]);
+    const bare = buildCanonTimeline({ sourceId: "src", events: [{ ...events[3]!, evidence: [] }], relations: [] });
     expect(bare.entries[0]!.discourseByte).toBe(TIMELINE_UNANCHORED_BYTE);
   });
 
@@ -163,6 +165,16 @@ describe("canonical timeline", () => {
     const events = [event("first", { writes: "character.plan" }), event("second", { writes: "character.plan" }), event("third", { writes: "character.plan" })];
     const timeline = buildCanonTimeline({ sourceId: "src", events, relations: [rel("second", "before", "third")], ...anchors({ first: 10, second: 20, third: 30 }) });
     expect(timeline.assumedPairs).toEqual([{ earlier: "first", later: "second", addresses: ["hero/character.plan"] }]);
+  });
+
+  it("breaks equal coarse coordinates with the compiler's discourse ordinal", () => {
+    const events = [
+      { ...event("b", { mode: "scene" }), narrativeContext: { layerId: "story", discourseOrder: 2, mode: "scene" as const } },
+      { ...event("a", { mode: "scene" }), narrativeContext: { layerId: "story", discourseOrder: 1, mode: "scene" as const } },
+      { ...event("z", { mode: "scene" }), narrativeContext: { layerId: "story", discourseOrder: 0, mode: "scene" as const } },
+    ];
+    const timeline = buildCanonTimeline({ sourceId: "src", events, relations: [] });
+    expect(order(timeline)).toEqual(["z", "a", "b"]);
   });
 
   it("is deterministic under input permutation", () => {

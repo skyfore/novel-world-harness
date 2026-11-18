@@ -89,7 +89,7 @@ export function buildCanonTimeline(input: BuildCanonTimelineInput): CanonTimelin
 
   // 1. Discourse coordinates from resolved event-mention anchors.
   const extents = mentionExtentsByEvent(input.eventResolutions ?? [], input.annotations ?? [], byId);
-  const lineToByte = lineToByteIndex(input.structure);
+  const lineToByte = lineToByteIndex(input.structure, actual);
   const discourse = new Map<string, number>();
   for (const event of actual) {
     const anchored = extents.get(event.id);
@@ -128,7 +128,14 @@ export function buildCanonTimeline(input: BuildCanonTimelineInput): CanonTimelin
     const root = find(event.id);
     groups.set(root, [...(groups.get(root) ?? []), event.id]);
   }
-  for (const members of groups.values()) members.sort((a, b) => discourse.get(a)! - discourse.get(b)! || a.localeCompare(b));
+  // Equal coordinates (coarse fallbacks) keep the compiler's discourse ordinal
+  // as a tie-break only; it never overrides a byte position.
+  const rank = new Map([...actual]
+    .sort((a, b) => discourse.get(a.id)! - discourse.get(b.id)!
+      || (a.narrativeContext?.discourseOrder ?? 0) - (b.narrativeContext?.discourseOrder ?? 0)
+      || a.id.localeCompare(b.id))
+    .map((event, index) => [event.id, index]));
+  for (const members of groups.values()) members.sort((a, b) => rank.get(a)! - rank.get(b)!);
   const groupOf = (id: string) => find(id);
 
   // 3. Explicit constraint edges between groups (earlier -> later).
@@ -183,7 +190,7 @@ export function buildCanonTimeline(input: BuildCanonTimelineInput): CanonTimelin
   const sortKey = new Map<string, number>();
   for (const [root, members] of groups) {
     const constrained = members.some((id) => touching.has(id));
-    let key = Math.min(...members.map((id) => discourse.get(id)!));
+    let key = Math.min(...members.map((id) => rank.get(id)!));
     for (const id of members) {
       const mode = byId.get(id)!.narrativeContext?.mode;
       if (constrained) continue;
@@ -193,7 +200,7 @@ export function buildCanonTimeline(input: BuildCanonTimelineInput): CanonTimelin
         issues.push({ code: "TIMELINE_FLASHFORWARD_UNANCHORED", message: `Flashforward ${id} has no explicit temporal constraint; it is kept after all other events so its effects cannot leak into earlier cuts.`, path: `event/${id}` });
       }
     }
-    if (!constrained && members.every((id) => byId.get(id)!.narrativeContext?.mode === "flashforward")) key = TIMELINE_UNANCHORED_BYTE;
+    if (!constrained && members.every((id) => byId.get(id)!.narrativeContext?.mode === "flashforward")) key += actual.length;
     sortKey.set(root, key);
   }
 
@@ -295,6 +302,60 @@ export function buildCanonTimeline(input: BuildCanonTimelineInput): CanonTimelin
   return { ...body, hash: contentHash(body) };
 }
 
+/** Structural view of a prepared bundle; avoids a runtime dependency on the compiler cache. */
+export type TimelineBundle = {
+  source: { id: string };
+  canonical: { events: readonly CanonicalEvent[]; eventRelations: readonly EventRelation[]; timeline?: CanonTimeline };
+  compilerSnapshot?: { eventResolutions?: readonly TimelineEventResolution[]; annotations?: readonly TimelineAnnotation[]; structure?: TimelineStructure };
+};
+
+const derivedTimelines = new WeakMap<object, CanonTimeline>();
+
+/**
+ * The bundle's frozen timeline, or a deterministic derivation for bundles
+ * prepared before timelines were frozen. The derivation is memoized per
+ * immutable canonical payload.
+ */
+export function bundleCanonTimeline(bundle: TimelineBundle): CanonTimeline {
+  if (bundle.canonical.timeline) return bundle.canonical.timeline;
+  const cached = derivedTimelines.get(bundle.canonical);
+  if (cached) return cached;
+  const timeline = deriveBundleCanonTimeline(bundle);
+  derivedTimelines.set(bundle.canonical, timeline);
+  return timeline;
+}
+
+/** Derive a fresh timeline from the bundle's canonical and compiler inputs, ignoring any frozen copy. */
+export function deriveBundleCanonTimeline(bundle: TimelineBundle): CanonTimeline {
+  return buildCanonTimeline({
+    sourceId: bundle.source.id,
+    events: bundle.canonical.events,
+    relations: bundle.canonical.eventRelations,
+    eventResolutions: bundle.compilerSnapshot?.eventResolutions ?? [],
+    annotations: bundle.compilerSnapshot?.annotations ?? [],
+    ...(bundle.compilerSnapshot?.structure ? { structure: bundle.compilerSnapshot.structure } : {}),
+  });
+}
+
+/** Reject a timeline that does not describe exactly this source's actual events. */
+export function canonTimelineProjectionIssues(timeline: CanonTimeline, events: readonly Pick<CanonicalEvent, "id" | "narrativeContext">[], sourceId?: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (sourceId && timeline.sourceId !== sourceId) issues.push({ code: "TIMELINE_SOURCE_MISMATCH", message: `Timeline belongs to ${timeline.sourceId}, not ${sourceId}` });
+  const actual = new Set(events.filter((event) => event.narrativeContext?.mode !== "hypothetical").map((event) => event.id));
+  const listed = new Set<string>();
+  timeline.entries.forEach((entry, index) => {
+    if (entry.index !== index) issues.push({ code: "TIMELINE_INDEX_INVALID", message: `Timeline entry ${entry.eventId} has index ${entry.index}, expected ${index}`, path: `event/${entry.eventId}` });
+    if (!actual.has(entry.eventId)) issues.push({ code: "TIMELINE_EVENT_UNKNOWN", message: `Timeline entry ${entry.eventId} is not an actual canonical event`, path: `event/${entry.eventId}` });
+    if (listed.has(entry.eventId)) issues.push({ code: "TIMELINE_EVENT_DUPLICATE", message: `Timeline lists ${entry.eventId} more than once`, path: `event/${entry.eventId}` });
+    listed.add(entry.eventId);
+  });
+  for (const id of actual) if (!listed.has(id)) issues.push({ code: "TIMELINE_EVENT_MISSING", message: `Actual canonical event ${id} is missing from the timeline`, path: `event/${id}` });
+  if (contentHash({ version: timeline.version, sourceId: timeline.sourceId, subjectHash: timeline.subjectHash, entries: timeline.entries, assumedPairs: timeline.assumedPairs, issues: timeline.issues }) !== timeline.hash) {
+    issues.push({ code: "TIMELINE_HASH_MISMATCH", message: "Timeline content does not match its hash" });
+  }
+  return issues;
+}
+
 /** Event ID -> timeline index. Hypothetical and unknown events are absent. */
 export function timelineIndex(timeline: Pick<CanonTimeline, "entries">): Map<string, number> {
   return new Map(timeline.entries.map((entry) => [entry.eventId, entry.index]));
@@ -344,13 +405,22 @@ function mentionExtentsByEvent(
   return result;
 }
 
-function lineToByteIndex(structure: TimelineStructure | undefined): ((line: number) => number | undefined) | undefined {
-  if (!structure?.units.length) return undefined;
+/**
+ * Map evidence lines to byte coordinates: the source structure when frozen,
+ * otherwise spans that carry both, otherwise the line number itself (only
+ * when no evidence is byte-addressed, so one coordinate system is used).
+ */
+function lineToByteIndex(structure: TimelineStructure | undefined, events: readonly CanonicalEvent[]): (line: number) => number | undefined {
   const starts = new Map<number, number>();
-  for (const unit of structure.units) {
-    const prior = starts.get(unit.anchor.startLine);
-    if (prior === undefined || unit.anchor.startByte < prior) starts.set(unit.anchor.startLine, unit.anchor.startByte);
+  const record = (line: number, byte: number) => {
+    const prior = starts.get(line);
+    if (prior === undefined || byte < prior) starts.set(line, byte);
+  };
+  if (structure?.units.length) for (const unit of structure.units) record(unit.anchor.startLine, unit.anchor.startByte);
+  else for (const event of events) for (const reference of event.evidence) {
+    if (reference.span.startByte !== undefined) record(reference.span.startLine, reference.span.startByte);
   }
+  if (!starts.size) return (line) => line;
   const lines = [...starts.keys()].sort((a, b) => a - b);
   return (line) => {
     let low = 0, high = lines.length - 1, found: number | undefined;
@@ -362,8 +432,8 @@ function lineToByteIndex(structure: TimelineStructure | undefined): ((line: numb
   };
 }
 
-function evidenceStartByte(event: CanonicalEvent, lineToByte: ((line: number) => number | undefined) | undefined): number | undefined {
-  const bytes = event.evidence.map((reference) => reference.span.startByte ?? lineToByte?.(reference.span.startLine))
+function evidenceStartByte(event: CanonicalEvent, lineToByte: (line: number) => number | undefined): number | undefined {
+  const bytes = event.evidence.map((reference) => reference.span.startByte ?? lineToByte(reference.span.startLine))
     .filter((value): value is number => typeof value === "number");
   return bytes.length ? Math.min(...bytes) : undefined;
 }

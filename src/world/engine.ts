@@ -1,3 +1,4 @@
+import type { CanonTimeline } from "./canon-timeline.js";
 import { committedTextDeliveries } from "./text-delivery.js";
 import { committedSpeechDeliveries } from "./speech-delivery.js";
 import { entryAgencyIssues } from "./entry-agency.js";
@@ -148,6 +149,8 @@ export type WorldModelContext = {
   actorGoals?: readonly CharacterGoal[];
   actorModels?: ReadonlyMap<string, CharacterModel>;
   possibilityTemplates?: readonly PossibilityTemplate[];
+  /** Host-derived canonical chronology frozen with the snapshot. Absent on legacy snapshots. */
+  timeline?: CanonTimeline;
 };
 
 export type ResolvedWorldModelContext = WorldModelContext & { canonicalSnapshotHash: ObjectHash };

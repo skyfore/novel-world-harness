@@ -30,6 +30,7 @@ import { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore } from 
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
+import { buildCanonTimeline, canonTimelineSchema } from "../world/canon-timeline.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import {
   InitialWorldStore,
@@ -152,6 +153,8 @@ const preparedCanonicalSchema = z.object({
   goals: z.array(characterGoalSchema),
   models: z.array(characterModelSchema),
   possibilities: z.array(possibilityTemplateSchema),
+  /** Host-derived chronology frozen with the revision; absent on bundles prepared before timelines. */
+  timeline: canonTimelineSchema.optional(),
 }).strict();
 
 const preparedCompilerSnapshotSchema = z.object({
@@ -973,7 +976,17 @@ export class PreparedNovelCache {
         .filter((batch) => batch.purpose !== "boundary-calibration")
         .map((batch) => batch.id)
         .sort(),
-      canonical: preparedCanonical,
+      canonical: {
+        ...preparedCanonical,
+        timeline: buildCanonTimeline({
+          sourceId: source.id,
+          events: preparedCanonical.events,
+          relations: preparedCanonical.eventRelations,
+          eventResolutions,
+          annotations,
+          structure,
+        }),
+      },
       compilerSnapshot: {
         ...(upstreamRepairCheckpoint ? { upstreamRepairCheckpoint } : {}),
         ...(upstreamRepairJournal.length ? { upstreamRepairJournal } : {}),

@@ -28,6 +28,7 @@ import { resolveActionInvocation, validateActionSchemaCatalog, type ActionSchema
 import { validateActionConstraintCatalog, type ActionConstraint } from "./action-constraint.js";
 import { validateNormTemplateCatalog, type NormTemplate } from "./norm-ontology.js";
 import { validateProcessTemplateCatalog, type ProcessTemplate } from "./process-ontology.js";
+import { canonTimelineProjectionIssues, canonTimelineSchema, type CanonTimeline } from "./canon-timeline.js";
 
 const revisionRefSchema = z.object({ id: z.string().min(1), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const validatePreparedSnapshotScope = (
@@ -68,6 +69,8 @@ export const canonicalSnapshotSchema = z.object({
   actorModels: z.array(revisionRefSchema),
   possibilities: z.array(revisionRefSchema),
   stateFields: z.array(stateFieldSpecSchema),
+  /** Frozen host chronology; snapshots captured before timelines keep legacy story-time cuts. */
+  timeline: canonTimelineSchema.optional(),
 }).strict().superRefine(validatePreparedSnapshotScope);
 export type CanonicalSnapshot = z.infer<typeof canonicalSnapshotSchema>;
 
@@ -96,6 +99,7 @@ export type ScopedWorldArtifacts = {
   goals: readonly CharacterGoal[];
   models: readonly CharacterModel[];
   possibilities: readonly PossibilityTemplate[];
+  timeline?: CanonTimeline;
 };
 
 export class WorldContextStore {
@@ -222,6 +226,7 @@ export class WorldContextStore {
     assertSpatialProjection(artifacts);
     assertSceneFrameActionProjection(artifacts);
     assertExecutablePolicyProjection(artifacts);
+    assertTimelineProjection(artifacts, sourceId);
     const actionConstraints = artifacts.actionConstraints ?? [];
     const normTemplates = artifacts.normTemplates ?? [];
     const processTemplates = artifacts.processTemplates ?? [];
@@ -294,6 +299,7 @@ export class WorldContextStore {
       actorModels: await actorRefs("models", artifacts.models, (item) => item.actorId),
       possibilities: await possibilityRefs(artifacts.possibilities),
       stateFields: DEFAULT_STATE_FIELDS,
+      ...(artifacts.timeline ? { timeline: artifacts.timeline } : {}),
     });
     const snapshotHash = contentHash(snapshot);
     await this.writeSnapshot(snapshotHash, snapshot);
@@ -405,6 +411,7 @@ export class WorldContextStore {
       normTemplates,
       processTemplates,
     });
+    if (snapshot.timeline) assertTimelineProjection({ timeline: snapshot.timeline, events }, snapshot.sourceId);
     const participationIndex = eventParticipationsByEvent(eventParticipations);
     const executionIssues = validateEventExecutions(eventExecutions, { acquisitions: new Map(acquisitions.map(item => [item.id, item])), participations: eventParticipations, events: new Map(events.map((event) => [event.id, event])), entities: new Map(entities.map((entity) => [entity.id, entity])), actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])), processTemplates: new Map(processTemplates.map(template => [template.id, template])) });
     if (executionIssues.length) throw new Error(executionIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
@@ -441,6 +448,7 @@ export class WorldContextStore {
       actorModels: new Map(actorModels.map((model) => [model.actorId, model])),
       possibilityTemplates: possibilities,
       stateSchema: new StateSchemaRegistry(snapshot.stateFields),
+      ...(snapshot.timeline ? { timeline: snapshot.timeline } : {}),
     };
   }
 
@@ -455,6 +463,12 @@ export class WorldContextStore {
       if ((await fs.readFile(filePath, "utf8")) !== serialized) throw new Error(`Canonical snapshot already exists with different content: ${snapshotHash}`);
     }
   }
+}
+
+function assertTimelineProjection(artifacts: Pick<ScopedWorldArtifacts, "timeline" | "events">, sourceId?: string): void {
+  if (!artifacts.timeline) return;
+  const issues = canonTimelineProjectionIssues(artifacts.timeline, artifacts.events, sourceId);
+  if (issues.length) throw new Error(`Invalid canonical timeline projection: ${issues.map((item) => `${item.code}: ${item.message}`).join("; ")}`);
 }
 
 function assertEventParticipationProjection(

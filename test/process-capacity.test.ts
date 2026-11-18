@@ -70,6 +70,8 @@ it.each(scenes)("executes source-grounded incapacity and recovers only by commit
   // The independent scene consumer must retain onset processes while replaying
   // an ordered cut, and must not certify an action that runtime rejects.
   const sceneBundle = structuredClone(bundle);
+  // Reshaped fixture: its frozen chronology no longer describes these events; exercise legacy story-time cuts.
+  delete sceneBundle.canonical.timeline;
   const sceneOnset = { ...event, storyTime: { kind: "ordinal" as const, label: "onset", orderHint: 1 } };
   const attempt = { ...event, id: "attempt", storyTime: { kind: "ordinal" as const, label: "attempt", orderHint: 2 }, observedOutcome: { version: 1 as const, operations: [{ op: "set" as const, entityId: "patient", field: "character.plan", value: "leave now" }] } };
   sceneBundle.canonical.events = [sceneOnset, attempt];

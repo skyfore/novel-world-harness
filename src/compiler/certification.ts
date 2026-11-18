@@ -32,6 +32,7 @@ import { annotationAnchors } from "./annotations.js";
 import { isBlockingSourceAccountingStatus, retainedSourceAccountingDecisions } from "./source-accounting.js";
 import { assessSemanticSupport, supportAssessmentSchema } from "./semantic-support.js";
 import { buildSceneExecutionContracts, sceneExecutionContractSchema } from "./scene-execution-contracts.js";
+import { attributeIssues, issueAttributionCatalog } from "./issue-attribution.js";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const novelClosureAssessmentSchema = z.object({
@@ -113,7 +114,8 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
     engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION, closure, roster, playability, entryReady, fullNovelReady: entryReady && qualityIssues.length === 0, quality, supportAssessments: support.assessments, sceneContracts: scenes.contracts,
     ...(requirementSets.length ? { requirementResults } : {}),
     ...(coreRoleResult ? { coreRoleResult } : {}),
-    issues: [...new Map(issues.map((issue) => [`${issue.code}/${issue.path ?? ""}/${issue.message}`, issue])).values()] });
+    // Every attributable issue names its closure node so admission can block only dependent cuts.
+    issues: [...new Map(attributeIssues(issues, issueAttributionCatalog(bundle)).map((issue) => [`${issue.code}/${issue.path ?? ""}/${issue.message}`, issue])).values()] });
   await new NovelClosureStore(root).write(assessment);
   return assessment;
 }

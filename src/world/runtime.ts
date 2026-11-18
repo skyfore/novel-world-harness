@@ -37,6 +37,7 @@ import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import { projectActorScene } from "./scene.js";
 import { comparableStoryTime, compareStoryTime } from "./time.js";
 import { canonPositionFor, expandTimelineAliases, type CanonTimeline } from "./canon-timeline.js";
+import { stepCanon as stepCanonEvents, type CanonStepInput, type CanonStepResult } from "./canon-stepper.js";
 import { contentHash } from "./canonical.js";
 
 const MAX_CALLBACK_CANDIDATES = 10_000;
@@ -541,6 +542,11 @@ export class WorldRuntime {
     });
     await this.frontierStore.write(frontier);
     return frontier;
+  }
+
+  /** Resolve canonical events in timeline order for the player's actor (see canon-stepper). */
+  async stepCanon(input: CanonStepInput): Promise<CanonStepResult> {
+    return stepCanonEvents({ engine: this.engine, refreshFrontier: (branchId, commitId) => this.refreshFrontier(branchId, commitId) }, input);
   }
 
   async realizedPossibilityIds(commitId: CommitId): Promise<ReadonlySet<string>> {

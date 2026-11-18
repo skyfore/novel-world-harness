@@ -26,6 +26,7 @@ import { migrateLegacyAcquisitions } from "./compiler/acquisition-migration.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
 import { compileNovelCommand } from "./commands/compile-novel.js";
+import { novelCutsCommand } from "./commands/novel-cuts.js";
 import { compileNovelWithLoop } from "./commands/compile-novel-loop.js";
 import { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
 import { WorkspaceOperationLock } from "./util/workspace-lock.js";
@@ -150,6 +151,12 @@ novelOptions(compileNovel.command("status").description("Read current source/pha
   .action(async (_options, child) => runCompileNovel(child, undefined, "status"));
 novelOptions(compileNovel.command("plan").description("Discover the complete remaining phase/dependency handoff and exact recovery conditions without writes or model calls"))
   .action(async (_options, child) => runCompileNovel(child, undefined, "plan"));
+novelOptions(compileNovel.command("cuts").description("Read-only cut diagnostics: the host-derived canonical timeline (default: current workspace candidate)"))
+  .option("--revision <hash>", "inspect an exact cached prepared revision instead of the workspace candidate")
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await novelCutsCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision });
+  });
 
 const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and run bounded host-reviewed corrections");
 program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")

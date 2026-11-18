@@ -241,7 +241,7 @@ export class ProjectionService {
       const context = await this.contextForSnapshot(entry.commit.canonicalSnapshotHash);
       if (previousTime) {
         try {
-          assertMonotonicLogicalTime(previousTime, entry.commit.logicalTime);
+          assertMonotonicLogicalTime(previousTime, entry.commit.logicalTime, { ignoreOrdinal: Boolean(context.timeline) });
         } catch (error) {
           throw new Error(`Non-monotonic world time at commit ${entry.id}: ${messageOf(error)}`);
         }

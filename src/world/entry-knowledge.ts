@@ -25,6 +25,7 @@ export function replayEntryKnowledge(input: EntryKnowledgeHistory, context: Worl
     actionSchemas: [...(context.actionSchemas?.values() ?? [])], actionConstraints: [...(context.actionConstraints?.values() ?? [])],
     processTemplates: [...(context.processTemplates?.values() ?? [])], normTemplates: [...(context.normTemplates?.values() ?? [])],
     eventRelations: context.eventRelations ?? [], eventParticipations: context.eventParticipations ?? [], spatialRelations: context.spatialRelations ?? [], goals: context.actorGoals ?? [],
+    ...(context.timeline ? { timeline: context.timeline } : {}),
   } } as unknown as PreparedNovelBundle;
   const result = executeSceneEvent(bundle, target, undefined, { beforeOnly: true, ignoreCheckpoint: true, sourceEventRevisions: context.sourceEventRevisions });
   if (result.cut.hash !== history.cutHash || contentHash([...result.cut.completedEventIds].sort()) !== contentHash([...new Set(realized)].sort())) return stop("Entry cut is stale or imports a future/unrealized occurrence");

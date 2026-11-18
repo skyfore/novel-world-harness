@@ -305,7 +305,7 @@ export function buildCanonTimeline(input: BuildCanonTimelineInput): CanonTimelin
 /** Structural view of a prepared bundle; avoids a runtime dependency on the compiler cache. */
 export type TimelineBundle = {
   source: { id: string };
-  canonical: { events: readonly CanonicalEvent[]; eventRelations: readonly EventRelation[]; timeline?: CanonTimeline };
+  canonical: { events: readonly CanonicalEvent[]; eventRelations?: readonly EventRelation[]; timeline?: CanonTimeline };
   compilerSnapshot?: { eventResolutions?: readonly TimelineEventResolution[]; annotations?: readonly TimelineAnnotation[]; structure?: TimelineStructure };
 };
 
@@ -330,7 +330,7 @@ export function deriveBundleCanonTimeline(bundle: TimelineBundle): CanonTimeline
   return buildCanonTimeline({
     sourceId: bundle.source.id,
     events: bundle.canonical.events,
-    relations: bundle.canonical.eventRelations,
+    relations: bundle.canonical.eventRelations ?? [],
     eventResolutions: bundle.compilerSnapshot?.eventResolutions ?? [],
     annotations: bundle.compilerSnapshot?.annotations ?? [],
     ...(bundle.compilerSnapshot?.structure ? { structure: bundle.compilerSnapshot.structure } : {}),
@@ -364,6 +364,35 @@ export function timelineIndex(timeline: Pick<CanonTimeline, "entries">): Map<str
 /** The first coreferent occurrence of an event, or the event itself. */
 export function timelineAliasRoot(timeline: Pick<CanonTimeline, "entries">, eventId: string): string {
   return timeline.entries.find((entry) => entry.eventId === eventId)?.aliasOf ?? eventId;
+}
+
+/** Index of the first event in an occurrence's coreference group. */
+export function timelineGroupStart(timeline: Pick<CanonTimeline, "entries">, eventId: string, index = timelineIndex(timeline)): number | undefined {
+  const at = index.get(eventId);
+  if (at === undefined) return undefined;
+  const root = timeline.entries[at]!.aliasOf;
+  return root === undefined ? at : index.get(root) ?? at;
+}
+
+/**
+ * Timeline position of the frozen opening: before its checkpoint event, or
+ * after every event narrated before the opening's own evidence.
+ */
+export function openingTimelineIndex(
+  timeline: Pick<CanonTimeline, "entries">,
+  opening: { checkpoint?: { beforeCanonicalEventId?: string }; evidence: ReadonlyArray<{ span: { startByte?: number } }> } | undefined,
+): number {
+  const before = opening?.checkpoint?.beforeCanonicalEventId;
+  if (before) {
+    const start = timelineGroupStart(timeline, before);
+    if (start !== undefined) return start;
+  }
+  const bytes = (opening?.evidence ?? []).map((reference) => reference.span.startByte).filter((value): value is number => typeof value === "number");
+  if (!bytes.length) return 0;
+  const openingByte = Math.min(...bytes);
+  let last = -1;
+  for (const entry of timeline.entries) if (entry.discourseByte < openingByte) last = entry.index;
+  return last + 1;
 }
 
 /** Earliest index whose cut is blocked by a hard timeline error, or undefined. */

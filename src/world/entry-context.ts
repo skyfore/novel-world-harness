@@ -9,6 +9,7 @@ import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateInca
 import { materializeProcessProposal } from "./process-ontology.js";
 import { validateSemanticEffect } from "./semantic-effect.js";
 import { deriveEntryCut, type EntryCut } from "./entry-cut.js";
+import { canonTimelineProjectionIssues, openingTimelineIndex, timelineGroupStart, timelineIndex, type CanonTimeline } from "./canon-timeline.js";
 import { timeAdvanceInDays } from "./time.js";
 import { applyEventExecutions, validateEventExecutions } from "./event-execution.js";
 import type { EntryProjectionSeed } from "./model.js";
@@ -107,9 +108,7 @@ export type CharacterEntrySeed = {
 export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): CharacterEntryOption[] {
   bundle = withExecutionEntries(bundle);
   const characters = bundle.canonical.entities.filter((entity) => entity.kind === "character");
-  const orderedEvents = eventsInDiscourseOrder(bundle.canonical.events);
-  const eventRanks = new Map(orderedEvents.map((event, index) => [event.id, index]));
-  const openingOrder = openingDiscourseOrder(bundle, orderedEvents);
+  const { ordered: orderedEvents, rank: eventRanks, opening: openingOrder } = entryChronology(bundle);
   const completeReaderContextBefore = new Set<string>();
   let readerContextComplete = true;
   for (const event of orderedEvents) {
@@ -174,9 +173,9 @@ export function deriveCharacterEntrySeed(
       `Character '${actorId}' has no grounded playable entry with complete prior reader context. A name, mention, letter signature, remote reference, or incomplete recap is not enough to establish a lived scene.`,
     );
   }
-  const orderedEvents = eventsInDiscourseOrder(bundle.canonical.events);
-  const baselineOrder = openingDiscourseOrder(bundle, orderedEvents);
+  const { ordered: orderedEvents, opening: baselineIndex, timeline } = entryChronology(bundle);
   const priorEvents = orderedEvents.slice(0, option.entry.discourseOrder);
+  const cutChronology = timeline ? { timeline, baselineIndex } : {};
   const targetEvent = option.entry.canonicalEventId
     ? orderedEvents.find((event) => event.id === option.entry.canonicalEventId)
     : undefined;
@@ -194,6 +193,7 @@ export function deriveCharacterEntrySeed(
     baselineEventId: bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId,
     baselineTime: bundle.canonical.initialWorld.checkpoint?.storyTime,
     completeCheckpoint: Boolean(projectionSeed),
+    ...cutChronology,
   });
   if (cut.issues.length) throw new Error(cut.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
   const forwardEvents = cut.replayEventIds.map((id) => bundle.canonical.events.find((event) => event.id === id)!);
@@ -213,7 +213,7 @@ export function deriveCharacterEntrySeed(
     const historicalCut = deriveEntryCut({ events: bundle.canonical.events, relations: bundle.canonical.eventRelations ?? [],
       beforeEventId: targetEvent.id, storyTime: targetEvent.storyTime,
       baselineEventId: bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId,
-      baselineTime: bundle.canonical.initialWorld.checkpoint?.storyTime });
+      baselineTime: bundle.canonical.initialWorld.checkpoint?.storyTime, ...cutChronology });
     if (historicalCut.issues.length) throw new Error(historicalCut.issues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
     knowledgeOperations = [
       ...structuredClone(bundle.canonical.initialWorld.knowledge?.operations ?? []),
@@ -449,10 +449,27 @@ function entryCheckpointFor(event: CanonicalEvent, actorId: string, bundle: Prep
     }).state === "grounded");
 }
 
-function eventAdvancesMainTimeline(event: CanonicalEvent): boolean {
-  return !["flashback", "flashforward", "recollection", "hypothetical"].includes(
-    event.narrativeContext?.mode ?? "scene",
-  );
+/**
+ * Entry ordering: the frozen canonical timeline when present (hypothetical
+ * events never complete), otherwise the legacy evidence-line discourse order.
+ * `rank` is the cut position used for an event's entry.
+ */
+function entryChronology(bundle: PreparedNovelBundle): { ordered: CanonicalEvent[]; rank: Map<string, number>; opening: number; timeline?: CanonTimeline } {
+  const timeline = bundle.canonical.timeline;
+  if (!timeline) {
+    const ordered = eventsInDiscourseOrder(bundle.canonical.events);
+    return { ordered, rank: new Map(ordered.map((event, index) => [event.id, index])), opening: openingDiscourseOrder(bundle, ordered) };
+  }
+  const issues = canonTimelineProjectionIssues(timeline, bundle.canonical.events, bundle.source.id);
+  if (issues.length) throw new Error(`TIMELINE_STALE: ${issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
+  const events = new Map(bundle.canonical.events.map((event) => [event.id, event]));
+  const index = timelineIndex(timeline);
+  return {
+    ordered: timeline.entries.map((entry) => events.get(entry.eventId)!),
+    rank: new Map(timeline.entries.map((entry) => [entry.eventId, timelineGroupStart(timeline, entry.eventId, index)!])),
+    opening: openingTimelineIndex(timeline, bundle.canonical.initialWorld),
+    timeline,
+  };
 }
 
 function eventsInDiscourseOrder(events: readonly CanonicalEvent[]): CanonicalEvent[] {

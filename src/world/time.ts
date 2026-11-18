@@ -43,13 +43,19 @@ export function advanceStoryTime(time: StoryTime, advance: TimeAdvance): StoryTi
 }
 
 /**
+ * In a world with a frozen canonical timeline, chronology comes from the host
+ * timeline; model-authored ordinal hints are display labels only.
+ */
+export type StoryTimeOrderOptions = { ignoreOrdinal?: boolean };
+
+/**
  * Produces a coarse but deterministic interval for ordering story anchors.
  * Unknown and unresolved relative anchors intentionally remain incomparable.
  */
-export function comparableStoryTime(time: StoryTime | undefined): ComparableStoryTime | undefined {
+export function comparableStoryTime(time: StoryTime | undefined, options: StoryTimeOrderOptions = {}): ComparableStoryTime | undefined {
   if (!time || time.kind === "unknown" || time.kind === "relative") return undefined;
   if (time.kind === "ordinal") {
-    return typeof time.orderHint === "number"
+    return typeof time.orderHint === "number" && !options.ignoreOrdinal
       ? { scale: "ordinal", min: time.orderHint, max: time.orderHint }
       : undefined;
   }
@@ -65,9 +71,9 @@ export function comparableStoryTime(time: StoryTime | undefined): ComparableStor
 }
 
 /** -1 means left is definitely earlier, 1 later, 0 overlapping/equal. */
-export function compareStoryTime(left: StoryTime | undefined, right: StoryTime | undefined): -1 | 0 | 1 | undefined {
-  const leftRange = comparableStoryTime(left);
-  const rightRange = comparableStoryTime(right);
+export function compareStoryTime(left: StoryTime | undefined, right: StoryTime | undefined, options: StoryTimeOrderOptions = {}): -1 | 0 | 1 | undefined {
+  const leftRange = comparableStoryTime(left, options);
+  const rightRange = comparableStoryTime(right, options);
   if (!leftRange || !rightRange || leftRange.scale !== rightRange.scale) return undefined;
   if (leftRange.max < rightRange.min) return -1;
   if (leftRange.min > rightRange.max) return 1;
@@ -91,8 +97,8 @@ export function storyTimeBefore(current: StoryTime | undefined, boundary: StoryT
  * Advance both clocks for an accepted event. An unknown proposed anchor keeps
  * the last known story anchor; it never erases temporal knowledge.
  */
-export function nextLogicalTime(current: LogicalTime, proposed: StoryTime, advance?: TimeAdvance): LogicalTime {
-  const order = compareStoryTime(proposed, current.storyTime);
+export function nextLogicalTime(current: LogicalTime, proposed: StoryTime, advance?: TimeAdvance, options: StoryTimeOrderOptions = {}): LogicalTime {
+  const order = compareStoryTime(proposed, current.storyTime, options);
   if (order === -1) throw new Error("Proposed story time is earlier than committed branch time");
   const storyTime = proposed.kind === "unknown" ? current.storyTime : proposed;
   const explicitDays = timeAdvanceInDays(advance);
@@ -105,10 +111,10 @@ export function nextLogicalTime(current: LogicalTime, proposed: StoryTime, advan
 }
 
 /** Validate the cumulative clock persisted on a commit during replay. */
-export function assertMonotonicLogicalTime(previous: LogicalTime, next: LogicalTime): void {
+export function assertMonotonicLogicalTime(previous: LogicalTime, next: LogicalTime, options: StoryTimeOrderOptions = {}): void {
   if (next.step <= previous.step) throw new Error("Logical step must increase");
   if ((next.elapsedDays ?? 0) < (previous.elapsedDays ?? 0)) throw new Error("Elapsed world time must not move backwards");
-  if (compareStoryTime(next.storyTime, previous.storyTime) === -1) throw new Error("Story time must not move backwards");
+  if (compareStoryTime(next.storyTime, previous.storyTime, options) === -1) throw new Error("Story time must not move backwards");
 }
 
 function inferElapsedDays(current: StoryTime | undefined, next: StoryTime | undefined): number {

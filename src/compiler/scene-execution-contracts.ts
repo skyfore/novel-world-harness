@@ -4,6 +4,7 @@ import { resolveActionInvocation } from "../world/action-ontology.js";
 import { contentHash } from "../world/canonical.js";
 import { executeSceneEvent } from "./scene-state.js";
 import { deriveEntryCut } from "../world/entry-cut.js";
+import { openingTimelineIndex } from "../world/canon-timeline.js";
 import { validateEffectObligations } from "../world/effect-obligations.js";
 import { predicateSchema, type CanonicalEvent, type ValidationIssue } from "../world/model.js";
 import { applyStateDelta, DEFAULT_STATE_FIELDS, emptyWorldState, StateSchemaRegistry, evaluatePredicateTruth } from "../world/state.js";
@@ -105,7 +106,8 @@ export function validateSceneTravel(bundle: PreparedNovelBundle, event: Canonica
   const checkpoint = event.characterEntryCheckpoints?.find((cut) => cut.actorId === actorId && cut.projectionSeed);
   const cut = deriveEntryCut({ events: canonical.events, relations: canonical.eventRelations,
     beforeEventId: event.id, storyTime: event.storyTime, baselineEventId: opening.checkpoint?.beforeCanonicalEventId,
-    baselineTime: opening.checkpoint?.storyTime, completeCheckpoint: Boolean(checkpoint) });
+    baselineTime: opening.checkpoint?.storyTime, completeCheckpoint: Boolean(checkpoint),
+    ...(canonical.timeline ? { timeline: canonical.timeline, baselineIndex: openingTimelineIndex(canonical.timeline, opening) } : {}) });
   if (cut.issues.length) return { issues: cut.issues, relationIds: [] };
   try {
     const entities = new Map(canonical.entities.map((entity) => [entity.id, entity]));

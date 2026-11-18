@@ -293,7 +293,7 @@ export function validateEventProposal(
   }
   let evaluationState = state;
   try {
-    const logicalTime = nextLogicalTime(state.logicalTime, proposal.proposedTime, proposal.timeAdvance);
+    const logicalTime = nextLogicalTime(state.logicalTime, proposal.proposedTime, proposal.timeAdvance, { ignoreOrdinal: Boolean(context.timeline) });
     evaluationState = advanceTemporalState(state, logicalTime, context.stateSchema, context.entities);
   } catch (error) {
     errors.push({ code: "INVALID_WORLD_TIME", message: error instanceof Error ? error.message : String(error), path: "proposedTime" });

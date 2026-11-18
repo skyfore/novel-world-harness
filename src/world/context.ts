@@ -28,7 +28,7 @@ import { resolveActionInvocation, validateActionSchemaCatalog, type ActionSchema
 import { validateActionConstraintCatalog, type ActionConstraint } from "./action-constraint.js";
 import { validateNormTemplateCatalog, type NormTemplate } from "./norm-ontology.js";
 import { validateProcessTemplateCatalog, type ProcessTemplate } from "./process-ontology.js";
-import { canonTimelineProjectionIssues, canonTimelineSchema, type CanonTimeline } from "./canon-timeline.js";
+import { buildCanonTimeline, canonTimelineProjectionIssues, canonTimelineSchema, type CanonTimeline } from "./canon-timeline.js";
 
 const revisionRefSchema = z.object({ id: z.string().min(1), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const validatePreparedSnapshotScope = (
@@ -163,7 +163,29 @@ export class WorldContextStore {
       models: models.filter(belongsToSource),
       possibilities: possibilities.filter(belongsToSource),
     };
+    if (sourceId) {
+      const timeline = await this.currentTimeline(sourceId, artifacts.events, artifacts.eventRelations);
+      if (timeline) artifacts.timeline = timeline;
+    }
     return this.captureArtifacts(artifacts, sourceId);
+  }
+
+  /**
+   * The chronology a candidate bundle would freeze from the same workspace
+   * inputs. Compiler stores load lazily so the world layer keeps no static
+   * dependency on them.
+   */
+  private async currentTimeline(sourceId: string, events: readonly CanonicalEvent[], relations: readonly EventRelation[]): Promise<CanonTimeline | undefined> {
+    if (!events.length) return undefined;
+    const [{ SourceAnnotationStore }, { EventResolutionStore }, { SourceStructureStore }] = await Promise.all([
+      import("../compiler/annotations.js"), import("../compiler/event-resolution.js"), import("../compiler/structure.js"),
+    ]);
+    const [annotations, eventResolutions, structure] = await Promise.all([
+      new SourceAnnotationStore(this.workspaceRoot).list(sourceId),
+      new EventResolutionStore(this.workspaceRoot).list(sourceId),
+      new SourceStructureStore(this.workspaceRoot).read(sourceId),
+    ]);
+    return buildCanonTimeline({ sourceId, events, relations, annotations, eventResolutions, ...(structure ? { structure } : {}) });
   }
 
   async capturePrepared(

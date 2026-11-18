@@ -66,3 +66,18 @@ describe("canonical timeline in world contexts", () => {
     expect(bundleCanonTimeline({ ...legacy, canonical: { ...legacy.canonical, timeline: frozen } })).toBe(frozen);
   });
 });
+
+describe("branch clock in timeline worlds", () => {
+  it("treats model ordinal hints as labels while calendar time stays authoritative", async () => {
+    const { nextLogicalTime, assertMonotonicLogicalTime, compareStoryTime } = await import("../src/world/time.js");
+    const late = { kind: "ordinal" as const, label: "batch-late", orderHint: 90 };
+    const early = { kind: "ordinal" as const, label: "batch-early", orderHint: 30 };
+    expect(() => nextLogicalTime({ step: 1, storyTime: late }, early)).toThrow(/earlier/);
+    expect(nextLogicalTime({ step: 1, storyTime: late }, early, undefined, { ignoreOrdinal: true })).toMatchObject({ step: 2, storyTime: early });
+    expect(() => assertMonotonicLogicalTime({ step: 1, storyTime: late }, { step: 2, storyTime: early }, { ignoreOrdinal: true })).not.toThrow();
+    const winter = { kind: "exact" as const, value: "2004-12-01", precision: "day" as const };
+    const spring = { kind: "exact" as const, value: "2004-03-01", precision: "day" as const };
+    expect(compareStoryTime(spring, winter, { ignoreOrdinal: true })).toBe(-1);
+    expect(() => nextLogicalTime({ step: 1, storyTime: winter }, spring, undefined, { ignoreOrdinal: true })).toThrow(/earlier/);
+  });
+});

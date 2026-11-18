@@ -5,6 +5,7 @@ import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateInca
 import { materializeProcessProposal } from "./process-ontology.js";
 import { contentHash } from "./canonical.js";
 import { deriveEntryCut } from "./entry-cut.js";
+import { openingTimelineIndex } from "./canon-timeline.js";
 import { validateEventProposal, type WorldModelContext } from "./engine.js";
 import { applyEventExecutions } from "./event-execution.js";
 import { applyKnowledgeDelta, emptyKnowledgeState } from "./knowledge.js";
@@ -24,7 +25,7 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
   const checkpoint = options.ignoreCheckpoint ? undefined : event.characterEntryCheckpoints?.find((item) => item.actorId === actorId && item.projectionSeed);
   const cut = deriveEntryCut({ events, relations: c.eventRelations, beforeEventId: event.id, storyTime: event.storyTime,
     baselineEventId: opening.checkpoint?.beforeCanonicalEventId, baselineTime: opening.checkpoint?.storyTime,
-    completeCheckpoint: Boolean(checkpoint) });
+    completeCheckpoint: Boolean(checkpoint), ...(c.timeline ? { timeline: c.timeline, baselineIndex: openingTimelineIndex(c.timeline, opening) } : {}) });
   if (cut.issues.length) throw new Error(cut.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
   const context: WorldModelContext = {
     initialWorld: opening, eventExecutions: new Map((c.eventExecutions ?? []).map(binding => [binding.id, binding])),
@@ -37,6 +38,7 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     actionSchemas: new Map(c.actionSchemas.map((item) => [item.id, item])), actionConstraints: new Map(c.actionConstraints.map((item) => [item.id, item])),
     processTemplates: new Map(c.processTemplates.map((item) => [item.id, item])), normTemplates: new Map(c.normTemplates.map((item) => [item.id, item])),
     spatialOntologyVersion: "spatial-v1", spatialRelations: c.spatialRelations, eventRelations: c.eventRelations,
+    ...(c.timeline ? { timeline: c.timeline } : {}),
   };
   const seed = checkpoint?.projectionSeed ?? opening.projectionSeed;
   let state = emptyWorldState(contentHash({ source: bundle.source, cut }));

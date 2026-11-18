@@ -92,7 +92,7 @@ export type ReviewDisposition = {
   measureId: string;
   /** Subject key: `pair:<a>|<b>` (sorted), `event:<id>`, `term:<surface>`, `location:<id>`, `actor:<id>`. */
   subject: string;
-  verdict: "not-stated" | "unconditioned" | "narration-only" | "unknown";
+  verdict: "not-stated" | "unconditioned" | "narration-only" | "unknown" | "no-change" | "rejected-candidate";
   rationale: string;
 };
 
@@ -248,6 +248,8 @@ export type WorldCompletenessOptions = {
   /** Census lore entries; quoted terms from the text are always included. */
   loreTerms?: readonly LoreTerm[];
   usage?: CompileUsage | null;
+  /** Host candidates the model rejected with a reason: they count as handled, not as missing annotations. */
+  handled?: { speech?: readonly ByteRange[]; names?: readonly ByteRange[] };
 };
 
 export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Uint8Array, options: WorldCompletenessOptions = {}): WorldCompletenessReport {
@@ -302,8 +304,8 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
   const entityMentions = annotations.filter((item) => item.annotationType === "entity-mention");
   const eventMentions = annotations.filter((item) => item.annotationType === "event-mention");
   const discourse = new Map(annotations.filter((item) => item.annotationType === "discourse-segment").map((item) => [item.id, item.anchors]));
-  const quotationUnion = new RangeUnion(quotations.map((item) => item.anchor));
-  const mentionUnion = new RangeUnion(entityMentions.map((item) => item.anchor));
+  const quotationUnion = new RangeUnion([...quotations.map((item) => item.anchor), ...(options.handled?.speech ?? [])]);
+  const mentionUnion = new RangeUnion([...entityMentions.map((item) => item.anchor), ...(options.handled?.names ?? [])]);
   const resolvedEventExtents = eventMentions.filter((item) => canonicalEventIds.has(mentionEvent.get(item.id) ?? "")).flatMap((item) => item.extentAnchors);
   const eventUnion = new RangeUnion(resolvedEventExtents);
   const bindingUnion = new RangeUnion(snapshot.evidenceBindings.flatMap((binding) => binding.assertions.flatMap((assertion) =>
@@ -382,12 +384,15 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
     ...canonical.semanticEffects.flatMap((item) => "eventId" in item && typeof item.eventId === "string" ? [item.eventId] : []),
     ...canonical.eventExecutions.map((item) => item.canonicalEventId),
   ]);
-  const effectful = events.filter((event) => event.observedOutcome.operations.length > 0
+  const changing = events.filter((event) => event.observedOutcome.operations.length > 0
     || (event.observedKnowledge?.operations.length ?? 0) > 0 || effectEvents.has(event.id));
+  // A reviewed "no change" satisfies the beat contract but never makes an event a key event.
+  const effectful = [...changing, ...events.filter((event) => !changing.includes(event) && disposed("events.effectful", `event:${event.id}`))];
   const agents = new Set(canonical.eventParticipations.filter((item) => item.role === "agent").map((item) => item.eventId));
   const scenesWithEventsAt = measures.length;
   measures.push(measure({ id: "events.effectful", layer: "events", label: "events with a state, knowledge, semantic or execution effect", denominator: "internal",
-    numerator: effectful.length, total: events.length, target: targets.effectfulEvents }));
+    numerator: effectful.length, total: events.length, target: targets.effectfulEvents,
+    note: `${effectful.length - changing.length} by a reviewed "no change".` }));
   measures.push(measure({ id: "events.typed-agent", layer: "events", label: "events with a typed agent participation", denominator: "internal",
     numerator: events.filter((event) => agents.has(event.id)).length, total: events.length, target: targets.typedAgent }));
   measures.push(measure({ id: "events.speech-in-beats", layer: "events", label: "direct-speech spans inside a canonical event's mention extent", denominator: "source",
@@ -470,7 +475,7 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
       };
     });
   const speakingMeasure = (id: string, label: string, predicate: (item: typeof speaking[number]) => boolean, target: number) =>
-    measures.push(measure({ id, layer: "characters", label, denominator: "source", numerator: speaking.filter(predicate).length, total: speaking.length, target }));
+    measures.push(measure({ id, layer: "characters", label, denominator: "source", numerator: speaking.filter((item) => predicate(item) || disposed(id, `actor:${item.actorId}`)).length, total: speaking.length, target }));
   speakingMeasure("characters.speaking-modelled", "speaking characters with a character model", (item) => item.model, targets.characterDepth);
   speakingMeasure("characters.speaking-with-disposition", "speaking characters whose model carries a trait or disposition", (item) => item.depth, targets.characterDepth);
   speakingMeasure("characters.speaking-with-goal", "speaking characters with at least one goal", (item) => item.goals > 0, targets.characterDepth);
@@ -485,7 +490,7 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
     .filter((operation) => "field" in operation && operation.field === "character.location" && "value" in operation && typeof operation.value === "string");
   for (const operation of locationWrites) if (locations.has((operation as { value: string }).value)) used.add((operation as { value: string }).value);
   measures.push(measure({ id: "space.locations-on-graph", layer: "space", label: "locations used by scenes or character positions that sit in the spatial graph", denominator: "internal",
-    numerator: [...used].filter((id) => graph.has(id)).length, total: used.size, target: targets.locationsOnGraph,
+    numerator: [...used].filter((id) => graph.has(id) || disposed("space.locations-on-graph", `location:${id}`)).length, total: used.size, target: targets.locationsOnGraph,
     note: `${canonical.spatialRelations.length} spatial relations over ${locations.size} location entities.` }));
   const openingActors = new Set([...(canonical.initialWorld.participantPresence ?? []).map((item) => item.entityId)].filter((id) => characters.has(id)));
   const openingPositioned = new Set(canonical.initialWorld.delta.operations
@@ -511,7 +516,7 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
       numerator: 0, total: speaking.length, target: targets.enterable, status: "unknown", note: "No admission manifest; rerun with --admission or use `compile-novel cuts`." }));
   }
   measures.push(measure({ id: "agency.effectful-goals", layer: "agency", label: "speaking characters with a goal whose candidate action changes state", denominator: "source",
-    numerator: speaking.filter((item) => item.effectfulGoals > 0).length, total: speaking.length, target: targets.characterDepth }));
+    numerator: speaking.filter((item) => item.effectfulGoals > 0 || disposed("agency.effectful-goals", `actor:${item.actorId}`)).length, total: speaking.length, target: targets.characterDepth }));
 
   // Aliases and generic names (design 3.3, identity layer extension).
   const entitiesById = new Map(canonical.entities.map((entity) => [entity.id, entity]));
@@ -603,7 +608,7 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
     note: `${inventory.times.length} explicit time expressions in scope; ${events.filter(anchored).length} events anchored overall.` }));
 
   // Causality: key events are roster-agent events with an effect.
-  const effectfulIds = new Set(effectful.map((event) => event.id));
+  const effectfulIds = new Set(changing.map((event) => event.id));
   const rosterAgentEvents = new Set(canonical.eventParticipations.filter((item) => item.role === "agent" && rosterSet.has(item.entityId)).map((item) => item.eventId));
   const keyEvents = events.filter((event) => effectfulIds.has(event.id) && rosterAgentEvents.has(event.id));
   const dependents = new Set(canonical.eventRelations.filter((relation) => ["cause", "enable", "motivate", "prevent"].includes(relation.type)).map((relation) => relation.toEventId));
@@ -672,7 +677,7 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
       scenesWithoutEvents: scenes.filter((scene) => scene.eventIds.length === 0).map((scene) => scene.id),
       scenesWithoutLocation: scenes.filter((scene) => !scene.locationId && !scene.locationUnknown).map((scene) => scene.id),
       absentSpeakers: absentSpeakers.slice(0, QUEUE_LIMIT),
-      locationsOffGraph: [...used].filter((id) => !graph.has(id)).sort(),
+      locationsOffGraph: [...used].filter((id) => !graph.has(id) && !disposed("space.locations-on-graph", `location:${id}`)).sort(),
       nameCollisions: inventory.lexicon.collisions,
       eventGaps: eventGaps.slice(0, 10),
       unattachedAliases: [...unattached.values()].sort((a, b) => b.mentions - a.mentions || a.surface.localeCompare(b.surface)).slice(0, QUEUE_LIMIT),

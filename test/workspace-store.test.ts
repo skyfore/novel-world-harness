@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { legacyWorkspaceStateDir, workspaceStateDir } from "../src/agent/runtime-paths.js";
+import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { SourceMaterialStore } from "../src/storage/source-material-store.js";
 
@@ -46,7 +46,7 @@ describe("WorkspaceStore", () => {
     expect(await store.listSources()).toHaveLength(1);
     const stat = await fs.stat(path.join(workspaceStateDir(root), "sources", `${first.id}.json`));
     expect(stat.mode & 0o077).toBe(0);
-    await expect(fs.stat(legacyWorkspaceStateDir(root))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.stat(path.join(root, ".novel-harness"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("does not guess a novel title from front-matter patterns during ingest", async () => {
@@ -64,43 +64,6 @@ describe("WorkspaceStore", () => {
       title: "opaque-upload-name.txt",
       sourcePath: "opaque-upload-name.txt",
     });
-  });
-
-  it("copies legacy local state into the user store without deleting the original", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-store-migration-"));
-    temporaryDirectories.push(root);
-    const legacy = legacyWorkspaceStateDir(root);
-    await fs.mkdir(legacy, { recursive: true });
-    await fs.writeFile(path.join(legacy, "project.json"), JSON.stringify({
-      version: 1,
-      id: "legacy",
-      name: "Legacy",
-      language: "zh-CN",
-      createdAt: new Date(0).toISOString(),
-      updatedAt: new Date(0).toISOString(),
-    }), "utf8");
-    const sourceContent = Buffer.from("Legacy source.\n", "utf8");
-    const sha = crypto.createHash("sha256").update(sourceContent).digest("hex");
-    const sourceId = sha.slice(0, 20);
-    await fs.writeFile(path.join(root, "legacy.txt"), sourceContent);
-    await fs.mkdir(path.join(legacy, "sources"), { recursive: true });
-    await fs.writeFile(path.join(legacy, "sources", `${sourceId}.json`), JSON.stringify({
-      version: 1,
-      id: sourceId,
-      title: "legacy.txt",
-      sourcePath: "legacy.txt",
-      contentSha256: sha,
-      bytes: sourceContent.byteLength,
-      registeredAt: new Date(0).toISOString(),
-      updatedAt: new Date(0).toISOString(),
-    }), "utf8");
-
-    const store = await WorkspaceStore.create(root);
-
-    await expect(store.readProject()).resolves.toMatchObject({ id: "legacy" });
-    await expect(fs.stat(path.join(workspaceStateDir(root), "project.json"))).resolves.toBeDefined();
-    await expect(fs.stat(path.join(legacy, "project.json"))).resolves.toBeDefined();
-    await expect(fs.readFile(path.join(new SourceMaterialStore().root, sha, "source.utf8"))).resolves.toEqual(sourceContent);
   });
 
   it("requires source material to stay inside the workspace", async () => {

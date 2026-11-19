@@ -1,6 +1,5 @@
 export { auditCompiler, type CompilerAuditReport, type CompilerReadinessState } from "./compiler/audit.js";
 export { WorkspaceOperationLock, withWorkspaceOperationLock, type WorkspaceLockOwner } from "./util/workspace-lock.js";
-export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
 export { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./compiler/boundary-calibration.js";
 export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleSchema, chapterSplitPlanSchema, type ChapterHeadingRule, type ChapterSplitPlan, type ChapterStructureSample } from "./compiler/chapter-split.js";
 export {
@@ -110,29 +109,14 @@ export {
 } from "./compiler/source-accounting.js";
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
 export { PreparedNovelCache, preparedNovelBundleSchema, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
-export { rebuildCommand } from "./commands/rebuild.js";
 export { compileNovelCommand, inspectNovelCompilation, type CompileNovelOptions } from "./commands/compile-novel.js";
 export { compileNovelWithLoop, type SupervisedCompileOptions } from "./commands/compile-novel-loop.js";
 export { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
-export { inspectCompilationHandoff } from "./compiler/compilation-handoff.js";
-export { checkCompilationClosure, type CompilationClosure } from "./compiler/compilation-closure.js";
-export { repairExistingCommand, type RepairExistingCommandOptions, type RepairExistingCommandResult } from "./commands/repair-existing.js";
 export { eventExecutionSchema, applyEventExecutions, validateEventExecutions, type EventExecution } from "./world/event-execution.js";
 export { buildPreparedClosure, affectedClosureNodes, staleClosureNodes, closureGraphSchema, type ClosureGraph, type ClosureKind } from "./compiler/closure.js";
-export { planClosureRepair, closureRepairDiagnostics } from "./compiler/closure-repair.js";
+export { closureRepairDiagnostics } from "./compiler/closure-repair.js";
 export { buildSceneExecutionContracts, sceneExecutionContractSchema, type SceneExecutionContract } from "./compiler/scene-execution-contracts.js";
 export { assessSemanticSupport, supportAssessmentSchema, supportReviewSchema, type SupportAssessment, type SupportReview } from "./compiler/semantic-support.js";
-export { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "./compiler/reconcile-world.js";
-export {
-  backfillLegacyProposalRejectionDiagnostics,
-  recoverLegacyCompilerState,
-  type LegacyArtifactRepair,
-  type LegacyCompilerRecoveryOptions,
-  type LegacyCompilerRecoveryPlan,
-  type LegacyCompilerRecoveryResult,
-  type LegacyInitialWorldRepair,
-  type LegacyRecoverySkip,
-} from "./compiler/legacy-recovery.js";
 export { compilerProposalArtifactId, CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
 export {
   validateAttributionProposalTrace,
@@ -488,17 +472,6 @@ export { WebApplicationError, webError } from "./web/errors.js";
 export { createWebHost, isLoopbackHost, type CreateWebHostOptions, type NwhWebHost } from "./web/host.js";
 export { OperationManager, type OperationRunContext, type StartOperationInput } from "./web/operation-manager.js";
 
-export { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
-export { inspectRoleProviderResumption, authorizeRoleProviderResumption, type RoleProviderResumptionInput } from "./compiler/role-provider-resumption.js";
-export {
-  buildRoleRosterObligationPreview,
-  reviewRoleRosterObligation,
-  roleRosterObligationReviewSchema,
-  type RoleRosterObligationPreview,
-  type RoleRosterObligationResult,
-  type RoleRosterObligationReview,
-} from "./compiler/role-roster-obligation-review.js";
-
 export { RuntimeHooks, runtimeHooks, currentRuntimeHooks, withRuntimeHooks, type RuntimeHook, type RuntimeHookEvent, type RuntimeHookType, type RuntimeHookStatus, type RuntimeHookMetadata, type RuntimeHookFailure } from "./runtime/hooks.js";
 
 export { semanticEffectSchema, validateSemanticEffect, validateSemanticEffectEvidence, semanticEffectRealizationIssues, SEMANTIC_EFFECT_VERSION, type SemanticEffect } from "./world/semantic-effect.js";
@@ -517,10 +490,15 @@ export { withPlayModelBudget, currentPlayModelBudget, PLAY_MODEL_REQUEST_LIMITS 
 export { ModelRequestBudget, ModelRequestBudgetError, type ModelRequestLimits } from "./runtime/model-request-budget.js";
 
 export { branchAcquisitionSchema, type BranchAcquisition } from "./world/model.js";
-export { migrateLegacyAcquisitions, acquisitionMigrationManifestSchema, type AcquisitionMigrationManifest } from "./compiler/acquisition-migration.js";
 
 export { buildLiteraryReferenceIndex, type LiteraryReferenceIndex, type LiteraryReferenceRecord } from "./world/literary-reference.js";
-export { prepareCoreRoleDependencyReview, beginCoreRoleDependencyReview, type RoleDependencyReviewInput } from "./compiler/role-dependency-review-service.js";
-export { roleDependencyReviewSchema, type RoleDependencyReview } from "./compiler/role-dependency-review.js";
-export { runRoleSemanticScope, runRoleSemanticScopeCorrection } from "./workflow/role-semantic-scope.js";
-export { prepareSemanticScopeCorrection } from "./compiler/role-semantic-scope-correction.js";
+
+export { runPipeline, runPipelineStage, runGapLoop, pipelineContext, PIPELINE_VERSION, PIPELINE_STAGE_ORDER, type PipelineOptions, type PipelineResult } from "./compiler/pipeline/compile.js";
+export { PiStageAgent, ScriptedStageAgent, type StageAgent, type StageAgentInput, type StageAgentResult } from "./compiler/pipeline/agent.js";
+export { PipelineStore, type PipelineRun, type ScopeReceipt } from "./compiler/pipeline/store.js";
+export { checkPipelineClosure, type PipelineClosure } from "./compiler/pipeline/closure.js";
+export { loadPipelineView, measureView } from "./compiler/pipeline/view.js";
+export { releaseHeldScope, releaseHeldScopes } from "./compiler/pipeline/runner.js";
+export { releaseHeldScopesCommand } from "./commands/compile-novel.js";
+export { buildReferencePack, compareWithReference, loadReferencePack, verifyReferencePack, writeReferencePack } from "./compiler/reference-pack.js";
+export { goldSliceSchema, scoreGoldSlice, draftGoldSliceFromReference, type GoldSlice } from "./eval/gold-slice.js";

@@ -58,6 +58,7 @@ export const normTemplateSchema = z.object({
   induction: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("source-pattern"), supportingEventIds: z.array(idSchema).min(1).max(64) }).strict(),
     z.object({ kind: z.literal("domain-module"), moduleId: idSchema, moduleVersion: z.string().trim().min(1).max(120) }).strict(),
+    z.object({ kind: z.literal("source-statement"), statement: z.string().trim().min(1).max(500) }).strict(),
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
@@ -79,7 +80,7 @@ export const normTemplateSchema = z.object({
   if (value.visibility !== "knowledge" && value.knownByClaimIds.length) {
     ctx.addIssue({ code: "custom", path: ["knownByClaimIds"], message: "knownByClaimIds is reserved for knowledge-visible norms" });
   }
-  if (value.induction.kind === "source-pattern" && !value.evidence.length) ctx.addIssue({ code: "custom", path: ["evidence"], message: "A source norm template requires evidence" });
+  if (value.induction.kind !== "domain-module" && !value.evidence.length) ctx.addIssue({ code: "custom", path: ["evidence"], message: "A source norm template requires evidence" });
   if (value.induction.kind === "domain-module" && value.evidence.length) ctx.addIssue({ code: "custom", path: ["evidence"], message: "Domain norms use module provenance, not novel EvidenceRefs" });
 });
 export type NormTemplate = z.infer<typeof normTemplateSchema>;

@@ -1,6 +1,9 @@
 import { contentHash } from "../world/canonical.js";
 import { canonicalEventSchema, eventParticipationSchema, type EvidenceRef } from "../world/model.js";
-import { prerequisiteStop } from "./role-source-prerequisites.js";
+/** A host-review stop: an entry prerequisite that cannot be settled without new evidence. */
+function prerequisiteStop(reason: string): Error {
+  return new Error(`ENTRY_PREREQUISITE_HOST_REVIEW: ${reason}. Preserve the original evidence and attempts; do not retry unchanged.`);
+}
 
 type Baseline = { kind: "canonical-event" | "event-participation"; id: string; payload: unknown; revisionHash: string };
 type Wording = { title: string; readerSummary: string; readerSetup: string; actorObservation: string; rationale: string };

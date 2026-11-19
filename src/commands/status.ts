@@ -1,6 +1,6 @@
 import path from "node:path";
 import { ActorModelStore } from "../world/actors.js";
-import { CompilerBatchStore } from "../compiler/batches.js";
+import { PipelineStore } from "../compiler/pipeline/store.js";
 import { SegmentStore } from "../compiler/segments.js";
 import { loadOptionalConfig } from "../config/load.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -11,11 +11,11 @@ import { inspectPreparation } from "../workflow/prepare.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { inspectPlayExperience } from "../world/play-experience.js";
 import { formatInstances } from "./catalog.js";
-import { inspectCompilerStatus } from "../compiler/status.js";
+import { inspectNovelCompilation } from "./compile-novel.js";
 
 export async function statusCommand(configPath: string, options: { json?: boolean; sourceId?: string } = {}): Promise<void> {
   if (options.json) {
-    console.log(JSON.stringify(await inspectCompilerStatus(path.dirname(path.resolve(configPath)), options.sourceId), null, 2));
+    console.log(JSON.stringify(await inspectNovelCompilation(path.dirname(path.resolve(configPath)), options.sourceId), null, 2));
     return;
   }
   const config = await loadOptionalConfig(configPath);
@@ -25,12 +25,12 @@ export async function statusCommand(configPath: string, options: { json?: boolea
 
   const sources = await store.listSources();
   const segments = new SegmentStore(root);
-  const batches = new CompilerBatchStore(root);
   const preparedCache = new PreparedNovelCache(root);
   const sourceRows = await Promise.all(sources.map(async (source) => {
-    const [manifest, progress, cached] = await Promise.all([
+    const pipeline = new PipelineStore(root, source.id);
+    const [manifest, receipts, cached] = await Promise.all([
       segments.readManifest(source.id),
-      batches.read(source.id),
+      pipeline.receipts(),
       preparedCache.lookup(source),
     ]);
     return {
@@ -41,7 +41,8 @@ export async function statusCommand(configPath: string, options: { json?: boolea
       preparedCache: cached.status === "already-cached" ? "ready" : "missing",
       preparedRevision: cached.bundleHash?.slice(0, 12) ?? "-",
       segments: manifest?.segments.length ?? 0,
-      completedBatches: progress.completedBatchIds.length,
+      completedScopes: receipts.filter((receipt) => receipt.status === "completed").length,
+      heldScopes: receipts.filter((receipt) => receipt.status === "held").length,
     };
   }));
 

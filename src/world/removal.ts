@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { CompilerBatchStore } from "../compiler/batches.js";
-import { CompilerFinishReceipts } from "../compiler/finish-receipts.js";
+import { PipelineStore } from "../compiler/pipeline/store.js";
 import { BoundaryCalibrationStore } from "../compiler/boundary-calibration.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { SegmentStore } from "../compiler/segments.js";
@@ -97,7 +96,6 @@ export async function removeNovelAnalysis(
   const sourceId = source.id;
   // Retire finish authority before removing any of its dependencies. A failed
   // archive leaves the analysis intact; an interrupted reset can be repeated.
-  await CompilerFinishReceipts.archiveSource(root, sourceId, "Explicit novel analysis removal");
   const canonical = new CanonicalModelStore(root);
   const actors = new ActorModelStore(root);
   const possibilities = new PossibilityTemplateStore(root);
@@ -257,11 +255,12 @@ export async function removeNovelAnalysis(
   await entityResolutionStore.removeSource(sourceId);
   await eventResolutionStore.removeSource(sourceId);
 
-  const batchStore = new CompilerBatchStore(root);
+  // Pipeline documents (census, lexicon decisions, dispositions, roster, scope receipts) go with the analysis.
+  const pipelineStore = new PipelineStore(root, sourceId);
   const boundaryStore = new BoundaryCalibrationStore(root);
-  const compilerProgress = (await batchStore.read(sourceId)).updatedAt !== new Date(0).toISOString()
+  const compilerProgress = Boolean(await pipelineStore.run()) || (await pipelineStore.receipts()).length > 0
     || (await boundaryStore.list(sourceId)).length > 0;
-  await batchStore.reset(sourceId);
+  await pipelineStore.remove();
   await boundaryStore.reset(sourceId);
 
   let proposals = await new ProposalStore(root).removeForSource(sourceId);

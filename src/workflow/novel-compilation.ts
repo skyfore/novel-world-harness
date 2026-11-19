@@ -3,14 +3,20 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { worldStorageRoot } from "../world/paths.js";
-import { compilationClosureSchema } from "../compiler/compilation-closure.js";
 import { compilationStopSchema, compilationStopFromError } from "../compiler/compilation-stop.js";
 
+/**
+ * Slim compile chain (iteration 02, design 5.1). `admit` publishes a
+ * cut-admitted revision (iteration 01) and is run explicitly; the default
+ * full run goes through the certification track to a playable branch.
+ */
 export const NOVEL_COMPILATION_PHASES = [
-  "source", "recover", "batches", "converge", "opening", "roles", "repair", "requirements", "closure",
-  "archive", "evaluation-plan", "evaluate", "certify", "activate", "branch",
+  "source", "census", "observation", "identity", "scenes", "world", "roster", "opening", "gaps", "closure",
+  "archive", "admit", "evaluation-plan", "evaluate", "certify", "activate", "branch",
 ] as const;
 export type NovelCompilationPhase = typeof NOVEL_COMPILATION_PHASES[number];
+export const FULL_COMPILATION_PHASES = NOVEL_COMPILATION_PHASES.filter((phase) => phase !== "admit");
+export const PIPELINE_PHASES = ["census", "observation", "identity", "scenes", "world", "roster", "opening", "gaps"] as const;
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const safeId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const receiptSchema = z.object({
@@ -19,15 +25,13 @@ const receiptSchema = z.object({
   recovery: compilationStopSchema.optional(),
 }).strict();
 const runSchema = z.object({
-  version: z.literal(1), id: safeId, sourceId: safeId, sourceSha256: digest,
-  mode: z.enum(["resume", "rebuild"]), rebuildInitialized: z.boolean(),
-  baselineBundleHash: digest.optional(), activeAtStart: digest.nullable().optional(),
-  rebuildBatchIds: z.array(z.string()).optional(),
+  version: z.literal(2), id: safeId, sourceId: safeId, sourceSha256: digest,
+  /** Prefix compile: the byte limit this run compiles through. */
+  limit: z.number().int().positive().optional(),
   subjectHash: digest.optional(), planHash: digest.optional(), bundleHash: digest.optional(),
   activatedBundleHash: digest.optional(),
-  // Compiler projections and repair evaluation share this schema through a
-  // module cycle. Resolve the unchanged closure validator only when parsing.
-  closure: z.lazy(() => compilationClosureSchema).optional(),
+  /** Last pipeline closure (structural, completeness, admission). */
+  closure: z.object({ passed: z.boolean(), checkedAt: z.string(), issues: z.array(z.string()) }).passthrough().optional(),
   branchId: safeId.optional(), completed: z.boolean(),
   history: z.array(receiptSchema),
 }).strict();
@@ -40,7 +44,11 @@ export class NovelCompilationRunStore {
     return path.join(worldStorageRoot(this.root), "compiler", "novel-compilation", `${safeId.parse(sourceId)}.json`);
   }
   async read(sourceId: string): Promise<NovelCompilationRun | null> {
-    try { return runSchema.parse(JSON.parse(await fs.readFile(this.file(sourceId), "utf8"))); }
+    try {
+      const value = JSON.parse(await fs.readFile(this.file(sourceId), "utf8")) as { version?: unknown };
+      // A run record from the retired chain is not resumed or migrated (decision D5).
+      return value.version === 2 ? runSchema.parse(value) : null;
+    }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
   }
   async write(run: NovelCompilationRun): Promise<void> {
@@ -61,9 +69,8 @@ async function atomicWrite(file: string, value: unknown) {
   } finally { await fs.rm(temporary, { force: true }); }
 }
 
-export function newNovelCompilationRun(source: { id: string; contentSha256: string }, rebuild = false): NovelCompilationRun {
-  return { version: 1, id: `novel-${crypto.randomUUID()}`, sourceId: source.id, sourceSha256: source.contentSha256,
-    mode: rebuild ? "rebuild" : "resume", rebuildInitialized: false, completed: false, history: [] };
+export function newNovelCompilationRun(source: { id: string; contentSha256: string }): NovelCompilationRun {
+  return { version: 2, id: `novel-${crypto.randomUUID()}`, sourceId: source.id, sourceSha256: source.contentSha256, completed: false, history: [] };
 }
 
 export async function runNovelCompilation(input: {
@@ -78,7 +85,7 @@ export async function runNovelCompilation(input: {
   run.completed = false;
   // Re-enter idempotent phases to validate their current evidence. A saved "completed"
   // receipt alone must never skip a changed roster, requirement set or stale certificate.
-  for (const phase of input.phase ? [input.phase] : NOVEL_COMPILATION_PHASES) {
+  for (const phase of input.phase ? [input.phase] : FULL_COMPILATION_PHASES) {
     input.signal?.throwIfAborted();
     const receipt: z.infer<typeof receiptSchema> = { phase, status: "running", startedAt: new Date().toISOString() };
     run.history.push(receipt);
@@ -98,9 +105,8 @@ export async function runNovelCompilation(input: {
       receipt.finishedAt = new Date().toISOString();
       await input.save(run);
       throw new Error(`NOVEL_COMPILATION_BLOCKED [${phase}]: ${receipt.error}\n`
-        + `Progress retained. Inspect nwh compile-novel plan --source ${run.sourceId}; `
-        + `satisfy the exact task dependencies and resume conditions before continuing phase ${phase}, then resume nwh compile-novel --source ${run.sourceId}. `
-        + "Host-review, scope, single-use and circuit-breaker stops require their stated recovery first; do not retry unchanged or use --rebuild to reset attempts.", { cause: error });
+        + `Progress retained. Inspect nwh compile-novel status --source ${run.sourceId} and compile-novel completeness; `
+        + `held scopes need host review (or the gap loop) before phase ${phase} can pass; then resume nwh compile-novel --source ${run.sourceId}.`, { cause: error });
     }
   }
   run.completed = !input.phase;

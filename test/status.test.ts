@@ -25,6 +25,6 @@ describe("status command", () => {
     expect(lines.join("\n")).toContain("State:");
     expect(lines.join("\n")).toContain("readiness is not inferred");
     expect(lines.join("\n")).toContain("Preparation: needs-source");
-    expect(lines.join("\n")).toContain("Next: nwh prepare <novel-path>");
+    expect(lines.join("\n")).toContain("Next: nwh compile-novel <novel-path>");
   });
 });

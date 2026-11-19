@@ -43,10 +43,10 @@ async function fixture(options: { blocked?: boolean; checkFailures?: number; rep
       writeFileSync(output, JSON.stringify({ compilerLock: { present: false },
         sources: [{ sourceId, sourceSha256: sourceHash, sourceIntegrity: "verified" }],
         compilation: [{ sourceId, run: options.blocked === false && work === 0 ? null : { id: options.changedDomainHistory ? "replacement-run" : "original-run", completed: false,
-          history: [{ phase: "roles", status: "blocked", error: "Model request budget exhausted: no new validated progress in 12 model calls",
-            ...(options.domainStop ? { recovery: { kind: "semantic-repair", sourceId, phase: "roles",
+          history: [{ phase: "roster", status: "blocked", error: "Model request budget exhausted: no new validated progress in 12 model calls",
+            ...(options.domainStop ? { recovery: { kind: "semantic-repair", sourceId, phase: "roster",
               taskIds: ["identity:original"], action: "inspect-compilation-plan" } } : {}) },
-            ...(options.domainResolved ? [{ phase: "roles", status: "completed" }] : [])] } }],
+            ...(options.domainResolved ? [{ phase: "roster", status: "completed" }] : [])] } }],
         supervisionTrace: { workId: "audit-29", planHash: "same-plan" } }));
     } else if (label === "worker") {
       work++;

@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { activeRequirementSets } from "./requirement-ledger.js";
 import { contentHash } from "../world/canonical.js";
 import { predicateSchema, stateOperationSchema, validationIssueSchema } from "../world/model.js";
 import { predicateReferences, stateOperationReferences } from "../world/state-references.js";
@@ -9,7 +8,7 @@ import { annotationAnchors } from "./annotations.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { applyEventExecutions } from "../world/event-execution.js";
 
-export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "semantic-effect", "perception-observation", "acquisition", "utterance-expression", "action", "event-execution", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry", "requirement-set", "core-role-requirements"]);
+export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "semantic-effect", "perception-observation", "acquisition", "utterance-expression", "action", "event-execution", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry"]);
 export type ClosureKind = z.infer<typeof closureKindSchema>;
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const dependencyUseSchema = z.object({ pointer: z.string(), purpose: z.enum(["identity", "evidence-support", "temporal-order", "causal-precondition", "state-effect", "knowledge-acquisition", "entry-seed", "capability", "certificate"]) }).strict();
@@ -53,7 +52,7 @@ const referenceFields: Readonly<Record<string, ClosureKind>> = {
 
 /** Also accepts a read-only live inventory; building a graph never archives or activates it. */
 export type ClosureInput = Pick<PreparedNovelBundle, "source" | "canonical"> & {
-  compilerSnapshot: Pick<PreparedNovelBundle["compilerSnapshot"], "structure" | "annotations" | "entityResolutions" | "eventResolutions" | "evidenceBindings" | "roleRoster" | "requirementDefinitions" | "coreRoleRequirementDefinitions">;
+  compilerSnapshot: Pick<PreparedNovelBundle["compilerSnapshot"], "structure" | "annotations" | "entityResolutions" | "eventResolutions" | "evidenceBindings" | "roleRoster">;
 };
 export function buildPreparedClosure(bundle: ClosureInput): ClosureGraph {
   const nodes = new Map<string, Node>(), payloads = new Map<string, unknown>();
@@ -72,15 +71,6 @@ export function buildPreparedClosure(bundle: ClosureInput): ClosureGraph {
   for (const model of canonical.models) add("model", model.actorId, model);
   add("initial", bundle.source.id, canonical.initialWorld);
   const snapshot = bundle.compilerSnapshot;
-  for (const set of activeRequirementSets(snapshot.requirementDefinitions ?? [])) {
-    add("requirement-set", set.id, set);
-    if (set.spec.sourceId !== bundle.source.id || set.spec.sourceSha256 !== bundle.source.contentSha256) issues.push({ code: "REQUIREMENT_SOURCE_MISMATCH", message: `Requirement set ${set.id} belongs to another source revision`, path: `requirement-set/${set.id}` });
-  }
-  const coreRoles = snapshot.coreRoleRequirementDefinitions?.at(-1);
-  if (coreRoles) {
-    add("core-role-requirements", coreRoles.id, coreRoles);
-    if (coreRoles.sourceId !== bundle.source.id || coreRoles.sourceSha256 !== bundle.source.contentSha256) issues.push({ code: "REQUIREMENT_SOURCE_MISMATCH", message: "Core role requirements belong to another source revision" });
-  }
   if (snapshot.roleRoster) add("roster", bundle.source.id, snapshot.roleRoster);
   for (const unit of snapshot.structure.units) add("unit", unit.id, unit);
   const baseUnits = snapshot.structure.units.filter((unit) => snapshot.structure.baseUnitIds?.includes(unit.id));

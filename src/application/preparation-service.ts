@@ -1,15 +1,5 @@
 import path from "node:path";
-import { compileCommand, type CompileCommandOptions } from "../commands/compile.js";
-import { compileSourceCommand, type CompileSourceOptions } from "../commands/compile-source.js";
-import { INITIAL_WORLD_PROMPT } from "../commands/prepare-all.js";
-import { prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld, type CompilerBatch } from "../compiler/batches.js";
-import {
-  ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
-  EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
-  SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
-} from "../compiler/proposal-tools.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
-import { TraceRecorder } from "../trace/recorder.js";
 import { TraceStore } from "../trace/store.js";
 import {
   operationAcceptedSchema,
@@ -21,35 +11,22 @@ import {
 import { WebEventBroker } from "../web/event-stream.js";
 import { webError } from "../web/errors.js";
 import { OperationManager, type OperationRunContext } from "../web/operation-manager.js";
-import { inspectPreparation } from "../workflow/prepare.js";
 import { readPreparationSnapshot } from "./preparation-projection.js";
-import { reviewNovelRoles } from "../workflow/role-review.js";
-import { PreparedNovelCache } from "../compiler/prepared-cache.js";
-import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { compileNovelWithLoop, type SupervisedCompileOptions } from "../commands/compile-novel-loop.js";
 import { inspectCompileLoop } from "../runtime/compile-loop/state.js";
+import { FULL_COMPILATION_PHASES, NovelCompilationRunStore, type NovelCompilationPhase } from "../workflow/novel-compilation.js";
 
-const OPENING_DISABLED_TOOLS = [
-  "propose_state_delta",
-  ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
-  ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
-  ...EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
-] as const;
-
+/**
+ * Browser preparation drives the same slim compile chain as the CLI
+ * (iteration 02): "all" runs the full chain (supervised), "next" runs the
+ * next unfinished phase once. Every pipeline scope is an isolated model job.
+ */
 export interface PreparationDependencies {
   compileNovel(options: SupervisedCompileOptions): Promise<unknown>;
-  compileSource(options: CompileSourceOptions): Promise<void>;
-  compileOpening(options: CompileCommandOptions): Promise<void>;
-  prepareOpeningBatch(root: string, source: Parameters<typeof prepareOpeningWorldCompilerBatch>[1]): ReturnType<typeof prepareOpeningWorldCompilerBatch>;
-  proposeFallback(root: string, source: Parameters<typeof proposeMinimalOpeningWorld>[1]): Promise<never>;
 }
 
 const defaultDependencies: PreparationDependencies = {
   compileNovel: compileNovelWithLoop,
-  compileSource: compileSourceCommand,
-  compileOpening: compileCommand,
-  prepareOpeningBatch: prepareOpeningWorldCompilerBatch,
-  proposeFallback: proposeMinimalOpeningWorld,
 };
 
 export interface PreparationApplicationServiceOptions {
@@ -60,6 +37,14 @@ export interface PreparationApplicationServiceOptions {
   configPath?: string;
   model?: string;
   dependencies?: Partial<PreparationDependencies>;
+}
+
+/** The first phase of the full chain whose latest receipt is not completed. */
+export async function nextCompilationPhase(root: string, sourceId: string): Promise<NovelCompilationPhase> {
+  const run = await new NovelCompilationRunStore(root).read(sourceId);
+  const latest = new Map<string, string>();
+  for (const receipt of run?.history ?? []) latest.set(receipt.phase, receipt.status);
+  return FULL_COMPILATION_PHASES.find((phase) => latest.get(phase) !== "completed") ?? "branch";
 }
 
 export class PreparationApplicationService {
@@ -78,202 +63,33 @@ export class PreparationApplicationService {
   async start(sourceId: string, inputValue: PrepareNovelRequest): Promise<OperationAccepted> {
     const input = prepareNovelRequestSchema.parse(inputValue);
     const existing = this.options.operations.findByClientRequest("prepare", sourceId, input.clientRequestId);
-    if (existing) {
-      return this.options.operations.start({
-        kind: "prepare",
-        scopeId: sourceId,
-        clientRequestId: input.clientRequestId,
-        request: input,
-        run: async () => { throw new Error("An idempotent operation must not be executed twice."); },
-      });
+    if (!existing) {
+      await this.requireSource(sourceId);
+      this.assertNoActiveCompilerOperation(sourceId);
     }
-    await this.requireSource(sourceId);
-    this.assertNoActiveCompilerOperation(sourceId);
-    if (input.mode === "all") {
-      const inspection = await inspectPreparation(this.root, { sourceId, ...(input.branchId ? { branchId: input.branchId } : {}) });
-      if (["repair", "create-branch", "ready"].includes(inspection.stage)) {
-        this.assertNoActiveCompilerOperation(sourceId);
-        // The supervisor and Pi own their durable traces. An additional running
-        // prepare trace here would look like unsettled model work to recovery.
-        return this.options.operations.start({ kind: "prepare", scopeId: sourceId, clientRequestId: input.clientRequestId,
-          request: input, run: context => this.runSupervisedPreparation(sourceId, input, context) });
-      }
-    }
-    const recorder = await TraceRecorder.start(this.options.traceStore, {
-      kind: "prepare",
-      sourceId,
-    });
-    try {
-      const accepted = this.options.operations.start({
-        kind: "prepare",
-        scopeId: sourceId,
-        clientRequestId: input.clientRequestId,
-        request: input,
-        runId: recorder.manifest.id,
-        run: (context) => this.runWithTrace(recorder, sourceId, input, context),
-      });
-      if (accepted.reused) {
-        await recorder.finish("cancelled", {}, {
-          code: "IDEMPOTENT_OPERATION_REUSED",
-          message: "A concurrent request reused an existing operation; this unused trace was closed without executing.",
-          retryable: false,
-        });
-        return accepted;
-      }
-      await recorder.link({ operationId: accepted.operation.id });
-      return operationAcceptedSchema.parse(accepted);
-    } catch (error) {
-      await recorder.finish("failed", {}, traceError(error)).catch(() => undefined);
-      throw error;
-    }
+    const accepted = this.options.operations.start({ kind: "prepare", scopeId: sourceId, clientRequestId: input.clientRequestId, request: input,
+      run: (context) => this.runPreparation(sourceId, input, context) });
+    return operationAcceptedSchema.parse(accepted);
   }
 
-  private async runSupervisedPreparation(sourceId: string, input: PrepareNovelRequest, context: OperationRunContext): Promise<PreparationSnapshot> {
+  private async runPreparation(sourceId: string, input: PrepareNovelRequest, context: OperationRunContext): Promise<PreparationSnapshot> {
     context.signal.throwIfAborted();
     this.assertSupervisorAllowsPreparation(sourceId);
     const progress = new PreparationProgress(context);
-    progress.phase("continuing-novel-compilation");
-    // Supervisor reservations and partial worker commits are durable. Cancelling
-    // this operation must never imply rollback of its original attempt history.
+    const phase = input.mode === "next" ? await nextCompilationPhase(this.root, sourceId) : undefined;
+    progress.phase(phase ? `compiling-${phase}` : "continuing-novel-compilation");
+    // Scope receipts and committed proposals are durable; cancelling never implies rollback.
     progress.markMutation("novel-compilation-dispatch");
     await this.dependencies.compileNovel({ root: this.root, sourceId,
       ...(this.options.configPath ? { configPath: this.options.configPath } : {}),
       ...(input.model ?? this.options.model ? { model: input.model ?? this.options.model } : {}),
       ...(input.branchId ? { branchId: input.branchId } : {}),
-      signal: context.signal, onProgress: message => progress.log(message) });
+      ...(phase ? { phase, loop: false } : {}),
+      signal: context.signal, onProgress: (message) => progress.log(message) });
     progress.flush();
     const result = await this.inspect(sourceId, input.branchId);
     this.options.events.publish("catalog.invalidated", { reason: "preparation-finished", sourceId, stage: result.stage }, { operationId: context.operationId });
     return result;
-  }
-
-  private async runWithTrace(
-    recorder: TraceRecorder,
-    sourceId: string,
-    input: PrepareNovelRequest,
-    context: OperationRunContext,
-  ): Promise<PreparationSnapshot> {
-    try {
-      const result = await this.runPreparation(recorder, sourceId, input, context);
-      await recorder.finish("succeeded");
-      this.options.events.publish("catalog.invalidated", {
-        reason: "preparation-finished",
-        sourceId,
-        stage: result.stage,
-      }, { operationId: context.operationId, runId: recorder.manifest.id });
-      return result;
-    } catch (error) {
-      const cancelled = context.signal.aborted && !context.commitBoundaryCrossed;
-      await recorder.finish(
-        cancelled ? "cancelled" : context.commitBoundaryCrossed ? "interrupted" : "failed",
-        {},
-        traceError(error),
-      ).catch(() => undefined);
-      throw error;
-    }
-  }
-
-  private async runPreparation(
-    recorder: TraceRecorder,
-    sourceId: string,
-    input: PrepareNovelRequest,
-    context: OperationRunContext,
-  ): Promise<PreparationSnapshot> {
-    context.signal.throwIfAborted();
-    const workspace = await WorkspaceStore.create(this.root);
-    const source = await workspace.getSource(sourceId);
-    if (!source) throw new Error(`Unknown source id: ${sourceId}`);
-    this.assertSupervisorAllowsPreparation(sourceId);
-    const before = await inspectPreparation(this.root, { sourceId, ...(input.branchId ? { branchId: input.branchId } : {}) });
-    const progress = new PreparationProgress(context);
-    progress.log(`Preparation stage is '${before.stage}'.`);
-
-    if (before.stage === "compile") {
-      const stage = await recorder.child(recorder.rootContext, input.mode === "next" ? "Compile next evidence batch" : "Compile remaining evidence batches", "compiler");
-      try {
-        progress.phase("compiling", {
-          completedBatches: before.completedBatches,
-          totalBatches: before.totalBatches,
-        });
-        await this.dependencies.compileSource({
-          root: this.root,
-          configPath: this.options.configPath ?? path.join(this.root, "novel-harness.yaml"),
-          allowMissingConfig: true,
-          sourceId,
-          ...(input.model ?? this.options.model ? { model: input.model ?? this.options.model } : {}),
-          maxBatches: input.mode === "next" ? 1 : undefined,
-          resume: true,
-          signal: context.signal,
-          traceParent: stage,
-          ...progress.callbacks(),
-        });
-        progress.markMutation("compiler-checkpoint", {
-          completedMode: input.mode,
-        });
-        progress.flush();
-        await recorder.finishStage(stage, { mode: input.mode });
-      } catch (error) {
-        await recorder.failStage(stage, error);
-        throw error;
-      }
-      if (input.mode === "next") return this.inspect(sourceId, input.branchId);
-    }
-
-    let inspection = await inspectPreparation(this.root, { sourceId, ...(input.branchId ? { branchId: input.branchId } : {}) });
-    if (inspection.stage === "needs-initial-world") {
-      const stage = await recorder.child(recorder.rootContext, "Generate opening-world proposal", "compiler");
-      const openingBatch = await this.dependencies.prepareOpeningBatch(this.root, source);
-      progress.phase("generating-initial-world", { compilerBatchId: openingBatch.id });
-      try {
-        await this.dependencies.compileOpening({
-          root: this.root,
-          configPath: this.options.configPath ?? path.join(this.root, "novel-harness.yaml"),
-          allowMissingConfig: true,
-          ...(input.model ?? this.options.model ? { model: input.model ?? this.options.model } : {}),
-          saveSession: false,
-          prompt: `${INITIAL_WORLD_PROMPT}\n\n${openingBatch.prompt}`,
-          segmentIds: openingBatch.segmentIds,
-          compilerBatchId: openingBatch.id,
-          sourceId,
-          includeLocalTools: false,
-          disabledProposalTools: [...OPENING_DISABLED_TOOLS],
-          signal: context.signal,
-          trace: openingTrace(stage, openingBatch),
-          ...progress.callbacks(),
-        });
-      } catch (error) {
-        context.signal.throwIfAborted();
-        progress.log(`Opening-world model pass failed: ${error instanceof Error ? error.message : String(error)}`);
-        await recorder.failStage(stage, error);
-        throw error;
-      }
-      context.signal.throwIfAborted();
-      inspection = await inspectPreparation(this.root, { sourceId, ...(input.branchId ? { branchId: input.branchId } : {}) });
-      if (inspection.stage === "needs-initial-world" && inspection.pending.length === 0) {
-        try { await this.dependencies.proposeFallback(this.root, source); }
-        catch (error) { await recorder.failStage(stage, error); throw error; }
-      }
-      progress.flush();
-      await recorder.finishStage(stage, { compilerBatchId: openingBatch.id });
-    }
-    if (["create-branch", "ready"].includes(inspection.stage)) {
-      await withWorkspaceOperationLock(this.root, "compiler", async () => {
-        progress.phase("reviewing-major-roles");
-        await reviewNovelRoles({ root: this.root, sourceId, configPath: this.options.configPath ?? path.join(this.root, "novel-harness.yaml"), allowMissingConfig: true,
-          ...(input.model ?? this.options.model ? { model: input.model ?? this.options.model } : {}), signal: context.signal, acquireLock: false,
-          ...progress.callbacks() }, this.dependencies.compileOpening);
-        progress.phase("evaluating-world-closure");
-        const { assessment } = await new PreparedNovelCache(this.root).inspectCandidate(source);
-        progress.log(`Major entry probes: ${assessment.playability?.readyTotal ?? 0}/${assessment.playability?.majorTotal ?? 0}; full novel certified: ${assessment.fullNovelReady}`);
-        if (!assessment.fullNovelReady) progress.log(assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
-        progress.flush();
-      });
-    } else if (["review", "repair"].includes(inspection.stage)) {
-      progress.phase(`barrier-${inspection.stage}`, { stage: inspection.stage });
-      progress.log(`No model call was started because '${inspection.stage}' is a browser decision barrier.`);
-    }
-
-    return this.inspect(sourceId, input.branchId);
   }
 
   private assertSupervisorAllowsPreparation(sourceId: string): void {
@@ -311,41 +127,9 @@ export class PreparationApplicationService {
 
 class PreparationProgress {
   private readonly logs: string[] = [];
-  private modelTextTail = "";
-  private modelTextCharacters = 0;
-  private thinkingCharacters = 0;
-  private lastTextPublish = 0;
   private mutationMarked = false;
 
   constructor(private readonly context: OperationRunContext) {}
-
-  callbacks(): Pick<CompileSourceOptions,
-    "onProgress" | "onStatus" | "onModelText" | "onModelThinking" | "onModelToolCall" | "onModelToolResult"> {
-    return {
-      onProgress: (message) => this.log(message),
-      onStatus: (message) => this.phase("waiting-for-model", { statusMessage: message }),
-      onModelText: (delta) => {
-        this.modelTextCharacters += delta.length;
-        this.modelTextTail = `${this.modelTextTail}${delta}`.slice(-8_000);
-        const now = Date.now();
-        if (now - this.lastTextPublish >= 200 || this.modelTextCharacters % 2_048 < delta.length) {
-          this.lastTextPublish = now;
-          this.phase("receiving-model-output");
-        }
-      },
-      onModelThinking: (delta) => {
-        this.thinkingCharacters += delta.length;
-      },
-      onModelToolCall: (name) => {
-        this.log(`Tool call: ${name}`);
-        this.phase("running-tool", { currentTool: name });
-      },
-      onModelToolResult: (name, _result, isError) => {
-        this.log(`Tool ${name} ${isError ? "failed" : "completed"}.`);
-        if (!isError && compilerToolMutates(name)) this.markMutation("compiler-tool", { currentTool: name });
-      },
-    };
-  }
 
   log(message: string): void {
     this.logs.push(message);
@@ -356,9 +140,6 @@ class PreparationProgress {
   phase(phase: string, extra: Record<string, unknown> = {}): void {
     this.context.update(phase, {
       logs: [...this.logs],
-      modelTextCharacters: this.modelTextCharacters,
-      modelTextTail: this.modelTextTail,
-      hiddenReasoningCharacters: this.thinkingCharacters,
       ...extra,
     });
   }
@@ -372,43 +153,6 @@ class PreparationProgress {
   flush(): void {
     this.phase("checkpointed");
   }
-}
-
-function compilerToolMutates(name: string): boolean {
-  return name.startsWith("propose_")
-    || name === "configure_chapter_split"
-    || name === "withdraw_compiler_proposal"
-    || name === "replace_boundary_proposal"
-    || name === "defer_boundary_artifact"
-    || name === "finish_compiler_batch";
-}
-
-function openingTrace(parent: Parameters<typeof TraceRecorder.prototype.child>[0], batch: CompilerBatch): NonNullable<CompileCommandOptions["trace"]> {
-  return {
-    parent,
-    invocationName: "opening-world compiler",
-    metadata: {
-      sourceId: batch.sourceId,
-      compilerBatchId: batch.id,
-      startLine: batch.startLine,
-      endLine: batch.endLine,
-      segmentIds: batch.segmentIds,
-    },
-    parts: [{
-      id: `compiler.opening.${batch.id}`,
-      label: "Opening-world evidence and proposal policy",
-      kind: "compiler.batch",
-      role: "user",
-      authority: "untrusted-source",
-      content: `${INITIAL_WORLD_PROMPT}\n\n${batch.prompt}`,
-      sourceRefs: batch.evidence.map((reference) => ({
-        sourceId: reference.span.sourceId,
-        ...(reference.span.startByte !== undefined ? { startByte: reference.span.startByte } : {}),
-        ...(reference.span.endByte !== undefined ? { endByte: reference.span.endByte } : {}),
-        label: `lines ${reference.span.startLine}-${reference.span.endLine}`,
-      })),
-    }],
-  };
 }
 
 function traceError(error: unknown) {

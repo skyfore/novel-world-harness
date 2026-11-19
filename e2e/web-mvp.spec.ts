@@ -7,8 +7,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { PreparationApplicationService } from "../src/application/preparation-service.js";
 import { PlayApplicationService } from "../src/application/play-service.js";
 import type { PlayerOpeningNarrator } from "../src/agent/pi-player-opening.js";
-import type { CompileSourceOptions } from "../src/commands/compile-source.js";
-import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import type { SupervisedCompileOptions } from "../src/commands/compile-novel-loop.js";
+import { PipelineStore } from "../src/compiler/pipeline/store.js";
 import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
@@ -57,7 +57,7 @@ test.beforeAll(async () => {
     events,
     traceStore,
     dependencies: {
-      compileSource: seedBrowserCompilation,
+      compileNovel: seedBrowserCompilation,
     },
   });
   playService = new PlayApplicationService({
@@ -502,7 +502,7 @@ function traceMetric(page: Page, label: string) {
   return page.locator(".trace-metric-grid > article").filter({ hasText: label });
 }
 
-async function seedBrowserCompilation(options: CompileSourceOptions): Promise<void> {
+async function seedBrowserCompilation(options: SupervisedCompileOptions): Promise<void> {
   options.signal?.throwIfAborted();
   if (!options.sourceId) throw new Error("The browser compiler fixture requires an exact source ID.");
   const workspace = await WorkspaceStore.create(options.root);
@@ -519,10 +519,8 @@ async function seedBrowserCompilation(options: CompileSourceOptions): Promise<vo
   const ruleId = `rule-no-flame-${suffix}`;
   const proposalId = `proposal-hero-${suffix}`;
 
-  options.onStatus?.("Running deterministic browser acceptance compiler adapter");
+  options.onProgress?.("Running deterministic browser acceptance compiler adapter");
   options.onProgress?.("Materializing one source-scoped proposal and canonical fixture artifacts.");
-  options.onModelText?.("Typed proposal ready for deterministic validation.");
-  options.onModelToolCall?.("propose_entity", { id: heroId });
 
   const canonical = new CanonicalModelStore(options.root);
   await canonical.putEntity({ id: hallId, kind: "location", canonicalName: "Hall", aliases: [], evidence });
@@ -645,9 +643,8 @@ async function seedBrowserCompilation(options: CompileSourceOptions): Promise<vo
       generatedBy: { worker: "playwright-browser-compiler", provider: "fixture", model: "typed-fixture" },
     });
   }
-  const batches = await prepareCompilerBatches(options.root, source);
-  await new CompilerBatchStore(options.root).replaceCompleted(source.id, batches.map((batch) => batch.id));
-  options.onModelToolResult?.("propose_entity", { proposalId }, false);
+  const now = new Date().toISOString();
+  await new PipelineStore(options.root, source.id).writeRun({ version: 1, sourceId: source.id, limit: source.bytes, startedAt: now, updatedAt: now });
   options.onProgress?.("Compiler checkpoint persisted; browser proposal review is now required.");
 }
 

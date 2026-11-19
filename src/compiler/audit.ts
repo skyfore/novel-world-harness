@@ -656,10 +656,10 @@ export async function auditCompiler(
     ...acquisitions.map((item) => ({ name: `acquisition:${item.id}`, kind: "acquisition", id: item.id, payload: item, evidence: item.evidence })),
     ...utteranceExpressions.map((item) => ({ name: `utterance-expression:${item.id}`, kind: "utterance-expression", id: item.id, payload: item, evidence: item.evidence })),
     ...eventExecutions.map((item) => ({ name: `event-execution:${item.id}`, kind: "event-execution", id: item.id, payload: item, evidence: item.evidence })),
-    ...actionSchemas.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `action-schema:${item.id}`, kind: "action-schema", id: item.id, payload: item, evidence: item.evidence })),
-    ...actionConstraints.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `action-constraint:${item.id}`, kind: "action-constraint", id: item.id, payload: item, evidence: item.evidence })),
-    ...normTemplates.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `norm-template:${item.id}`, kind: "norm-template", id: item.id, payload: item, evidence: item.evidence })),
-    ...processTemplates.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `process-template:${item.id}`, kind: "process-template", id: item.id, payload: item, evidence: item.evidence })),
+    ...actionSchemas.filter((item) => item.induction.kind !== "domain-module").map((item) => ({ name: `action-schema:${item.id}`, kind: "action-schema", id: item.id, payload: item, evidence: item.evidence })),
+    ...actionConstraints.filter((item) => item.induction.kind !== "domain-module").map((item) => ({ name: `action-constraint:${item.id}`, kind: "action-constraint", id: item.id, payload: item, evidence: item.evidence })),
+    ...normTemplates.filter((item) => item.induction.kind !== "domain-module").map((item) => ({ name: `norm-template:${item.id}`, kind: "norm-template", id: item.id, payload: item, evidence: item.evidence })),
+    ...processTemplates.filter((item) => item.induction.kind !== "domain-module").map((item) => ({ name: `process-template:${item.id}`, kind: "process-template", id: item.id, payload: item, evidence: item.evidence })),
     ...spatialRelations.map((item) => ({ name: `spatial-relation:${item.id}`, kind: "spatial-relation", id: item.id, payload: item, evidence: spatialRelationEvidence(item) })),
     ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: worldRuleEvidence(item) })),
     ...(initialWorld ? [{ name: "initial-world", kind: "initial-world", id: "initial-world", payload: initialWorld, evidence: initialWorld.evidence }] : []),
@@ -1735,7 +1735,7 @@ export async function auditCompiler(
       normTemplates: normTemplates.length,
       processTemplates: processTemplates.length,
       sourceInduced: [...actionConstraints, ...normTemplates, ...processTemplates]
-        .filter((item) => item.induction.kind === "source-pattern").length,
+        .filter((item) => item.induction.kind !== "domain-module").length,
       domainModules: [...actionConstraints, ...normTemplates, ...processTemplates]
         .filter((item) => item.induction.kind === "domain-module").length,
       contested: [...actionConstraints, ...normTemplates]

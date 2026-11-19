@@ -1,6 +1,6 @@
 import { auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
 import { isNovelScaleCompilation } from "../compiler/scale.js";
-import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatches } from "../compiler/batches.js";
+import { PipelineStore } from "../compiler/pipeline/store.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { CanonicalModelStore, ProposalStore, type ProposalSummary } from "../world/canonical-model.js";
 import { InitialWorldStore, type InitialWorld } from "../world/initial.js";
@@ -101,7 +101,7 @@ export async function inspectPreparation(
   const sources = await workspace.listSources();
   const base = { branchId, sources, pending: [], completedBatches: 0, totalBatches: 0 };
   if (!sources.length) {
-    return { ...base, stage: "needs-source", next: "nwh prepare <novel-path>" };
+    return { ...base, stage: "needs-source", next: "nwh compile-novel <novel-path>" };
   }
 
   const source = options.sourceId
@@ -112,7 +112,7 @@ export async function inspectPreparation(
     return {
       ...base,
       stage: "choose-source",
-      next: `nwh prepare --source <id>  # ${sources.map((candidate) => candidate.id).join(", ")}`,
+      next: `nwh compile-novel --source <id>  # ${sources.map((candidate) => candidate.id).join(", ")}`,
     };
   }
 
@@ -135,16 +135,16 @@ export async function inspectPreparation(
     };
   }
 
-  const batches = await prepareCompilerBatches(workspaceRoot, source);
-  const progress = await new CompilerBatchStore(workspaceRoot).read(source.id);
-  const batchIds = new Set(batches.map((batch) => batch.id));
-  const completedBatches = progress.completedBatchIds.filter((id) => batchIds.has(id)).length;
-  const shared = { branchId, sources, source, pending, completedBatches, totalBatches: batches.length, audit: earlyAudit };
-  if (completedBatches < batches.length) {
+  // Progress is the slim pipeline's scope receipts: compile until a run exists and no scope is running or held.
+  const pipeline = new PipelineStore(workspaceRoot, source.id);
+  const [run, receipts] = await Promise.all([pipeline.run(), pipeline.receipts()]);
+  const completedBatches = receipts.filter((receipt) => receipt.status === "completed").length;
+  const shared = { branchId, sources, source, pending, completedBatches, totalBatches: receipts.length, audit: earlyAudit };
+  if (!run || receipts.some((receipt) => receipt.status !== "completed")) {
     return {
       ...shared,
       stage: "compile",
-      next: `nwh prepare --source ${source.id}`,
+      next: `nwh compile-novel --source ${source.id}`,
     };
   }
   if (pending.length) {
@@ -176,24 +176,10 @@ export async function inspectPreparation(
       ...shared,
       audit,
       stage: "needs-initial-world",
-      next: "nwh compile \"Propose an evidence-backed initial world for the opening state\"",
+      next: `nwh compile-novel opening --source ${source.id}`,
     };
   }
   assertEvidenceExclusiveToSource(initialWorld.evidence, source.id, "Prepared opening world");
-  const openingBatches = selectOpeningCompilerBatches(batches);
-  if (openingBatches.length && !initialWorld.evidence.some((reference) =>
-    openingBatches.some((batch) => batch.evidence.some((opening) => evidenceSpansOverlap(reference, opening))))) {
-    const openingRanges = openingBatches.map((batch) => `${batch.startLine}-${batch.endLine}`).join(" or ");
-    return {
-      ...shared,
-      audit,
-      stage: "needs-initial-world",
-      repairReasons: [
-        `The accepted initial world for source ${source.id} is grounded outside the selected narrative opening (lines ${openingRanges}); replace it before creating another branch.`,
-      ],
-      next: "nwh compile \"Propose an evidence-backed replacement initial world for the opening state\"",
-    };
-  }
 
   const sourceCharacters = (await new CanonicalModelStore(workspaceRoot).listEntities())
     .filter((entity) => entity.kind === "character")
@@ -210,7 +196,7 @@ export async function inspectPreparation(
       repairReasons: [
         `No committed character entities from source ${source.id} are available for player selection; a playable branch cannot be created. Reparse the source so at least one evidence-backed character is accepted.`,
       ],
-      next: `nwh reparse --source ${source.id} --all`,
+      next: `nwh compile-novel gaps --source ${source.id}`,
     };
   }
   if (!sourceCharacters.some((character) => characterPlayableAtGenesis(initialWorld, character.id))) {
@@ -221,7 +207,7 @@ export async function inspectPreparation(
       repairReasons: [
         `The accepted initial world for source ${source.id} does not represent any living opening character in committed state or knowledge; a playable branch cannot be created. Rebuild the opening state before preparing a branch.`,
       ],
-      next: `nwh reparse --source ${source.id} --all`,
+      next: `nwh compile-novel gaps --source ${source.id}`,
     };
   }
 
@@ -251,7 +237,7 @@ export async function inspectPreparation(
 
   const branches = new BranchStore(workspaceRoot);
   if (!(await branchExists(branches, branchId))) {
-    return { ...shared, audit, stage: "create-branch", next: `nwh prepare --source ${source.id} --branch ${branchId}` };
+    return { ...shared, audit, stage: "create-branch", next: `nwh compile-novel branch --source ${source.id} --branch ${branchId}` };
   }
   const branch = await branches.read(branchId);
   if (branch.sourceId && branch.sourceId !== source.id) {
@@ -262,7 +248,7 @@ export async function inspectPreparation(
       repairReasons: [
         `Branch '${branchId}' belongs to source ${branch.sourceId}, not ${source.id}; prepare this novel on a different branch instead of mixing source timelines.`,
       ],
-      next: `nwh prepare --source ${source.id} --branch <new-branch-id>`,
+      next: `nwh compile-novel branch --source ${source.id} --branch <new-branch-id>`,
     };
   }
   if (!(await branchGenesisHasPlayableCharacter(workspaceRoot, branchId, source.id))) {
@@ -273,17 +259,12 @@ export async function inspectPreparation(
       repairReasons: [
         `Branch '${branchId}' was created without a living committed character from source ${source.id}. Its pinned genesis snapshot is immutable; prepare a new branch after repairing the source/opening state instead of treating this branch as playable.`,
       ],
-      next: `nwh prepare --source ${source.id} --branch <new-branch-id>`,
+      next: `nwh compile-novel branch --source ${source.id} --branch <new-branch-id>`,
     };
   }
   return { ...shared, audit, stage: "ready", next: `nwh characters --branch ${branchId}` };
 }
 
-function evidenceSpansOverlap(left: InitialWorld["evidence"][number], right: InitialWorld["evidence"][number]): boolean {
-  return left.span.sourceId === right.span.sourceId
-    && left.span.startLine <= right.span.endLine
-    && left.span.endLine >= right.span.startLine;
-}
 
 function preparationRepairReasons(audit: CompilerAuditReport): string[] {
   return [

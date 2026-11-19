@@ -1,13 +1,4 @@
-import { beginCoreRoleReviewRevision, type beginCoreRoleReviewSchema } from "../compiler/role-review-revision-service.js";
-import { RoleRosterStore } from "../compiler/role-roster.js";
-import { contentHash } from "../world/canonical.js";
-import type { z } from "zod";
 import fs from "node:fs/promises";
-import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
-import { registerSourceRequirements, settleSourceRequirements } from "../compiler/requirement-service.js";
-import { RequirementLedger } from "../compiler/requirement-ledger.js";
-import { registerReviewedCoreRoles } from "../compiler/core-role-requirement-service.js";
-import { loadCurrentRoleRoster } from "../compiler/role-roster-tools.js";
 import { sceneCapabilitySpecSchema, evaluateSceneCapabilities, type SceneReviewCatalog } from "../eval/scene-capabilities.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
@@ -46,43 +37,10 @@ export async function reviewScenes(root: string, specInput: unknown) {
   return { ...evaluateSceneCapabilities(spec, bytes, catalog), catalogMode: "pending-overlay-on-canonical", pendingRevisions };
 }
 
-export async function reviewScenesCommand(root: string, specFile: string, registration?: { id: string; predecessorRevision?: string }) {
+/** Read-only scene capability check against an independent source-review spec (requirement registration is retired). */
+export async function reviewScenesCommand(root: string, specFile: string) {
   const spec = sceneCapabilitySpecSchema.parse(JSON.parse(await fs.readFile(specFile, "utf8")));
-  if (registration) {
-    const result = await withWorkspaceOperationLock(root, "compiler", async () => {
-      await registerSourceRequirements(root, { ...registration, sourceId: spec.sourceId, spec, scopeDecisionRef: spec.review.auditRef });
-      return settleSourceRequirements(root, spec.sourceId);
-    });
-    console.log(JSON.stringify(result, null, 2));
-    if (result.issues.length) process.exitCode = 2;
-    return;
-  }
   const result = await reviewScenes(root, spec);
   console.log(JSON.stringify(result, null, 2));
   if (!result.verified) process.exitCode = 2;
-}
-
-export async function inspectRequirementsCommand(root: string, sourceId: string) {
-  const ledger = new RequirementLedger(root, sourceId);
-  const savedRoster = await new RoleRosterStore(root).read(sourceId);
-  const { RoleReviewWorkStore } = await import("../compiler/role-review-work.js");
-  const roleReviewPlans = (await RoleReviewWorkStore.plans(root, sourceId)).map(plan => ({ batchId: plan.batchId, planHash: contentHash(plan), subjectHash: plan.subjectHash, reviewRevisionId: plan.reviewRevisionId }));
-  const dependencyReviews = await ledger.roleDependencyReviews();
-  console.log(JSON.stringify({ savedRoster, savedRosterHash: savedRoster ? contentHash(savedRoster) : null, roleReviewPlans,
-    dependencyReviews: dependencyReviews.map(r => ({ taskId: r.taskId, revisionHash: r.revisionHash, authority: r.authority,
-      priorPlanHash: r.scope.planHash, priorCandidateCount: r.priorRoster.candidates.length, nextCandidateCount: r.nextRoster.candidates.length,
-      addedCandidateIds: r.addedCandidateIds, upstream: r.upstream })),
-    semanticScopeRecords: (await Promise.all(dependencyReviews.map(r => ledger.roleSemanticScopes(r.taskId)))).flat().map(r => ({ taskId: r.taskId, phase: r.phase, hash: contentHash(r), traceRunId: r.traceRunId })),
-    reviewRevisions: await ledger.roleReviewRevisions(), definitions: await ledger.definitions(), coreRoleDefinitions: await ledger.coreRoleDefinitionHistory(), history: await ledger.history() }, null, 2));
-}
-
-export async function registerCoreRoleRequirementsCommand(root: string, sourceId: string, decision: { predecessorRevision?: string; scopeDecisionRef: string; scopeChangeReason: string }) {
-  const result = await withWorkspaceOperationLock(root, "compiler", async () => registerReviewedCoreRoles(root, await loadCurrentRoleRoster(root, sourceId), decision));
-  if (!result) throw new Error("Core role registration requires two complete source reviews; preserve partial review work and do not retry unchanged");
-  console.log(JSON.stringify(result, null, 2));
-}
-
-export async function beginCoreRoleReviewCommand(root: string, input: z.infer<typeof beginCoreRoleReviewSchema>) {
-  const revision = await withWorkspaceOperationLock(root, "compiler", () => beginCoreRoleReviewRevision(root, input));
-  console.log(JSON.stringify({ revision, nextStep: `Resume nwh prepare-all --source ${input.sourceId} to complete two independent reviews. Prior requirements remain unresolved until current evaluation.` }, null, 2));
 }

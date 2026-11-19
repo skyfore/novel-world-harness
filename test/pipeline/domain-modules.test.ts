@@ -12,10 +12,11 @@ const move = (actorId: string, operations: Array<Record<string, unknown>>, extra
   schemas, entities, { participants: ["lin", "gate"], actorId, proposedDelta: { version: 1, operations: operations as never }, ...none, ...extra });
 
 describe("base action domain module", () => {
-  it("instantiates move within its envelope: mover alive, only the mover's location changes", () => {
+  it("instantiates move within its envelope: only the mover's location changes, with no precondition on an unstated life status", () => {
     const resolved = move("lin", [{ op: "set", entityId: "lin", field: "character.location", value: "gate" }], { hasSceneTransition: true });
     expect(resolved.issues).toEqual([]);
-    expect(resolved.preconditions).toEqual([{ op: "fact-equals", entityId: "lin", field: "character.alive", value: true }]);
+    // A dead initiator is refused by the engine (ACTOR_DEAD); an unknown life status must not block the move.
+    expect(resolved.preconditions).toEqual([]);
     expect(resolved.stateEffects.map((effect) => effect.operation)).toEqual([{ op: "set", entityId: "lin", field: "character.location", value: "gate" }]);
   });
 
@@ -37,5 +38,16 @@ describe("base action domain module", () => {
     schemas, entities, { participants: ["mo", "key"], actorId: "mo", proposedDelta: { version: 1, operations: [{ op: "set", entityId: "key", field: "artifact.custodian", value: "mo" }] }, ...none });
     expect(take.issues).toEqual([]);
     expect(take.preconditions).toEqual([{ op: "not", item: { op: "fact-exists", entityId: "key", field: "artifact.custodian" } }]);
+  });
+
+  it("cannot bypass presence: every bound role must be a participant of the event", () => {
+    const give = resolveActionInvocation({ lane: "schema-bound", schemaId: "base-action-give", parameters: {},
+      roleBindings: [{ roleId: "giver", entityIds: ["lin"] }, { roleId: "item", entityIds: ["key"] }, { roleId: "recipient", entityIds: ["mo"] }] },
+    schemas, entities, { participants: ["lin", "key"], actorId: "lin", proposedDelta: { version: 1, operations: [{ op: "set", entityId: "key", field: "artifact.custodian", value: "mo" }] }, ...none });
+    expect(give.issues.map((item) => item.code)).toContain("ACTION_ROLE_NOT_PARTICIPANT");
+    expect(move("lin", [{ op: "set", entityId: "lin", field: "character.location", value: "gate" }], { hasSceneTransition: true }).issues).toEqual([]);
+    const away = resolveActionInvocation({ lane: "schema-bound", schemaId: "base-action-move", roleBindings: [{ roleId: "mover", entityIds: ["lin"] }, { roleId: "destination", entityIds: ["gate"] }], parameters: {} },
+      schemas, entities, { participants: ["gate"], actorId: "lin", proposedDelta: { version: 1, operations: [{ op: "set", entityId: "lin", field: "character.location", value: "gate" }] as never }, ...none, hasSceneTransition: true });
+    expect(away.issues.map((item) => item.code)).toContain("ACTION_ROLE_NOT_PARTICIPANT");
   });
 });

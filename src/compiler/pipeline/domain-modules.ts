@@ -7,9 +7,14 @@ import { canonicalJson } from "../../world/canonical.js";
  * fixed preconditions and effect envelopes, and they never stand in for a
  * capability the source must state (a specific power still needs a
  * source-statement or source-pattern mechanism). Knowledge and presence are
- * still checked by the runtime for every invocation.
+ * still checked by the runtime for every invocation: every bound role must
+ * be a participant of the event, and the initiator must be the acting
+ * character, whom the engine refuses when dead (ACTOR_DEAD). Speak and move
+ * carry no "alive" precondition of their own: a predicate over an unstated
+ * life status is unknown, which would block every character whose life the
+ * text never mentions.
  */
-export const BASE_ACTION_MODULE = { moduleId: "base-actions", moduleVersion: "1" } as const;
+export const BASE_ACTION_MODULE = { moduleId: "base-actions", moduleVersion: "2" } as const;
 
 const character = (id: string, label: string, min = 1, max = 1) => ({ id, label, allowedEntityKinds: ["character" as const], minCardinality: min, maxCardinality: max });
 const induction = { kind: "domain-module" as const, ...BASE_ACTION_MODULE };
@@ -19,13 +24,13 @@ export const BASE_ACTION_SCHEMAS: readonly ActionSchema[] = Object.freeze([
   {
     ontologyVersion: "action-schema-v1", id: "base-action-speak", name: "Speak", visibility: "public",
     roles: [character("speaker", "Speaker"), character("addressee", "Addressee", 0, 8)], initiatorRoleId: "speaker", parameters: [],
-    preconditions: [{ op: "fact-equals", entity: { kind: "role", roleId: "speaker" }, field: "character.alive", value: { source: "literal", value: true } }],
+    preconditions: [],
     stateEffects: [], effectEnvelope: envelope([], 0, true, false), induction, evidence: [],
   },
   {
     ontologyVersion: "action-schema-v1", id: "base-action-move", name: "Move", visibility: "public",
     roles: [character("mover", "Mover"), { id: "destination", label: "Destination", allowedEntityKinds: ["location"], minCardinality: 1, maxCardinality: 1 }], initiatorRoleId: "mover", parameters: [],
-    preconditions: [{ op: "fact-equals", entity: { kind: "role", roleId: "mover" }, field: "character.alive", value: { source: "literal", value: true } }],
+    preconditions: [],
     stateEffects: [{ op: "set", entity: { kind: "role", roleId: "mover" }, field: "character.location", value: { source: "role", roleId: "destination" }, required: true }],
     effectEnvelope: envelope(["character.location"], 1, false, true), induction, evidence: [],
   },

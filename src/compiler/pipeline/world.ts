@@ -4,7 +4,8 @@ import { CompilerProposalService } from "../proposals.js";
 import type { WorldCompletenessReport } from "../world-completeness.js";
 import { artifactTools } from "./artifacts.js";
 import { convergeCanonical } from "./canon.js";
-import { BASE_ACTION_SCHEMAS } from "./domain-modules.js";
+import { BASE_ACTION_MODULE, BASE_ACTION_SCHEMAS } from "./domain-modules.js";
+import { canonicalJson } from "../../world/canonical.js";
 import { convergeWorldProposals } from "../converge.js";
 import { gateOf, type ScopePlan, type StageContext, type StageDefinition } from "./runner.js";
 import { extentSelectorSchema, ScopeText, windowUnits } from "./text.js";
@@ -67,12 +68,13 @@ function stillOpen(report: WorldCompletenessReport, item: string, view: Pipeline
 /** Install the host's base-action domain module once (same proposal and validation path as everything else). */
 export async function installDomainModules(ctx: StageContext): Promise<void> {
   const view = await loadPipelineView(ctx.root, ctx.sourceId);
-  const installed = new Set(view.bundle.canonical.actionSchemas.map((schema) => schema.id));
-  const missing = BASE_ACTION_SCHEMAS.filter((schema) => !installed.has(schema.id));
+  const installed = new Map(view.bundle.canonical.actionSchemas.map((schema) => [schema.id, canonicalJson(schema)]));
+  // Missing, or an older module version: (re)install the registered copy.
+  const missing = BASE_ACTION_SCHEMAS.filter((schema) => installed.get(schema.id) !== canonicalJson(schema));
   if (!missing.length) return;
   const service = new CompilerProposalService(ctx.root);
   for (const schema of missing) {
-    await service.submit("action-schema", { proposalId: `domain-${schema.id}-v1`, payload: schema, generatedBy: { worker: "host-domain-module", compilerBatchId: `world-${ctx.sourceId}-domain` } })
+    await service.submit("action-schema", { proposalId: `domain-${schema.id}-v${BASE_ACTION_MODULE.moduleVersion}`, payload: schema, generatedBy: { worker: "host-domain-module", compilerBatchId: `world-${ctx.sourceId}-domain` } })
       .catch((error: Error) => { if (!/already exists/u.test(error.message)) throw error; });
   }
   // Domain modules carry no source evidence, so converge across sources.

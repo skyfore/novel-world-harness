@@ -77,7 +77,7 @@ export const candidateReviewSchema = z.object({
   scopeId: z.string().min(1),
 }).strict().superRefine((value, ctx) => {
   if (value.verdict === "rejected" && !value.rationale) ctx.addIssue({ code: "custom", path: ["rationale"], message: "A rejected candidate needs a rationale" });
-  if (value.verdict !== "rejected" && !value.annotationId) ctx.addIssue({ code: "custom", path: ["annotationId"], message: "An accepted candidate points at its annotation" });
+  if (value.verdict !== "rejected" && value.kind !== "time" && !value.annotationId) ctx.addIssue({ code: "custom", path: ["annotationId"], message: "An accepted candidate points at its annotation" });
 });
 export type CandidateReview = z.infer<typeof candidateReviewSchema>;
 const reviewDocumentSchema = z.object({ version: z.literal(PIPELINE_STORE_VERSION), reviews: z.array(candidateReviewSchema) }).strict();

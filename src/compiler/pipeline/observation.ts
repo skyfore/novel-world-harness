@@ -5,7 +5,8 @@ import type { ByteRange } from "../world-completeness.js";
 import { AnnotationWriter, HOST_LEXICAL_WORKER, KIND_FOR_CLASS, PIPELINE_OBSERVATION_WORKER, annotationId } from "./annotate.js";
 import { gateOf, type ScopePlan, type StageContext, type StageDefinition } from "./runner.js";
 import { sourceChapters } from "./source-stage.js";
-import type { CandidateReview } from "./store.js";
+import type { CandidateReview, CensusClass, CensusEntry } from "./store.js";
+import { isGenericName } from "../world-completeness.js";
 import { extentSelectorSchema, spanSelectorSchema, ScopeText, unitLabel, windowUnits } from "./text.js";
 import { applyEach, pipelineTool, T } from "./tooling.js";
 import { censusKey, loadPipelineView, measureView, type PipelineView } from "./view.js";
@@ -21,13 +22,16 @@ const PAGE = 150;
 
 export type ObservationCandidate = {
   id: string;
-  kind: "speech" | "name";
+  /** speech: direct speech; name: a lexicon occurrence; time: an explicit time expression (design 5.3 step 2). */
+  kind: "speech" | "name" | "time";
   range: ByteRange;
   text: string;
   /** Speech: the host speaker cue (person lexicon occurrence). */
   cue?: { range: ByteRange; surface: string; rule: string };
   /** Name: census surface and class. */
   censusClass?: string;
+  /** Time: the host's expression kind (date, clock, relative, period). */
+  timeKind?: string;
 };
 
 const overlaps = (left: ByteRange, right: ByteRange) => left.startByte < right.endByte && right.startByte < left.endByte;
@@ -50,6 +54,11 @@ export function observationCandidates(view: PipelineView, range: ByteRange): Obs
     const surface = decode(occurrence);
     result.push({ id: `n${occurrence.startByte}`, kind: "name", range: { startByte: occurrence.startByte, endByte: occurrence.endByte }, text: surface, censusClass: classOf.get(surface) ?? "person" });
   }
+  // Explicit time expressions: the model confirms each is story time here (it then anchors scene timing) or rejects it (an idiom, a quoted date in a document).
+  for (const time of view.inventory.times) {
+    if (!inside(time, range)) continue;
+    result.push({ id: `t${time.startByte}`, kind: "time", range: { startByte: time.startByte, endByte: time.endByte }, text: time.surface, timeKind: time.kind });
+  }
   return result.sort((a, b) => a.range.startByte - b.range.startByte || a.kind.localeCompare(b.kind));
 }
 
@@ -60,7 +69,7 @@ export function openCandidates(view: PipelineView, range: ByteRange): Observatio
   const quotations = annotations.filter((item) => item.annotationType === "quotation").map((item) => item.anchor);
   const mentions = annotations.filter((item) => item.annotationType === "entity-mention").map((item) => item.anchor);
   return observationCandidates(view, range).filter((item) => !reviewed.has(item.id)
-    && !(item.kind === "speech" ? quotations : mentions).some((anchor) => overlaps(anchor, item.range)));
+    && (item.kind === "time" || !(item.kind === "speech" ? quotations : mentions).some((anchor) => overlaps(anchor, item.range))));
 }
 
 export async function observationWindows(ctx: StageContext, view: PipelineView): Promise<ScopePlan[]> {
@@ -87,7 +96,7 @@ export async function observationWindows(ctx: StageContext, view: PipelineView):
 const speakerSchema = z.union([spanSelectorSchema.extend({ form: z.enum(["proper", "nominal", "pronoun", "title", "kinship", "collective"]).optional() }).strict(), z.object({ mention: z.string().min(1) }).strict(), z.literal("cue")]);
 const reviewInput = z.object({
   items: z.array(z.object({
-    id: z.string().regex(/^[sn]\d+$/u),
+    id: z.string().regex(/^[snt]\d+$/u),
     verdict: z.enum(["accept", "rewrite", "reject"]),
     rationale: z.string().trim().min(1).max(500).optional(),
     span: spanSelectorSchema.optional(),
@@ -108,10 +117,27 @@ const eventInput = z.object({
   items: z.array(z.object({ trigger: spanSelectorSchema, extent: extentSelectorSchema, types: z.array(eventMentionTypeSchema).min(1).max(4),
     salience: z.enum(["major", "supporting", "minor"]), participants: z.array(z.string().min(1)).max(16).default([]), interpretation: z.string().trim().min(1).max(500).optional() }).strict()).min(1).max(PAGE),
 }).strict();
+const DISCOURSE_KINDS = ["scene", "summary", "flashback", "flashforward", "frame", "recollection", "hypothetical", "dream", "embedded-document", "narrator-commentary", "unclassified"] as const;
 const discourseInput = z.object({
-  items: z.array(z.object({ extent: extentSelectorSchema, kind: z.enum(["scene", "summary", "flashback", "flashforward", "frame", "recollection", "hypothetical", "dream", "embedded-document", "narrator-commentary", "unclassified"]),
+  items: z.array(z.object({ extent: extentSelectorSchema, kind: z.enum(DISCOURSE_KINDS),
+    /** Continue a segment that runs on from the previous window (a scene crossing the window boundary). */
+    continues: z.string().min(1).optional(),
     interpretation: z.string().trim().min(1).max(500).optional() }).strict()).min(1).max(64),
 }).strict();
+
+type DiscourseSegment = Extract<SourceAnnotation, { annotationType: "discourse-segment" }>;
+const segmentEnd = (segment: DiscourseSegment) => Math.max(...segment.anchors.map((anchor) => anchor.endByte));
+
+/**
+ * Segments that run up to this scope's start with nothing but whitespace in
+ * between: a scene crossing the 16 KiB window boundary continues here as
+ * the same segment (and later the same scene), never as a second one.
+ */
+export function continuableSegments(view: PipelineView, range: ByteRange): DiscourseSegment[] {
+  const text = (from: number, to: number) => Buffer.from(view.bytes.buffer, view.bytes.byteOffset + from, Math.max(0, to - from)).toString("utf8");
+  return view.bundle.compilerSnapshot.annotations.filter((item): item is DiscourseSegment => item.annotationType === "discourse-segment")
+    .filter((segment) => segmentEnd(segment) <= range.startByte && !text(segmentEnd(segment), range.startByte).trim());
+}
 const accountInput = z.object({
   items: z.array(z.object({ unit: z.string(), status: z.enum(["background-only", "duplicate-description", "paratext"]), rationale: z.string().trim().min(1).max(500) }).strict()).min(1).max(PAGE),
 }).strict();
@@ -152,7 +178,7 @@ export function observationTools(ctx: StageContext, scope: ScopePlan) {
   return [
     pipelineTool({
       name: "list_open_candidates", label: "List open candidates",
-      description: "Host candidates in this scope not yet reviewed or covered: direct speech (id s…) with any host speaker cue, and lexicon name occurrences (id n…).",
+      description: "Host candidates in this scope not yet reviewed or covered: direct speech (id s…) with any host speaker cue, lexicon name occurrences (id n…) and explicit time expressions (id t…).",
       parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }, { additionalProperties: false }),
       input: z.object({ offset: z.number().int().nonnegative().optional() }).strict(),
       async execute(input) {
@@ -180,7 +206,7 @@ export function observationTools(ctx: StageContext, scope: ScopePlan) {
     }),
     pipelineTool({
       name: "review_observation_candidates", label: "Review observation candidates",
-      description: "Accept, rewrite or reject host candidates by id. Speech: give speaker as {unit,text[,form]}, {mention:id} or \"cue\" (the host cue), and mode (default direct). Names: optionally kinds/form. Rewrite: give the corrected span. Reject: give a rationale (e.g. a quoted term, not speech; an ordinary word, not this name).",
+      description: "Accept, rewrite or reject host candidates by id. Speech: give speaker as {unit,text[,form]}, {mention:id} or \"cue\" (the host cue), and mode (default direct). Names: optionally kinds/form. Time (t…): accept when it states story time here, reject otherwise (an idiom, a date inside a quoted document). Rewrite: give the corrected span. Reject: give a rationale (e.g. a quoted term, not speech; an ordinary word, not this name).",
       parameters: Type.Object({ items: Type.Array(Type.Object({ id: Type.String(), verdict: Type.Union([Type.Literal("accept"), Type.Literal("rewrite"), Type.Literal("reject")]), rationale: Type.Optional(T.rationale()),
         span: Type.Optional(T.span()), speaker: Type.Optional(speakerT()), mode: Type.Optional(Type.String()), form: Type.Optional(Type.String()), kinds: Type.Optional(kindsT()) }, { additionalProperties: false })) }, { additionalProperties: false }),
       input: reviewInput,
@@ -195,6 +221,12 @@ export function observationTools(ctx: StageContext, scope: ScopePlan) {
             if (!item.rationale) throw new Error("A rejection needs a rationale.");
             reviews.push({ candidateId: candidate.id, kind: candidate.kind, range: candidate.range, verdict: "rejected", rationale: item.rationale, scopeId: scope.id });
             return { id: candidate.id, verdict: "rejected" };
+          }
+          if (candidate.kind === "time") {
+            // A confirmed time expression stays a source fact for scene timing; there is no annotation to rewrite.
+            if (item.verdict === "rewrite") throw new Error("A time candidate is accepted or rejected, not rewritten.");
+            reviews.push({ candidateId: candidate.id, kind: "time", range: candidate.range, verdict: "accepted", ...(item.rationale ? { rationale: item.rationale } : {}), scopeId: scope.id });
+            return { id: candidate.id, verdict: "accepted" };
           }
           const range = item.verdict === "rewrite" ? (item.span ? state.text.span(item.span) : (() => { throw new Error("A rewrite gives the corrected span."); })()) : candidate.range;
           const worker = item.verdict === "accept" ? HOST_LEXICAL_WORKER : PIPELINE_OBSERVATION_WORKER;
@@ -224,7 +256,9 @@ export function observationTools(ctx: StageContext, scope: ScopePlan) {
         const state = await load();
         const result = await applyEach(input.items, async (item) => (await state.writer.commit(state.writer.entityMention({ range: state.text.span(item.span), form: item.form, kinds: item.kinds,
           worker: PIPELINE_OBSERVATION_WORKER, ...(item.interpretation ? { interpretation: item.interpretation } : {}) }))).id);
-        return { created: result.applied, failed: result.failed };
+        const lexicon = await feedCensus(ctx, scope.id, state.view, input.items.filter((_item, index) => !result.failed.some((failure) => failure.index === index))
+          .filter((item) => item.form === "proper").map((item) => ({ surface: state.text.text(state.text.span(item.span)), kinds: item.kinds })));
+        return { created: result.applied, failed: result.failed, ...(lexicon.length ? { addedToLexicon: lexicon, note: "New names join the lexicon: their other occurrences become name candidates (the gap loop annotates windows already done)." } : {}) };
       },
     }),
     pipelineTool({
@@ -261,19 +295,29 @@ export function observationTools(ctx: StageContext, scope: ScopePlan) {
     }),
     pipelineTool({
       name: "propose_discourse_segments", label: "Propose discourse segments",
-      description: "Mark discourse segments (first..last unit): scenes, summaries, flashbacks, narrator commentary and so on. Every narrative unit in the scope must belong to one.",
-      parameters: Type.Object({ items: Type.Array(Type.Object({ extent: T.extent(), kind: Type.String(), interpretation: Type.Optional(T.rationale()) }, { additionalProperties: false })) }, { additionalProperties: false }),
+      description: "Mark discourse segments (first..last unit): scenes, summaries, flashbacks, narrator commentary and so on. Every narrative unit in the scope must belong to one. When the scope opens in the middle of a segment from the previous window, give continues: <that segment id> (same kind) and an extent starting at the scope's first unit; it stays one segment and one scene.",
+      parameters: Type.Object({ items: Type.Array(Type.Object({ extent: T.extent(), kind: Type.String(), continues: Type.Optional(Type.String()), interpretation: Type.Optional(T.rationale()) }, { additionalProperties: false })) }, { additionalProperties: false }),
       input: discourseInput,
       async execute(input) {
         const state = await load();
-        const result = await applyEach(input.items, async (item) => (await state.writer.commit(state.writer.discourse({ extents: [state.text.extent(item.extent)], kind: item.kind,
-          ...(item.interpretation ? { interpretation: item.interpretation } : { ...(item.kind === "unclassified" ? { interpretation: "Boundary unresolved." } : {}) }) }))).id);
+        const result = await applyEach(input.items, async (item) => {
+          const extent = state.text.extent(item.extent);
+          if (item.continues) {
+            const segment = continuableSegments(state.view, { startByte: extent.startByte, endByte: extent.endByte }).find((candidate) => candidate.id === item.continues);
+            if (!segment) throw new Error(`Segment ${item.continues} does not run up to ${item.extent.from}: only a segment ending right before this extent (whitespace between) can continue.`);
+            if (segment.kind !== item.kind) throw new Error(`Segment ${segment.id} is a ${segment.kind}; a continuation keeps its kind.`);
+            return (await state.writer.commit(state.writer.discourse({ extents: [...segment.anchors.map((anchor) => ({ startByte: anchor.startByte, endByte: anchor.endByte })), extent], kind: segment.kind,
+              ...(segment.interpretation ? { interpretation: segment.interpretation } : item.interpretation ? { interpretation: item.interpretation } : {}) }))).id;
+          }
+          return (await state.writer.commit(state.writer.discourse({ extents: [extent], kind: item.kind,
+            ...(item.interpretation ? { interpretation: item.interpretation } : { ...(item.kind === "unclassified" ? { interpretation: "Boundary unresolved." } : {}) }) }))).id;
+        });
         return { created: result.applied, failed: result.failed };
       },
     }),
     pipelineTool({
       name: "account_units", label: "Account units",
-      description: "Close units that carry no annotation: background-only, duplicate-description or paratext, with a reason. A unit holding a speech or name candidate that is not rejected cannot be closed this way; annotate it instead.",
+      description: "Close units that carry no annotation: background-only, duplicate-description or paratext, with a reason. A unit holding a speech or name candidate that is not rejected cannot be closed as background or duplicate; annotate it instead. Titles and headings are paratext (their candidates still need review).",
       parameters: Type.Object({ items: Type.Array(Type.Object({ unit: Type.String(), status: Type.String(), rationale: T.rationale() }, { additionalProperties: false })) }, { additionalProperties: false }),
       input: accountInput,
       async execute(input) {
@@ -282,7 +326,8 @@ export function observationTools(ctx: StageContext, scope: ScopePlan) {
         const candidates = observationCandidates(state.view, scope.range);
         const result = await applyEach(input.items, async (item) => {
           const unit = state.text.unit(item.unit);
-          const holding = candidates.filter((candidate) => overlaps(candidate.range, unit) && !rejected.has(candidate.id));
+          // Background and duplicate dispositions may not hide a candidate (design 5.3 step 5); a title or heading is paratext even when it names someone, and its candidates still need review.
+          const holding = item.status === "paratext" ? [] : candidates.filter((candidate) => candidate.kind !== "time" && overlaps(candidate.range, unit) && !rejected.has(candidate.id));
           if (holding.length) throw new Error(`${item.unit} holds ${holding.length} candidate(s) (${holding.slice(0, 5).map((candidate) => candidate.id).join(", ")}); review them instead of closing the unit.`);
           await ctx.store.recordUnitAccounts([{ unitId: unit.unitId, status: item.status, rationale: item.rationale, scopeId: scope.id }]);
           return item.unit;
@@ -291,6 +336,32 @@ export function observationTools(ctx: StageContext, scope: ScopePlan) {
       },
     }),
   ];
+}
+
+const CLASS_FOR_KIND: Partial<Record<string, CensusClass>> = { character: "person", location: "location", faction: "organization", institution: "organization", artifact: "object", concept: "lore" };
+
+/**
+ * A proper name the census missed flows back into the lexicon (design 11,
+ * risk "census misses a low-frequency name"): its other occurrences become
+ * observation candidates, so windows already observed are re-annotated by
+ * the gap loop instead of silently missing the name.
+ */
+export async function feedCensus(ctx: StageContext, scopeId: string, view: PipelineView, names: ReadonlyArray<{ surface: string; kinds: readonly string[] }>): Promise<string[]> {
+  const known = new Set(view.census.map((entry) => entry.surface));
+  const text = Buffer.from(view.bytes.buffer, view.bytes.byteOffset, Math.min(view.bytes.byteLength, ctx.limit)).toString("utf8");
+  const entries: CensusEntry[] = [];
+  for (const { surface, kinds } of names) {
+    const cls = kinds.map((kind) => CLASS_FOR_KIND[kind]).find(Boolean);
+    const trimmed = surface.trim();
+    if (!cls || known.has(trimmed) || Array.from(trimmed).length < 2 || Array.from(trimmed).length > 40 || isGenericName(trimmed)) continue;
+    let occurrences = 0;
+    for (let at = text.indexOf(trimmed); at >= 0; at = text.indexOf(trimmed, at + trimmed.length)) occurrences += 1;
+    known.add(trimmed);
+    entries.push({ surface: trimmed, class: cls, occurrences, firstByte: Buffer.byteLength(text.slice(0, Math.max(0, text.indexOf(trimmed))), "utf8"), decidedBy: "model",
+      rationale: "Proper name annotated after the census; added so every occurrence is reviewed.", scopeId });
+  }
+  if (entries.length) await ctx.store.recordCensus(entries);
+  return entries.map((entry) => entry.surface);
 }
 
 /** Narrative units in range not covered by a discourse segment. */
@@ -302,20 +373,21 @@ export function uncoveredByDiscourse(view: PipelineView, range: ByteRange): stri
 
 export const observationStage: StageDefinition = {
   stage: "observation",
+  // A window may continue the segment the previous window ended with.
+  sequential: true,
   plan: observationWindows,
   prompt(ctx, view, scope, previous) {
     const text = new ScopeText(ctx.sourceId, view.bytes, windowUnits(view.structure, view.bytes, scope.range));
     const open = openCandidates(view, scope.range);
-    const times = view.inventory.times.filter((item) => inside(item, scope.range));
     return [
       `Observation for ${scope.title}. The scope text is below, one base unit per line.`,
-      "1. Review every host candidate with review_observation_candidates: direct speech (id s…) needs its speaker whenever the text lets you tell (use \"cue\" when the host cue is right); name occurrences (id n…) are accepted unless the surface is not that name here.",
+      "1. Review every host candidate with review_observation_candidates: direct speech (id s…) needs its speaker whenever the text lets you tell (use \"cue\" when the host cue is right); name occurrences (id n…) are accepted unless the surface is not that name here; time expressions (id t…) are accepted when they state story time here.",
       "2. Add what the host cannot find: propose_entity_mentions for pronouns, titles and unnamed people who speak or act; propose_quotations for indirect speech; propose_event_mentions for every event (mark story-advancing ones major); propose_discourse_segments so every unit belongs to a segment.",
       "3. Close units with no content worth annotating with account_units. Then call finish_scope; fix whatever it reports.",
       previous ? `Previous attempt failed: ${previous.checks.filter((check) => !check.passed).map((check) => `${check.id}: ${check.detail}`).join("; ")}` : "",
       `Open candidates: ${open.length} (first ${Math.min(open.length, PAGE)} below; page with list_open_candidates).`,
-      ...open.slice(0, PAGE).map((item) => `${item.id} ${item.kind} [${text.unitAt(item.range.startByte)?.label ?? "?"}] ${item.text.slice(0, 80)}${item.cue ? ` (cue: ${item.cue.surface})` : ""}`),
-      times.length ? `Explicit time expressions (for later scene timing): ${times.slice(0, 40).map((item) => `${item.surface}@${text.unitAt(item.startByte)?.label ?? "?"}`).join(", ")}` : "",
+      ...open.slice(0, PAGE).map((item) => `${item.id} ${item.kind} [${text.unitAt(item.range.startByte)?.label ?? "?"}] ${item.text.slice(0, 80)}${item.cue ? ` (cue: ${item.cue.surface})` : ""}${item.timeKind ? ` (${item.timeKind})` : ""}`),
+      ...continuableSegments(view, scope.range).map((segment) => `Segment ${segment.id} (${segment.kind}) runs up to this window's start: if it goes on here, continue it (propose_discourse_segments with continues: "${segment.id}") instead of opening a new one.`),
       "--- scope text ---",
       text.render(),
     ].filter(Boolean).join("\n");

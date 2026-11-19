@@ -84,6 +84,9 @@ const sceneInput = z.object({
   location: idSchema.optional(), locationUnknown: z.string().trim().min(1).max(500).optional(),
   present: z.array(idSchema).max(64), viewpoint: z.array(idSchema).max(8).default([]),
   storyInterval: z.object({ start: storyTimeSchema, end: storyTimeSchema.optional() }).strict().optional(),
+  /** Stated conditions for being in the scene or leaving it (design 5.5: "when the text has them"). */
+  entryConditions: z.array(predicateSchema).max(16).default([]),
+  exitConditions: z.array(predicateSchema).max(16).default([]),
 }).strict().refine((value) => Boolean(value.location) !== Boolean(value.locationUnknown), "Give exactly one of location or locationUnknown (with the reason the text does not say where).");
 const beatInput = z.object({
   items: z.array(z.object({
@@ -111,8 +114,9 @@ export function sceneTools(ctx: StageContext, scope: ScopePlan) {
   return [
     pipelineTool({
       name: "propose_scene", label: "Propose scene",
-      description: "The scene record for this segment: location (entity id) or locationUnknown with the reason the text does not say; everyone present (bodily) and viewpoint characters; optional story interval. The host attaches this segment's events.",
-      parameters: Type.Object({ location: Type.Optional(Type.String()), locationUnknown: Type.Optional(T.rationale()), present: Type.Array(Type.String()), viewpoint: Type.Optional(Type.Array(Type.String())), storyInterval: Type.Optional(Type.Unknown()) }, { additionalProperties: false }),
+      description: "The scene record for this segment: location (entity id) or locationUnknown with the reason the text does not say; everyone present (bodily) and viewpoint characters; optional story interval; entry and exit conditions (predicates) only when the text states them (who may enter, what ends the scene). The host attaches this segment's events.",
+      parameters: Type.Object({ location: Type.Optional(Type.String()), locationUnknown: Type.Optional(T.rationale()), present: Type.Array(Type.String()), viewpoint: Type.Optional(Type.Array(Type.String())), storyInterval: Type.Optional(Type.Unknown()),
+        entryConditions: Type.Optional(Type.Array(Type.Unknown())), exitConditions: Type.Optional(Type.Array(Type.Unknown())) }, { additionalProperties: false }),
       input: sceneInput,
       async execute(input) {
         const { view, text } = await load();
@@ -122,7 +126,7 @@ export function sceneTools(ctx: StageContext, scope: ScopePlan) {
         if (!segment || segment.annotationType !== "discourse-segment") throw new Error(`Discourse segment ${segmentId} is gone; rerun observation.`);
         const scene: SceneOccurrence = { ontologyVersion: SCENE_OCCURRENCE_ONTOLOGY_VERSION, id: sceneIdFor(segmentId), discourseSegmentIds: [segmentId], eventIds: [],
           ...(input.location ? { locationId: input.location } : {}), ...(input.locationUnknown ? { locationUnknown: { reason: input.locationUnknown } } : {}),
-          ...(input.storyInterval ? { storyInterval: input.storyInterval } : {}), viewpointActorIds: input.viewpoint, presentActorIds: input.present, entryConditions: [], exitConditions: [],
+          ...(input.storyInterval ? { storyInterval: input.storyInterval } : {}), viewpointActorIds: input.viewpoint, presentActorIds: input.present, entryConditions: input.entryConditions, exitConditions: input.exitConditions,
           evidence: evidenceOf(text, segment.anchors) };
         await submitLinkedScene(ctx, scope, view, scene);
         return { scene: scene.id, convergenceIssues: await convergeCanonical(ctx) };

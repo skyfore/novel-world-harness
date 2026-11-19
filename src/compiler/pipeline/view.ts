@@ -105,6 +105,9 @@ export async function loadPipelineView(workspaceRoot: string, sourceId: string):
     // Blank and other non-scene structure units carry no narrative: the host accounts for them deterministically.
     if (!represented && unit.kind === "non-scene") return { version: 1 as const, unitId: unit.id, status: "background-only" as const, annotationIds: [], evidenceAssertionIds: [],
       reason: "Non-scene structure unit (blank or layout).", reviewedBy: "deterministic" as const, reviewedAt: new Date(0).toISOString(), batchIds: [] };
+    // A heading or title the model marked paratext stays paratext even when a name in it is annotated.
+    if (account?.status === "paratext") return { version: 1 as const, unitId: unit.id, status: "paratext" as const, annotationIds: covering, evidenceAssertionIds: [], reason: account.rationale,
+      reviewedBy: "model" as const, reviewedAt: new Date(0).toISOString(), batchIds: [account.scopeId] };
     return { version: 1 as const, unitId: unit.id, status: represented ? "represented" as const : account?.status ?? "unresolved" as const, annotationIds: covering, evidenceAssertionIds: [],
       ...(account && !represented ? { reason: account.rationale } : {}), reviewedBy: represented ? "deterministic" as const : "model" as const, reviewedAt: new Date(0).toISOString(), batchIds: account && !represented ? [account.scopeId] : [] };
   });

@@ -131,9 +131,23 @@ export async function runStage(definition: StageDefinition, ctx: StageContext, o
   return summary;
 }
 
-/** Re-open a held scope (after host review) so the next run attempts it again. */
-export async function releaseHeldScope(store: PipelineStore, scopeId: string): Promise<void> {
+/** Re-open a held scope (after host review) so the next run attempts it again; the review is kept on the receipt. */
+export async function releaseHeldScope(store: PipelineStore, scopeId: string, note?: string): Promise<void> {
   const receipt = await store.receipt(scopeId);
   if (!receipt || receipt.status !== "held") throw new Error(`Scope ${scopeId} is not held.`);
-  await store.writeReceipt({ ...receipt, status: "running", attempts: 0 });
+  const release = { at: new Date().toISOString(), attempts: receipt.attempts, ...(note ? { note } : {}) };
+  await store.writeReceipt({ ...receipt, status: "running", attempts: 0, releases: [...(receipt.releases ?? []), release] });
+}
+
+/** Release held scopes by id, by stage, or all of them. Returns the released ids. */
+export async function releaseHeldScopes(store: PipelineStore, selection: { scopeIds?: readonly string[]; stage?: string; all?: boolean }, note?: string): Promise<string[]> {
+  const held = (await store.receipts()).filter((receipt) => receipt.status === "held");
+  if (selection.scopeIds?.length) {
+    const unknown = selection.scopeIds.filter((id) => !held.some((receipt) => receipt.id === id));
+    if (unknown.length) throw new Error(`Not held: ${unknown.join(", ")}. List held scopes with compile-novel status.`);
+  }
+  const chosen = held.filter((receipt) => selection.all || selection.scopeIds?.includes(receipt.id) || (selection.stage && receipt.stage === selection.stage));
+  if (!selection.all && !selection.scopeIds?.length && !selection.stage) throw new Error("Choose --scope <id>, --stage <stage> or --all.");
+  for (const receipt of chosen) await releaseHeldScope(store, receipt.id, note);
+  return chosen.map((receipt) => receipt.id);
 }

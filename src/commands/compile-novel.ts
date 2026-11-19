@@ -7,6 +7,7 @@ import { tierAtLeast } from "../compiler/cut-admission-schema.js";
 import { PiStageAgent, type StageAgent } from "../compiler/pipeline/agent.js";
 import { checkPipelineClosure } from "../compiler/pipeline/closure.js";
 import { pipelineContext, runGapLoop, runPipelineStage, type PipelineOptions } from "../compiler/pipeline/compile.js";
+import { releaseHeldScopes } from "../compiler/pipeline/runner.js";
 import { prepareSourceStage } from "../compiler/pipeline/source-stage.js";
 import { PipelineStore } from "../compiler/pipeline/store.js";
 import { SourceMaterialStore } from "../storage/source-material-store.js";
@@ -85,8 +86,25 @@ export async function inspectNovelCompilation(root: string, sourceId?: string) {
         evaluationReview: run?.subjectHash ? await inspectEvaluationReview(root, run.subjectHash) : null,
         evaluation: run?.subjectHash ? await new NovelPlayQualityStore(root).read(run.subjectHash) : null };
     })),
-    interpretation: "Pipeline receipts are scheduling and gate records; held scopes need host review or the gap loop. Run records are not certification.",
+    interpretation: "Pipeline receipts are scheduling and gate records; a held scope stays skipped until host review re-opens it with compile-novel release (the gap loop also repairs what it measured). Run records are not certification.",
   };
+}
+
+/**
+ * Host review of held scopes (design 5.8 step 5): re-open them so the next
+ * stage run or gap loop attempts them again. The release and its note are
+ * kept on the scope receipt. No model call.
+ */
+export async function releaseHeldScopesCommand(options: { root: string; sourceId?: string; scopeIds?: readonly string[]; stage?: string; all?: boolean; note?: string }): Promise<string[]> {
+  const root = path.resolve(options.root);
+  return withWorkspaceOperationLock(root, "compiler", async () => {
+    const workspace = await WorkspaceStore.create(root), sources = await workspace.listSources();
+    const source = options.sourceId ? await resolveNovelSource(workspace, options.sourceId) : sources.length === 1 ? sources[0]! : undefined;
+    if (!source) throw new Error(`Select one novel with --source. Registered sources: ${sources.map((item) => item.id).join(", ") || "none"}.`);
+    const released = await releaseHeldScopes(new PipelineStore(root, source.id), { ...(options.scopeIds ? { scopeIds: options.scopeIds } : {}), ...(options.stage ? { stage: options.stage } : {}), ...(options.all ? { all: true } : {}) }, options.note);
+    console.log(JSON.stringify({ sourceId: source.id, released, next: released.length ? "Rerun the scope's stage (or compile-novel gaps) to attempt it again." : "Nothing was held for this selection." }, null, 2));
+    return released;
+  });
 }
 
 export async function compileNovelCommand(options: CompileNovelOptions): Promise<NovelCompilationRun | undefined> {

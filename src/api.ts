@@ -498,5 +498,7 @@ export { PiStageAgent, ScriptedStageAgent, type StageAgent, type StageAgentInput
 export { PipelineStore, type PipelineRun, type ScopeReceipt } from "./compiler/pipeline/store.js";
 export { checkPipelineClosure, type PipelineClosure } from "./compiler/pipeline/closure.js";
 export { loadPipelineView, measureView } from "./compiler/pipeline/view.js";
+export { releaseHeldScope, releaseHeldScopes } from "./compiler/pipeline/runner.js";
+export { releaseHeldScopesCommand } from "./commands/compile-novel.js";
 export { buildReferencePack, compareWithReference, loadReferencePack, verifyReferencePack, writeReferencePack } from "./compiler/reference-pack.js";
 export { goldSliceSchema, scoreGoldSlice, draftGoldSliceFromReference, type GoldSlice } from "./eval/gold-slice.js";

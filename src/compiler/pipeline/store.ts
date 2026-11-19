@@ -136,6 +136,8 @@ export const scopeReceiptSchema = z.object({
   startedAt: z.string().datetime(),
   finishedAt: z.string().datetime().optional(),
   error: z.string().max(4_000).optional(),
+  /** Host reviews that re-opened this scope after it was held (design 5.8 step 5). */
+  releases: z.array(z.object({ at: z.string().datetime(), attempts: z.number().int().nonnegative(), note: z.string().trim().min(1).max(1_000).optional() }).strict()).max(64).optional(),
 }).strict();
 export type ScopeReceipt = z.infer<typeof scopeReceiptSchema>;
 const receiptsDocumentSchema = z.object({ version: z.literal(PIPELINE_STORE_VERSION), receipts: z.array(scopeReceiptSchema) }).strict();

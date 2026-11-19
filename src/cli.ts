@@ -13,7 +13,7 @@ import { reviewScenesCommand } from "./commands/review-scenes.js";
 import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
 import { resumeCommand } from "./commands/resume.js";
 import { playCommand } from "./commands/play.js";
-import { compileNovelCommand } from "./commands/compile-novel.js";
+import { compileNovelCommand, releaseHeldScopesCommand } from "./commands/compile-novel.js";
 import { novelCutsCommand } from "./commands/novel-cuts.js";
 import { novelCompletenessCommand } from "./commands/novel-completeness.js";
 import { novelReferenceCompareCommand, novelReferenceExportCommand, novelReferenceVerifyCommand } from "./commands/novel-reference.js";
@@ -143,6 +143,16 @@ for (const phase of NOVEL_COMPILATION_PHASES) {
 }
 novelOptions(compileNovel.command("status").description("Read pipeline scopes by stage, held scopes, usage and cost per source KB, and run receipts; no models or writes"))
   .action(async (_options, child) => runCompileNovel(child, undefined, "status"));
+novelOptions(compileNovel.command("release").description("Host review: re-open held pipeline scopes so the next stage run or gap loop attempts them again (no model; the release is kept on the receipt)"))
+  .option("--scope <id...>", "held scope IDs (from compile-novel status)")
+  .option("--stage <stage>", "every held scope of one stage (census, observation, identity, scenes, world, roster, opening, gaps)")
+  .option("--all", "every held scope of this source")
+  .option("--note <text>", "what the host review found or changed")
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await releaseHeldScopesCommand({ root: rootFor(options), sourceId: options.source, ...(options.scope ? { scopeIds: options.scope } : {}), ...(options.stage ? { stage: options.stage } : {}),
+      ...(options.all ? { all: true } : {}), ...(options.note ? { note: options.note } : {}) });
+  });
 novelOptions(compileNovel.command("plan").description("Alias of status"))
   .action(async (_options, child) => runCompileNovel(child, undefined, "plan"));
 novelOptions(compileNovel.command("cuts").description("Read-only cut diagnostics: canonical timeline, per-cut admission tiers and first blocking causes (default: current workspace candidate)"))

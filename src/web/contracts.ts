@@ -423,6 +423,13 @@ export const preparationSnapshotSchema = z.object({
     majorTotal: z.number().int().nonnegative(), readyTotal: z.number().int().nonnegative(),
     evaluation: z.enum(["not-run", "blocked", "passed"]), roles: z.array(preparedPlayRoleSchema),
     issues: z.array(z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict()),
+    /** Per-cut admission coverage of the active revision's frozen manifest. */
+    admission: z.object({
+      bundleHash: z.string().regex(/^[a-f0-9]{64}$/), current: z.boolean(), minimumTier: z.string().min(1),
+      horizonIndex: z.number().int().min(-1), cuts: z.number().int().nonnegative(), admissibleCuts: z.number().int().nonnegative(),
+      scenes: z.number().int().nonnegative(), admissibleScenes: z.number().int().nonnegative(), admittedEntries: z.number().int().nonnegative(),
+      firstBlocking: z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict().optional(),
+    }).strict().optional(),
   }).strict().optional(),
   audit: compilerAuditSummarySchema.optional(),
   updatedAt: z.string().datetime({ offset: true }),
@@ -761,11 +768,40 @@ export const sourcePlayRoleListSchema = z.object({
   roles: z.array(sourcePlayRoleSchema),
 }).strict();
 
+export const sourceCutListSchema = z.object({
+  sourceId: z.string().min(1),
+  sourceTitle: z.string().min(1),
+  preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/),
+  minimumTier: z.string().min(1),
+  horizonIndex: z.number().int().min(-1),
+  cuts: z.array(z.object({
+    cutId: z.string().regex(/^[a-f0-9]{64}$/),
+    beforeEventId: z.string().min(1),
+    beforeEventTitle: z.string().min(1),
+    sceneId: z.string().min(1).optional(),
+    sceneIds: z.array(z.string().min(1)),
+    index: z.number().int().nonnegative(),
+    tier: z.string().min(1),
+    blocking: z.array(z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict()),
+    actors: z.array(z.object({
+      actorId: z.string().min(1),
+      canonicalName: z.string().min(1),
+      tier: z.string().min(1),
+      entryBasis: z.enum(["opening", "checkpoint", "derived"]),
+      admitted: z.boolean(),
+      entryCutHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+      issues: z.array(z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict()),
+    }).strict()),
+  }).strict()),
+}).strict();
+
 export const startFreshPlayRequestSchema = z.object({
   sourceId: z.string().min(1),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/),
   actorId: z.string().min(1),
   entryCutHash: z.string().regex(/^[a-f0-9]{64}$/),
+  /** Optional admitted cut; omitted requests start at the character's first entry as before. */
+  cutId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   title: z.string().trim().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(200),
 }).strict();
@@ -898,6 +934,13 @@ export const playOperationResultSchema = z.object({
   worldResponseEvents: z.array(z.object({ eventHash: z.string(), title: z.string(), possibilityId: z.string() }).strict()),
   reactionEvents: z.array(z.object({ eventHash: z.string(), title: z.string(), actorId: z.string() }).passthrough()),
   backgroundEvents: z.array(z.object({ eventHash: z.string(), title: z.string() }).strict()),
+  /** Canonical events the stepper resolved this turn. */
+  canonStepEvents: z.array(z.object({ eventHash: z.string(), title: z.string(), canonicalEventId: z.string() }).strict()).optional(),
+  /** Where the instance stands relative to canon (frozen-timeline worlds). */
+  canonStatus: z.object({
+    status: z.enum(["following", "diverged", "beyond-horizon", "exhausted"]),
+    position: z.number().int().nonnegative(), total: z.number().int().nonnegative(), horizonIndex: z.number().int().min(-1), diverged: z.boolean(),
+  }).strict().optional(),
 }).strict();
 
 export const sceneNarrationResultSchema = z.object({
@@ -1009,6 +1052,7 @@ export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSc
 export type SourcePlayRole = z.infer<typeof sourcePlayRoleSchema>;
 export type SourcePlayRoleList = z.infer<typeof sourcePlayRoleListSchema>;
 export type StartFreshPlayRequest = z.infer<typeof startFreshPlayRequestSchema>;
+export type SourceCutList = z.infer<typeof sourceCutListSchema>;
 export type StartFreshPlayResult = z.infer<typeof startFreshPlayResultSchema>;
 export type PlayableCharacter = z.infer<typeof playableCharacterSchema>;
 export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;

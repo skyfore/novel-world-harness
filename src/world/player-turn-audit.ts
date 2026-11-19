@@ -1,3 +1,4 @@
+import type { CanonStepResult } from "./canon-stepper.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentHash } from "./canonical.js";
@@ -71,6 +72,9 @@ export type PlayerTurnAudit = {
   /** Host-private deterministic actor/background selection and commit trace. */
   runtimeMoveTrace?: WorldMoveTrace;
   backgroundError?: string;
+  /** Canon stepper result for frozen-timeline worlds. */
+  canonStep?: CanonStepResult;
+  canonStepError?: string;
   /** Presentation-memory failure; committed world truth remains unaffected. */
   conversationError?: string;
   sessionError?: string;

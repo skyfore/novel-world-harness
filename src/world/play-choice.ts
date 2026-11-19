@@ -14,7 +14,8 @@ import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prepare.js";
 import { createWorldBranch } from "./instance.js";
 import { BranchStore } from "./store.js";
-import { certifiedEntryOptions, requireCertifiedEntry } from "./play-roles.js";
+import { certifiedEntryOptions, requireAdmittedSceneEntry, requireCertifiedEntry } from "./play-roles.js";
+import { minimumAdmissionTierFor } from "../config/load.js";
 import {
   deriveCharacterEntryOptions,
   deriveCharacterEntrySeed,
@@ -89,6 +90,8 @@ export async function choosePlayExperience(
     preparedCacheRoot?: string;
     expectedPreparedRevisionHash?: string;
     expectedEntryCutHash?: string;
+    /** Start at this admitted cut instead of the character's first entry. */
+    entryCutId?: string;
     sessionIdentity?: { id: string; conversationId: string };
     onInstanceLifecycle?: (event: PlayInstanceLifecycleEvent) => void;
   },
@@ -123,20 +126,30 @@ export async function choosePlayExperience(
   if (sourceId && (mode === "create" || (!instanceCatalog.instances.length && (options.createIfMissing ?? true)))) {
     const source = catalog.novels.find((novel) => novel.id === sourceId);
     if (!source) throw new Error(`Unknown novel source '${sourceId}'.`);
-    const prepared = await new PreparedNovelCache(root, options.preparedCacheRoot).loadFreshActive(source);
+    const minimumAdmissionTier = await minimumAdmissionTierFor(root);
+    const prepared = await new PreparedNovelCache(root, options.preparedCacheRoot).loadFreshActive(source, { minimumAdmissionTier });
     if (!prepared) throw new Error(`Novel '${source.title}' has no active prepared revision with character entry checkpoints.`);
     if (options.expectedPreparedRevisionHash && prepared.bundleHash !== options.expectedPreparedRevisionHash) {
       throw new Error(
         `Active prepared revision changed from ${options.expectedPreparedRevisionHash} to ${prepared.bundleHash}; refresh the frozen base before creating an instance.`,
       );
     }
-    const entryOptions = certifiedEntryOptions(prepared.bundle);
-    if (!entryOptions.length) {
-      throw new Error(`Novel '${source.title}' has no grounded embodied character entry with complete prior reader context. Recompile its opening and canonical scenes before play.`);
+    let selectedSeed;
+    if (options.entryCutId) {
+      // A scene entry names its cut and character explicitly; both are checked against admission.
+      const actor = options.character ? resolveSceneEntryActor(prepared.bundle, options.entryCutId, options.character) : undefined;
+      if (!actor) throw new Error(`Choose the character entering at cut ${options.entryCutId} with --character; list admitted entries with nwh compile-novel cuts.`);
+      createdActorId = actor;
+      selectedSeed = requireAdmittedSceneEntry(prepared.bundle, options.entryCutId, createdActorId, options.expectedEntryCutHash, minimumAdmissionTier);
+    } else {
+      const entryOptions = certifiedEntryOptions(prepared.bundle, minimumAdmissionTier);
+      if (!entryOptions.length) {
+        throw new Error(`Novel '${source.title}' has no grounded embodied character entry with complete prior reader context. Recompile its opening and canonical scenes before play.`);
+      }
+      createdActorId = await chooseCharacterEntry(entryOptions, options.character, source.title, ask);
+      if (!createdActorId) return undefined;
+      selectedSeed = requireCertifiedEntry(prepared.bundle, createdActorId, options.expectedEntryCutHash, minimumAdmissionTier);
     }
-    createdActorId = await chooseCharacterEntry(entryOptions, options.character, source.title, ask);
-    if (!createdActorId) return undefined;
-    const selectedSeed = requireCertifiedEntry(prepared.bundle, createdActorId, options.expectedEntryCutHash);
     createdReaderContext = selectedSeed.readerContext;
     const created = await createSourcePlayInstance(root, catalog, sourceId, {
       ...(mode === "create" ? { alwaysCreate: true } : {}),
@@ -145,6 +158,7 @@ export async function choosePlayExperience(
       expectedPreparedRevisionHash: prepared.bundleHash,
       entryActorId: createdActorId,
       expectedEntryCutHash: selectedSeed.cut.hash,
+      ...(options.entryCutId ? { entryCutId: options.entryCutId } : {}),
     });
     options.onInstanceLifecycle?.({
       type: "created",
@@ -337,6 +351,7 @@ export async function createSourcePlayInstance(
     entryActorId?: string;
     expectedPreparedRevisionHash?: string;
     expectedEntryCutHash?: string;
+    entryCutId?: string;
   } = {},
 ): Promise<PlayInstanceSummary> {
   const source = catalog.novels.find((novel) => novel.id === sourceId);
@@ -375,11 +390,40 @@ export async function createSourcePlayInstance(
     options.entryActorId,
     options.expectedPreparedRevisionHash,
     options.expectedEntryCutHash,
+    options.entryCutId ? { entryCutId: options.entryCutId } : {},
   );
   const refreshed = await inspectPlayExperience(root);
   const created = refreshed.instances.find((instance) => instance.branchId === branchId);
   if (!created) throw new Error(`Created instance '${branchId}' was not discoverable.`);
   return created;
+}
+
+/**
+ * Resolve a scene ID (or an exact cut ID) to the admitted cut of the active
+ * revision where that scene starts.
+ */
+export async function resolveSceneEntryCut(root: string, options: { source?: string; scene: string; preparedCacheRoot?: string }): Promise<{ sourceId: string; cutId: string }> {
+  const catalog = await inspectPlayExperience(root);
+  const source = options.source
+    ? catalog.novels.find((novel) => novel.id === options.source || novel.title === options.source)
+    : catalog.novels.length === 1 ? catalog.novels[0] : undefined;
+  if (!source) throw new Error(options.source ? `Unknown novel '${options.source}'.` : "Select the novel with --novel before choosing a scene.");
+  const prepared = await new PreparedNovelCache(root, options.preparedCacheRoot).loadFreshActive(source, { minimumAdmissionTier: await minimumAdmissionTierFor(root) });
+  const cuts = prepared?.bundle.admission?.cuts ?? [];
+  const cut = cuts.find((item) => item.cutId === options.scene) ?? cuts.find((item) => item.sceneIds.includes(options.scene));
+  if (!cut) throw new Error(`Scene '${options.scene}' has no cut in the active revision of '${source.title}'. List cuts with nwh compile-novel cuts --source ${source.id}.`);
+  return { sourceId: source.id, cutId: cut.cutId };
+}
+
+/** The admitted actor at a cut matching an ID or name (exact ID first). */
+function resolveSceneEntryActor(bundle: Parameters<typeof requireAdmittedSceneEntry>[0], cutId: string, requested: string): string | undefined {
+  const cut = bundle.admission?.cuts.find((item) => item.cutId === cutId);
+  const actors = cut?.actors.map((actor) => actor.actorId) ?? [];
+  if (actors.includes(requested)) return requested;
+  const normalized = requested.normalize("NFKC").trim().toLowerCase();
+  const matches = bundle.canonical.entities.filter((entity) => actors.includes(entity.id)
+    && [entity.canonicalName, ...entity.aliases].some((name) => name.normalize("NFKC").trim().toLowerCase() === normalized));
+  return matches.length === 1 ? matches[0]!.id : undefined;
 }
 
 async function chooseCharacterEntry(

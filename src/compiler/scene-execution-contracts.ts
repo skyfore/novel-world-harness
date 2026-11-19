@@ -4,12 +4,13 @@ import { resolveActionInvocation } from "../world/action-ontology.js";
 import { contentHash } from "../world/canonical.js";
 import { executeSceneEvent } from "./scene-state.js";
 import { deriveEntryCut } from "../world/entry-cut.js";
+import { openingTimelineIndex } from "../world/canon-timeline.js";
 import { validateEffectObligations } from "../world/effect-obligations.js";
 import { predicateSchema, type CanonicalEvent, type ValidationIssue } from "../world/model.js";
 import { applyStateDelta, DEFAULT_STATE_FIELDS, emptyWorldState, StateSchemaRegistry, evaluatePredicateTruth } from "../world/state.js";
 import { findSpatialRoute, resolveActiveSpatialRelations } from "../world/spatial-ontology.js";
 import { timeAdvanceInDays } from "../world/time.js";
-import { validateSceneOccurrenceCatalog } from "../world/scene-occurrence.js";
+import { sceneLocationIssues, validateSceneOccurrenceCatalog } from "../world/scene-occurrence.js";
 import { buildPreparedClosure } from "./closure.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { majorRoleCandidates, type RoleRoster } from "./role-roster.js";
@@ -27,7 +28,7 @@ export function buildSceneExecutionContracts(bundle: PreparedNovelBundle, roster
   const canonical = bundle.canonical, graph = buildPreparedClosure(bundle);
   const entities = new Map(canonical.entities.map((entity) => [entity.id, entity])), events = new Map(canonical.events.map((event) => [event.id, event]));
   const schemas = new Map(canonical.actionSchemas.map((schema) => [schema.id, schema]));
-  const issues = validateSceneOccurrenceCatalog({ entities, events, scenes: canonical.sceneOccurrences });
+  const issues = [...validateSceneOccurrenceCatalog({ entities, events, scenes: canonical.sceneOccurrences }), ...sceneLocationIssues(canonical.sceneOccurrences)];
   const major = new Set(roster ? majorRoleCandidates(roster).flatMap((role) => role.entityId ? [role.entityId] : []) : []);
   issues.push(...validateEventExecutions(canonical.eventExecutions ?? [], { events, entities, actionSchemas: schemas, processTemplates: new Map(canonical.processTemplates.map(template => [template.id, template])), participations: canonical.eventParticipations }));
   const actual = applyEventExecutions(canonical.events, canonical.eventExecutions ?? []).filter((event) => event.narrativeContext?.mode !== "hypothetical");
@@ -105,7 +106,8 @@ export function validateSceneTravel(bundle: PreparedNovelBundle, event: Canonica
   const checkpoint = event.characterEntryCheckpoints?.find((cut) => cut.actorId === actorId && cut.projectionSeed);
   const cut = deriveEntryCut({ events: canonical.events, relations: canonical.eventRelations,
     beforeEventId: event.id, storyTime: event.storyTime, baselineEventId: opening.checkpoint?.beforeCanonicalEventId,
-    baselineTime: opening.checkpoint?.storyTime, completeCheckpoint: Boolean(checkpoint) });
+    baselineTime: opening.checkpoint?.storyTime, completeCheckpoint: Boolean(checkpoint),
+    ...(canonical.timeline ? { timeline: canonical.timeline, baselineIndex: openingTimelineIndex(canonical.timeline, opening) } : {}) });
   if (cut.issues.length) return { issues: cut.issues, relationIds: [] };
   try {
     const entities = new Map(canonical.entities.map((entity) => [entity.id, entity]));

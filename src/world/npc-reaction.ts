@@ -125,6 +125,8 @@ export type NpcReactionReasoningInput = Readonly<{
   repetitionDepth: number;
   /** Complete actor-perceived archive for read-only related-message retrieval. */
   relatedPerceivedMessages: readonly NpcPerceivedMessage[];
+  /** This character's own earlier source lines before the read horizon: voice only, never facts. */
+  voiceReferences?: ReadonlyArray<{ text: string }>;
 }>;
 
 export type NpcReactionReasoner = (
@@ -164,6 +166,8 @@ export async function respondToNpcInteractions(input: {
   playerCandidate: PlayerActionCandidate;
   triggerEvent: CommittedEvent;
   reasoner: NpcReactionReasoner;
+  /** Optional host provider of an NPC's voice references at a committed head. */
+  voiceReferences?: (npcId: string, atCommit: string) => Promise<ReadonlyArray<{ text: string }>>;
 }): Promise<NpcReactionBatchResult> {
   const candidate = playerActionCandidateSchema.parse(input.playerCandidate);
   const interaction = candidate.intent?.controlledAct?.interaction;
@@ -214,6 +218,7 @@ async function respondOneNpc(input: {
   interaction: PlayerInteraction;
   atCommit: string;
   reasoner: NpcReactionReasoner;
+  voiceReferences?: (npcId: string, atCommit: string) => Promise<ReadonlyArray<{ text: string }>>;
 }): Promise<{ newHead: string; event: NpcReactionEvent } | null> {
   const [worldContext, state, history, actorContext, development] = await Promise.all([
     input.engine.contextForCommit(input.atCommit),
@@ -290,6 +295,7 @@ async function respondOneNpc(input: {
     ? modelVisibleRelationshipOntology(development.model, (entityId) => visibleNames.get(entityId))
     : undefined;
   const repetitionDepth = npcExchangeStagnationDepth(history, input.playerId, input.npcId);
+  const voiceReferences = input.voiceReferences ? await input.voiceReferences(input.npcId, input.atCommit) : [];
   const rawProposal = await withDecisionScope({ branchId: input.branchId, headCommitId: input.atCommit, actorId: input.npcId }, () => input.reasoner(deepFreeze({
     npc: { id: npc.id, name: npc.canonicalName },
     player: { id: input.playerId, name: playerIdentity.name },
@@ -330,6 +336,7 @@ async function respondOneNpc(input: {
     repetitionDepth,
     recentPerceivedMessages: perceivedMessages.slice(-10),
     relatedPerceivedMessages: perceivedMessages,
+    ...(voiceReferences.length ? { voiceReferences: voiceReferences.map((reference) => ({ text: reference.text })) } : {}),
   } satisfies NpcReactionReasoningInput)));
   const reaction = npcReactionCandidateSchema.parse(structuredClone(rawProposal));
   if (reaction.interaction) {

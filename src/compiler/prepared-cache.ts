@@ -30,6 +30,10 @@ import { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore } from 
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
+import { buildCanonTimeline, canonTimelineSchema } from "../world/canon-timeline.js";
+import { buildVoiceIndex, voiceIndexSchema } from "../world/voice-references.js";
+import { admissionManifestSchema, type AdmissionManifest, type AdmissionTier } from "./cut-admission-schema.js";
+import { assertPlayableRevision, buildAdmissionManifest } from "./cut-admission.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import {
   InitialWorldStore,
@@ -152,6 +156,10 @@ const preparedCanonicalSchema = z.object({
   goals: z.array(characterGoalSchema),
   models: z.array(characterModelSchema),
   possibilities: z.array(possibilityTemplateSchema),
+  /** Host-derived chronology frozen with the revision; absent on bundles prepared before timelines. */
+  timeline: canonTimelineSchema.optional(),
+  /** Character-attributed source quotations (pointers) used as NPC voice references. */
+  voiceIndex: voiceIndexSchema.optional(),
 }).strict();
 
 const preparedCompilerSnapshotSchema = z.object({
@@ -186,6 +194,8 @@ export const preparedNovelBundleSchema = z.object({
   lineage: preparedRevisionLineageSchema.optional(),
   compilerSnapshot: preparedCompilerSnapshotSchema,
   readiness: novelClosureAssessmentSchema.nullable().default(null),
+  /** Per-cut admission frozen at publication; play may start at an admitted cut without full-novel certification. */
+  admission: admissionManifestSchema.nullable().default(null),
 }).strict();
 
 export type PreparedNovelBundle = z.infer<typeof preparedNovelBundleSchema>;
@@ -453,11 +463,11 @@ export class PreparedNovelCache {
     return this.freshnessIssue(cached.bundle);
   }
 
-  /** Fresh instances use the last certified publication, independently of rebuild staging. */
-  async loadFreshActive(source: SourceDocument): Promise<ActivePreparedNovel | null> {
+  /** Fresh instances use the last certified or cut-admitted publication, independently of rebuild staging. */
+  async loadFreshActive(source: SourceDocument, options: { minimumAdmissionTier?: AdmissionTier } = {}): Promise<ActivePreparedNovel | null> {
     const active = await this.loadActive(source);
     if (!active) return null;
-    assertPreparedReadiness(active.bundle);
+    assertPlayableRevision(active.bundle, options.minimumAdmissionTier);
     return active;
   }
 
@@ -479,7 +489,7 @@ export class PreparedNovelCache {
       };
     }
 
-    assertPreparedReadiness(cached.bundle);
+    assertPlayableRevision(cached.bundle);
     const compatibility = await this.assertWorkspaceCanMaterialize(cached.bundle);
     if (!compatibility.compatible) {
       return {
@@ -526,6 +536,26 @@ export class PreparedNovelCache {
   async inspectRepairCandidate(source: SourceDocument) {
     const { bundle, baselineIssues } = await this.repairCandidateSnapshot(source);
     return { bundle, baselineIssues, assessment: await assessNovelClosure(this.workspaceRoot, bundle, baselineIssues) };
+  }
+
+  /**
+   * Freeze the candidate with its closure assessment and per-cut admission
+   * manifest. Publishable when fully certified or when at least one cut admits
+   * an entry at the minimum tier; activation stays a separate step.
+   */
+  async admitCandidate(source: SourceDocument, options: { lineage?: PreparedRevisionLineage; minimumAdmissionTier?: AdmissionTier } = {}): Promise<PreparedCacheResult & { admission: AdmissionManifest }> {
+    if (options.lineage && !await this.loadRevision(source, options.lineage.parentBundleHash, { allowIncompatible: true })) {
+      throw new Error(`Admission parent revision ${options.lineage.parentBundleHash} is missing.`);
+    }
+    const identity = await sourceIdentity(this.workspaceRoot, source), baselineIssues: ValidationIssue[] = [];
+    const candidate = await this.buildBundle(source, identity, { allowSemanticDebtForRollback: true, ...(options.lineage ? { lineage: options.lineage } : {}) }, error => {
+      baselineIssues.push({ code: "SOURCE_ISOLATED_BASELINE_INVALID", message: error.message });
+    });
+    const assessed = preparedNovelBundleSchema.parse({ ...candidate, readiness: await assessNovelClosure(this.workspaceRoot, candidate, baselineIssues) });
+    const admission = await buildAdmissionManifest(assessed, { inputIssues: baselineIssues });
+    const bundle = preparedNovelBundleSchema.parse({ ...assessed, admission });
+    assertPlayableRevision(bundle, options.minimumAdmissionTier);
+    return { ...await this.publishBundle(source, identity, bundle, false), admission };
   }
 
   /** Freeze reviewable compiler output while keeping public Play activation unchanged. */
@@ -778,7 +808,7 @@ export class PreparedNovelCache {
     await this.materialize(checkpoint.bundle, true);
   }
 
-  async activate(source: SourceDocument, bundleHash: string, options: { allowIncompatibleRollback?: boolean } = {}): Promise<PreparedCacheResult> {
+  async activate(source: SourceDocument, bundleHash: string, options: { allowIncompatibleRollback?: boolean; minimumAdmissionTier?: AdmissionTier } = {}): Promise<PreparedCacheResult> {
     digestSchema.parse(bundleHash);
     const identity = await sourceIdentity(this.workspaceRoot, source);
     await this.ensureRevisionLayout(identity.contentMd5, false);
@@ -786,7 +816,7 @@ export class PreparedNovelCache {
     const cached = await this.readCached(identity.contentMd5, bundleHash);
     if (!cached) throw new Error(`Prepared cache revision not found: ${identity.contentMd5}@${bundleHash}`);
     assertSourceIdentity(cached.bundle, identity);
-    assertPreparedReadiness(cached.bundle);
+    assertPlayableRevision(cached.bundle, options.minimumAdmissionTier);
     const pending = await new ProposalStore(this.workspaceRoot).list("pending", source.id);
     const registeredSource = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(source.id);
     const pendingTitle = registeredSource?.pendingTitleProposal ? 1 : 0;
@@ -973,7 +1003,18 @@ export class PreparedNovelCache {
         .filter((batch) => batch.purpose !== "boundary-calibration")
         .map((batch) => batch.id)
         .sort(),
-      canonical: preparedCanonical,
+      canonical: {
+        ...preparedCanonical,
+        timeline: buildCanonTimeline({
+          sourceId: source.id,
+          events: preparedCanonical.events,
+          relations: preparedCanonical.eventRelations,
+          eventResolutions,
+          annotations,
+          structure,
+        }),
+        voiceIndex: buildVoiceIndex({ sourceId: source.id, annotations, entityResolutions, entities: preparedCanonical.entities }),
+      },
       compilerSnapshot: {
         ...(upstreamRepairCheckpoint ? { upstreamRepairCheckpoint } : {}),
         ...(upstreamRepairJournal.length ? { upstreamRepairJournal } : {}),

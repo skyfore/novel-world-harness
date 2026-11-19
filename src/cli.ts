@@ -26,6 +26,8 @@ import { migrateLegacyAcquisitions } from "./compiler/acquisition-migration.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
 import { compileNovelCommand } from "./commands/compile-novel.js";
+import { novelAdmitCommand, novelCutsCommand } from "./commands/novel-cuts.js";
+import { novelProbeCommand } from "./commands/novel-probe.js";
 import { compileNovelWithLoop } from "./commands/compile-novel-loop.js";
 import { NOVEL_COMPILATION_PHASES, type NovelCompilationPhase } from "./workflow/novel-compilation.js";
 import { WorkspaceOperationLock } from "./util/workspace-lock.js";
@@ -50,7 +52,7 @@ import {
   worldSnapshotCommand,
   worldValidateCommand,
 } from "./commands/world.js";
-import { choosePlayExperience } from "./world/play-choice.js";
+import { resolveSceneEntryCut, choosePlayExperience } from "./world/play-choice.js";
 import { playSceneRequestForEntry } from "./world/play-opening.js";
 import { askUserQuestion } from "./util/ask-user-question.js";
 import { parseWebPort, webCommand } from "./commands/web.js";
@@ -150,6 +152,30 @@ novelOptions(compileNovel.command("status").description("Read current source/pha
   .action(async (_options, child) => runCompileNovel(child, undefined, "status"));
 novelOptions(compileNovel.command("plan").description("Discover the complete remaining phase/dependency handoff and exact recovery conditions without writes or model calls"))
   .action(async (_options, child) => runCompileNovel(child, undefined, "plan"));
+novelOptions(compileNovel.command("cuts").description("Read-only cut diagnostics: canonical timeline, per-cut admission tiers and first blocking causes (default: current workspace candidate)"))
+  .option("--revision <hash>", "inspect an exact cached prepared revision instead of the workspace candidate")
+  .option("--no-admission", "print only the timeline")
+  .option("--no-probe", "skip the deterministic entry probes (cut tiers stop at replayable)")
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await novelCutsCommand({ root: rootFor(options), sourceId: options.source, revision: options.revision, admission: options.admission, probe: options.probe,
+      configPath: options.config ? path.resolve(options.config) : undefined });
+  });
+novelOptions(compileNovel.command("probe").description("Act probe: scripted player turns on every admitted cut x actor of the active revision (fake reasoners by default; --live uses the configured model)"))
+  .option("--cut <id>", "probe one admitted cut")
+  .option("--live", "use the configured Pi model instead of deterministic fake reasoners")
+  .option("--turns <n>", "turns per intent class (1-3)", (value) => Number.parseInt(value, 10))
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await withCompilerSignals(signal => novelProbeCommand({ root: rootFor(options), sourceId: options.source, cutId: options.cut, live: Boolean(options.live), turns: options.turns,
+      configPath: options.config ? path.resolve(options.config) : undefined, model: options.model, signal }));
+  });
+novelOptions(compileNovel.command("admit").description("Freeze the current candidate with per-cut admission; publishable when certified or when a cut admits an entry at play.minimumAdmissionTier"))
+  .option("--activate", "activate the admitted revision for fresh play")
+  .action(async (_options, child) => {
+    const options = { ...program.opts(), ...compileNovel.opts(), ...child.opts() };
+    await novelAdmitCommand({ root: rootFor(options), sourceId: options.source, configPath: options.config ? path.resolve(options.config) : undefined, activate: Boolean(options.activate) });
+  });
 
 const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and run bounded host-reviewed corrections");
 program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")
@@ -988,6 +1014,7 @@ program
   .option("--branch <id>", "playable instance to enter")
   .option("--character <id-or-name>", "character to inhabit")
   .option("--novel <id-or-title>", "registered novel source to enter")
+  .option("--scene <scene-id-or-cut-id>", "start a fresh instance at an admitted scene cut (requires --character)")
   .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
@@ -998,8 +1025,15 @@ program
   .description("open the local-first terminal session")
   .action(async (options) => {
     const globalOptions = program.opts();
-    const explicitlySelectedWorld = Boolean(options.branch || options.character || options.novel);
-    if (explicitlySelectedWorld) {
+    const explicitlySelectedWorld = Boolean(options.branch || options.character || options.novel || options.scene);
+    if (options.scene) {
+      if (!options.character) throw new Error("--scene requires --character: choose who enters at that scene.");
+      const { sourceId, cutId } = await resolveSceneEntryCut(rootFor(options), { scene: options.scene, ...(options.novel ? { source: options.novel } : {}) });
+      await choosePlayExperience(rootFor(options), {
+        source: sourceId, character: options.character, entryCutId: cutId,
+        preferActiveSource: false, preferSavedCharacter: false, instanceMode: "create",
+      }, askUserQuestion);
+    } else if (explicitlySelectedWorld) {
       await choosePlayExperience(rootFor(options), {
         ...(options.branch ? { branchId: options.branch } : {}),
         ...(options.character ? { character: options.character } : {}),

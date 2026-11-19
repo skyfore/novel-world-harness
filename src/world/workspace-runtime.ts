@@ -1,12 +1,14 @@
 import { ActorModelStore, deterministicActorProposalSource, type ActorProposalSource } from "./actors.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { canonicalEventToPossibility } from "./canon-runtime.js";
+import { CANON_POSSIBILITY_WINDOW, canonPositionFor, expandTimelineAliases } from "./canon-timeline.js";
+import { branchCanonResolution } from "./read-horizon.js";
 import { loadWorldContext, type ScopedWorldArtifacts } from "./context.js";
 import { WorldEngine } from "./engine.js";
 import { PossibilityTemplateStore } from "./possibility-model.js";
 import { WorldRuntime, type NarrativeRender, type PossibilitySource } from "./runtime.js";
 import { contextContainsGroundedArtifacts, evidenceBelongsExclusivelyToSource, inferLegacyBranchSourceId } from "./source-scope.js";
-import type { EvidenceRef } from "./model.js";
+import type { CanonicalEvent, EvidenceRef } from "./model.js";
 import { modelActorProposalSource, type ActorReasoner } from "./model-actor-policy.js";
 
 export type WorkspaceWorld = {
@@ -60,12 +62,14 @@ export async function openWorkspaceWorld(
       .map((template) => ({ ...template, branchId, evaluatedAtCommit: commitId }));
     const events = [...(commitContext.events?.values() ?? [])]
       .filter(belongsToActiveWorld);
-    const canonical = events.map((event) => canonicalEventToPossibility(
-      event,
-      branchId,
-      commitId,
-      commitContext.eventRelations ?? [],
-    ));
+    const canonical = commitContext.timeline
+      ? await windowedCanonicalPossibilities(engine, commitContext, events, branchId, commitId)
+      : events.map((event) => canonicalEventToPossibility(
+        event,
+        branchId,
+        commitId,
+        commitContext.eventRelations ?? [],
+      ));
     const byId = new Map(canonical.map((possibility) => [possibility.id, possibility]));
     for (const template of templates) {
       if (template.id.startsWith("canon-")) {
@@ -96,4 +100,32 @@ export async function openWorkspaceWorld(
     actorProposalSource,
   );
   return { engine, runtime, actorModels, possibilityTemplates };
+}
+
+/**
+ * Canonical possibilities on a frozen timeline: the forward window
+ * [position, position + W) bounded by the admission horizon, plus passed but
+ * unresolved events so their necessary successors are invalidated.
+ */
+async function windowedCanonicalPossibilities(
+  engine: WorldEngine,
+  context: Awaited<ReturnType<WorldEngine["contextForCommit"]>>,
+  events: readonly CanonicalEvent[],
+  branchId: string,
+  commitId: string,
+  window = CANON_POSSIBILITY_WINDOW,
+) {
+  const timeline = context.timeline!;
+  const byId = new Map(events.map((event) => [event.id, event]));
+  const resolution = branchCanonResolution((await engine.projections.project(commitId)).history.map((entry) => entry.event));
+  const settled = expandTimelineAliases(timeline, [...resolution.resolved, ...resolution.superseded]);
+  const position = canonPositionFor(timeline, settled);
+  const horizon = Math.min(timeline.entries.length, context.canonHorizonIndex ?? timeline.entries.length);
+  const upper = Math.min(position + window, horizon);
+  return timeline.entries
+    .filter((entry) => !settled.has(entry.eventId) && (entry.index < position || entry.index < upper))
+    .flatMap((entry) => {
+      const event = byId.get(entry.eventId);
+      return event ? [canonicalEventToPossibility(event, branchId, commitId, context.eventRelations ?? [], entry.index)] : [];
+    });
 }

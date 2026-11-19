@@ -492,7 +492,8 @@ it("commits an exact unresolved identity successor and entity quarantine togethe
   const inspection = await cache.inspectRepairCandidate(f.source.source);
   expect(inspection.baselineIssues[0]?.message).toContain("ENTITY_IDENTITY_CONSUMPTION_BLOCKED");
   expect(inspection.bundle.canonical.initialWorld).toEqual(opening);
-  expect(inspection.assessment.issues).toContainEqual(inspection.baselineIssues[0]);
+  // Aggregation attributes the retained issue to its node (the frozen opening) without altering it.
+  expect(inspection.assessment.issues).toContainEqual({ ...inspection.baselineIssues[0]!, path: `initial/${inspection.bundle.source.id}` });
   expect(inspection.assessment.entryReady).toBe(false); expect(inspection.assessment.fullNovelReady).toBe(false);
   for (const action of [() => cache.candidateSnapshot(f.source.source), () => cache.archiveCandidate(f.source.source), () => cache.certifyCandidate(f.source.source)])
     await expect(action()).rejects.toThrow("ENTITY_IDENTITY_CONSUMPTION_BLOCKED");

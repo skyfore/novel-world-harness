@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { admissionTierSchema, DEFAULT_MINIMUM_ADMISSION_TIER } from "../compiler/cut-admission-schema.js";
 
 const thinkingLevelSchema = z
   .enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"])
@@ -45,6 +46,13 @@ export const configSchema = z
         defaultProfile: z.string().min(1),
         profiles: z.record(z.string(), llmProfileSchema),
         routing: routingSchema,
+      })
+      .strict()
+      .optional(),
+    play: z
+      .object({
+        /** Lowest per-cut admission tier a fresh playthrough may start from (D1: enterable). */
+        minimumAdmissionTier: admissionTierSchema.default(DEFAULT_MINIMUM_ADMISSION_TIER),
       })
       .strict()
       .optional(),

@@ -22,6 +22,11 @@ function contextFields(values: Record<string, StateValue>, registry: StateSchema
   }).map(([field]) => field).sort();
 }
 
+/** Operational entry-context fields (location, plan, ...) with a usable value. */
+export function entryContextFields(values: Record<string, StateValue>, registry = new StateSchemaRegistry(DEFAULT_STATE_FIELDS)): string[] {
+  return contextFields(values, registry);
+}
+
 /** Conservative regression comparison when no catalog is available. This
  * never authorizes an entry; proposal/entry boundaries perform full validation. */
 export function entryDeltaRetainsContext(delta: StateDelta, actorId: string): boolean {

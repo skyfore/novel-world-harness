@@ -4,12 +4,15 @@ import { contentHash } from "../world/canonical.js";
 import { inspectCompilerStatus } from "./status.js";
 import { UpstreamRepairLedger } from "./upstream-repair-ledger.js";
 import { NovelCompilationRunStore, NOVEL_COMPILATION_PHASES, type NovelCompilationRun } from "../workflow/novel-compilation.js";
+import { PreparedNovelCache } from "./prepared-cache.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
+import type { AdmissionManifest } from "./cut-admission-schema.js";
 
 type SourceStatus = Awaited<ReturnType<typeof inspectCompilerStatus>>["sources"][number];
 type UpstreamState = Awaited<ReturnType<UpstreamRepairLedger["inspect"]>>;
 export type CompilationHandoffTask = {
   id: string;
-  kind: "identity-consumers" | "source-audit" | "upstream-repair" | "semantic-review" | "inspection" | "phase";
+  kind: "identity-consumers" | "source-audit" | "upstream-repair" | "semantic-review" | "inspection" | "phase" | "horizon";
   state: "blocked" | "available" | "pending" | "recorded";
   dependsOn: string[];
   refs: string[];
@@ -17,14 +20,46 @@ export type CompilationHandoffTask = {
   command: { program: "nwh"; args: string[] };
   execution: "existing-phase" | "inspect-only";
   resumeCondition: string;
+  /** Horizon tasks: the first blocked cut's blocking causes, grouped by code with their nodes. */
+  groups?: Array<{ code: string; nodes: string[]; count: number }>;
 };
+
+/** The active revision's frozen admission, when present, orders repair by playable reach. */
+export type HandoffAdmission = { bundleHash: string; manifest: Pick<AdmissionManifest, "horizonIndex" | "cuts"> };
+
+/**
+ * Repair that moves the horizon comes first: the first blocked cut after the
+ * contiguous replayable run, its blocking causes grouped by code, and how many
+ * cuts wait behind it. Diagnostic only; the fix still goes through its stage.
+ */
+export function horizonTask(source: { sourceId: string }, admission: HandoffAdmission, command: (...args: string[]) => CompilationHandoffTask["command"]): CompilationHandoffTask | undefined {
+  const cuts = [...admission.manifest.cuts].sort((a, b) => a.index - b.index);
+  const blocked = cuts.find((cut) => cut.tier === "blocked" && cut.index > admission.manifest.horizonIndex) ?? cuts.find((cut) => cut.tier === "blocked");
+  if (!blocked) return undefined;
+  const groups = new Map<string, Set<string>>(), counts = new Map<string, number>();
+  for (const issue of blocked.blocking) {
+    groups.set(issue.code, (groups.get(issue.code) ?? new Set()).add(issue.path ?? "unattributed"));
+    counts.set(issue.code, (counts.get(issue.code) ?? 0) + 1);
+  }
+  const behind = cuts.filter((cut) => cut.tier === "blocked" && cut.index >= blocked.index).length;
+  return {
+    id: `horizon:${blocked.cutId}`, kind: "horizon", state: "blocked", dependsOn: [],
+    refs: [admission.bundleHash, blocked.cutId, ...new Set(blocked.blocking.flatMap((issue) => issue.path ? [issue.path] : []))],
+    reason: `Horizon at timeline index ${admission.manifest.horizonIndex}; the first blocked cut (before ${blocked.beforeEventId}${blocked.sceneId ? `, scene ${blocked.sceneId}` : ""}) holds back ${behind} cut(s): ${blocked.blocking.slice(0, 3).map((issue) => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}`).join("; ")}.`,
+    command: command("compile-novel", "cuts"), execution: "inspect-only",
+    resumeCondition: `Repair the grouped causes for ${source.sourceId} through their original compiler stages (source evidence, typed artifacts, accounting), then re-admit with compile-novel admit. Fixing this cut first extends the playable horizon; later cuts may share the same causes.`,
+    groups: [...groups].map(([code, nodes]) => ({ code, nodes: [...nodes].sort(), count: counts.get(code)! })),
+  };
+}
 
 /** Scheduling projection only. Every execution still enters its original host
  * verifier, ledger, budget and finish protocol. Historical receipts never grant
  * permission to skip a validator or reopen a consumed model invocation. */
-export function compilationHandoff(root: string, source: SourceStatus, run: NovelCompilationRun | null, upstream: UpstreamState) {
+export function compilationHandoff(root: string, source: SourceStatus, run: NovelCompilationRun | null, upstream: UpstreamState, admission?: HandoffAdmission) {
   const tasks: CompilationHandoffTask[] = [], sid = source.sourceId;
   const command = (...args: string[]) => ({ program: "nwh" as const, args: ["--root", path.resolve(root), ...args, "--source", sid] });
+  const horizon = admission ? horizonTask(source, admission, command) : undefined;
+  if (horizon) tasks.push(horizon);
   const currentWork = source.roleReviewWork.filter(p => p.current);
   const openPlans = new Set(currentWork.filter(p => p.openQuestions || p.blockedAudits).map(p => p.planHash));
   const roleDependencies: string[] = [];
@@ -119,7 +154,7 @@ export function compilationHandoff(root: string, source: SourceStatus, run: Nove
   }
   return { version: 1 as const, policy: "compilation-handoff/v1", authority: "diagnostic-only" as const,
     workspace: path.resolve(root), sourceId: sid, sourceSha256: source.sourceSha256,
-    inputHash: contentHash({ workspace: path.resolve(root), source, run, upstreamHead: upstream.records.at(-1)?.hash ?? null }),
+    inputHash: contentHash({ workspace: path.resolve(root), source, run, upstreamHead: upstream.records.at(-1)?.hash ?? null, ...(admission ? { admissionBundleHash: admission.bundleHash } : {}) }),
     batchExecution: { completed: source.completedBatches, total: source.totalBatches,
       checkpointComplete: source.batchReviewComplete, finishVerification: "requires-current-host-verification" },
     delivery: { inspection: source.candidates.inspection,
@@ -138,9 +173,18 @@ export function compilationHandoff(root: string, source: SourceStatus, run: Nove
 /** Reads existing stores only; safe for status and planning before model work. */
 export async function inspectCompilationHandoff(root: string, sourceId: string, source?: SourceStatus, run?: NovelCompilationRun | null) {
   const current = source ?? (await inspectCompilerStatus(root, sourceId)).sources[0]!;
-  const [saved, upstream] = await Promise.all([run === undefined ? new NovelCompilationRunStore(root).read(sourceId) : run,
-    new UpstreamRepairLedger(root, sourceId).inspect()]);
-  return compilationHandoff(root, current, saved, upstream);
+  const [saved, upstream, admission] = await Promise.all([run === undefined ? new NovelCompilationRunStore(root).read(sourceId) : run,
+    new UpstreamRepairLedger(root, sourceId).inspect(), activeAdmission(root, sourceId)]);
+  return compilationHandoff(root, current, saved, upstream, admission);
+}
+
+/** The active revision's frozen admission manifest, read without migration, probes or model calls. */
+async function activeAdmission(root: string, sourceId: string): Promise<HandoffAdmission | undefined> {
+  try {
+    const source = await WorkspaceStore.openReadOnly(root).getSource(sourceId);
+    const active = source ? await new PreparedNovelCache(root).loadActive(source) : null;
+    return active?.bundle.admission ? { bundleHash: active.bundleHash, manifest: active.bundle.admission } : undefined;
+  } catch { return undefined; }
 }
 
 /** Before another role model session, expose the exact dependency rather than

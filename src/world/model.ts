@@ -1152,6 +1152,8 @@ export type CanonicalAdaptation = z.infer<typeof canonicalAdaptationSchema>;
 export const entryKnowledgeHistorySchema = z.object({
   version: z.literal(1), actorId: idSchema, beforeCanonicalEventId: idSchema,
   cutHash: z.string().regex(/^[a-f0-9]{64}$/),
+  /** A derived scene entry has no compiled checkpoint; its experience is exactly the canonical prefix. */
+  basis: z.literal("derived-scene").optional(),
 }).strict();
 export type EntryKnowledgeHistory = z.infer<typeof entryKnowledgeHistorySchema>;
 export const entryProjectionSeedSchema = z.object({
@@ -1231,6 +1233,8 @@ export const progressChannelSchema = z.enum([
   "thread",
   "time-pressure",
   "consequence",
+  /** A canonical event happened in this branch: branch truth even without typed effects. */
+  "occurrence",
 ]);
 export type ProgressChannel = z.infer<typeof progressChannelSchema>;
 
@@ -1306,9 +1310,14 @@ export const progressCertificateSchema = z.object({
   messageCount: z.number().int().positive().max(32).optional(),
   timeAdvanced: z.boolean(),
   sceneTransition: sceneTransitionSchema.optional(),
+  /** Present (true) only when this commit realizes a not-yet-realized canonical event. */
+  canonicalOccurrence: z.literal(true).optional(),
   channels: z.array(progressChannelSchema),
 }).strict().superRefine((certificate, ctx) => {
   const uniqueChannels = new Set(certificate.channels);
+  if (Boolean(certificate.canonicalOccurrence) !== uniqueChannels.has("occurrence")) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "occurrence channel must exactly match canonicalOccurrence" });
+  }
   if (uniqueChannels.size !== certificate.channels.length) {
     ctx.addIssue({ code: "custom", path: ["channels"], message: "Progress certificate channels must be unique" });
   }
@@ -1822,6 +1831,8 @@ export const branchSchema = z.object({
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   /** Character whose grounded checkpoint seeded a fresh source-based instance. */
   entryActorId: idSchema.optional(),
+  /** Admitted cut (the world just before one canonical event) this instance started from. */
+  entryCutId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   createdAt: z.string().datetime({ offset: true }).optional(),
   parentBranchId: idSchema.optional(),
   forkCommitId: idSchema.optional(),
@@ -1840,6 +1851,9 @@ export const branchSchema = z.object({
       path: ["entryActorId"],
       message: "An entry actor belongs only to a fresh source-based instance with a frozen prepared revision",
     });
+  }
+  if (value.entryCutId && !value.entryActorId) {
+    ctx.addIssue({ code: "custom", path: ["entryCutId"], message: "An entry cut requires the entry actor that started there" });
   }
 });
 export type Branch = z.infer<typeof branchSchema>;
@@ -1894,6 +1908,8 @@ export const possibilityBaseSchema = z
     sourceActorId: idSchema.optional(),
     sourceGoalId: idSchema.optional(),
     canonicalEventId: idSchema.optional(),
+    /** Host timeline index of the canonical event; replaces story-time comparison for ordered canon. */
+    canonicalOrder: z.number().int().nonnegative().optional(),
     /** Source-support diagnostic only; never a pressure or ranking input. */
     sourceConfidence: z.number().min(0).max(1).optional(),
     /** Legacy declaration retained for artifact compatibility; host scheduler derives pressure independently. */
@@ -2006,5 +2022,5 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
-export const WORLD_SCHEMA_VERSION = 3;
-export const WORLD_ENGINE_VERSION = "0.36.0";
+export const WORLD_SCHEMA_VERSION = 4;
+export const WORLD_ENGINE_VERSION = "0.37.0";

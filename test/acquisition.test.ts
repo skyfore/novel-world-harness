@@ -138,6 +138,8 @@ it.each(scenes.flatMap(scene => [false, true].map(repair => ({ ...scene, repair 
   const { acquisitionId: _removed, ...stripped } = received;
   expect((await engine.commitProposal({ ...proposal, branchId: "silent", proposedKnowledge: { version: 1, operations: [stripped] } } as never)).report.errors.some(item => item.code === "ACQUISITION_REQUIRED" || item.message.includes("ACQUISITION_REQUIRED"))).toBe(true);
   const lateBundle = structuredClone(bundle);
+  // Reshaped fixture: its frozen chronology no longer describes these events; exercise legacy story-time cuts.
+  delete lateBundle.canonical.timeline;
   const lateEvent = canonicalEventSchema.parse({ ...event, id: "entry", title: "Before recollection", readerSummary: "The listener considers the warning", evidence: source.evidence(scene.memory), observedOutcome: { version: 1, operations: [{ op: "set", entityId: "listener", field: "character.plan", value: "future-canon" }] }, characterEntryCheckpoints: [{ actorId: "listener", readerSetup: "The warning has already been heard", actorObservation: "I remember hearing the warning", participantPresence: [{ entityId: "listener", mode: "physical" }], delta: { version: 1, operations: [{ op: "set", entityId: "listener", field: "character.location", value: "place" }] } }] });
   lateBundle.canonical.events.push(lateEvent);
   lateBundle.canonical.initialWorld.checkpoint = { mode: "chronological", rationale: "Before the source warning", beforeCanonicalEventId: event.id, storyTime: event.storyTime };
@@ -342,6 +344,8 @@ it.each(scenes)("separates reading, uncomprehended receipt and mistaken sources:
       expect(openingReplay.knowledge.acquisitions?.received?.actorId).toBe("listener");
       expect(openingReplay.history[0]!.event.participants).toContain("terminal");
       const lateBundle = structuredClone(bundle);
+      // Reshaped fixture: its frozen chronology no longer describes these events; exercise legacy story-time cuts.
+      delete lateBundle.canonical.timeline;
       lateBundle.canonical.initialWorld.participantPresence = [{ entityId: "speaker", mode: "physical" }];
       lateBundle.canonical.initialWorld.delta.operations = lateBundle.canonical.initialWorld.delta.operations.filter(op => !("entityId" in op && op.entityId === "listener" && "field" in op && op.field === "character.location"));
       lateBundle.canonical.initialWorld.checkpoint = { mode: "chronological", rationale: "Before the reading", beforeCanonicalEventId: event.id, storyTime: event.storyTime };

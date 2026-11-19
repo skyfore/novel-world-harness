@@ -2,10 +2,11 @@ import crypto from "node:crypto";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import type { EvidenceRef } from "./model.js";
+import { rangeWithinHorizon, type ReadHorizon } from "./read-horizon.js";
 
-const MAX_REFERENCE_CHARACTERS = 1_800;
-const MAX_TOTAL_REFERENCE_CHARACTERS = 6_000;
-const MAX_REFERENCES = 4;
+export const MAX_REFERENCE_CHARACTERS = 1_800;
+export const MAX_TOTAL_REFERENCE_CHARACTERS = 6_000;
+export const MAX_REFERENCES = 4;
 
 export type NarrativeEvidenceCandidate = {
   evidence: readonly EvidenceRef[];
@@ -27,8 +28,9 @@ export type NarrativeSourceReference = {
   endLine: number;
   text: string;
   relevance: string[];
-  authority: "style-only";
-  safety: "actor-visible-committed-evidence";
+  /** style-only: committed actor-visible evidence; presentation-only: lead-in prose before the read horizon. */
+  authority: "style-only" | "presentation-only";
+  safety: "actor-visible-committed-evidence" | "read-horizon-prior-text";
 };
 
 /**
@@ -100,6 +102,64 @@ export async function buildNarrativeSourceReferences(input: {
     }
   }
   return references;
+}
+
+/** A heading that starts a new chapter; lead-in prose never crosses it. */
+const CHAPTER_HEADING = /^\s*(?:第[一二三四五六七八九十百千零〇两0-9]+[章节回幕卷部]|chapter\s+[0-9ivxlc]+\b|序章|楔子|尾声|终章)/iu;
+
+/**
+ * Lead-in prose for a scene entry: whole paragraphs that end before the read
+ * horizon, nearest first, inside the same chapter, avoiding unresolved
+ * events' mentions and any unavailable name. Fills only the budget left after
+ * committed actor-visible references (D5); presentation-only authority.
+ */
+export async function buildLeadInReferences(input: {
+  workspaceRoot: string;
+  sourceId?: string;
+  horizon: ReadHorizon;
+  forbiddenNames?: readonly string[];
+  used?: { references: number; characters: number };
+}): Promise<NarrativeSourceReference[]> {
+  const remainingReferences = MAX_REFERENCES - (input.used?.references ?? 0);
+  const remainingCharacters = MAX_TOTAL_REFERENCE_CHARACTERS - (input.used?.characters ?? 0);
+  if (!input.sourceId || remainingReferences <= 0 || remainingCharacters <= 0 || input.horizon.horizonByte <= 0) return [];
+  const source = await (await WorkspaceStore.create(input.workspaceRoot)).getSource(input.sourceId);
+  if (!source) return [];
+  const buffer = await readSourceMaterial(input.workspaceRoot, source);
+  const forbiddenNames = [...new Set((input.forbiddenNames ?? []).map((value) => value.normalize("NFKC").trim()).filter((value) => Array.from(value).length >= 2))];
+  const lines = lineRanges(buffer);
+  const paragraphs = lines.map((range, index) => ({ ...range, line: index + 1, text: buffer.subarray(range.startByte, range.endByte).toString("utf8").replace(/\r?\n$/u, "") }))
+    .filter((paragraph) => paragraph.text.trim().length > 0 && Math.min(paragraph.endByte, input.horizon.horizonByte) === paragraph.endByte);
+  const selected: Array<(typeof paragraphs)[number]> = [];
+  let budget = Math.min(remainingCharacters, remainingReferences * MAX_REFERENCE_CHARACTERS);
+  for (let index = paragraphs.length - 1; index >= 0 && budget > 0; index--) {
+    const paragraph = paragraphs[index]!;
+    if (CHAPTER_HEADING.test(paragraph.text)) break;
+    if (!rangeWithinHorizon(input.horizon, paragraph.startByte, paragraph.endByte)) continue;
+    const characters = Array.from(paragraph.text).length;
+    if (characters > MAX_REFERENCE_CHARACTERS || characters > budget) break;
+    if (containsForbiddenName(paragraph.text, forbiddenNames)) break;
+    selected.unshift(paragraph);
+    budget -= characters;
+  }
+  // Group adjacent paragraphs, nearest first, into at most the remaining number of references.
+  const groups: Array<typeof selected> = [];
+  for (let index = selected.length - 1; index >= 0; index--) {
+    const paragraph = selected[index]!, current = groups.at(-1);
+    const fits = current && current[0]!.line === paragraph.line + 1
+      && Array.from([paragraph, ...current].map((item) => item.text).join("\n")).length <= MAX_REFERENCE_CHARACTERS;
+    if (fits) current.unshift(paragraph);
+    else if (groups.length < remainingReferences) groups.push([paragraph]);
+    else break;
+  }
+  const references: NarrativeSourceReference[] = groups.reverse().map((group) => {
+    const first = group[0]!, last = group.at(-1)!;
+    const identity = `${input.sourceId}:${first.startByte}:${last.endByte}:lead-in`;
+    return { ref: `source-lead-in-${sha256(Buffer.from(identity)).slice(0, 24)}`, sourceId: input.sourceId!, startByte: first.startByte, endByte: last.endByte,
+      startLine: first.line, endLine: last.line, text: group.map((paragraph) => paragraph.text).join("\n"),
+      relevance: ["scene lead-in before the read horizon"], authority: "presentation-only" as const, safety: "read-horizon-prior-text" as const };
+  });
+  return references.slice(0, remainingReferences);
 }
 
 function evidenceBounds(

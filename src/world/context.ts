@@ -28,6 +28,8 @@ import { resolveActionInvocation, validateActionSchemaCatalog, type ActionSchema
 import { validateActionConstraintCatalog, type ActionConstraint } from "./action-constraint.js";
 import { validateNormTemplateCatalog, type NormTemplate } from "./norm-ontology.js";
 import { validateProcessTemplateCatalog, type ProcessTemplate } from "./process-ontology.js";
+import { buildCanonTimeline, canonTimelineProjectionIssues, canonTimelineSchema, type CanonTimeline } from "./canon-timeline.js";
+import { buildVoiceIndex, voiceIndexSchema, type VoiceIndex } from "./voice-references.js";
 
 const revisionRefSchema = z.object({ id: z.string().min(1), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const validatePreparedSnapshotScope = (
@@ -68,6 +70,12 @@ export const canonicalSnapshotSchema = z.object({
   actorModels: z.array(revisionRefSchema),
   possibilities: z.array(revisionRefSchema),
   stateFields: z.array(stateFieldSpecSchema),
+  /** Frozen host chronology; snapshots captured before timelines keep legacy story-time cuts. */
+  timeline: canonTimelineSchema.optional(),
+  /** Admission horizon: canonical events at or beyond this timeline index are not playable yet. */
+  canonHorizonIndex: z.number().int().min(-1).optional(),
+  /** Character-attributed quotation pointers for voice references. */
+  voiceIndex: voiceIndexSchema.optional(),
 }).strict().superRefine(validatePreparedSnapshotScope);
 export type CanonicalSnapshot = z.infer<typeof canonicalSnapshotSchema>;
 
@@ -96,6 +104,9 @@ export type ScopedWorldArtifacts = {
   goals: readonly CharacterGoal[];
   models: readonly CharacterModel[];
   possibilities: readonly PossibilityTemplate[];
+  timeline?: CanonTimeline;
+  canonHorizonIndex?: number;
+  voiceIndex?: VoiceIndex;
 };
 
 export class WorldContextStore {
@@ -159,7 +170,37 @@ export class WorldContextStore {
       models: models.filter(belongsToSource),
       possibilities: possibilities.filter(belongsToSource),
     };
+    if (sourceId) {
+      const timeline = await this.currentTimeline(sourceId, artifacts.events, artifacts.eventRelations);
+      if (timeline) artifacts.timeline = timeline;
+      const voiceIndex = timeline ? await this.currentVoiceIndex(sourceId, artifacts.entities) : undefined;
+      if (voiceIndex?.entries.length) artifacts.voiceIndex = voiceIndex;
+    }
     return this.captureArtifacts(artifacts, sourceId);
+  }
+
+  /**
+   * The chronology a candidate bundle would freeze from the same workspace
+   * inputs. Compiler stores load lazily so the world layer keeps no static
+   * dependency on them.
+   */
+  private async currentVoiceIndex(sourceId: string, entities: ScopedWorldArtifacts["entities"]): Promise<VoiceIndex> {
+    const [{ SourceAnnotationStore }, { EntityResolutionStore }] = await Promise.all([import("../compiler/annotations.js"), import("../compiler/entity-resolution.js")]);
+    const [annotations, entityResolutions] = await Promise.all([new SourceAnnotationStore(this.workspaceRoot).list(sourceId, "quotation"), new EntityResolutionStore(this.workspaceRoot).list(sourceId)]);
+    return buildVoiceIndex({ sourceId, annotations, entityResolutions, entities });
+  }
+
+  private async currentTimeline(sourceId: string, events: readonly CanonicalEvent[], relations: readonly EventRelation[]): Promise<CanonTimeline | undefined> {
+    if (!events.length) return undefined;
+    const [{ SourceAnnotationStore }, { EventResolutionStore }, { SourceStructureStore }] = await Promise.all([
+      import("../compiler/annotations.js"), import("../compiler/event-resolution.js"), import("../compiler/structure.js"),
+    ]);
+    const [annotations, eventResolutions, structure] = await Promise.all([
+      new SourceAnnotationStore(this.workspaceRoot).list(sourceId),
+      new EventResolutionStore(this.workspaceRoot).list(sourceId),
+      new SourceStructureStore(this.workspaceRoot).read(sourceId),
+    ]);
+    return buildCanonTimeline({ sourceId, events, relations, annotations, eventResolutions, ...(structure ? { structure } : {}) });
   }
 
   async capturePrepared(
@@ -222,6 +263,7 @@ export class WorldContextStore {
     assertSpatialProjection(artifacts);
     assertSceneFrameActionProjection(artifacts);
     assertExecutablePolicyProjection(artifacts);
+    assertTimelineProjection(artifacts, sourceId);
     const actionConstraints = artifacts.actionConstraints ?? [];
     const normTemplates = artifacts.normTemplates ?? [];
     const processTemplates = artifacts.processTemplates ?? [];
@@ -294,6 +336,9 @@ export class WorldContextStore {
       actorModels: await actorRefs("models", artifacts.models, (item) => item.actorId),
       possibilities: await possibilityRefs(artifacts.possibilities),
       stateFields: DEFAULT_STATE_FIELDS,
+      ...(artifacts.timeline ? { timeline: artifacts.timeline } : {}),
+      ...(artifacts.timeline && artifacts.canonHorizonIndex !== undefined ? { canonHorizonIndex: artifacts.canonHorizonIndex } : {}),
+      ...(artifacts.voiceIndex ? { voiceIndex: assertVoiceIndexProjection(artifacts.voiceIndex, artifacts.entities, sourceId) } : {}),
     });
     const snapshotHash = contentHash(snapshot);
     await this.writeSnapshot(snapshotHash, snapshot);
@@ -405,6 +450,7 @@ export class WorldContextStore {
       normTemplates,
       processTemplates,
     });
+    if (snapshot.timeline) assertTimelineProjection({ timeline: snapshot.timeline, events }, snapshot.sourceId);
     const participationIndex = eventParticipationsByEvent(eventParticipations);
     const executionIssues = validateEventExecutions(eventExecutions, { acquisitions: new Map(acquisitions.map(item => [item.id, item])), participations: eventParticipations, events: new Map(events.map((event) => [event.id, event])), entities: new Map(entities.map((entity) => [entity.id, entity])), actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])), processTemplates: new Map(processTemplates.map(template => [template.id, template])) });
     if (executionIssues.length) throw new Error(executionIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
@@ -441,6 +487,9 @@ export class WorldContextStore {
       actorModels: new Map(actorModels.map((model) => [model.actorId, model])),
       possibilityTemplates: possibilities,
       stateSchema: new StateSchemaRegistry(snapshot.stateFields),
+      ...(snapshot.timeline ? { timeline: snapshot.timeline } : {}),
+      ...(snapshot.canonHorizonIndex !== undefined ? { canonHorizonIndex: snapshot.canonHorizonIndex } : {}),
+      ...(snapshot.voiceIndex ? { voiceIndex: snapshot.voiceIndex } : {}),
     };
   }
 
@@ -455,6 +504,20 @@ export class WorldContextStore {
       if ((await fs.readFile(filePath, "utf8")) !== serialized) throw new Error(`Canonical snapshot already exists with different content: ${snapshotHash}`);
     }
   }
+}
+
+function assertVoiceIndexProjection(index: VoiceIndex, entities: ScopedWorldArtifacts["entities"], sourceId?: string): VoiceIndex {
+  const characters = new Set(entities.filter((entity) => entity.kind === "character").map((entity) => entity.id));
+  if (sourceId && index.sourceId !== sourceId) throw new Error(`Invalid voice index projection: it belongs to ${index.sourceId}, not ${sourceId}`);
+  const stray = index.entries.find((entry) => !characters.has(entry.actorId));
+  if (stray) throw new Error(`Invalid voice index projection: ${stray.actorId} is not a character of this snapshot`);
+  return index;
+}
+
+function assertTimelineProjection(artifacts: Pick<ScopedWorldArtifacts, "timeline" | "events">, sourceId?: string): void {
+  if (!artifacts.timeline) return;
+  const issues = canonTimelineProjectionIssues(artifacts.timeline, artifacts.events, sourceId);
+  if (issues.length) throw new Error(`Invalid canonical timeline projection: ${issues.map((item) => `${item.code}: ${item.message}`).join("; ")}`);
 }
 
 function assertEventParticipationProjection(

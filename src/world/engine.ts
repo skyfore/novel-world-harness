@@ -1,3 +1,5 @@
+import type { CanonTimeline } from "./canon-timeline.js";
+import type { VoiceIndex } from "./voice-references.js";
 import { committedTextDeliveries } from "./text-delivery.js";
 import { committedSpeechDeliveries } from "./speech-delivery.js";
 import { entryAgencyIssues } from "./entry-agency.js";
@@ -148,6 +150,12 @@ export type WorldModelContext = {
   actorGoals?: readonly CharacterGoal[];
   actorModels?: ReadonlyMap<string, CharacterModel>;
   possibilityTemplates?: readonly PossibilityTemplate[];
+  /** Host-derived canonical chronology frozen with the snapshot. Absent on legacy snapshots. */
+  timeline?: CanonTimeline;
+  /** Frozen admission horizon on the timeline (exclusive bound for resolvable events). */
+  canonHorizonIndex?: number;
+  /** Frozen character-attributed quotation pointers (voice references). */
+  voiceIndex?: VoiceIndex;
 };
 
 export type ResolvedWorldModelContext = WorldModelContext & { canonicalSnapshotHash: ObjectHash };
@@ -290,7 +298,7 @@ export function validateEventProposal(
   }
   let evaluationState = state;
   try {
-    const logicalTime = nextLogicalTime(state.logicalTime, proposal.proposedTime, proposal.timeAdvance);
+    const logicalTime = nextLogicalTime(state.logicalTime, proposal.proposedTime, proposal.timeAdvance, { ignoreOrdinal: Boolean(context.timeline) });
     evaluationState = advanceTemporalState(state, logicalTime, context.stateSchema, context.entities);
   } catch (error) {
     errors.push({ code: "INVALID_WORLD_TIME", message: error instanceof Error ? error.message : String(error), path: "proposedTime" });
@@ -432,7 +440,9 @@ export function validateEventProposal(
       const timeChanged = (postState.logicalTime.elapsedDays ?? 0) > (state.logicalTime.elapsedDays ?? 0)
         || JSON.stringify(postState.logicalTime.storyTime) !== JSON.stringify(state.logicalTime.storyTime);
       const hasKnowledgeEffect = Boolean(proposal.proposedKnowledge?.operations.length);
-      if (!stateChanged && !hasNonStateMateriality(proposal, timeChanged) && !options.deferMateriality) {
+      const canonicalOccurrence = !proposal.canonicalAdaptation && proposal.possibilityId?.startsWith("canon-")
+        && context.events?.has(proposal.possibilityId.slice("canon-".length)) && !options.realizedCanonicalEventIds?.has(proposal.possibilityId.slice("canon-".length));
+      if (!stateChanged && !hasNonStateMateriality(proposal, timeChanged) && !canonicalOccurrence && !options.deferMateriality) {
         errors.push({
           code: "EVENT_MATERIALITY_REQUIRED",
           message: "A committed event requires a net state or knowledge effect, an utterance, an adjudicated action outcome, effective time advancement, or a validated scene beat.",
@@ -503,6 +513,8 @@ export class WorldEngine {
     initialTime: Omit<LogicalTime, "step"> = {},
     genesisOptions: {
       entryActorId?: EntityId;
+      /** Admitted cut this fresh instance starts from (recorded on the branch). */
+      entryCutId?: string;
       projectionSeed?: EntryProjectionSeed;
       realizesCanonicalEventIds?: readonly string[];
       participantPresence?: readonly ParticipantPresence[];
@@ -728,7 +740,7 @@ export class WorldEngine {
       ...(branchSourceId ? { sourceId: branchSourceId } : {}),
       ...(branchPreparedRevisionHash ? { preparedRevisionHash: branchPreparedRevisionHash } : {}),
       ...(genesisOptions.entryActorId && branchSourceId && branchPreparedRevisionHash
-        ? { entryActorId: genesisOptions.entryActorId }
+        ? { entryActorId: genesisOptions.entryActorId, ...(genesisOptions.entryCutId ? { entryCutId: genesisOptions.entryCutId } : {}) }
         : {}),
       createdAt: new Date().toISOString(),
       headCommitId: commitHash,
@@ -1109,7 +1121,20 @@ export class WorldEngine {
       : [];
     const timeAdvanced = (postState.logicalTime.elapsedDays ?? 0) > (state.logicalTime.elapsedDays ?? 0)
       || JSON.stringify(postState.logicalTime.storyTime) !== JSON.stringify(state.logicalTime.storyTime);
-    const hasMaterialCandidate = effectiveStateIndexes.length > 0
+    const occurrenceId = !parsed.canonicalAdaptation && parsed.possibilityId?.startsWith("canon-") && context.events?.has(parsed.possibilityId.slice("canon-".length))
+      ? parsed.possibilityId.slice("canon-".length) : undefined;
+    if (occurrenceId && projection.history.some((entry) => entry.event.realizesCanonicalEventIds?.includes(occurrenceId))) {
+      const { derivedDeltaHash: _derivedDeltaHash, ...withoutDerivedHash } = report;
+      report = { ...withoutDerivedHash, accepted: false, errors: [...report.errors, {
+        code: "CANONICAL_EVENT_ALREADY_REALIZED",
+        message: `Canonical event ${occurrenceId} has already happened in this branch; a canonical occurrence is realized once.`,
+        path: "possibilityId",
+      }] };
+      return { report, previousHead: head, newHead: head };
+    }
+    const canonicalOccurrence = Boolean(occurrenceId);
+    const hasMaterialCandidate = canonicalOccurrence
+      || effectiveStateIndexes.length > 0
       || effectiveKnowledgeIndexes.length > 0
       || Boolean(semanticDelta?.operations.length)
       || Boolean(processDelta?.operations.length)
@@ -1168,6 +1193,7 @@ export class WorldEngine {
       messageCount: parsed.writtenMessages?.length ?? 0,
       timeAdvanced,
       ...(parsed.progress?.scene ? { sceneTransition: parsed.progress.scene } : {}),
+      canonicalOccurrence,
     });
     if (!hasMaterialProgress(progressCertificate)) throw new Error("Accepted event has no host-certified progress");
     if (!persist) return { report, previousHead: head, newHead: head, progressCertificate };

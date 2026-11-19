@@ -5,6 +5,7 @@ import { capacityUseIssues, incapacityOnsets, incapacityRecoveries, validateInca
 import { materializeProcessProposal } from "./process-ontology.js";
 import { contentHash } from "./canonical.js";
 import { deriveEntryCut } from "./entry-cut.js";
+import { openingTimelineIndex } from "./canon-timeline.js";
 import { validateEventProposal, type WorldModelContext } from "./engine.js";
 import { applyEventExecutions } from "./event-execution.js";
 import { applyKnowledgeDelta, emptyKnowledgeState } from "./knowledge.js";
@@ -16,15 +17,27 @@ import { isNormativeWorldRule } from "./world-rule-ontology.js";
 import { applyStateDelta, DEFAULT_STATE_FIELDS, emptyWorldState, StateSchemaRegistry, validateEngineInvariants } from "./state.js";
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 
+/** A canonical occurrence failed engine validation while replaying a cut prefix. */
+export class CanonReplayError extends Error {
+  constructor(readonly eventId: string, message: string) {
+    super(message);
+    this.name = "CanonReplayError";
+  }
+}
+
 /** A scene cut is tied to this occurrence, never to the actor's first playable scene. */
-export function executeSceneEvent(bundle: PreparedNovelBundle, target: CanonicalEvent, actorId?: string, options: { beforeOnly?: boolean; ignoreCheckpoint?: boolean; sourceEventRevisions?: ReadonlyMap<string, string> } = {}) {
+export function executeSceneEvent(bundle: PreparedNovelBundle, target: CanonicalEvent, actorId?: string, options: {
+  beforeOnly?: boolean; ignoreCheckpoint?: boolean; sourceEventRevisions?: ReadonlyMap<string, string>;
+  /** Validate occurrences exactly as the runtime commits canonical possibilities (canon-candidate, no actor authority claim). */
+  canonOccurrences?: boolean;
+} = {}) {
   const c = bundle.canonical, opening = c.initialWorld;
   const events = applyEventExecutions(c.events, c.eventExecutions ?? []);
   const event = events.find((item) => item.id === target.id) ?? target;
   const checkpoint = options.ignoreCheckpoint ? undefined : event.characterEntryCheckpoints?.find((item) => item.actorId === actorId && item.projectionSeed);
   const cut = deriveEntryCut({ events, relations: c.eventRelations, beforeEventId: event.id, storyTime: event.storyTime,
     baselineEventId: opening.checkpoint?.beforeCanonicalEventId, baselineTime: opening.checkpoint?.storyTime,
-    completeCheckpoint: Boolean(checkpoint) });
+    completeCheckpoint: Boolean(checkpoint), ...(c.timeline ? { timeline: c.timeline, baselineIndex: openingTimelineIndex(c.timeline, opening) } : {}) });
   if (cut.issues.length) throw new Error(cut.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
   const context: WorldModelContext = {
     initialWorld: opening, eventExecutions: new Map((c.eventExecutions ?? []).map(binding => [binding.id, binding])),
@@ -37,6 +50,7 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     actionSchemas: new Map(c.actionSchemas.map((item) => [item.id, item])), actionConstraints: new Map(c.actionConstraints.map((item) => [item.id, item])),
     processTemplates: new Map(c.processTemplates.map((item) => [item.id, item])), normTemplates: new Map(c.normTemplates.map((item) => [item.id, item])),
     spatialOntologyVersion: "spatial-v1", spatialRelations: c.spatialRelations, eventRelations: c.eventRelations,
+    ...(c.timeline ? { timeline: c.timeline } : {}),
   };
   const seed = checkpoint?.projectionSeed ?? opening.projectionSeed;
   let state = emptyWorldState(contentHash({ source: bundle.source, cut }));
@@ -89,7 +103,7 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     const useIssues = capacityUseIssues({ actorId: initiator }, processes, processes, processContext.templates);
     if (useIssues.length) throw new Error(useIssues.map(issue => `${issue.code}: ${issue.message}`).join("; "));
     const result = validateEventProposal({ proposalId: `scene-${occurrence.id}`, branchId: "scene-validation", expectedParentCommit: before.atCommit,
-      source: initiator ? "actor" : "canon-candidate", possibilityId: `canon-${occurrence.id}`, ...(initiator ? { actorId: initiator } : {}), title: occurrence.title, participants: occurrence.participants, participantPresence: occurrence.participantPresence,
+      source: initiator && !options.canonOccurrences ? "actor" : "canon-candidate", possibilityId: `canon-${occurrence.id}`, ...(initiator && !options.canonOccurrences ? { actorId: initiator } : {}), title: occurrence.title, participants: occurrence.participants, participantPresence: occurrence.participantPresence,
       proposedTime: occurrence.storyTime, preconditions: occurrence.preconditions, proposedDelta: occurrence.observedOutcome,
       ...(occurrence.observedKnowledge ? { proposedKnowledge: occurrence.observedKnowledge } : {}), ...(occurrence.action ? { action: occurrence.action } : {}),
       ...(occurrence.timeAdvance ? { timeAdvance: occurrence.timeAdvance } : {}), causalParents: occurrence.causalParents, evidence: occurrence.evidence,
@@ -111,7 +125,11 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     if (occurrence.observedKnowledge) knowledge = applyKnowledgeDelta(knowledge, occurrence.observedKnowledge, before.atCommit, { ...knowledgeContext, branchOccurrence: { eventId: occurrence.id, participants: occurrence.participants, participantPresence: occurrence.participantPresence, before, after: result.postState, processesBefore: beforeProcesses }, currentCanonicalEventIds: new Set([occurrence.id]), realizedCanonicalEventIds: new Set([...realized, occurrence.id]), perceptionOccurrence: { eventIds: new Set([occurrence.id]), before, after: result.postState, schema: context.stateSchema } });
     return result.postState;
   };
-  for (const id of cut.replayEventIds) { state = execute(context.events!.get(id)!, state); for (const alias of aliases.get(id) ?? [id]) realized.add(alias); }
-  const before = state, beforeProcesses = processes, beforeKnowledge = knowledge, after = options.beforeOnly ? before : execute(event, before);
+  const attributed = (occurrence: CanonicalEvent, prior: WorldState) => {
+    try { return execute(occurrence, prior); }
+    catch (error) { throw new CanonReplayError(occurrence.id, error instanceof Error ? error.message : String(error)); }
+  };
+  for (const id of cut.replayEventIds) { state = attributed(context.events!.get(id)!, state); for (const alias of aliases.get(id) ?? [id]) realized.add(alias); }
+  const before = state, beforeProcesses = processes, beforeKnowledge = knowledge, after = options.beforeOnly ? before : attributed(event, before);
   return { cut, before, after, context, knowledge, beforeKnowledge, beforeProcesses, processes, hash: contentHash({ cut, before, beforeProcesses, beforeKnowledge, actorId: actorId ?? null }) };
 }

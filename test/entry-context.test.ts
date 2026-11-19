@@ -5,6 +5,7 @@ import {
   deriveCharacterEntrySeed,
   formatReaderEntryContext,
 } from "../src/world/entry-context.js";
+import { deriveBundleCanonTimeline } from "../src/world/canon-timeline.js";
 
 const evidence = (startLine: number) => [{
   span: { sourceId: "source", startLine, endLine: startLine, quoteHash: `quote-${startLine}` },
@@ -239,5 +240,27 @@ describe("character entry context", () => {
     expect(option?.entry.discourseOrder).toBe(2);
     expect(seed.readerContext.storySoFar.map((beat) => beat.eventId))
       .toEqual(["prologue-change", "letter-is-read"]);
+  });
+  it("orders entry and recap by a frozen canonical timeline when story time is unknown", () => {
+    const prepared = bundle();
+    for (const event of prepared.canonical.events) event.storyTime = { kind: "unknown" };
+    expect(() => deriveCharacterEntrySeed(prepared, "later-actor")).toThrow(/ENTRY_TIME_UNKNOWN/);
+    prepared.canonical.timeline = deriveBundleCanonTimeline(prepared);
+    const option = deriveCharacterEntryOptions(prepared).find((candidate) => candidate.actorId === "later-actor");
+    expect(option?.entry.discourseOrder).toBe(2);
+    const seed = deriveCharacterEntrySeed(prepared, "later-actor");
+    expect(seed.cut.issues).toEqual([]);
+    expect(seed.cut.timelineHash).toBe(prepared.canonical.timeline.hash);
+    expect(seed.realizesCanonicalEventIds).toEqual(["letter-is-read", "prologue-change"]);
+    expect(seed.cut.replayEventIds).toEqual(["prologue-change", "letter-is-read"]);
+    expect(seed.readerContext.storySoFar.map((beat) => beat.eventId)).toEqual(["prologue-change", "letter-is-read"]);
+    expect(seed.delta.operations).not.toContainEqual(expect.objectContaining({ entityId: "later-actor", value: "answer the summons" }));
+  });
+
+  it("refuses a frozen timeline that no longer describes the bundle's events", () => {
+    const prepared = bundle();
+    prepared.canonical.timeline = deriveBundleCanonTimeline(prepared);
+    prepared.canonical.events.push({ ...prepared.canonical.events[1]!, id: "added-later" });
+    expect(() => deriveCharacterEntryOptions(prepared)).toThrow(/TIMELINE_STALE/);
   });
 });

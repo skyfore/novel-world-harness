@@ -2,7 +2,8 @@ import { branchAcquisitionRevision } from "./branch-acquisition.js";
 import { createHash } from "node:crypto";
 import { contentHash } from "./canonical.js";
 import { observeCommittedEvent } from "./actor-visible.js";
-import { buildNarrativeSourceReferences, type NarrativeEvidenceCandidate, type NarrativeSourceReference } from "./narrative-source.js";
+import { buildLeadInReferences, buildNarrativeSourceReferences, type NarrativeEvidenceCandidate, type NarrativeSourceReference } from "./narrative-source.js";
+import { branchCanonResolution, deriveReadHorizon, type ReadHorizon } from "./read-horizon.js";
 import { resolveCommitSourceId } from "./source-scope.js";
 import type { WorldEngine } from "./engine.js";
 import type { StoryTime } from "./model.js";
@@ -21,6 +22,14 @@ export type LiteraryReferenceRecord = {
   goalRefs: string[];
   visibility: { actorId: string; basis: "committed-observation" | "committed-utterance" | "understood-expression"; acquisitionId?: string; expressionId?: string; expressionHash?: string };
 };
+export type LiteraryLeadInRecord = {
+  ref: string;
+  sourceId: string;
+  span: { startByte: number; endByte: number; startLine: number; endLine: number; exactHash: string };
+  purpose: "presentation-only";
+  horizonByte: number;
+  frozenByDivergence: boolean;
+};
 export type LiteraryReferenceIndex = {
   version: "literary-reference/v1";
   branchId: string;
@@ -28,6 +37,8 @@ export type LiteraryReferenceIndex = {
   actorId: string;
   sourceId?: string;
   records: LiteraryReferenceRecord[];
+  /** Scene lead-in prose before the branch's read horizon (frozen-timeline revisions only). */
+  leadIns?: LiteraryLeadInRecord[];
   revisionHash: string;
 };
 
@@ -96,8 +107,22 @@ export async function buildLiteraryReferenceIndex(input: {
   const references = await buildNarrativeSourceReferences({ workspaceRoot: input.workspaceRoot, sourceId, candidates, forbiddenNames: input.forbiddenNames });
   const records = references.map(reference => ({ ...bases.get(reference.occurrenceId!)!, ref: reference.ref, sourceId: reference.sourceId,
     span: { startByte: reference.startByte, endByte: reference.endByte, startLine: reference.startLine, endLine: reference.endLine, exactHash: contentHashText(reference.text) }, purpose: "style-only" as const }));
-  const value = { version: "literary-reference/v1" as const, branchId: input.branchId, atCommit: input.atCommit, actorId: input.actorId, ...(sourceId ? { sourceId } : {}), records };
-  return { index: { ...value, revisionHash: contentHash(value) }, references };
+  // Committed actor-visible prose takes the budget first; lead-in prose before
+  // the read horizon only fills what remains (D5).
+  let leadIns: NarrativeSourceReference[] = [];
+  let horizon: ReadHorizon | undefined;
+  if (context.timeline && sourceId) {
+    const resolution = branchCanonResolution(projection.history.map(entry => entry.event));
+    horizon = deriveReadHorizon(context.timeline, resolution.resolved, resolution.superseded);
+    leadIns = await buildLeadInReferences({ workspaceRoot: input.workspaceRoot, sourceId, horizon, forbiddenNames: input.forbiddenNames,
+      used: { references: references.length, characters: references.reduce((total, reference) => total + Array.from(reference.text).length, 0) } });
+  }
+  const leadInRecords = leadIns.map(reference => ({ ref: reference.ref, sourceId: reference.sourceId,
+    span: { startByte: reference.startByte, endByte: reference.endByte, startLine: reference.startLine, endLine: reference.endLine, exactHash: contentHashText(reference.text) },
+    purpose: "presentation-only" as const, horizonByte: horizon!.horizonByte, frozenByDivergence: horizon!.frozenByDivergence }));
+  const value = { version: "literary-reference/v1" as const, branchId: input.branchId, atCommit: input.atCommit, actorId: input.actorId, ...(sourceId ? { sourceId } : {}), records,
+    ...(leadInRecords.length ? { leadIns: leadInRecords } : {}) };
+  return { index: { ...value, revisionHash: contentHash(value) }, references: [...references, ...leadIns] };
 }
 
 const contentHashText = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");

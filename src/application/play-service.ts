@@ -1,3 +1,5 @@
+import { admissionManifestIssues } from "../compiler/cut-admission.js";
+import { tierAtLeast } from "../compiler/cut-admission-schema.js";
 import { withPlayModelBudget } from "../runtime/play-model-budget.js";
 import { currentRuntimeHooks } from "../runtime/hooks.js";
 import crypto from "node:crypto";
@@ -14,7 +16,7 @@ import { createPiPlayerWorldAdjudicator } from "../agent/pi-player-world-adjudic
 import { createPiPlayerWorldResponseResolver } from "../agent/pi-player-world-response.js";
 import { createPiRuntimeContextResolver } from "../agent/pi-runtime-context.js";
 import { playerSceneChoicesSchema, type PlayerSceneChoice } from "../agent/player-scene-choice-tool.js";
-import { loadOptionalConfig, profileForRole } from "../config/load.js";
+import { loadOptionalConfig, minimumAdmissionTierFor, profileForRole } from "../config/load.js";
 import type { LlmProfile } from "../config/schema.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -73,6 +75,7 @@ import {
   sceneNarrationRequestSchema,
   sceneNarrationResultSchema,
   sourcePlayRoleListSchema,
+  sourceCutListSchema,
   startFreshPlayRequestSchema,
   startFreshPlayResultSchema,
   updatePlaySessionRequestSchema,
@@ -93,6 +96,7 @@ import {
   type SceneNarrationRequest,
   type SceneNarrationResult,
   type SourcePlayRoleList,
+  type SourceCutList,
   type StartFreshPlayRequest,
   type StartFreshPlayResult,
   type UpdatePlaySessionRequest,
@@ -210,6 +214,38 @@ export class PlayApplicationService {
   }
 
   /** List role checkpoints from the active frozen base, not from a mutable branch head. */
+  /** Admitted cuts of the active frozen base: scenes, entering characters and their tiers. */
+  async listSourceCuts(sourceId: string): Promise<SourceCutList> {
+    const workspace = await WorkspaceStore.create(this.root);
+    const source = await workspace.getSource(sourceId);
+    if (!source) throw this.sourceNotFound(sourceId);
+    const minimumTier = await minimumAdmissionTierFor(this.root, this.options.configPath);
+    let prepared;
+    try { prepared = await new PreparedNovelCache(this.root, this.options.preparedCacheRoot).loadFreshActive(source, { minimumAdmissionTier: minimumTier }); }
+    catch (error) {
+      throw webError(409, "FROZEN_BASE_NOT_READY", errorMessage(error), { kind: "after-refresh", discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(sourceId)}/preparation`, copyField: "stage", maxAttempts: 1 });
+    }
+    const manifest = prepared?.bundle.admission;
+    if (!prepared || !manifest || admissionManifestIssues(prepared.bundle, manifest).length) {
+      throw webError(409, "CUT_ADMISSION_UNAVAILABLE", `Novel '${source.title}' has no current per-cut admission manifest.`, {
+        kind: "after-user-action", discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(sourceId)}/preparation`, copyField: "nextAction", maxAttempts: 1,
+      });
+    }
+    const names = new Map(prepared.bundle.canonical.entities.map((entity) => [entity.id, entity.canonicalName]));
+    const titles = new Map(prepared.bundle.canonical.events.map((event) => [event.id, event.title]));
+    return sourceCutListSchema.parse({
+      sourceId: source.id, sourceTitle: source.title, preparedRevisionHash: prepared.bundleHash, minimumTier, horizonIndex: manifest.horizonIndex,
+      cuts: manifest.cuts.map((cut) => ({
+        cutId: cut.cutId, beforeEventId: cut.beforeEventId, beforeEventTitle: titles.get(cut.beforeEventId) ?? cut.beforeEventId,
+        ...(cut.sceneId ? { sceneId: cut.sceneId } : {}), sceneIds: cut.sceneIds, index: cut.index, tier: cut.tier, blocking: cut.blocking,
+        actors: cut.actors.map((actor) => ({
+          actorId: actor.actorId, canonicalName: names.get(actor.actorId) ?? actor.actorId, tier: actor.tier, entryBasis: actor.entryBasis,
+          admitted: cut.tier !== "blocked" && tierAtLeast(actor.tier, minimumTier), ...(actor.entryCutHash ? { entryCutHash: actor.entryCutHash } : {}), issues: actor.issues,
+        })),
+      })),
+    });
+  }
+
   async listSourceRoles(sourceId: string): Promise<SourcePlayRoleList> {
     const workspace = await WorkspaceStore.create(this.root);
     const source = await workspace.getSource(sourceId);
@@ -266,6 +302,44 @@ export class PlayApplicationService {
   private async startFreshPlayOnce(
     input: StartFreshPlayRequest,
   ): Promise<Omit<StartFreshPlayResult, "reused">> {
+    if (input.cutId) await this.assertAdmittedCutSelection(input);
+    else await this.assertRoleSelection(input);
+    let selection;
+    try {
+      selection = await choosePlayExperience(this.root, {
+        source: input.sourceId,
+        expectedPreparedRevisionHash: input.preparedRevisionHash,
+        expectedEntryCutHash: input.entryCutHash,
+        character: input.actorId,
+        ...(input.cutId ? { entryCutId: input.cutId } : {}),
+        instanceMode: "create",
+        preferSavedCharacter: false,
+        preferActiveSource: false,
+        ...(this.options.preparedCacheRoot ? { preparedCacheRoot: this.options.preparedCacheRoot } : {}),
+        sessionIdentity: newPlaySessionIdentity(),
+      }, async () => undefined);
+    } catch (error) {
+      throw webError(409, "FRESH_PLAY_START_FAILED", errorMessage(error), {
+        kind: "after-refresh",
+        discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(input.sourceId)}/${input.cutId ? "cuts" : "play-roles"}`,
+        copyField: "preparedRevisionHash",
+        maxAttempts: 1,
+      });
+    }
+    return this.completeFreshPlay(input, selection);
+  }
+
+  /** A scene start must name an admitted cut x actor of the current frozen base and its probed entry. */
+  private async assertAdmittedCutSelection(input: StartFreshPlayRequest): Promise<void> {
+    const cuts = await this.listSourceCuts(input.sourceId);
+    const discovery = `/api/v1/novels/${encodeURIComponent(input.sourceId)}/cuts`;
+    if (cuts.preparedRevisionHash !== input.preparedRevisionHash) throw webError(409, "FROZEN_BASE_MOVED", "The active frozen base changed after cut selection. Refresh the cut list before starting play.", { kind: "after-refresh", discoveryEndpoint: discovery, copyField: "preparedRevisionHash", maxAttempts: 1 });
+    const actor = cuts.cuts.find((cut) => cut.cutId === input.cutId)?.actors.find((candidate) => candidate.actorId === input.actorId);
+    if (!actor?.admitted) throw webError(400, "CUT_NOT_ADMITTED", `Role '${input.actorId}' is not admitted at cut '${input.cutId}'.`, { kind: "after-refresh", discoveryEndpoint: discovery, copyField: "cuts[].actors[].actorId", maxAttempts: 1 });
+    if (actor.entryCutHash !== input.entryCutHash) throw webError(409, "ENTRY_CUT_STALE", "The selected scene entry changed. Refresh the cut list before starting play.", { kind: "after-refresh", discoveryEndpoint: discovery, copyField: "cuts[].actors[].entryCutHash", maxAttempts: 1 });
+  }
+
+  private async assertRoleSelection(input: StartFreshPlayRequest): Promise<void> {
     const roles = await this.listSourceRoles(input.sourceId);
     if (roles.preparedRevisionHash !== input.preparedRevisionHash) {
       throw webError(409, "FROZEN_BASE_MOVED", "The active frozen base changed after role selection. Refresh the role list before starting play.", {
@@ -287,27 +361,9 @@ export class PlayApplicationService {
     if (role.entryCutHash !== input.entryCutHash) throw webError(409, "ENTRY_CUT_STALE", "The selected entry changed. Refresh the role list before starting play.", {
       kind: "after-refresh", discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(input.sourceId)}/play-roles`, copyField: "roles[].entryCutHash", maxAttempts: 1,
     });
-    let selection;
-    try {
-      selection = await choosePlayExperience(this.root, {
-        source: input.sourceId,
-        expectedPreparedRevisionHash: input.preparedRevisionHash,
-        expectedEntryCutHash: input.entryCutHash,
-        character: input.actorId,
-        instanceMode: "create",
-        preferSavedCharacter: false,
-        preferActiveSource: false,
-        ...(this.options.preparedCacheRoot ? { preparedCacheRoot: this.options.preparedCacheRoot } : {}),
-        sessionIdentity: newPlaySessionIdentity(),
-      }, async () => undefined);
-    } catch (error) {
-      throw webError(409, "FRESH_PLAY_START_FAILED", errorMessage(error), {
-        kind: "after-refresh",
-        discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(input.sourceId)}/play-roles`,
-        copyField: "preparedRevisionHash",
-        maxAttempts: 1,
-      });
-    }
+  }
+
+  private async completeFreshPlay(input: StartFreshPlayRequest, selection: Awaited<ReturnType<typeof choosePlayExperience>>): Promise<Omit<StartFreshPlayResult, "reused">> {
     if (!selection) {
       throw webError(409, "FRESH_PLAY_START_FAILED", "The selected frozen-base role could not create a play instance.", {
         kind: "after-refresh",
@@ -908,6 +964,7 @@ export class PlayApplicationService {
             ...outcome.reactionEvents.map((event) => event.eventHash),
             ...outcome.worldResponseEvents.map((event) => event.eventHash),
             ...outcome.canonicalRecoveryEvents.map((event) => event.eventHash),
+            ...(outcome.canonStepEvents ?? []).map((event) => event.eventHash),
             ...outcome.backgroundEvents.map((event) => event.eventHash),
           ],
         }, turnTrace, { storyTime: storyTimeAfter });
@@ -1000,6 +1057,8 @@ export class PlayApplicationService {
         worldResponseEvents: outcome.worldResponseEvents,
         reactionEvents: outcome.reactionEvents,
         backgroundEvents: outcome.backgroundEvents,
+        ...(outcome.canonStepEvents?.length ? { canonStepEvents: outcome.canonStepEvents } : {}),
+        ...(outcome.canonStatus ? { canonStatus: outcome.canonStatus } : {}),
       });
       return result;
     } catch (error) {

@@ -36,6 +36,8 @@ import {
 import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import { projectActorScene } from "./scene.js";
 import { comparableStoryTime, compareStoryTime } from "./time.js";
+import { canonPositionFor, expandTimelineAliases, type CanonTimeline } from "./canon-timeline.js";
+import { stepCanon as stepCanonEvents, type CanonStepInput, type CanonStepResult } from "./canon-stepper.js";
 import { contentHash } from "./canonical.js";
 
 const MAX_CALLBACK_CANDIDATES = 10_000;
@@ -524,10 +526,12 @@ export class WorldRuntime {
     const duplicateId = templates.find((template, index) => templates.findIndex((candidate) => candidate.id === template.id) !== index)?.id;
     if (duplicateId) throw new Error(`Duplicate possibility id ${duplicateId} in the current frontier`);
     const history = await this.possibilityHistory(head);
+    const canon = context.timeline ? canonProgress(context.timeline, history) : undefined;
     const frontier = buildFrontier(branchId, head, state, templates, {
       activeGoalPressures: await activeGoalPressures(this.engine, head),
       dueMechanisms: new Map(due.map(candidate => [candidate.id, possibilitySchema.parse(candidate)])),
-      realizedIds: history.realizedIds,
+      realizedIds: canon?.realizedIds ?? history.realizedIds,
+      ...(canon ? { canonPosition: canon.position } : {}),
       adaptedIds: history.adaptedIds,
       supersededIds: history.supersededIds,
       realizationEventIds: history.realizationEventIds,
@@ -538,6 +542,11 @@ export class WorldRuntime {
     });
     await this.frontierStore.write(frontier);
     return frontier;
+  }
+
+  /** Resolve canonical events in timeline order for the player's actor (see canon-stepper). */
+  async stepCanon(input: CanonStepInput): Promise<CanonStepResult> {
+    return stepCanonEvents({ engine: this.engine, refreshFrontier: (branchId, commitId) => this.refreshFrontier(branchId, commitId) }, input);
   }
 
   async realizedPossibilityIds(commitId: CommitId): Promise<ReadonlySet<string>> {
@@ -1521,4 +1530,16 @@ function finalStateWrites(delta: EventProposal["proposedDelta"]): Map<string, un
 function boundedLimit(value: number, name: string): number {
   if (!Number.isInteger(value) || value < 0 || value > 100) throw new Error(`${name} must be an integer between 0 and 100`);
   return value;
+}
+
+/**
+ * Canonical progress on a frozen timeline: aliases of a realized occurrence
+ * count as realized, and the position is one past the furthest settled event.
+ */
+function canonProgress(timeline: CanonTimeline, history: { realizedIds: ReadonlySet<string>; adaptedIds: ReadonlySet<string>; supersededIds: ReadonlySet<string> }) {
+  const plain = (ids: ReadonlySet<string>) => [...ids].map((id) => id.startsWith("canon-") ? id.slice("canon-".length) : id);
+  const realized = expandTimelineAliases(timeline, plain(history.realizedIds));
+  const realizedIds = new Set([...history.realizedIds, ...[...realized].flatMap((id) => [id, `canon-${id}`])]);
+  const position = canonPositionFor(timeline, [...realized, ...plain(history.adaptedIds), ...plain(history.supersededIds)]);
+  return { realizedIds, position };
 }

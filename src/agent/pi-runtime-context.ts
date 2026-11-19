@@ -1,3 +1,4 @@
+import { branchCanonResolution, deriveReadHorizon, rangeWithinHorizon } from "../world/read-horizon.js";
 import { ModelRequestBudget } from "./model-request-budget.js";
 import type { LlmProfile } from "../config/schema.js";
 import { promptJson } from "../util/prompt-data.js";
@@ -236,6 +237,9 @@ export async function admitRuntimeContextProposal(
   const evidenceRefs = new Set<string>();
   const artifactRefs = new Map<string, RuntimeContextArtifactRef>();
   const repairHints: RuntimeCompilerRepairHint[] = [];
+  // Host-derived read horizon: a model's temporal label can only make admission stricter.
+  const resolution = branchCanonResolution(history.map((entry) => entry.event));
+  const horizon = worldContext.timeline ? deriveReadHorizon(worldContext.timeline, resolution.resolved, resolution.superseded) : undefined;
   let sawFuture = false;
   let sawAdmissible = false;
   let sawSourceOnly = false;
@@ -268,7 +272,8 @@ export async function admitRuntimeContextProposal(
       return (artifact?.kind === "canonical-event" && !realized.has(artifact.id))
         || (artifact?.kind === "possibility" && !committedPossibilityIds.has(artifact.id));
     });
-    if (finding.temporalClass === "future" || touchesUncommittedFuture) {
+    const beyondHorizon = Boolean(horizon && passages.some((passage) => !rangeWithinHorizon(horizon, passage.anchor.startByte, passage.anchor.endByte)));
+    if (finding.temporalClass === "future" || touchesUncommittedFuture || beyondHorizon) {
       sawFuture = true;
       continue;
     }

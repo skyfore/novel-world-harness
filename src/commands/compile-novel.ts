@@ -7,7 +7,8 @@ import { recoverCompilerFinish } from "../compiler/finish-recovery.js";
 import { pendingAuthorizedUpstreamRepairs, prepareAuthorizedUpstreamRepair } from "../compiler/upstream-repair-preparation.js";
 import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
-import { preparedSubjectHash, assertPreparedReadiness } from "../compiler/certification.js";
+import { preparedSubjectHash } from "../compiler/certification.js";
+import { assertPlayableRevision } from "../compiler/cut-admission.js";
 import { inspectCompilerStatus } from "../compiler/status.js";
 import { inspectCompilationHandoff } from "../compiler/compilation-handoff.js";
 import { checkCompilationClosure, assertCompilationClosure } from "../compiler/compilation-closure.js";
@@ -260,14 +261,15 @@ async function compileNovelLocked(options: CompileNovelOptions): Promise<NovelCo
           if (!run.bundleHash) throw new Error(`CERTIFIED_CANDIDATE_REQUIRED: run compile-novel certify --source ${source.id} first.`);
           const frozen = await cache.loadRevision(source, run.bundleHash);
           if (!frozen) throw new Error(`CERTIFIED_CANDIDATE_MISSING: inspect prepared-cache list --source ${source.id}, then certify the current candidate; do not guess a hash.`);
-          assertPreparedReadiness(frozen.bundle);
+          // A fully certified or cut-admitted revision may be activated (D1).
+          assertPlayableRevision(frozen.bundle, config?.play?.minimumAdmissionTier);
           if (preparedSubjectHash(frozen.bundle) !== preparedSubjectHash(await cache.candidateSnapshot(source))) throw new Error("CERTIFIED_CANDIDATE_STALE: compiler inputs changed; rerun evaluation-plan, evaluate and certify before activation.");
-          await cache.activate(source, run.bundleHash);
+          await cache.activate(source, run.bundleHash, { ...(config?.play?.minimumAdmissionTier ? { minimumAdmissionTier: config.play.minimumAdmissionTier } : {}) });
           run.activatedBundleHash = run.bundleHash;
           break;
         }
         case "branch": {
-          const active = await cache.loadFreshActive(source);
+          const active = await cache.loadFreshActive(source, { ...(config?.play?.minimumAdmissionTier ? { minimumAdmissionTier: config.play.minimumAdmissionTier } : {}) });
           if (!active) throw new Error(`ACTIVE_CERTIFIED_NOVEL_REQUIRED: run compile-novel activate --source ${source.id} first.`);
           if (preparedSubjectHash(active.bundle) !== preparedSubjectHash(await cache.candidateSnapshot(source))) throw new Error("ACTIVE_CANDIDATE_STALE: activate the current certified candidate before creating its branch.");
           const branches = new BranchStore(root);

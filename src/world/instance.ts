@@ -6,7 +6,9 @@ import { InitialWorldStore } from "./initial.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
 import { assertEvidenceExclusiveToSource } from "./source-scope.js";
 import { type ReaderEntryContext } from "./entry-context.js";
-import { certifiedEntryOptions, requireCertifiedEntry } from "./play-roles.js";
+import { certifiedEntryOptions, requireAdmittedSceneEntry, requireCertifiedEntry } from "./play-roles.js";
+import { minimumAdmissionTierFor } from "../config/load.js";
+import type { AdmissionTier } from "../compiler/cut-admission-schema.js";
 
 export type CreatedWorldBranch = {
   head: string;
@@ -24,7 +26,10 @@ export async function createWorldBranch(
   entryActorId?: string,
   expectedPreparedRevisionHash?: string,
   expectedEntryCutHash?: string,
+  options: { minimumAdmissionTier?: AdmissionTier; entryCutId?: string } = {},
 ): Promise<CreatedWorldBranch> {
+  if (options.entryCutId && !entryActorId) throw new Error("ENTRY_CUT_REQUIRES_ACTOR: choose the character who enters at this cut");
+  const minimumAdmissionTier = options.minimumAdmissionTier ?? await minimumAdmissionTierFor(root);
   const workspace = await WorkspaceStore.create(root);
   const sources = await workspace.listSources();
   const source = sourceId
@@ -37,10 +42,10 @@ export async function createWorldBranch(
     throw new Error(`Multiple sources are registered; specify --source. Available: ${sources.map((item) => item.id).join(", ")}`);
   }
   const effectiveSourceId = source?.id;
-  const prepared = source ? await new PreparedNovelCache(root, cacheRoot).loadFreshActive(source) : null;
+  const prepared = source ? await new PreparedNovelCache(root, cacheRoot).loadFreshActive(source, { minimumAdmissionTier }) : null;
   if (source && !prepared) throw new Error("WORLD_CLOSURE_BLOCKED: source-backed play requires a certified prepared revision");
   if (source && seedPath) throw new Error("WORLD_CLOSURE_BLOCKED: an arbitrary seed cannot replace a certified novel entry");
-  if (prepared && !entryActorId) entryActorId = certifiedEntryOptions(prepared.bundle)[0]?.actorId;
+  if (prepared && !entryActorId) entryActorId = certifiedEntryOptions(prepared.bundle, minimumAdmissionTier)[0]?.actorId;
   if (prepared && !entryActorId) throw new Error("MAJOR_ROLE_NOT_CERTIFIED: no certified role entry is available");
   if (expectedPreparedRevisionHash && prepared?.bundleHash !== expectedPreparedRevisionHash) {
     throw new Error(
@@ -71,6 +76,10 @@ export async function createWorldBranch(
     goals: prepared.bundle.canonical.goals,
     models: prepared.bundle.canonical.models,
     possibilities: prepared.bundle.canonical.possibilities,
+    ...(prepared.bundle.canonical.timeline ? { timeline: prepared.bundle.canonical.timeline } : {}),
+    ...(prepared.bundle.canonical.timeline && prepared.bundle.admission?.timelineHash === prepared.bundle.canonical.timeline.hash
+      ? { canonHorizonIndex: prepared.bundle.admission.horizonIndex } : {}),
+    ...(prepared.bundle.canonical.voiceIndex?.entries.length ? { voiceIndex: prepared.bundle.canonical.voiceIndex } : {}),
   } : undefined;
   const { engine } = await openWorkspaceWorld(root, undefined, {
     ...(effectiveSourceId ? { sourceId: effectiveSourceId } : {}),
@@ -83,8 +92,11 @@ export async function createWorldBranch(
   if (entryActorId && !prepared) {
     throw new Error("Character-specific entry requires an active prepared novel revision.");
   }
+  if (options.entryCutId && !prepared) throw new Error("ENTRY_CUT_REQUIRES_PREPARED_REVISION: a scene entry needs an active admitted revision");
   const entrySeed = entryActorId && prepared
-    ? requireCertifiedEntry(prepared.bundle, entryActorId, expectedEntryCutHash)
+    ? options.entryCutId
+      ? requireAdmittedSceneEntry(prepared.bundle, options.entryCutId, entryActorId, expectedEntryCutHash, minimumAdmissionTier)
+      : requireCertifiedEntry(prepared.bundle, entryActorId, expectedEntryCutHash, minimumAdmissionTier)
     : undefined;
   if (!seedPath && !canonicalInitial) {
     throw new Error("No accepted initial world. Review and accept an initial-world proposal before creating a playable branch, or pass --seed explicitly.");
@@ -143,6 +155,7 @@ export async function createWorldBranch(
     },
     seedPath ? {} : {
       ...(entryActorId ? { entryActorId } : {}),
+      ...(options.entryCutId ? { entryCutId: options.entryCutId } : {}),
       ...((entrySeed?.projectionSeed ?? canonicalInitial?.projectionSeed) ? { projectionSeed: entrySeed?.projectionSeed ?? canonicalInitial?.projectionSeed } : {}),
       ...(entrySeed
         ? { realizesCanonicalEventIds: entrySeed.realizesCanonicalEventIds }

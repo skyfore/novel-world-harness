@@ -1,3 +1,5 @@
+import { admittedEntries } from "../compiler/cut-admission.js";
+import { minimumAdmissionTierFor } from "../config/load.js";
 import path from "node:path";
 import { CatalogService } from "./catalog-service.js";
 import { resolvePreparationBranchId, inspectPreparation, type PreparationInspection } from "../workflow/prepare.js";
@@ -63,10 +65,12 @@ export async function readPreparationSnapshot(
       const subjectSnapshotHash = preparedSubjectHash(bundle);
       const assessment = await new NovelClosureStore(root).read(sourceId, subjectSnapshotHash);
       const roles = describePreparedRoles(bundle, assessment);
+      const admission = await activeAdmissionCoverage(root, source, subjectSnapshotHash);
       closure = { subjectSnapshotHash, entryReady: assessment?.entryReady ?? false, fullNovelReady: assessment?.fullNovelReady ?? false,
         majorTotal: assessment?.playability?.majorTotal ?? roles.filter((role) => role.major).length, readyTotal: assessment?.playability?.readyTotal ?? 0,
         evaluation: !assessment?.quality ? "not-run" : assessment.fullNovelReady ? "passed" : "blocked", roles,
-        issues: assessment?.issues ?? [{ code: "NOVEL_EVALUATION_NOT_RUN", message: "Current inputs have not completed closure and independent play evaluation" }] };
+        issues: assessment?.issues ?? [{ code: "NOVEL_EVALUATION_NOT_RUN", message: "Current inputs have not completed closure and independent play evaluation" }],
+        ...(admission ? { admission } : {}) };
     } catch (error) {
       closure = { subjectSnapshotHash: "unavailable", entryReady: false, fullNovelReady: false, majorTotal: 0, readyTotal: 0, evaluation: "blocked", roles: [], issues: [{ code: "CANDIDATE_NOT_READY", message: String(error) }] };
     }
@@ -160,5 +164,22 @@ function projectAudit(audit: NonNullable<PreparationInspection["audit"]>): Compi
       blockingIssues: audit.readiness.blockingIssues,
     },
     notes: audit.notes,
+  };
+}
+
+/** Coverage of the active revision's frozen per-cut admission; never recomputes probes in a read model. */
+async function activeAdmissionCoverage(root: string, source: Parameters<PreparedNovelCache["loadActive"]>[0], candidateSubjectHash: string) {
+  const active = await new PreparedNovelCache(root).loadActive(source).catch(() => null);
+  const manifest = active?.bundle.admission;
+  if (!active || !manifest) return undefined;
+  const minimumTier = await minimumAdmissionTierFor(root);
+  const admissible = manifest.cuts.filter((cut) => cut.tier !== "blocked");
+  const firstBlocked = manifest.cuts.find((cut) => cut.tier === "blocked")?.blocking[0];
+  return {
+    bundleHash: active.bundleHash, current: manifest.subjectHash === candidateSubjectHash, minimumTier, horizonIndex: manifest.horizonIndex,
+    cuts: manifest.cuts.length, admissibleCuts: admissible.length,
+    scenes: active.bundle.canonical.sceneOccurrences.length, admissibleScenes: new Set(admissible.flatMap((cut) => cut.sceneIds)).size,
+    admittedEntries: admittedEntries(active.bundle, minimumTier).length,
+    ...(firstBlocked ? { firstBlocking: firstBlocked } : {}),
   };
 }

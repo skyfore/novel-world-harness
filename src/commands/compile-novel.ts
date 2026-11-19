@@ -44,6 +44,8 @@ export type CompileNovelOptions = {
   throughByte?: number;
   /** Test seam: the model side of every pipeline scope. Defaults to an isolated Pi session per scope. */
   agent?: StageAgent;
+  /** Pipeline scopes with non-overlapping ranges that may run side by side (default 1). */
+  concurrency?: number;
 };
 
 /** Pipeline status for one source: scopes by stage, held scopes, usage and cost per source KB. Read-only. */
@@ -155,9 +157,18 @@ async function compileNovelLocked(options: CompileNovelOptions): Promise<NovelCo
   const cache = new PreparedNovelCache(root, options.cacheRoot);
   const report = options.onProgress ?? ((message: string) => console.log(message));
   const extractor = config ? profileForRole(config, "extractor").profile : undefined;
-  const agent = options.agent ?? new PiStageAgent({ root, ...(extractor ? { profile: extractor } : {}), ...(options.model ? { model: options.model } : {}), onStatus: report });
+  // Design 5.9: `llm.routing["extractor.<stage>"]` routes one stage to its own profile (e.g. a cheaper tier for census and observation).
+  const stageProfiles = Object.fromEntries(PIPELINE_PHASES.flatMap((stage) => {
+    const name = config?.llm?.routing[`extractor.${stage}`];
+    const profile = name ? config!.llm!.profiles[name] : undefined;
+    if (name && !profile) throw new Error(`llm.routing.extractor.${stage} names unknown profile ${name}.`);
+    return profile ? [[stage, profile] as const] : [];
+  }));
+  const agent = options.agent ?? new PiStageAgent({ root, ...(extractor ? { profile: extractor } : {}), ...(Object.keys(stageProfiles).length ? { stageProfiles } : {}), ...(options.model ? { model: options.model } : {}), onStatus: report });
+  const stageGeneratedBy = options.model ? undefined : Object.fromEntries(Object.entries(stageProfiles).map(([stage, profile]) => [stage, { ...(profile.provider ? { provider: profile.provider } : {}), ...(profile.model ? { model: profile.model } : {}) }]));
   const pipeline: PipelineOptions = { root, source, agent, runId: run.id, report,
     generatedBy: { ...(extractor?.provider ? { provider: extractor.provider } : {}), ...(options.model ?? extractor?.model ? { model: options.model ?? extractor?.model } : {}) },
+    ...(stageGeneratedBy && Object.keys(stageGeneratedBy).length ? { stageGeneratedBy } : {}), ...(options.concurrency ? { concurrency: options.concurrency } : {}),
     ...(options.throughChapter !== undefined ? { throughChapter: options.throughChapter } : {}), ...(options.throughByte !== undefined ? { throughByte: options.throughByte } : {}),
     ...(options.signal ? { signal: options.signal } : {}) };
   const minimumAdmissionTier = config?.play?.minimumAdmissionTier;

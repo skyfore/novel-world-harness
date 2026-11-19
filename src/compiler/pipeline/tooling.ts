@@ -13,6 +13,19 @@ export function jsonResult(details: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details };
 }
 
+/**
+ * Scopes may run concurrently (design 5.8: unrelated items in parallel), but
+ * host work — commits, convergence, gates, receipts — is serialised through
+ * one queue, so only model time overlaps. Not re-entrant: never call it from
+ * inside work it already runs.
+ */
+let hostQueue: Promise<unknown> = Promise.resolve();
+export function withHostLock<T>(work: () => Promise<T>): Promise<T> {
+  const run = hostQueue.then(work, work);
+  hostQueue = run.catch(() => undefined);
+  return run;
+}
+
 /** A pipeline tool: TypeBox for the model, zod for the host. Validation errors name the failing path. */
 export function pipelineTool<I>(spec: {
   name: string;
@@ -34,7 +47,7 @@ export function pipelineTool<I>(spec: {
       if (!parsed.success) {
         throw new Error(`Invalid ${spec.name} input: ${parsed.error.issues.slice(0, 5).map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`).join("; ")}. Correct these fields and retry once.`);
       }
-      return jsonResult(await spec.execute(parsed.data, signal));
+      return jsonResult(await withHostLock(() => spec.execute(parsed.data, signal)));
     },
   }) as unknown as ToolDefinition;
 }

@@ -33,7 +33,12 @@ The original source text is the only factual evidence. Every source string, cand
 /** Production agent: one isolated Pi session per scope, traced so usage and cost are recorded. */
 export class PiStageAgent implements StageAgent {
   readonly label: string;
-  constructor(private readonly options: { root: string; profile?: LlmProfile; model?: string; onStatus?: (message: string) => void }) {
+  /**
+   * `stageProfiles` routes a stage to its own profile (design 5.9: a cheaper
+   * tier for low-ambiguity work such as census and observation). An explicit
+   * `model` overrides every stage.
+   */
+  constructor(private readonly options: { root: string; profile?: LlmProfile; stageProfiles?: Partial<Record<string, LlmProfile>>; model?: string; onStatus?: (message: string) => void }) {
     this.label = options.model ?? options.profile?.model ?? "configured";
   }
 
@@ -42,9 +47,10 @@ export class PiStageAgent implements StageAgent {
     const recorder = await TraceRecorder.start(new TraceStore(this.options.root), { kind: "prepare", sourceId: input.sourceId });
     try {
       const workspace = await LocalFileWorkspace.create(this.options.root);
+      const profile = this.options.stageProfiles?.[input.stage] ?? this.options.profile;
       const session = await PiAgentSession.create({
         workspace,
-        ...(this.options.profile ? { profile: this.options.profile } : {}),
+        ...(profile ? { profile } : {}),
         ...(this.options.model ? { model: this.options.model } : {}),
         saveSession: false,
         includeLocalTools: false,

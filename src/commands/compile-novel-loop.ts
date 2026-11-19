@@ -40,6 +40,7 @@ export async function compileNovelWithLoop(options: SupervisedCompileOptions) {
     configPath: retained && !retained.request.configPath && configPath === path.join(root, "novel-harness.yaml") ? undefined : configPath,
     branchId: options.branchId,
     cacheRoot: options.cacheRoot, throughChapter: options.throughChapter ?? retained?.request.throughChapter, throughByte: options.throughByte ?? retained?.request.throughByte,
+    concurrency: options.concurrency ?? retained?.request.concurrency,
     evaluationPlanFile: options.evaluationPlanFile ? path.resolve(root, options.evaluationPlanFile) : undefined,
     evaluationPlanHash: options.evaluationPlanHash };
   const request = { ...retained?.request, ...Object.fromEntries(Object.entries(explicit).filter(([, value]) => value !== undefined)) } as WorkerRequest;

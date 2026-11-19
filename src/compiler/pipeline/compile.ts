@@ -35,6 +35,10 @@ export type PipelineOptions = {
   runId?: string;
   signal?: AbortSignal;
   report?: (message: string) => void;
+  /** Scopes of one stage that may run side by side when their ranges do not overlap (default 1). */
+  concurrency?: number;
+  /** Model provenance per stage when stages route to different profiles (design 5.9). */
+  stageGeneratedBy?: StageContext["stageGeneratedBy"];
 };
 
 /** Resolve (and persist) the prefix limit. A later call without a limit reuses the saved one. */
@@ -49,7 +53,8 @@ export async function pipelineContext(options: PipelineOptions): Promise<StageCo
     ...(options.throughByte ? { throughByte: options.throughByte } : saved?.throughByte && !explicit ? { throughByte: saved.throughByte } : {}), startedAt: saved?.startedAt ?? now, updatedAt: now };
   await store.writeRun(run);
   return { root: options.root, sourceId: options.source.id, limit, agent: options.agent, store, runId: options.runId ?? `pipeline-${Date.now().toString(36)}`,
-    generatedBy: options.generatedBy ?? {}, ...(options.signal ? { signal: options.signal } : {}), report: options.report ?? (() => undefined) };
+    generatedBy: options.generatedBy ?? {}, ...(options.signal ? { signal: options.signal } : {}), report: options.report ?? (() => undefined),
+    ...(options.concurrency ? { concurrency: options.concurrency } : {}), ...(options.stageGeneratedBy ? { stageGeneratedBy: options.stageGeneratedBy } : {}) };
 }
 
 export async function runPipelineStage(options: PipelineOptions, stage: PipelineModelStage, scopeIds?: readonly string[]): Promise<StageRunSummary> {

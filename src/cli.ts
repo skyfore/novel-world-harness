@@ -93,6 +93,7 @@ const novelOptions = (command: Command) => command
   .option("--branch <id>", "new playable branch ID; existing revision-pinned histories are preserved")
   .option("--through-chapter <n>", "prefix compile: only chapters 1..n (the limit is saved for later stages)", parsePositive)
   .option("--through-byte <n>", "prefix compile: only source bytes before n", parsePositive)
+  .option("--concurrency <n>", "pipeline scopes with non-overlapping source ranges that may run side by side (default 1; host writes stay serialised)", parsePositive)
   .option("--evaluation-plan <path>", "independent evaluation input JSON; otherwise generate/reuse a source-reviewed plan")
   .option("--plan-hash <hash>", "exact previously frozen independent evaluation plan");
 novelOptions(compileNovel)
@@ -111,6 +112,7 @@ const runCompileNovel = async (command: Command, novel?: string, phase?: NovelCo
     root: rootFor(options), configPath: options.config ? path.resolve(options.config) : undefined,
     novelPath: novel, sourceId: options.source, branchId: options.branch, model: options.model, phase,
     ...(options.throughChapter ? { throughChapter: options.throughChapter } : {}), ...(options.throughByte ? { throughByte: options.throughByte } : {}),
+    ...(options.concurrency ? { concurrency: options.concurrency } : {}),
     evaluationPlanFile: options.evaluationPlan, evaluationPlanHash: options.planHash, signal, loop: options.loop,
     engineerModel: options.engineerModel, loopHistory: options.loopHistory, loopResolution: options.loopResolution, loopResume: options.loopResume, loopHostPatch: options.loopHostPatch, loopNewRun: options.loopNewRun,
   }));

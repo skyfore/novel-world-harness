@@ -2,7 +2,7 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | 修订版 v2（2026-11-19）；M1–M4 已实现（见[进度](progress.zh-CN.md)），M5 起需逐次确认模型批次 |
+| 状态 | 修订版 v2（2026-11-19）；M1–M4 已实现，2026-11-20 按核查补齐（见[进度](progress.zh-CN.md)），M5 起需逐次确认模型批次 |
 | 代码基线 | `f9daea4`；M1–M4 在分支 `design/iteration-02-world-model-content` |
 | 验证语料 | 《龙族1》，源 `a28585b1cf867f3e3a16`，798,095 字节 |
 | 输入 | [基线评估](baseline-evaluation.zh-CN.md)、[最终态差距分析](end-state-gap-analysis.zh-CN.md) |
@@ -96,7 +96,7 @@
 | 身份 | 一个专名只指一个角色，或有带范围的别名决议 | `identity.name-collisions`、`identity.mentions-resolved` | source / internal | 0、100% |
 | 事件 | 每个场景有节拍；事件有效果或显式的无变化；有类型化施事者；台词被节拍承载 | `events.scenes-with-events`、`events.effectful`、`events.typed-agent`、`events.speech-in-beats` | internal / source | 100%、90%、90%、90% |
 | 场景 | 叙事被场景覆盖；场景有地点或有理由的未知；说话的人在场 | `scenes.narrative-covered`、`scenes.location-contract`、`scenes.speakers-present` | source / internal | 95%、100%、100% |
-| 角色 | 名册角色有模型、倾向、目标，并出现在场景中；名册经独立评审 | `characters.speaking-*`、`characters.roster-reviewed` | source / roster | 100% |
+| 角色 | 名册角色有模型、倾向、目标，并出现在场景中；名册经独立评审；评审指出的漏掉角色留在分母里 | `characters.speaking-*`、`characters.roster-reviewed`、`characters.roster-modelled` | source / roster | 100% |
 | 空间 | 被使用的地点在空间图中；入场人物有位置 | `space.locations-on-graph`、`space.opening-positions` | internal | 100% |
 | 知识 | 每次习得有获取路径 | `knowledge.acquisition-paths` | internal | 100% |
 | 行动 | 名册角色至少在一个切面可入场，并有改变状态的行动 | `agency.speaking-enterable`、`agency.effectful-goals` | source | 100% |
@@ -317,6 +317,8 @@ source → census → observation → identity → scenes → world → roster
 5. 同一项失败两次进入“待宿主复核”清单。循环继续处理其他项，不整体停下。
 
 没有逐产物的台账，没有前缀锁，互不相关的项可以并行。
+
+每个可能为 `gap` 的度量都有修复队列（2026-11-20 补齐）。比例型度量（说话人归属、类型化施事者、节拍内台词、时间锚定）的单项可以用带理由的例外关闭，例外不计入分子，由目标余量吸收；被复核为“仅叙述”的片段计入叙事覆盖。
 
 ### 5.9 成本可见
 

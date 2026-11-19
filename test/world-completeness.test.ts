@@ -193,3 +193,80 @@ describe("world-model completeness v2 layers", () => {
     expect(byId.get("lore.terms-grounded")).toMatchObject({ total: 1 });
   });
 });
+
+describe("gap-loop queues and reviewed exceptions", () => {
+  const policy = { ...DEFAULT_COMPLETENESS_POLICY, speakingLineThreshold: 1 };
+  const measuresOf = (report: ReturnType<typeof measureWorldCompleteness>) => new Map(report.measures.map((item) => [item.id, item]));
+
+  it("bounds queues by default, keeps their totals, and lets the gap loop read the whole tail", () => {
+    const longSource = Buffer.from(text + "路明非来了。".repeat(60), "utf8");
+    const bounded = measureWorldCompleteness(bundle(), longSource, { policy });
+    expect(bounded.queues.unannotatedNames.total).toBe(61);
+    expect(bounded.queues.unannotatedNames.ranges).toHaveLength(50);
+    const whole = measureWorldCompleteness(bundle(), longSource, { policy, queueLimit: Number.POSITIVE_INFINITY });
+    expect(whole.queues.unannotatedNames.ranges).toHaveLength(61);
+    expect(whole.queues.unannotatedNames.ranges.at(-1)!.startByte).toBeGreaterThan(bounded.queues.unannotatedNames.ranges.at(-1)!.startByte);
+  });
+
+  it("closes ratio-measure items by reviewed exceptions without counting them as facts; narration-only segments count as covered", () => {
+    // Same byte length as 诺诺: the second line's reply now has no speaker cue.
+    const anonymous = Buffer.from(text.replace("诺诺点头", "有人点头"), "utf8");
+    const base = measureWorldCompleteness(bundle(), anonymous, { policy });
+    const unattributed = base.queues.unattributedSpeech.ranges;
+    expect(unattributed.length).toBeGreaterThan(0);
+    const before = measuresOf(base).get("observation.speech-attributed")!;
+    const dispositions = unattributed.map((range) => ({ measureId: "observation.speech-attributed", subject: `speech:${range.startByte}`, verdict: "unknown" as const, rationale: "The text does not say who answers." }));
+    const reviewed = measureWorldCompleteness(bundle(), anonymous, { policy, dispositions });
+    expect(reviewed.queues.unattributedSpeech.ranges).toEqual([]);
+    expect(measuresOf(reviewed).get("observation.speech-attributed")).toMatchObject({ numerator: before.numerator, total: before.total });
+
+    // Narrative outside every scene: u2..u3. A segment reviewed as narration only covers it.
+    const withSegment = bundle() as unknown as { compilerSnapshot: { annotations: unknown[] } };
+    withSegment.compilerSnapshot.annotations.push({ version: 1, id: "ds2", sourceId: "src", derivation, annotationType: "discourse-segment", kind: "narrator-commentary", anchors: [unitAnchors[2], unitAnchors[3]], confidence: 1 });
+    const uncovered = measureWorldCompleteness(withSegment as unknown as PreparedNovelBundle, source, { policy });
+    expect(measuresOf(uncovered).get("scenes.narrative-covered")!.status).toBe("gap");
+    expect(uncovered.queues.narrativeOutsideScenes.ranges).toEqual([{ startByte: unitAnchors[2]!.startByte, endByte: unitAnchors[3]!.endByte }]);
+    const covered = measureWorldCompleteness(withSegment as unknown as PreparedNovelBundle, source, { policy,
+      dispositions: [{ measureId: "scenes.narrative-covered", subject: "segment:ds2", verdict: "narration-only", rationale: "Narrator commentary, no staged occurrence." }] });
+    expect(measuresOf(covered).get("scenes.narrative-covered")).toMatchObject({ status: "satisfied" });
+    expect(covered.queues.narrativeOutsideScenes.ranges).toEqual([]);
+  });
+
+  it("counts an event mention reviewed as non-referential as resolved", () => {
+    const withHabit = bundle() as unknown as { compilerSnapshot: { annotations: unknown[]; eventResolutions: unknown[] } };
+    withHabit.compilerSnapshot.annotations.push({ version: 1, id: "em2", sourceId: "src", derivation, annotationType: "event-mention", triggerAnchor: anchor("吹"), trigger: "吹", extentAnchors: [unitAnchors[2]],
+      eventTypeCandidates: ["other"], participantMentionIds: [], salience: "minor", confidence: 1 });
+    const open = measureWorldCompleteness(withHabit as unknown as PreparedNovelBundle, source, { policy });
+    expect(measuresOf(open).get("observation.event-mentions-resolved")).toMatchObject({ numerator: 1, total: 2, status: "gap" });
+    expect(open.queues.unresolvedEventMentions.mentions.map((item) => item.mentionId)).toEqual(["em2"]);
+    withHabit.compilerSnapshot.eventResolutions.push({ id: "er2", eventMentionIds: ["em2"], status: "non-referential", supersedesResolutionIds: [] });
+    const reviewed = measureWorldCompleteness(withHabit as unknown as PreparedNovelBundle, source, { policy });
+    expect(measuresOf(reviewed).get("observation.event-mentions-resolved")).toMatchObject({ numerator: 2, total: 2, status: "satisfied" });
+  });
+
+  it("keeps missing majors named by the roster review in the denominator until they are modelled or reviewed", () => {
+    const roster = { reviewed: true, actorIds: ["lu"], missing: ["诺诺", "白鸦"] };
+    const report = measureWorldCompleteness(bundle(), source, { policy, roster });
+    // 诺诺 matches an entity and joins the roster; 白鸦 has no entity yet and still counts.
+    expect(report.roster.actorIds.sort()).toEqual(["lu", "nono"]);
+    expect(measuresOf(report).get("characters.roster-modelled")).toMatchObject({ numerator: 0, total: 3, status: "gap" });
+    expect(report.queues.rosterUnmodelled.map((item) => item.subject)).toEqual(["actor:lu", "actor:nono", "missing:白鸦"]);
+    const dispositions = report.queues.rosterUnmodelled.map((item) => ({ measureId: "characters.roster-modelled", subject: item.subject, verdict: "not-stated" as const, rationale: "Reviewed." }));
+    expect(measuresOf(measureWorldCompleteness(bundle(), source, { policy, roster, dispositions })).get("characters.roster-modelled")).toMatchObject({ numerator: 3, status: "satisfied" });
+    // Without a review the roster measure cannot fail: it is unknown.
+    expect(measuresOf(measureWorldCompleteness(bundle(), source, { policy })).get("characters.roster-modelled")!.status).toBe("unknown");
+  });
+
+  it("drops a time expression the observation review rejected from the time denominator", () => {
+    const v2Text = "\t第二天，“走吧。”路明非说。\n";
+    const v2Source = Buffer.from(v2Text, "utf8");
+    const base = bundle() as unknown as { canonical: { events: Array<{ evidence: unknown[] }> }; compilerSnapshot: { annotations: Array<Record<string, unknown>>; eventResolutions: unknown[] } };
+    const line = { version: 1, sourceId: "src", startByte: 0, endByte: v2Source.byteLength, startLine: 1, endLine: 1, exactHash: "0".repeat(64) };
+    base.compilerSnapshot.annotations = base.compilerSnapshot.annotations.filter((item) => item.id === "em1").map((item) => ({ ...item, extentAnchors: [line] }));
+    const timed = measureWorldCompleteness(base as unknown as PreparedNovelBundle, v2Source, { policy });
+    expect(measuresOf(timed).get("time.anchored-events")).toMatchObject({ total: 1, status: "gap" });
+    const time = Buffer.byteLength("\t", "utf8");
+    const rejected = measureWorldCompleteness(base as unknown as PreparedNovelBundle, v2Source, { policy, handled: { times: [{ startByte: time, endByte: time + Buffer.byteLength("第二天", "utf8") }] } });
+    expect(measuresOf(rejected).get("time.anchored-events")).toMatchObject({ total: 0 });
+  });
+});

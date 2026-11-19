@@ -3,7 +3,7 @@ import { z } from "zod";
 import { idSchema, participantPresenceModeSchema, stateOperationSchema } from "../../world/model.js";
 import { buildAssertions } from "./artifacts.js";
 import { convergeCanonical, submitCanonical } from "./canon.js";
-import { gateOf, type StageDefinition } from "./runner.js";
+import { gateOf, type ScopePlan, type StageContext, type StageDefinition } from "./runner.js";
 import { extentSelectorSchema, spanSelectorSchema, ScopeText, windowUnits } from "./text.js";
 import { pipelineTool, T } from "./tooling.js";
 import { loadPipelineView, measureView } from "./view.js";
@@ -14,6 +14,34 @@ import { loadPipelineView, measureView } from "./view.js";
  * reader setup. Built through the same proposal path as every artifact.
  */
 const citation = z.union([spanSelectorSchema, extentSelectorSchema]);
+
+/** The initial-world tool; the gap loop reuses it for opening positions (design D3). */
+export function openingTools(ctx: StageContext, scope: ScopePlan) {
+  return [pipelineTool({
+    name: "propose_initial_world", label: "Propose initial world",
+    description: "The initial world at the opening checkpoint: presence of characters, starting locations (positions), other state operations, reader setup, and citations.",
+    parameters: Type.Object({ readerSetup: Type.Optional(Type.String()), presence: Type.Array(Type.Object({ entity: Type.String(), mode: Type.String() }, { additionalProperties: false })),
+      positions: Type.Optional(Type.Array(Type.Object({ entity: Type.String(), location: Type.String() }, { additionalProperties: false }))), operations: Type.Optional(Type.Array(Type.Unknown())),
+      evidence: Type.Array(Type.Union([T.span(), T.extent()])), readerContext: Type.Optional(Type.Unknown()) }, { additionalProperties: false }),
+    input: openingInput,
+    async execute(input) {
+      const view = await loadPipelineView(ctx.root, ctx.sourceId);
+      const entities = new Set(view.bundle.canonical.entities.map((entity) => entity.id));
+      for (const id of [...input.presence.map((item) => item.entity), ...input.positions.flatMap((item) => [item.entity, item.location])]) if (!entities.has(id)) throw new Error(`Unknown entity ${id}.`);
+      const text = new ScopeText(ctx.sourceId, view.bytes, windowUnits(view.structure, view.bytes, { startByte: 0, endByte: ctx.limit }));
+      const evidence = input.evidence.map((item) => text.evidence("unit" in item ? text.span(item) : text.extent(item)));
+      const payload = {
+        version: 1, ...(input.readerSetup ? { readerSetup: input.readerSetup } : {}), ...(input.readerContext ? { readerContext: input.readerContext } : {}),
+        participantPresence: input.presence.map((item) => ({ entityId: item.entity, mode: item.mode })),
+        delta: { version: 1, operations: [...input.positions.map((item) => ({ op: "set" as const, entityId: item.entity, field: "character.location", value: item.location })), ...input.operations] },
+        evidence,
+      };
+      await submitCanonical(ctx, scope.id, "initial-world", payload, "pipeline-opening", buildAssertions(ctx, scope.id, text, "initial-world", payload, input.evidence, []));
+      return { convergenceIssues: await convergeCanonical(ctx) };
+    },
+  })];
+}
+
 const openingInput = z.object({
   readerSetup: z.string().trim().min(1).max(2_000).optional(),
   presence: z.array(z.object({ entity: idSchema, mode: participantPresenceModeSchema }).strict()).min(1).max(64),
@@ -38,31 +66,7 @@ export const openingStage: StageDefinition = {
       "--- opening text ---", text.render(),
     ].filter(Boolean).join("\n");
   },
-  tools(ctx, scope) {
-    return [pipelineTool({
-      name: "propose_initial_world", label: "Propose initial world",
-      description: "The initial world at the opening checkpoint: presence of characters, starting locations (positions), other state operations, reader setup, and citations.",
-      parameters: Type.Object({ readerSetup: Type.Optional(Type.String()), presence: Type.Array(Type.Object({ entity: Type.String(), mode: Type.String() }, { additionalProperties: false })),
-        positions: Type.Optional(Type.Array(Type.Object({ entity: Type.String(), location: Type.String() }, { additionalProperties: false }))), operations: Type.Optional(Type.Array(Type.Unknown())),
-        evidence: Type.Array(Type.Union([T.span(), T.extent()])), readerContext: Type.Optional(Type.Unknown()) }, { additionalProperties: false }),
-      input: openingInput,
-      async execute(input) {
-        const view = await loadPipelineView(ctx.root, ctx.sourceId);
-        const entities = new Set(view.bundle.canonical.entities.map((entity) => entity.id));
-        for (const id of [...input.presence.map((item) => item.entity), ...input.positions.flatMap((item) => [item.entity, item.location])]) if (!entities.has(id)) throw new Error(`Unknown entity ${id}.`);
-        const text = new ScopeText(ctx.sourceId, view.bytes, windowUnits(view.structure, view.bytes, { startByte: 0, endByte: ctx.limit }));
-        const evidence = input.evidence.map((item) => text.evidence("unit" in item ? text.span(item) : text.extent(item)));
-        const payload = {
-          version: 1, ...(input.readerSetup ? { readerSetup: input.readerSetup } : {}), ...(input.readerContext ? { readerContext: input.readerContext } : {}),
-          participantPresence: input.presence.map((item) => ({ entityId: item.entity, mode: item.mode })),
-          delta: { version: 1, operations: [...input.positions.map((item) => ({ op: "set" as const, entityId: item.entity, field: "character.location", value: item.location })), ...input.operations] },
-          evidence,
-        };
-        await submitCanonical(ctx, scope.id, "initial-world", payload, "pipeline-opening", buildAssertions(ctx, scope.id, text, "initial-world", payload, input.evidence, []));
-        return { convergenceIssues: await convergeCanonical(ctx) };
-      },
-    })];
-  },
+  tools: (ctx, scope) => openingTools(ctx, scope),
   async commit(ctx) { return convergeCanonical(ctx); },
   gate(ctx, view) {
     const initial = view.bundle.canonical.initialWorld;

@@ -9,6 +9,8 @@ import { convergeWorldProposals } from "../converge.js";
 import { gateOf, type ScopePlan, type StageContext, type StageDefinition } from "./runner.js";
 import { extentSelectorSchema, ScopeText, windowUnits } from "./text.js";
 import { pipelineTool } from "./tooling.js";
+import { identityTools } from "./identity.js";
+import { observationTools } from "./observation.js";
 import { loadPipelineView, measureView, type PipelineView } from "./view.js";
 
 /**
@@ -17,7 +19,7 @@ import { loadPipelineView, measureView, type PipelineView } from "./view.js";
  * artifact or a reviewed "not stated". A scope completes when every item it
  * holds has left its measure's queue.
  */
-export type WorldItemKind = "lore" | "location" | "pair" | "actor" | "key-event" | "autonomy" | "knowledge";
+export type WorldItemKind = "lore" | "location" | "pair" | "actor" | "roster" | "key-event" | "autonomy" | "knowledge";
 const ITEMS_PER_SCOPE = 12;
 
 /** Open work items, keyed `<kind>:<subject>`, from one completeness report. */
@@ -31,6 +33,8 @@ export function worldWorkItems(report: WorldCompletenessReport): string[] {
     ...report.queues.locationsOffGraph.map((id) => `location:${id}`),
     ...report.queues.rosterPairs.map((item) => item.subject.replace(/^pair:/u, "pair:")),
     ...openActors,
+    // Reviewed and missing majors (design 5.7): a missing major stays open until it is an entity with a model and a goal, or reviewed "not stated".
+    ...(measure("characters.roster-modelled")?.status === "gap" ? report.queues.rosterUnmodelled.map((item) => `roster:${item.subject}`) : []),
     ...report.queues.unconditionedKeyEvents.map((id) => `key-event:${id}`),
     ...(measure("possibility.autonomous-templates")?.status === "gap" ? ["autonomy:source"] : []),
     ...report.queues.unacquiredKnowledge.map((item) => `knowledge:${item.eventId}|${item.actorId}|${item.claimId}`),
@@ -52,6 +56,7 @@ function stillOpen(report: WorldCompletenessReport, item: string, view: Pipeline
       return !(done("characters.speaking-modelled", character.model) && done("characters.speaking-with-disposition", character.depth)
         && done("characters.speaking-with-goal", character.goals > 0) && done("agency.effectful-goals", character.effectfulGoals > 0));
     }
+    case "roster": return report.queues.rosterUnmodelled.some((entry) => entry.subject === subject) && report.measures.find((entry) => entry.id === "characters.roster-modelled")?.status === "gap";
     case "key-event": return report.queues.unconditionedKeyEvents.includes(subject);
     case "autonomy": return report.measures.find((entry) => entry.id === "possibility.autonomous-templates")?.status === "gap";
     case "knowledge": return report.queues.unacquiredKnowledge.some((entry) => `${entry.eventId}|${entry.actorId}|${entry.claimId}` === subject);
@@ -116,6 +121,12 @@ function describeItem(view: PipelineView, report: WorldCompletenessReport, item:
     case "location": return `${item}: location ${name(subject)} is used by scenes or positions but has no spatial relation. Propose containment/adjacency/route spatial relations the text states, or record space.locations-on-graph location:${subject} unknown.`;
     case "pair": { const [a, b] = subject.split("|"); return `${item}: ${name(a!)} and ${name(b!)} share ${report.queues.rosterPairs.find((entry) => entry.subject === `pair:${subject}`)?.scenes ?? "?"} scenes. Propose a directed relation (proposition, or a character model's relationship stance), or record relations.roster-pairs pair:${subject} not-stated.`; }
     case "actor": { const entry = report.speakingCharacters.find((character) => character.actorId === subject); return `${item}: ${name(subject)} (${entry?.lines ?? 0} lines, ${entry?.scenes ?? 0} scenes; model ${entry?.model ? "yes" : "no"}, dispositions ${entry?.depth ? "yes" : "no"}, goals ${entry?.goals ?? 0}, state-changing goals ${entry?.effectfulGoals ?? 0}). Propose a character model with evidenced dispositions and goals whose candidate action changes state, or record not-stated per measure.`; }
+    case "roster": {
+      const slot = report.queues.rosterUnmodelled.find((entry) => entry.subject === subject);
+      return slot?.actorId
+        ? `${item}: roster major ${slot.name} needs a character model with evidenced dispositions and at least one goal whose candidate action changes state, or record characters.roster-modelled ${subject} not-stated.`
+        : `${item}: the roster review names "${slot?.name ?? subject}" as a missing major. Annotate a mention of the name (propose_entity_mentions), create the character (propose_entities), then give it a model and a goal; or record characters.roster-modelled ${subject} not-stated if the text in range never presents this person.`;
+    }
     case "key-event": { const event = view.bundle.canonical.events.find((entry) => entry.id === subject); return `${item}: key event "${event?.title ?? subject}". Give its preconditions or a typed causal relation (event-relation cause/enable/motivate), or record causality.conditioned-key-events event:${subject} unconditioned after review.`; }
     case "autonomy": return `${item}: no obligation, pressure or process stays in force after divergence. Propose at least one norm template, process template or possibility the text supports (a deadline, a duty, a pursuit, an institutional reaction).`;
     case "knowledge": { const [eventId, actorId, claimId] = subject.split("|"); return `${item}: ${name(actorId!)} learns ${claimId} in ${eventId} without an acquisition path. Propose an acquisition (observed / told / read / inferred) with its evidence.`; }
@@ -148,7 +159,10 @@ export const worldStage: StageDefinition = {
       "Work items:", ...scope.items.map((item) => describeItem(view, report, item)),
     ].filter(Boolean).join("\n");
   },
-  tools: (ctx, scope) => [...artifactTools(ctx, scope, { startByte: 0, endByte: ctx.limit }), ...sourceReadingTools(ctx)],
+  tools: (ctx, scope) => [...artifactTools(ctx, scope, { startByte: 0, endByte: ctx.limit }), ...sourceReadingTools(ctx),
+    // Missing majors may need an entity first.
+    ...(scope.items.some((item) => item.startsWith("roster:missing:")) ? [...observationTools(ctx, { ...scope, range: { startByte: 0, endByte: ctx.limit } }).filter((tool) => tool.name === "propose_entity_mentions"),
+      ...identityTools(ctx, scope).filter((tool) => tool.name !== "decide_lexicon_entries")] : [])],
   async commit(ctx) { return convergeCanonical(ctx); },
   gate(ctx, view, scope) {
     const report = measureView(view, { startByte: 0, endByte: ctx.limit });

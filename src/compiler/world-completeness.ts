@@ -130,10 +130,31 @@ export type WorldCompletenessReport = {
   summary: { satisfied: number; gap: number; unknown: number; info: number };
   /** Source-derived character denominator, most attributed lines first. */
   speakingCharacters: Array<{ actorId: string; name: string; lines: number; occurrences: number; annotatedMentions: number; model: boolean; depth: boolean; goals: number; effectfulGoals: number; scenes: number }>;
-  /** Bounded, ordered work lists for the repair milestones; `total` keeps the tail discoverable. */
+  /**
+   * Ordered work lists for the gap loop, bounded by `queueLimit` (default 50);
+   * `total` keeps a truncated tail discoverable, and the gap loop reads them
+   * unbounded. Subjects closed by a reviewed disposition are not queued.
+   */
   queues: {
     hiddenUnits: { total: number; ranges: HiddenUnitRange[] };
     unannotatedSpeech: { total: number; ranges: ByteRange[] };
+    /** Narrative units still unresolved or deferred (they hold the cut horizon back). */
+    blockingUnits: { total: number; ranges: ByteRange[] };
+    unannotatedNames: { total: number; ranges: ByteRange[] };
+    /** Direct-speech spans with no character speaker and no reviewed "speaker unknown". */
+    unattributedSpeech: { total: number; ranges: ByteRange[] };
+    unresolvedEntityMentions: { total: number; mentions: Array<ByteRange & { mentionId: string }> };
+    unresolvedEventMentions: { total: number; mentions: Array<ByteRange & { mentionId: string; salience: string }> };
+    uneffectfulEvents: string[];
+    untypedAgentEvents: string[];
+    /** Direct speech outside every canonical event extent and not reviewed as narration only. */
+    speechOutsideBeats: { total: number; ranges: ByteRange[] };
+    /** Narrative stretches outside every scene extent and every segment reviewed as narration only. */
+    narrativeOutsideScenes: { total: number; ranges: ByteRange[] };
+    unpositionedOpening: string[];
+    /** Roster actors (reviewed majors and missing majors named by the review) without an entity, model or goal. */
+    rosterUnmodelled: Array<{ subject: string; name: string; actorId?: string }>;
+    speakingNotEnterable: string[];
     scenesWithoutEvents: string[];
     scenesWithoutLocation: string[];
     absentSpeakers: Array<{ sceneId: string; actorId: string; lines: number }>;
@@ -151,7 +172,7 @@ export type WorldCompletenessReport = {
   roster: RosterSummary;
 };
 
-const QUEUE_LIMIT = 50;
+export const DEFAULT_QUEUE_LIMIT = 50;
 
 /** Disjoint, sorted union of ranges with an overlap query. */
 class RangeUnion {
@@ -251,7 +272,9 @@ export type WorldCompletenessOptions = {
   loreTerms?: readonly LoreTerm[];
   usage?: CompileUsage | null;
   /** Host candidates the model rejected with a reason: they count as handled, not as missing annotations. */
-  handled?: { speech?: readonly ByteRange[]; names?: readonly ByteRange[] };
+  handled?: { speech?: readonly ByteRange[]; names?: readonly ByteRange[]; times?: readonly ByteRange[] };
+  /** Queue bound (default 50). The gap loop passes Infinity so held items at the head never hide the tail. */
+  queueLimit?: number;
 };
 
 export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Uint8Array, options: WorldCompletenessOptions = {}): WorldCompletenessReport {
@@ -287,8 +310,12 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
   }
   const supersededEvent = new Set(snapshot.eventResolutions.flatMap((item) => item.supersedesResolutionIds ?? []));
   const mentionEvent = new Map<string, string>();
+  /** Event mentions reviewed as not an occurrence (habitual, hypothetical): "explicitly not entering canon" (design 3.3). */
+  const nonReferentialEvents = new Set<string>();
   for (const item of snapshot.eventResolutions) {
-    if (supersededEvent.has(item.id) || !item.canonicalEventId) continue;
+    if (supersededEvent.has(item.id)) continue;
+    if (item.status === "non-referential") for (const mentionId of item.eventMentionIds) nonReferentialEvents.add(mentionId);
+    if (!item.canonicalEventId) continue;
     for (const mentionId of item.eventMentionIds) mentionEvent.set(mentionId, item.canonicalEventId);
   }
   // Event extents: resolved event-mention extents, else the event's own evidence spans.
@@ -364,21 +391,25 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
   measures.push(measure({ id: "observation.speech-annotated", layer: "observation", label: "direct-speech spans covered by a quotation annotation", denominator: "source",
     numerator: speech.filter((span) => quotationUnion.overlaps(span.startByte, span.endByte)).length, total: speech.length, target: targets.speechAnnotated }));
   const attributedAny = speech.filter((span) => speechSpeaker.has(span.startByte)).length;
+  const unattributedSpeech = speech.filter((span) => !speechSpeaker.has(span.startByte) && !disposed("observation.speech-attributed", `speech:${span.startByte}`));
   measures.push(measure({ id: "observation.speech-attributed", layer: "observation", label: "direct-speech spans with a character speaker (annotation or host lexical cue)", denominator: "source",
     numerator: attributedAny, total: speech.length, target: targets.speechAttributed,
-    note: `${annotationSpeaker.size} by compiled quotation annotations, ${attributedAny - annotationSpeaker.size} by host lexical cue only.` }));
+    note: `${annotationSpeaker.size} by compiled quotation annotations, ${attributedAny - annotationSpeaker.size} by host lexical cue only.${speech.length - attributedAny - unattributedSpeech.length ? ` ${speech.length - attributedAny - unattributedSpeech.length} reviewed as speaker unknown.` : ""}` }));
   measures.push(measure({ id: "observation.names-annotated", layer: "observation", label: "established-name occurrences covered by an entity-mention annotation", denominator: "source",
     numerator: occurrences.filter((item) => mentionUnion.overlaps(item.startByte, item.endByte)).length, total: occurrences.length, target: targets.namesAnnotated }));
-  measures.push(measure({ id: "observation.event-mentions-resolved", layer: "observation", label: "event mentions resolved into a canonical event", denominator: "internal",
-    numerator: eventMentions.filter((item) => canonicalEventIds.has(mentionEvent.get(item.id) ?? "")).length, total: eventMentions.length, target: targets.eventMentionsResolved,
-    note: `${eventMentions.filter((item) => item.salience === "major" && !canonicalEventIds.has(mentionEvent.get(item.id) ?? "")).length} unresolved mentions are marked major.` }));
+  const eventMentionResolved = (item: { id: string }) => canonicalEventIds.has(mentionEvent.get(item.id) ?? "") || nonReferentialEvents.has(item.id);
+  const unresolvedEventMentions = eventMentions.filter((item) => !eventMentionResolved(item));
+  measures.push(measure({ id: "observation.event-mentions-resolved", layer: "observation", label: "event mentions resolved into a canonical event or reviewed as non-referential", denominator: "internal",
+    numerator: eventMentions.length - unresolvedEventMentions.length, total: eventMentions.length, target: targets.eventMentionsResolved,
+    note: `${unresolvedEventMentions.filter((item) => item.annotationType === "event-mention" && item.salience === "major").length} unresolved mentions are marked major; ${eventMentions.filter((item) => nonReferentialEvents.has(item.id)).length} reviewed as non-referential.` }));
 
   // Identity.
   measures.push(measure({ id: "identity.name-collisions", layer: "identity", label: "proper names attested for more than one character entity", denominator: "source",
     numerator: inventory.lexicon.collisions.length, total: inventory.lexicon.entries.length + inventory.lexicon.collisions.length, target: targets.nameCollisions, lowerIsBetter: true,
     note: "Each collision is a duplicate-entity or alias-scope question for identity review." }));
+  const unresolvedEntityMentions = entityMentions.filter((item) => !resolvedMentions.has(item.id));
   measures.push(measure({ id: "identity.mentions-resolved", layer: "identity", label: "entity mentions with a resolution in force", denominator: "internal",
-    numerator: entityMentions.filter((item) => resolvedMentions.has(item.id)).length, total: entityMentions.length, target: 1 }));
+    numerator: entityMentions.length - unresolvedEntityMentions.length, total: entityMentions.length, target: 1 }));
 
   // Events and beats.
   const allScenes = canonical.sceneOccurrences;
@@ -395,11 +426,15 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
   measures.push(measure({ id: "events.effectful", layer: "events", label: "events with a state, knowledge, semantic or execution effect", denominator: "internal",
     numerator: effectful.length, total: events.length, target: targets.effectfulEvents,
     note: `${effectful.length - changing.length} by a reviewed "no change".` }));
+  // Reviewed exceptions ("agentless", "narration only") close a gap-loop item but never count as the fact the measure counts; the target's slack absorbs them.
+  const untypedAgentEvents = events.filter((event) => !agents.has(event.id) && !disposed("events.typed-agent", `event:${event.id}`));
   measures.push(measure({ id: "events.typed-agent", layer: "events", label: "events with a typed agent participation", denominator: "internal",
-    numerator: events.filter((event) => agents.has(event.id)).length, total: events.length, target: targets.typedAgent }));
+    numerator: events.filter((event) => agents.has(event.id)).length, total: events.length, target: targets.typedAgent,
+    ...(events.length - events.filter((event) => agents.has(event.id)).length - untypedAgentEvents.length ? { note: `${events.length - events.filter((event) => agents.has(event.id)).length - untypedAgentEvents.length} reviewed as agentless.` } : {}) }));
+  const speechOutsideBeats = speech.filter((span) => !eventUnion.overlaps(span.startByte, span.endByte) && !disposed("events.speech-in-beats", `speech:${span.startByte}`));
   measures.push(measure({ id: "events.speech-in-beats", layer: "events", label: "direct-speech spans inside a canonical event's mention extent", denominator: "source",
     numerator: speech.filter((span) => eventUnion.overlaps(span.startByte, span.endByte)).length, total: speech.length, target: targets.speechInBeats,
-    note: "Dialogue outside every event extent is talk the world model does not stage as a beat." }));
+    note: `Dialogue outside every event extent is talk the world model does not stage as a beat.${speech.length - speech.filter((span) => eventUnion.overlaps(span.startByte, span.endByte)).length - speechOutsideBeats.length ? ` ${speech.length - speech.filter((span) => eventUnion.overlaps(span.startByte, span.endByte)).length - speechOutsideBeats.length} lines reviewed as narration only.` : ""}` }));
   const narrativeRanges = new RangeUnion(narrative.map((unit) => unit.anchor));
   const eventGaps: ByteRange[] = [];
   let cursor = narrativeRanges.ranges[0]?.startByte ?? scope?.startByte ?? 0;
@@ -422,9 +457,17 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
   const scenes = scope ? allScenes.filter((scene) => sceneRanges.get(scene.id)!.ranges.some(inScope)) : allScenes;
   measures.splice(scenesWithEventsAt, 0, measure({ id: "events.scenes-with-events", layer: "events", label: "scenes with at least one canonical event", denominator: "internal",
     numerator: scenes.filter((scene) => scene.eventIds.length > 0).length, total: scenes.length, target: targets.scenesWithEvents }));
+  // A discourse segment reviewed as narration only (narrator commentary, a summary with no staged occurrence) is accounted narrative, not a missing scene.
+  const narrationOnly = [...discourse.entries()].filter(([id]) => disposed("scenes.narrative-covered", `segment:${id}`)).flatMap(([, anchors]) => anchors);
   const allSceneRanges = new RangeUnion([...sceneRanges.values()].flatMap((union) => union.ranges));
-  measures.push(measure({ id: "scenes.narrative-covered", layer: "scenes", label: "narrative bytes inside a scene's extent (discourse anchors and scene evidence)", denominator: "source",
-    numerator: narrative.reduce((total, unit) => total + allSceneRanges.coveredBytes(unit.anchor.startByte, unit.anchor.endByte), 0), total: narrativeBytes, target: targets.narrativeInScenes }));
+  const coveredRanges = new RangeUnion([...allSceneRanges.ranges, ...narrationOnly]);
+  const sceneBytes = narrative.reduce((total, unit) => total + allSceneRanges.coveredBytes(unit.anchor.startByte, unit.anchor.endByte), 0);
+  const coveredBytes = narrative.reduce((total, unit) => total + coveredRanges.coveredBytes(unit.anchor.startByte, unit.anchor.endByte), 0);
+  measures.push(measure({ id: "scenes.narrative-covered", layer: "scenes", label: "narrative bytes inside a scene's extent or a segment reviewed as narration only", denominator: "source",
+    numerator: coveredBytes, total: narrativeBytes, target: targets.narrativeInScenes,
+    note: `${sceneBytes} bytes in scenes, ${coveredBytes - sceneBytes} in segments reviewed as narration only.` }));
+  const narrativeOutsideScenes = mergeAdjacent(narrative.filter((unit) => coveredRanges.coveredBytes(unit.anchor.startByte, unit.anchor.endByte) < unit.anchor.endByte - unit.anchor.startByte)
+    .map((unit) => ({ startByte: unit.anchor.startByte, endByte: unit.anchor.endByte })).sort((a, b) => a.startByte - b.startByte), (left, right) => ({ startByte: left.startByte, endByte: right.endByte }), 8);
   measures.push(measure({ id: "scenes.location-contract", layer: "scenes", label: "scenes with a location or an explicit reasoned unknown", denominator: "internal",
     numerator: scenes.filter((scene) => scene.locationId || scene.locationUnknown).length, total: scenes.length, target: targets.sceneLocation }));
   const speakerLines = new Map<string, number>();
@@ -509,8 +552,10 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
 
   // Agency: can each speaking character actually be entered and act?
   const admission = bundle.admission ?? options.admission ?? null;
+  let speakingNotEnterable: string[] = [];
   if (admission) {
     const enterable = new Set(admission.cuts.filter((cut) => cut.tier !== "blocked").flatMap((cut) => cut.actors.filter((actor) => tierAtLeast(actor.tier, "enterable")).map((actor) => actor.actorId)));
+    speakingNotEnterable = speaking.filter((item) => !enterable.has(item.actorId)).map((item) => item.actorId);
     measures.push(measure({ id: "agency.speaking-enterable", layer: "agency", label: "speaking characters with at least one enterable cut", denominator: "source",
       numerator: speaking.filter((item) => enterable.has(item.actorId)).length, total: speaking.length, target: targets.enterable }));
   } else {
@@ -556,12 +601,29 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
   const provisional = [...new Set([...speaking.map((item) => item.actorId),
     ...[...agentCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, policy.rosterTopAgents).map(([actorId]) => actorId)])];
   const roster: RosterSummary = options.roster ?? { reviewed: Boolean(snapshot.roleRoster?.reviews.length), actorIds: provisional };
-  const rosterSet = new Set(roster.actorIds);
+  // Missing majors named by the review stay in the denominator (design 5.7): once an entity carries the name it joins the roster set, until then it is an open roster slot.
+  const characterByName = new Map<string, string>();
+  for (const entity of canonical.entities) if (entity.kind === "character") for (const name of [entity.canonicalName, ...entity.aliases]) if (!characterByName.has(name.trim())) characterByName.set(name.trim(), entity.id);
+  const missingMajors = (roster.missing ?? []).map((name) => ({ name, actorId: characterByName.get(name.trim()) }));
+  const rosterActors = [...new Set([...roster.actorIds, ...missingMajors.flatMap((item) => item.actorId ? [item.actorId] : [])])];
+  const rosterSet = new Set(rosterActors);
   measures.splice(rosterReviewedAt, 0, measure({ id: "characters.roster-reviewed", layer: "characters", label: "role roster independently reviewed", denominator: "roster",
     numerator: roster.reviewed ? 1 : 0, total: 1, target: 1, ...(roster.reviewed ? {} : { status: "unknown" as const }),
-    note: `${roster.actorIds.length} roster actors${roster.missing?.length ? `, ${roster.missing.length} missing majors named by review` : ""}; without a review the major-role denominator is provisional.` }));
+    note: `${roster.actorIds.length} roster actors${missingMajors.length ? `, ${missingMajors.length} missing majors named by review (${missingMajors.filter((item) => !item.actorId).length} without an entity yet)` : ""}; without a review the major-role denominator is provisional.` }));
   const rosterStatus = (computed: number, total: number, target: number): MeasureStatus | undefined =>
     roster.reviewed ? undefined : total === 0 ? "unknown" : computed / total >= target ? undefined : "unknown";
+  // Every roster role (reviewed majors and missing majors) needs an entity, a model and a goal, or a reviewed "not stated".
+  const rosterSlots: Array<{ subject: string; name: string; actorId?: string }> = [
+    ...rosterActors.map((actorId) => ({ subject: `actor:${actorId}`, name: names.get(actorId) ?? actorId, actorId })),
+    ...missingMajors.filter((item) => !item.actorId).map((item) => ({ subject: `missing:${item.name}`, name: item.name })),
+  ];
+  const rosterModelled = (slot: typeof rosterSlots[number]) => Boolean(disposed("characters.roster-modelled", slot.subject))
+    || Boolean(slot.actorId && models.has(slot.actorId) && (goalsBy.get(slot.actorId)?.length ?? 0) > 0);
+  const rosterUnmodelled = rosterSlots.filter((slot) => !rosterModelled(slot));
+  const rosterModelStatus = rosterStatus(rosterSlots.length - rosterUnmodelled.length, rosterSlots.length, targets.characterDepth);
+  measures.splice(rosterReviewedAt + 1, 0, measure({ id: "characters.roster-modelled", layer: "characters", label: "roster roles (reviewed and missing majors) with an entity, a character model and a goal, or a reviewed \"not stated\"", denominator: "roster",
+    numerator: rosterSlots.length - rosterUnmodelled.length, total: rosterSlots.length, target: targets.characterDepth, ...(rosterModelStatus ? { status: rosterModelStatus } : {}),
+    note: `${missingMajors.length} missing majors in the denominator.` }));
 
   // Relations between roster characters who share scenes.
   const related = new Set<string>();
@@ -602,12 +664,16 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
     note: `${related.size} related pairs recorded${roster.reviewed ? "" : "; roster not independently reviewed, so the denominator is provisional"}.` }));
 
   // Time: events whose mention extent states a time should carry a story time that is not an ordinal label.
-  const timeUnion = new RangeUnion(inventory.times);
+  // A time expression the observation review rejected (an idiom, a date in a quoted document) is not story time.
+  const rejectedTimes = new Set((options.handled?.times ?? []).map((range) => `${range.startByte}-${range.endByte}`));
+  const storyTimes = inventory.times.filter((item) => !rejectedTimes.has(`${item.startByte}-${item.endByte}`));
+  const timeUnion = new RangeUnion(storyTimes);
   const timed = events.filter((event) => (eventExtents.get(event.id) ?? []).some((range) => timeUnion.overlaps(range.startByte, range.endByte)));
   const anchored = (event: typeof events[number]) => ["exact", "range", "relative"].includes(event.storyTime.kind);
+  const unanchoredEvents = timed.filter((event) => !anchored(event) && !disposed("time.anchored-events", `event:${event.id}`));
   measures.push(measure({ id: "time.anchored-events", layer: "time", label: "events whose extent contains an explicit time expression and whose story time is exact, a range or relative", denominator: "source",
     numerator: timed.filter(anchored).length, total: timed.length, target: targets.anchoredEvents,
-    note: `${inventory.times.length} explicit time expressions in scope; ${events.filter(anchored).length} events anchored overall.` }));
+    note: `${storyTimes.length} explicit time expressions in scope${rejectedTimes.size ? ` (${inventory.times.length - storyTimes.length} reviewed as not story time)` : ""}; ${events.filter(anchored).length} events anchored overall.` }));
 
   // Causality: key events are roster-agent events with an effect.
   const effectfulIds = new Set(changing.map((event) => event.id));
@@ -665,6 +731,11 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
   const summary = { satisfied: 0, gap: 0, unknown: 0, info: 0 };
   for (const item of measures) summary[item.status] += 1;
   const unannotatedSpeech = mergeAdjacent(speechUnion.ranges, (left, right) => ({ startByte: left.startByte, endByte: right.endByte }), 64);
+  const limit = options.queueLimit ?? DEFAULT_QUEUE_LIMIT;
+  const head = <T>(items: readonly T[]) => items.slice(0, limit);
+  const spans = (items: ReadonlyArray<ByteRange>) => items.map(({ startByte, endByte }) => ({ startByte, endByte }));
+  const blockingRanges = spans(blocking.map((unit) => unit.anchor)).sort((a, b) => a.startByte - b.startByte);
+  const status = (id: string) => measures.find((item) => item.id === id)?.status;
   return {
     version: WORLD_COMPLETENESS_VERSION,
     policy: policy.version,
@@ -674,23 +745,36 @@ export function measureWorldCompleteness(bundle: PreparedNovelBundle, source: Ui
     summary,
     speakingCharacters: speaking,
     queues: {
-      hiddenUnits: { total: hiddenRanges.length, ranges: [...hiddenRanges].sort((a, b) => b.units - a.units || a.startByte - b.startByte).slice(0, QUEUE_LIMIT) },
-      unannotatedSpeech: { total: unannotatedSpeech.length, ranges: unannotatedSpeech.slice(0, QUEUE_LIMIT) },
+      hiddenUnits: { total: hiddenRanges.length, ranges: head([...hiddenRanges].sort((a, b) => b.units - a.units || a.startByte - b.startByte)) },
+      unannotatedSpeech: { total: unannotatedSpeech.length, ranges: head(unannotatedSpeech) },
+      blockingUnits: { total: blockingRanges.length, ranges: head(blockingRanges) },
+      unannotatedNames: { total: unannotatedNames.ranges.length, ranges: head(unannotatedNames.ranges) },
+      unattributedSpeech: { total: unattributedSpeech.length, ranges: head(spans(unattributedSpeech)) },
+      unresolvedEntityMentions: { total: unresolvedEntityMentions.length, mentions: head(unresolvedEntityMentions.flatMap((item) => item.annotationType === "entity-mention" ? [{ mentionId: item.id, startByte: item.anchor.startByte, endByte: item.anchor.endByte }] : [])) },
+      unresolvedEventMentions: { total: unresolvedEventMentions.length, mentions: head(unresolvedEventMentions.flatMap((item) => item.annotationType === "event-mention" ? [{ mentionId: item.id, startByte: item.triggerAnchor.startByte, endByte: item.triggerAnchor.endByte, salience: item.salience }] : [])) },
+      // Ratio measures queue their exceptions only while the measure misses its target.
+      uneffectfulEvents: status("events.effectful") === "gap" ? head(events.filter((event) => !effectful.includes(event)).map((event) => event.id)) : [],
+      untypedAgentEvents: status("events.typed-agent") === "gap" ? head(untypedAgentEvents.map((event) => event.id)) : [],
+      speechOutsideBeats: status("events.speech-in-beats") === "gap" ? { total: speechOutsideBeats.length, ranges: head(spans(speechOutsideBeats)) } : { total: 0, ranges: [] },
+      narrativeOutsideScenes: status("scenes.narrative-covered") === "gap" ? { total: narrativeOutsideScenes.length, ranges: head(narrativeOutsideScenes) } : { total: 0, ranges: [] },
+      unpositionedOpening: [...openingActors].filter((id) => !openingPositioned.has(id)).sort(),
+      rosterUnmodelled: head(rosterUnmodelled.map((slot) => ({ subject: slot.subject, name: slot.name, ...(slot.actorId ? { actorId: slot.actorId } : {}) }))),
+      speakingNotEnterable,
       scenesWithoutEvents: scenes.filter((scene) => scene.eventIds.length === 0).map((scene) => scene.id),
       scenesWithoutLocation: scenes.filter((scene) => !scene.locationId && !scene.locationUnknown).map((scene) => scene.id),
-      absentSpeakers: absentSpeakers.slice(0, QUEUE_LIMIT),
+      absentSpeakers: head(absentSpeakers),
       locationsOffGraph: [...used].filter((id) => !graph.has(id) && !disposed("space.locations-on-graph", `location:${id}`)).sort(),
       nameCollisions: inventory.lexicon.collisions,
       eventGaps: eventGaps.slice(0, 10),
-      unattachedAliases: [...unattached.values()].sort((a, b) => b.mentions - a.mentions || a.surface.localeCompare(b.surface)).slice(0, QUEUE_LIMIT),
+      unattachedAliases: head([...unattached.values()].sort((a, b) => b.mentions - a.mentions || a.surface.localeCompare(b.surface))),
       genericNames: generic.map((entity) => ({ entityId: entity.id, name: entity.canonicalName })),
-      rosterPairs: pairs.filter(([subject]) => !pairDone(subject)).map(([subject, count]) => ({ subject, scenes: count })).sort((a, b) => b.scenes - a.scenes || a.subject.localeCompare(b.subject)).slice(0, QUEUE_LIMIT),
-      unanchoredEvents: timed.filter((event) => !anchored(event)).map((event) => event.id).slice(0, QUEUE_LIMIT),
-      unconditionedKeyEvents: keyEvents.filter((event) => !conditioned(event)).map((event) => event.id).slice(0, QUEUE_LIMIT),
-      ungroundedTerms: ungrounded.slice(0, QUEUE_LIMIT),
-      unacquiredKnowledge: learns.filter((item) => !acquired.has(`${item.eventId}:${item.actorId}:${item.claimId}`)).slice(0, QUEUE_LIMIT),
+      rosterPairs: head(pairs.filter(([subject]) => !pairDone(subject)).map(([subject, count]) => ({ subject, scenes: count })).sort((a, b) => b.scenes - a.scenes || a.subject.localeCompare(b.subject))),
+      unanchoredEvents: status("time.anchored-events") === "gap" ? head(unanchoredEvents.map((event) => event.id)) : [],
+      unconditionedKeyEvents: head(keyEvents.filter((event) => !conditioned(event)).map((event) => event.id)),
+      ungroundedTerms: head(ungrounded),
+      unacquiredKnowledge: head(learns.filter((item) => !acquired.has(`${item.eventId}:${item.actorId}:${item.claimId}`))),
     },
-    roster,
+    roster: { ...roster, actorIds: rosterActors },
   };
 }
 

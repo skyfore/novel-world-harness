@@ -153,11 +153,11 @@ export async function loadPipelineView(workspaceRoot: string, sourceId: string):
     ...(rosterSummary ? { roster: rosterSummary } : {}),
     loreTerms,
     usage: receiptsUsage(receipts),
-    handled: { speech: rejected("speech"), names: rejected("name") },
+    handled: { speech: rejected("speech"), names: rejected("name"), times: rejected("time") },
   };
   return { accounting, source, bytes, structure, bundle, inventory, census, decisions, dispositions, reviews, accounts, roster, receipts, options };
 }
 
-export function measureView(view: PipelineView, scope?: ByteRange): WorldCompletenessReport {
-  return measureWorldCompleteness(view.bundle, view.bytes, { ...view.options, ...(scope ? { scope } : {}) });
+export function measureView(view: PipelineView, scope?: ByteRange, extra: Pick<WorldCompletenessOptions, "queueLimit" | "admission"> = {}): WorldCompletenessReport {
+  return measureWorldCompleteness(view.bundle, view.bytes, { ...view.options, ...extra, ...(scope ? { scope } : {}) });
 }

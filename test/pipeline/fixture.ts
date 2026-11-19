@@ -197,7 +197,32 @@ export function bellTowerAgent() {
         evidence: [{ unit: units[0].unit, text: "林岐站在钟楼下" }] });
       await call("finish_scope", {});
     },
-    gaps: async (_input, call) => { await call("finish_scope", {}); },
+    gaps: async (input, call) => {
+      // A name the scenes stage added joined the lexicon: annotate its other occurrences.
+      if (/Target: observation: Name occurrences/u.test(input.prompt)) {
+        const open = (await must(call, "list_open_candidates", {})) as { candidates: Array<{ id: string; kind: string }> };
+        if (open.candidates.length) await must(call, "review_observation_candidates", { items: open.candidates.map((item) => ({ id: item.id, verdict: "accept" })) });
+      }
+      // A name added after identity: decide it once; the host resolves every mention.
+      const undecided = /Lexicon surface "([^"]+)"/u.exec(input.prompt)?.[1];
+      const entity = undecided ? /^([\w-]+) \((?:location|character)\) (.+)$/gmu : undefined;
+      if (undecided && entity) {
+        const id = [...input.prompt.matchAll(entity)].find((match) => match[2] === undecided)?.[1];
+        if (id) await must(call, "decide_lexicon_entries", { items: [{ surface: undecided, verdict: "entity", entity: id, aliasType: "name", rationale: "The place the scene names." }] });
+      }
+      // Roster majors (design 5.7) need a model and a goal whose action changes state.
+      const actor = /world:roster:actor:(char-[\w-]+)/u.exec(input.prompt)?.[1];
+      if (actor) {
+        const walk = (await must(call, "search_source", { query: "走向北门" })).units[0];
+        const cite = [{ unit: walk.unit, text: "走向北门" }];
+        await must(call, "propose_artifacts", { items: [
+          { kind: "character-model", payload: { actorId: actor, traits: { urgency: 0.7 }, decisionBiases: {} }, evidence: cite },
+          { kind: "character-goal", payload: { id: `goal-${actor}-north-gate`, actorId: actor, description: "在第七声钟响前赶到北门", priority: 0.8, requiresKnowledge: [],
+            candidateAction: { title: "走向北门", preconditions: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: actor, field: "character.location", value: "loc-north-gate" }] } } }, evidence: cite },
+        ] });
+      }
+      await call("finish_scope", {});
+    },
   };
   return new ScriptedStageAgent(async (input, call) => scripts[input.stage]!(input, call));
 }

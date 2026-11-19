@@ -32,7 +32,9 @@ function unknownReason(measure: CompletenessMeasure, report: WorldCompletenessRe
 
 export async function checkPipelineClosure(root: string, sourceId: string, limit: number, options: { admission?: AdmissionManifest | null } = {}): Promise<PipelineClosure> {
   const view = await loadPipelineView(root, sourceId);
-  const report = measureView(view, { startByte: 0, endByte: limit });
+  const admission = options.admission ?? null;
+  // With the candidate's admission manifest, enterability is measured, not left unknown.
+  const report = measureView(view, { startByte: 0, endByte: limit }, admission ? { admission } : {});
   const pending = await new ProposalStore(root).list("pending", sourceId);
   const annotationIssues = await validateSourceAnnotationClosure(root, sourceId, [], { includeCommitted: true, verifyAnchors: true });
   const receipts = await new PipelineStore(root, sourceId).receipts();
@@ -41,13 +43,12 @@ export async function checkPipelineClosure(root: string, sourceId: string, limit
   const unfinished = inRange.filter((receipt) => receipt.status === "running").map((receipt) => receipt.id);
   const gaps = report.measures.filter((item) => item.status === "gap" && item.layer !== "cost");
   const unknown = report.measures.filter((item) => item.status === "unknown").map((item) => ({ id: item.id, reason: unknownReason(item, report) }));
-  const admission = options.admission ?? null;
   const issues = [
     ...(pending.length ? [`${pending.length} canonical proposals still pending`] : []),
     ...annotationIssues.slice(0, 20),
     ...held.map((id) => `scope ${id} held for host review`),
     ...unfinished.map((id) => `scope ${id} unfinished`),
-    ...gaps.map((item) => `gap ${item.id}: ${item.numerator}/${item.total}`),
+    ...gaps.map((item) => `gap ${item.id}: ${item.numerator}/${item.total}${item.id === "agency.speaking-enterable" && report.queues.speakingNotEnterable.length ? ` (not enterable: ${report.queues.speakingNotEnterable.slice(0, 10).join(", ")})` : ""}`),
     ...unknown.filter((item) => item.reason === null).map((item) => `unknown ${item.id} without a reason`),
     ...(admission && !admission.cuts.some((cut) => cut.tier !== "blocked") ? ["no cut admits an entry"] : []),
   ];

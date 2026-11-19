@@ -82,7 +82,37 @@ export const DISPOSABLE: Record<string, readonly PipelineDisposition["verdict"][
   "characters.speaking-with-disposition": ["not-stated"],
   "characters.speaking-with-goal": ["not-stated"],
   "agency.effectful-goals": ["not-stated"],
+  "characters.roster-modelled": ["not-stated"],
+  // Reviewed exceptions for ratio measures: they close a gap-loop item, and the target's slack absorbs them.
+  "observation.speech-attributed": ["unknown"],
+  "events.typed-agent": ["not-stated"],
+  "events.speech-in-beats": ["narration-only"],
+  "time.anchored-events": ["not-stated"],
+  "scenes.narrative-covered": ["narration-only"],
 };
+
+/** The subject kinds each disposable measure speaks about. */
+const SUBJECT_KINDS: Record<string, readonly string[]> = {
+  "events.effectful": ["event"], "relations.roster-pairs": ["pair"], "causality.conditioned-key-events": ["event"], "lore.terms-grounded": ["term"],
+  "space.locations-on-graph": ["location"], "characters.speaking-modelled": ["actor"], "characters.speaking-with-disposition": ["actor"], "characters.speaking-with-goal": ["actor"],
+  "agency.effectful-goals": ["actor"], "characters.roster-modelled": ["actor", "missing"], "observation.speech-attributed": ["speech"], "events.typed-agent": ["event"],
+  "events.speech-in-beats": ["speech"], "time.anchored-events": ["event"], "scenes.narrative-covered": ["segment"],
+};
+
+/** A disposition must name a subject that exists: an unknown subject would silently close nothing. */
+function checkSubject(view: Awaited<ReturnType<typeof loadPipelineView>>, measure: string, subject: string): void {
+  const kind = subject.slice(0, subject.indexOf(":"));
+  const value = subject.slice(subject.indexOf(":") + 1);
+  if (!SUBJECT_KINDS[measure]?.includes(kind) || !value) throw new Error(`${measure} takes subjects ${SUBJECT_KINDS[measure]?.map((item) => `${item}:<…>`).join(" or ") ?? "(none)"}, not "${subject}".`);
+  const entities = new Set(view.bundle.canonical.entities.map((entity) => entity.id));
+  if (kind === "event" && !view.bundle.canonical.events.some((event) => event.id === value)) throw new Error(`Unknown event ${value}.`);
+  if (kind === "actor" && !entities.has(value)) throw new Error(`Unknown actor ${value}.`);
+  if (kind === "location" && !entities.has(value)) throw new Error(`Unknown location ${value}.`);
+  if (kind === "pair" && value.split("|").some((id) => !entities.has(id))) throw new Error(`Unknown actor in pair ${value}.`);
+  if (kind === "segment" && !view.bundle.compilerSnapshot.annotations.some((item) => item.id === value && item.annotationType === "discourse-segment")) throw new Error(`Unknown discourse segment ${value}.`);
+  if (kind === "speech" && !view.inventory.speech.some((span) => span.kind === "speech" && String(span.startByte) === value)) throw new Error(`No direct-speech span starts at byte ${value}; use the number from the speech:<start> or s<start> id.`);
+  if (kind === "missing" && !view.roster?.review?.missing.some((item) => item.name === value)) throw new Error(`The roster review names no missing major "${value}".`);
+}
 
 export function artifactTools(ctx: StageContext, scope: ScopePlan, range = scope.range) {
   const text = async () => {
@@ -108,16 +138,19 @@ export function artifactTools(ctx: StageContext, scope: ScopePlan, range = scope
     }),
     pipelineTool({
       name: "record_dispositions", label: "Record reviewed dispositions",
-      description: `Record an explicit reviewed conclusion instead of an artifact, with its reason: ${Object.entries(DISPOSABLE).map(([measure, verdicts]) => `${measure} → ${verdicts.join("/")}`).join("; ")}. Subjects: event:<id>, pair:<a>|<b> (sorted ids), term:<surface>, location:<id>, actor:<id>. Never use one to hide something the text states.`,
+      description: `Record an explicit reviewed conclusion instead of an artifact, with its reason: ${Object.entries(DISPOSABLE).map(([measure, verdicts]) => `${measure} → ${verdicts.join("/")}`).join("; ")}. Subjects: event:<id>, pair:<a>|<b> (sorted ids), term:<surface>, location:<id>, actor:<id>, missing:<name>, speech:<start byte>, segment:<id>. Never use one to hide something the text states.`,
       parameters: Type.Object({ items: Type.Array(Type.Object({ measure: Type.String(), subject: Type.String(), verdict: Type.String(), rationale: T.rationale() }, { additionalProperties: false })) }, { additionalProperties: false }),
       input: dispositionInput,
       async execute(input) {
         const records: PipelineDisposition[] = [];
+        const view = await loadPipelineView(ctx.root, ctx.sourceId);
         const result = await applyEach(input.items, async (item) => {
           const allowed = DISPOSABLE[item.measure];
           if (!allowed?.includes(item.verdict)) throw new Error(`${item.measure} does not accept "${item.verdict}"; allowed: ${allowed?.join(", ") ?? "none"}.`);
-          records.push({ measureId: item.measure, subject: item.subject, verdict: item.verdict, rationale: item.rationale, scopeId: scope.id });
-          return `${item.measure} ${item.subject}`;
+          checkSubject(view, item.measure, item.subject);
+          const subject = item.subject.startsWith("pair:") ? `pair:${item.subject.slice(5).split("|").sort().join("|")}` : item.subject;
+          records.push({ measureId: item.measure, subject, verdict: item.verdict, rationale: item.rationale, scopeId: scope.id });
+          return `${item.measure} ${subject}`;
         });
         if (records.length) await ctx.store.recordDispositions(records);
         return { recorded: result.applied, failed: result.failed };
